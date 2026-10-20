@@ -662,9 +662,10 @@ impl Cx<'_> {
             .rounded(radius::SM)
             .border(
                 1.0,
-                Rgba::white(0.12).mix(Rgba::white(0.25), if open { 1.0 } else { hot }),
+                vornui::theme::bright(0.12)
+                    .mix(vornui::theme::bright(0.25), if open { 1.0 } else { hot }),
             )
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), hot))
+            .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.04), hot))
             .ring(radius::SM)
             .role(Role::ComboBox, name)
             .value(shown)
@@ -680,7 +681,7 @@ impl Cx<'_> {
             .child(self.icon(
                 if open { "chevron-up" } else { "chevron-down" },
                 12.0,
-                color::GRAY_500,
+                color::GRAY_500.rgba(),
             ));
         if !open {
             return trigger;
@@ -690,7 +691,7 @@ impl Cx<'_> {
             .min_w(180.0)
             .py(4.0)
             .bg(color::SURFACE_OVERLAY)
-            .border(1.0, Rgba::white(0.10))
+            .border(1.0, vornui::theme::bright(0.10))
             .rounded(radius::SM)
             .role(Role::Menu, name)
             .children(options.iter().map(|o| {
@@ -1527,7 +1528,7 @@ impl Cx<'_> {
             .gap(12.0)
             .px(12.0)
             .min_w0()
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.03), hot))
+            .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.03), hot))
             .child_if(check)
             .child_if(lead)
             .child(middle);
@@ -1900,7 +1901,7 @@ fn styled(s: &str, style: TextStyle, ink: Option<Rgba>) -> El {
         TextStyle::Heading => (size::XS.0, size::XS.1, color::GRAY_500),
         TextStyle::Label => (10.0, 15.0, color::GRAY_600),
     };
-    let ink = ink.unwrap_or(rest);
+    let ink = ink.unwrap_or(rest.rgba());
     let shown = if matches!(style, TextStyle::Heading | TextStyle::Label) {
         s.to_uppercase()
     } else {

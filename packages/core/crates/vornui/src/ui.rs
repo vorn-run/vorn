@@ -399,7 +399,8 @@ impl Ui {
             return;
         };
         let uv = [u + src[0], v + src[1], src[2], src[3]];
-        self.scene.rounded_image(dst, uv, crate::theme::bright(1.0), radius);
+        self.scene
+            .rounded_image(dst, uv, crate::theme::bright(1.0), radius);
     }
 
     /// Starts a frame on an empty scene.

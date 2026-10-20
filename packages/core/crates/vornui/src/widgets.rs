@@ -738,8 +738,11 @@ pub fn text_area_input(ui: &Ui, id: Id, name: &str, placeholder: &str, lines: u8
         .py(4.0)
         .h(f32::from(lines) * 18.0 + 8.0)
         .rounded(radius::SM)
-        .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
-        .bg(tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04)))
+        .border(
+            1.0,
+            crate::theme::bright(0.12).mix(crate::theme::bright(0.25), hot),
+        )
+        .bg(tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.04)))
         .content(look)
         .role(Role::MultilineTextInput, name)
 }
