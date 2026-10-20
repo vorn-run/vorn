@@ -345,6 +345,12 @@ impl App {
                 videos.push(session.to_owned());
             }
         }
+        // Simulators run beside the desktop app only; a browser client shows
+        // what the desktop reports and never answers the Device itself.
+        if cfg!(target_arch = "wasm32") {
+            asks.clear();
+            shown.clear();
+        }
         self.video
             .doing
             .retain(|d| asks.iter().any(|(_, _, what, _)| what == d));
