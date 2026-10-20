@@ -151,6 +151,13 @@ needs, and the events are `CORE_EVENTS` in `events.rs`. A call the manifest
 does not declare the permission for is refused, naming both; the person
 installing sees every permission first.
 
+An extension's workflows live in its own namespace: the ids `workflow.seed`
+inserts and the prefix `workflow.unseed` removes start with its id and a
+colon (`acme.tickets:`), and `workflow.run` runs only those. Running anyone
+else's workflow, or seeding a step that runs commands or agents (a script, an
+agent, or a type no extension declares, which runs as an agent), also needs
+`process.run`, which the install sheet shows as running programs.
+
 The core is frozen against that API: `packages/core/freeze.toml` lists every
 crate of the core by its area and every feature still left in it, and
 `cargo test -p vorn-extensions --test freeze` fails when an extension Vorn

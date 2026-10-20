@@ -367,7 +367,9 @@ current, isGitRepo}`, under `git.read`.
 - `workflow.run` (`{workflowId, inputs}`) runs a workflow by hand,
   `workflow.resolveGate` (`{runId, nodeId, decision}`) answers a gate and
   `workflow.gates` lists the gates waiting for a person, under
-  `workflows.write` and `workflows.read`.
+  `workflows.write` and `workflows.read`. A workflow outside the caller's
+  namespace (`<extension id>:`) also needs `process.run`, since its steps
+  may run commands.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
   changed).

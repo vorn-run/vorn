@@ -24,6 +24,101 @@ pub struct Caller {
     pub extension: String,
     /// The project the call is about, when one is.
     pub project: Option<String>,
+    /// Declares `process.run`: a workflow it seeds may run commands and
+    /// agents, and it may run workflows not its own.
+    pub runs_commands: bool,
+}
+
+impl Caller {
+    /// The extension `manifest` describes, about no project.
+    pub fn of(manifest: &Manifest) -> Caller {
+        Caller {
+            extension: manifest.id.clone(),
+            project: None,
+            runs_commands: declares(manifest, Permission::ProcessRun),
+        }
+    }
+
+    /// Whether workflow `id` is in its namespace: `<extension id>:`.
+    pub fn owns(&self, id: &str) -> bool {
+        id.strip_prefix(self.extension.as_str())
+            .is_some_and(|rest| rest.starts_with(':'))
+    }
+
+    fn namespace(&self) -> String {
+        format!("{}:", self.extension)
+    }
+}
+
+fn declares(manifest: &Manifest, permission: Permission) -> bool {
+    manifest
+        .permissions
+        .as_deref()
+        .unwrap_or_default()
+        .contains(&permission)
+}
+
+/// `workflow.seed` and `workflow.unseed`: an id or prefix in the caller's
+/// namespace, so an extension adds and removes only its own workflows.
+pub fn admit_own(caller: &Caller, method: &str, id: &str) -> Result<(), ExtError> {
+    if caller.owns(id) {
+        return Ok(());
+    }
+    Err(ExtError::new(
+        "denied",
+        format!(
+            "{method}: {id} is not {}'s; its workflows' ids start with {}",
+            caller.extension,
+            caller.namespace()
+        ),
+    ))
+}
+
+/// `workflow.run`: the caller's own workflows; any other, whose steps may
+/// run commands, only with `process.run`.
+pub fn admit_run(caller: &Caller, id: &str) -> Result<(), ExtError> {
+    if caller.runs_commands || caller.owns(id) {
+        return Ok(());
+    }
+    Err(ExtError::new(
+        "denied",
+        format!(
+            "{} does not declare process.run, which workflow.run needs for {id}, a workflow not its own",
+            caller.extension
+        ),
+    ))
+}
+
+/// `workflow.seed`'s `workflow`: in the caller's namespace, and with a step
+/// that runs commands or agents (`runs_commands` says which node types do)
+/// only with `process.run`.
+pub fn admit_seed(
+    caller: &Caller,
+    workflow: &Value,
+    runs_commands: impl Fn(&str) -> bool,
+) -> Result<(), ExtError> {
+    let id = workflow.get("id").and_then(Value::as_str).unwrap_or("");
+    admit_own(caller, "workflow.seed", id)?;
+    if caller.runs_commands {
+        return Ok(());
+    }
+    let nodes = workflow.get("nodes").and_then(Value::as_array);
+    let kind = |n: &Value| {
+        n.get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned()
+    };
+    match nodes.into_iter().flatten().map(kind).find(|t| runs_commands(t)) {
+        None => Ok(()),
+        Some(step) => Err(ExtError::new(
+            "denied",
+            format!(
+                "{} does not declare process.run, which workflow.seed needs for {id}: its {step} step runs commands",
+                caller.extension
+            ),
+        )),
+    }
 }
 
 /// What vornd puts behind the gate.
@@ -92,12 +187,7 @@ pub fn admit_start(manifest: &Manifest) -> Result<(), ExtError> {
 
 /// `storage.*` and `blobs.*`: refused unless the manifest declares `storage`.
 pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
-    let declared = manifest
-        .permissions
-        .as_deref()
-        .unwrap_or_default()
-        .contains(&Permission::Storage);
-    if declared {
+    if declares(manifest, Permission::Storage) {
         return Ok(());
     }
     Err(ExtError::new(
@@ -111,8 +201,9 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
 
 /// The core methods a program may call, and the permission each needs. A
 /// permission none of these needs (`network.tcp`, `auth.borrow`,
-/// `http.routes`, `process.run`) is declared and shown, not enforced:
-/// `storage` is held at `storage.*`, the network at `net.fetch`.
+/// `http.routes`) is declared and shown, not enforced: `storage` is held at
+/// `storage.*`, the network at `net.fetch`, and `process.run` at the
+/// workflows it seeds and runs ([`admit_seed`], [`admit_run`]).
 ///
 /// The board, the workflows, their inbox and the sign-in windows are what a
 /// connector feeds: items become tasks through `task.importItems`, polled
@@ -184,9 +275,11 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("remote.vault", Permission::Remote),
 ];
 
-/// Whether the bridge holds a program to `permission`: some method or call needs it.
+/// Whether the bridge holds a program to `permission`: some method or call
+/// needs it. `process.run` is held at the workflows a program seeds and runs.
 pub fn enforced(permission: Permission) -> bool {
-    permission == Permission::Storage || CORE_METHODS.iter().any(|(_, p)| *p == permission)
+    matches!(permission, Permission::Storage | Permission::ProcessRun)
+        || CORE_METHODS.iter().any(|(_, p)| *p == permission)
 }
 
 /// Headers a program may not set: credentials come from vornd alone.
@@ -367,10 +460,7 @@ header = "Authorization: Bearer {token}"
     }
 
     fn caller() -> Caller {
-        Caller {
-            extension: "x".into(),
-            project: None,
-        }
+        Caller::of(&manifest())
     }
 
     #[tokio::test]
@@ -483,6 +573,50 @@ header = "Authorization: Bearer {token}"
     }
 
     #[test]
+    fn holds_workflows_to_the_callers_namespace_and_commands_to_process_run() {
+        use serde_json::json;
+        let x = caller();
+        assert!(x.owns("x:a") && !x.owns("xy:a") && !x.owns("x") && !x.owns("import:a"));
+        assert_eq!(admit_own(&x, "workflow.unseed", "x:conn:"), Ok(()));
+        let foreign = admit_own(&x, "workflow.unseed", "import:").unwrap_err();
+        assert_eq!(
+            (foreign.code.as_str(), foreign.message.as_str()),
+            (
+                "denied",
+                "workflow.unseed: import: is not x's; its workflows' ids start with x:"
+            )
+        );
+
+        assert_eq!(admit_run(&x, "x:mine"), Ok(()));
+        let theirs = admit_run(&x, "wf-1").unwrap_err();
+        assert_eq!(
+            theirs.message,
+            "x does not declare process.run, which workflow.run needs for wf-1, a workflow not its own"
+        );
+
+        let runs = |t: &str| t == "script";
+        let wf = |id: &str, step: &str| json!({ "id": id, "nodes": [{ "type": "trigger" }, { "type": step }] });
+        assert_eq!(admit_seed(&x, &wf("x:a", "createTask"), runs), Ok(()));
+        let elsewhere = admit_seed(&x, &wf("y:a", "createTask"), runs).unwrap_err();
+        assert!(elsewhere
+            .message
+            .starts_with("workflow.seed: y:a is not x's"));
+        let shell = admit_seed(&x, &wf("x:a", "script"), runs).unwrap_err();
+        assert_eq!(
+            shell.message,
+            "x does not declare process.run, which workflow.seed needs for x:a: its script step runs commands"
+        );
+
+        let commands = Caller {
+            runs_commands: true,
+            ..caller()
+        };
+        assert_eq!(admit_run(&commands, "wf-1"), Ok(()));
+        assert_eq!(admit_seed(&commands, &wf("x:a", "script"), runs), Ok(()));
+        assert!(admit_seed(&commands, &wf("y:a", "script"), runs).is_err());
+    }
+
+    #[test]
     fn holds_storage_to_the_storage_permission() {
         let err = admit_storage(&manifest()).unwrap_err();
         assert_eq!(
@@ -497,7 +631,8 @@ header = "Authorization: Bearer {token}"
         assert_eq!(admit_storage(&m), Ok(()));
         assert!(enforced(Permission::Storage));
         assert!(enforced(Permission::GitWrite));
-        assert!(!enforced(Permission::ProcessRun));
+        assert!(enforced(Permission::ProcessRun));
+        assert!(!enforced(Permission::NetworkTcp));
     }
 
     #[test]

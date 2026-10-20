@@ -468,7 +468,11 @@ mod tests {
         let text = fs::read_to_string(&toml).unwrap();
         fs::write(&toml, text.replace(manifest::API, "vorn:extension@0.9")).unwrap();
         let linked = tempfile::tempdir().unwrap();
-        fs::write(linked.path().join(file::FILE), "api = \"vorn:extension@0.9\"\n").unwrap();
+        fs::write(
+            linked.path().join(file::FILE),
+            "api = \"vorn:extension@0.9\"\n",
+        )
+        .unwrap();
         fs::create_dir_all(root.path().join("mine")).unwrap();
         fs::write(
             root.path().join("mine").join(CURRENT_FILE),

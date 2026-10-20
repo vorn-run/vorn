@@ -18,7 +18,7 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::{Role, WebSocketConfig};
 use tokio_tungstenite::WebSocketStream;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::applink::AppLink;
 use crate::holder::Holder;
@@ -226,6 +226,14 @@ impl Daemon {
             true,
         );
         let connectors = connectors::ConnectorsBuiltin::new(native, services, on);
+        match connectors.inner().move_seeded().await {
+            Ok(0) => {}
+            Ok(n) => info!(
+                moved = n,
+                "seeded workflows moved into the Connectors' namespace"
+            ),
+            Err(err) => warn!(%err, "seeded workflows could not be moved"),
+        }
         native.set_connectors(Arc::clone(&connectors));
         tokio::spawn(async move { connectors.reconcile().await });
     }

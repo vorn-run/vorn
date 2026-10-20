@@ -253,10 +253,7 @@ impl Host for Wired {
         let world = crate::native::extensions::world::Wired {
             native: self.native.clone(),
         };
-        let caller = Caller {
-            extension: builtin::ID.to_owned(),
-            project: None,
-        };
+        let caller = Caller::of(&self.manifest);
         let method = method.to_owned();
         Box::pin(async move {
             admitted.map_err(|e| e.message)?;

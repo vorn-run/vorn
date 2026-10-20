@@ -34,6 +34,10 @@ components and the element tree. The API is defined once, in
 6. **Handshake.** A program checks `guest.init`'s `ctx.api` and refuses a
    Vorn older than it was built for with a message naming both versions; a
    component is checked by vornd before linking.
+7. **Own workflows only.** Seeded workflow ids and unseed prefixes start
+   with `<extension id>:`, and `workflow.run` runs only those. Running
+   another's workflow, or seeding a script, agent or undeclared step, needs
+   `process.run`.
 
 ## Checks
 

@@ -390,6 +390,10 @@ impl Installs {
                     .collect();
                 if p == Permission::Storage {
                     format!("{used} (its own tables, storage.*)")
+                } else if p == Permission::ProcessRun {
+                    format!(
+                        "{used} (runs commands: workflow steps it seeds, workflows not its own)"
+                    )
                 } else if !enforced(p) {
                     format!("{used} (declared; Vorn cannot hold it to this)")
                 } else {
@@ -975,7 +979,7 @@ migrations = "migrations"
             sheet.methods,
             [
                 "sessions.read (sessions.list, sessions.get, agents.list)",
-                "process.run (declared; Vorn cannot hold it to this)",
+                "process.run (runs commands: workflow steps it seeds, workflows not its own)",
                 "storage (its own tables, storage.*)"
             ]
         );

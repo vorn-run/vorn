@@ -8,12 +8,12 @@ import {
 describe('connector workflow id helpers', () => {
   it('connectorSeededWorkflowId assembles the stable three-segment id', () => {
     expect(connectorSeededWorkflowId('conn-1', 'issueCreated')).toBe(
-      'connector:conn-1:issueCreated'
+      'vorn.connectors:conn-1:issueCreated'
     )
   })
 
   it('connectorSeededWorkflowIdPrefix returns the deletion-sweep prefix', () => {
-    expect(connectorSeededWorkflowIdPrefix('conn-1')).toBe('connector:conn-1:')
+    expect(connectorSeededWorkflowIdPrefix('conn-1')).toBe('vorn.connectors:conn-1:')
   })
 
   it('parseConnectorWorkflowId round-trips the assembled id', () => {
@@ -31,13 +31,13 @@ describe('connector workflow id helpers', () => {
   })
 
   it('parseConnectorWorkflowId handles event strings that themselves contain colons', () => {
-    expect(parseConnectorWorkflowId('connector:conn-1:event:with:colons')).toEqual({
+    expect(parseConnectorWorkflowId('vorn.connectors:conn-1:event:with:colons')).toEqual({
       connectionId: 'conn-1',
       event: 'event:with:colons'
     })
   })
 
   it('parseConnectorWorkflowId returns null when the second segment is missing', () => {
-    expect(parseConnectorWorkflowId('connector:only-one-segment')).toBeNull()
+    expect(parseConnectorWorkflowId('vorn.connectors:only-one-segment')).toBeNull()
   })
 })

@@ -260,14 +260,12 @@ impl Host for VorndHost {
     /// A public method as the Workflows built-in, held to what its manifest declares.
     async fn api(&self, method: &str, args: Value) -> Result<Value, String> {
         use vorn_extensions::gate::{self, Caller, World};
-        gate::admit_call(&super::types::workflows_manifest(), method).map_err(|e| e.message)?;
+        let manifest = super::types::workflows_manifest();
+        gate::admit_call(&manifest, method).map_err(|e| e.message)?;
         let world = crate::native::extensions::world::Wired {
             native: self.native.clone(),
         };
-        let caller = Caller {
-            extension: vorn_workflows::ID.to_owned(),
-            project: None,
-        };
+        let caller = Caller::of(&manifest);
         world
             .call(&caller, method, args)
             .await

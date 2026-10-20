@@ -89,9 +89,9 @@ fn connection_look(s: &Screen<'_>, connection: &str) -> Option<Look> {
 }
 
 /// `parseConnectorWorkflowId`: the connection a connector-seeded workflow
-/// (`connector:<connectionId>:<event>`) listens on.
+/// (`vorn.connectors:<connectionId>:<event>`) listens on.
 fn seeded_connection(id: &str) -> Option<&str> {
-    id.strip_prefix("connector:")?
+    id.strip_prefix("vorn.connectors:")?
         .split_once(':')
         .map(|(c, _)| c)
 }
@@ -1458,8 +1458,11 @@ mod tests {
 
     #[test]
     fn a_seeded_workflow_names_its_connection() {
-        assert_eq!(seeded_connection("connector:c1:issue.opened"), Some("c1"));
-        assert_eq!(seeded_connection("connector:c1"), None);
+        assert_eq!(
+            seeded_connection("vorn.connectors:c1:issue.opened"),
+            Some("c1")
+        );
+        assert_eq!(seeded_connection("vorn.connectors:c1"), None);
         assert_eq!(seeded_connection("wf-1"), None);
     }
 

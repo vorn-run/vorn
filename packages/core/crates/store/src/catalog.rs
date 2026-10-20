@@ -288,6 +288,69 @@ impl Store {
         Ok(())
     }
 
+    /// Moves every workflow whose id starts with `from` to the same id
+    /// starting with `to`, with what each table keeps by `workflow_id` (its
+    /// runs, schedule, cursor and inbox); answers how many moved. One whose
+    /// new id is taken stays where it is.
+    pub fn rename_workflows(&mut self, from: &str, to: &str) -> Result<usize> {
+        let tx = self.write_transaction()?;
+        let ids: Vec<String> = {
+            let mut stmt = tx.prepare("SELECT id FROM workflows WHERE substr(id, 1, ?1) = ?2")?;
+            let rows = stmt.query_map(params![from.chars().count() as i64, from], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let tables: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name != 'workflows'",
+            )?;
+            let names = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            names
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .filter(|t| {
+                    crate::schema::columns(&tx, t)
+                        .is_ok_and(|c| c.iter().any(|c| c == "workflow_id"))
+                })
+                .collect()
+        };
+        tx.execute_batch("CREATE TEMP TABLE moved AS SELECT * FROM workflows WHERE 0")?;
+        let mut moved = 0;
+        for old in ids {
+            let new = format!("{to}{}", &old[from.len()..]);
+            let taken: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM workflows WHERE id = ?)",
+                [&new],
+                |r| r.get(0),
+            )?;
+            if taken {
+                continue;
+            }
+            // The new row first, so what points at the old one can follow it.
+            tx.execute(
+                "INSERT INTO temp.moved SELECT * FROM workflows WHERE id = ?",
+                [&old],
+            )?;
+            tx.execute("UPDATE temp.moved SET id = ?", [&new])?;
+            tx.execute_batch(
+                "INSERT INTO workflows SELECT * FROM temp.moved; DELETE FROM temp.moved",
+            )?;
+            for table in &tables {
+                tx.execute(
+                    &format!("UPDATE {table} SET workflow_id = ?1 WHERE workflow_id = ?2"),
+                    [&new, &old],
+                )?;
+            }
+            tx.execute("DELETE FROM workflows WHERE id = ?", [&old])?;
+            moved += 1;
+        }
+        tx.execute_batch("DROP TABLE temp.moved")?;
+        tx.commit()?;
+        Ok(moved)
+    }
+
     /// Records a run's outcome without a full config save.
     pub fn update_workflow_run_status(
         &self,

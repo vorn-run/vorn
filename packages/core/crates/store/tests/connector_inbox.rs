@@ -454,3 +454,52 @@ fn the_run_that_owns_an_inbox_row_is_found() {
     assert_eq!(by_inbox(&mut store, 9)["runId"], "run-inbox-9");
     assert!(by_inbox(&mut store, 404).is_null());
 }
+
+#[test]
+fn renamed_workflows_take_their_cursor_and_inbox_along() {
+    let mut store = store();
+    call(
+        &mut store,
+        "dbInsertWorkflow",
+        json!([workflow("connector:c1:issues")]),
+    );
+    call(
+        &mut store,
+        "dbInsertWorkflow",
+        json!([workflow("connectors:x")]),
+    );
+    record(&mut store, "connector:c1:issues", "cursor-1", &["1"]);
+
+    let moved = store
+        .rename_workflows("connector:", "vorn.connectors:")
+        .unwrap();
+    assert_eq!(moved, 1);
+    let get = |store: &mut Store, id: &str| call(store, "dbGetWorkflow", json!([id]));
+    assert!(get(&mut store, "connector:c1:issues").is_null());
+    assert_eq!(
+        get(&mut store, "vorn.connectors:c1:issues")["name"],
+        "connector:c1:issues"
+    );
+    assert!(
+        !get(&mut store, "connectors:x").is_null(),
+        "only the prefix moves"
+    );
+    assert_eq!(
+        cursor(&mut store, "vorn.connectors:c1:issues", CONNECTION),
+        "cursor-1"
+    );
+    let claimed = claim(
+        &mut store,
+        "2026-08-04T01:00:00.000Z",
+        "2026-08-04T02:00:00.000Z",
+    );
+    assert_eq!(claimed[0]["workflowId"], "vorn.connectors:c1:issues");
+
+    // Once moved, nothing is left to move.
+    assert_eq!(
+        store
+            .rename_workflows("connector:", "vorn.connectors:")
+            .unwrap(),
+        0
+    );
+}

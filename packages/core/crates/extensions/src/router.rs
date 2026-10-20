@@ -580,7 +580,7 @@ impl Router {
         let child = Child::start_with(&launch, format!("[extensions] {}", pack.name()), Some(tx))?;
         let caller = Caller {
             extension: pack.id.clone(),
-            project: None,
+            ..Caller::of(&pack.manifest)
         };
         tokio::spawn(dispatch(
             self.me.clone(),
@@ -647,10 +647,7 @@ impl Router {
         init: InitCtx,
     ) -> Result<Program, String> {
         let name = format!("[extensions] {}", manifest.name);
-        let caller = Caller {
-            extension: manifest.id.clone(),
-            project: None,
-        };
+        let caller = Caller::of(&manifest);
         let start = crate::wasm::Start {
             source,
             cache: self.store.root().join(crate::component::COMPILED),

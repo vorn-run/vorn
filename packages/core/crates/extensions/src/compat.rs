@@ -394,7 +394,10 @@ mod tests {
             relabel(old).unwrap(),
             "id = \"a.b\"\napi  =  \"vorn:extension@1.0\" # kept\n[x]\napi = \"vorn:extension@0.9\"\n"
         );
-        assert_eq!(relabel("api = \"vorn:extension@0.9.0\"").unwrap(), "api = \"vorn:extension@1.0\"");
+        assert_eq!(
+            relabel("api = \"vorn:extension@0.9.0\"").unwrap(),
+            "api = \"vorn:extension@1.0\""
+        );
         assert_eq!(relabel("api = \"vorn:extension@1.0\"\n"), None);
         assert_eq!(relabel("api = \"vorn:extension@0.8\"\n"), None);
         assert_eq!(relabel("[a]\napi = \"vorn:extension@0.9\"\n"), None);

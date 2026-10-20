@@ -6,7 +6,7 @@ publisher = "Vorn"
 description = "The Workflows view: its runs and the editor, where each step is a card on a canvas; Run workflow in the grid's, a card's and a terminal's menus; and approval gates waiting for you beside agents asking. Off, workflows still run and keep their files."
 
 [declares]
-uses = ["workflows.read", "workflows.write"]
+uses = ["workflows.read", "workflows.write", "process.run"]
 
 [service]
 component = "workflow-editor.wasm"

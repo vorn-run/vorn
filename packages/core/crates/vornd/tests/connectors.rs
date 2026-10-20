@@ -213,7 +213,10 @@ async fn packages_installed_for_0_9_are_relabelled_once_at_start() {
     };
     let packs = c.result("connector:listPacks", json!(null)).await;
     assert_eq!(packs[0]["id"], "tickets", "{packs}");
-    let toml = served.data.path().join("connectors/tickets/1.0.0/vorn-extension.toml");
+    let toml = served
+        .data
+        .path()
+        .join("connectors/tickets/1.0.0/vorn-extension.toml");
     assert_eq!(std::fs::read_to_string(toml).unwrap(), MANIFEST);
 }
 
