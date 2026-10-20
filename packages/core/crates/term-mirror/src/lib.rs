@@ -26,8 +26,7 @@ pub mod kitty;
 
 use vorn_term_proto::row::{self, DecodeError, Run, ROW_FMT};
 use vorn_term_proto::screen::{
-    ColorsDelta, Delta, LinkDef, Placements, Row, Screen, Snapshot, StyleDef, TermDelta,
-    TermState,
+    ColorsDelta, Delta, LinkDef, Placements, Row, Screen, Snapshot, StyleDef, TermDelta, TermState,
 };
 use vorn_term_proto::Cursor;
 
@@ -588,7 +587,10 @@ mod tests {
         })
         .unwrap();
         m.resnapshot(snapshot()).unwrap();
-        assert!(m.placements().is_empty(), "a snapshot without any clears them");
+        assert!(
+            m.placements().is_empty(),
+            "a snapshot without any clears them"
+        );
     }
 
     #[test]

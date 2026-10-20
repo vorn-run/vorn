@@ -15,11 +15,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use vorn_term_mirror::{Mirror, Refused};
-use vorn_term_proto::screen::Image;
 use vorn_term_proto::msg::{
     caps, Attach, Attached, ClientKind, ClientMsg, EventId, EventKind, FrameReader, GridResume,
     Hello, MsgError, ServerMsg, Welcome, PROTO_MAJOR, PROTO_MINOR,
 };
+use vorn_term_proto::screen::Image;
 
 /// One attachment as the client sees it.
 #[derive(Default)]

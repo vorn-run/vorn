@@ -64,7 +64,10 @@ fn placed(em: &Emulator) -> Vec<Placed> {
 
 fn transmit(em: &mut Emulator, id: u32, keys: &str) {
     let data = b64(&rgba(20, 40, [1, 2, 3, 255]));
-    feed(em, &apc(&format!("a=T,f=32,s=20,v=40,i={id},q=2{keys}"), &data));
+    feed(
+        em,
+        &apc(&format!("a=T,f=32,s=20,v=40,i={id},q=2{keys}"), &data),
+    );
 }
 
 #[test]
@@ -94,7 +97,13 @@ fn chunked_rgb_and_sized_crops_come_out_as_placed() {
     feed(&mut em, &apc("a=t,f=24,s=30,v=20,i=3,q=2,m=1", a));
     assert!(placed(&em).is_empty());
     feed(&mut em, &apc("m=0", b));
-    feed(&mut em, &apc("a=p,i=3,p=1,x=10,y=5,w=10,h=10,c=4,r=2,X=3,Y=4,z=-5,q=2", ""));
+    feed(
+        &mut em,
+        &apc(
+            "a=p,i=3,p=1,x=10,y=5,w=10,h=10,c=4,r=2,X=3,Y=4,z=-5,q=2",
+            "",
+        ),
+    );
     let p = placed(&em);
     assert_eq!(p.len(), 1);
     let p = p[0];
@@ -115,7 +124,10 @@ fn deletes_remove_what_they_name() {
     assert_eq!(placed(&em).len(), 3);
     // By z-index.
     feed(&mut em, &apc("a=d,d=z,z=2,q=2", ""));
-    assert_eq!(placed(&em).iter().map(|p| p.image).collect::<Vec<_>>(), [1, 3]);
+    assert_eq!(
+        placed(&em).iter().map(|p| p.image).collect::<Vec<_>>(),
+        [1, 3]
+    );
     // By id, freeing the image too.
     feed(&mut em, &apc("a=d,d=I,i=3,q=2", ""));
     assert_eq!(placed(&em).iter().map(|p| p.image).collect::<Vec<_>>(), [1]);
@@ -227,7 +239,10 @@ fn files_load_only_with_images_on() {
     // Not a regular file.
     let bad = feed(
         &mut em,
-        &apc("a=t,t=f,f=32,s=4,v=4,i=4", &b64(dir.to_str().unwrap().as_bytes())),
+        &apc(
+            "a=t,t=f,f=32,s=4,v=4,i=4",
+            &b64(dir.to_str().unwrap().as_bytes()),
+        ),
     );
     assert!(bad[0].starts_with("\x1b_Gi=4;E"), "{bad:?}");
     std::fs::remove_dir_all(&dir).unwrap();
@@ -254,7 +269,10 @@ fn virtual_placements_resolve_their_grid_from_the_cell_size() {
     em.placements(&mut p, &mut v);
     assert!(p.is_empty());
     assert_eq!(v.len(), 1);
-    assert_eq!((v[0].image, v[0].placement, v[0].cols, v[0].rows), (9, 4, 2, 2));
+    assert_eq!(
+        (v[0].image, v[0].placement, v[0].cols, v[0].rows),
+        (9, 4, 2, 2)
+    );
 }
 
 #[test]
@@ -278,7 +296,10 @@ fn size_reports_follow_the_cell_pixels_at_any_scale() {
     // A resize to fewer cells in the same window keeps the reply in step.
     em.resize_px(100, 30, 1600, 1020, &mut Vec::new()).unwrap();
     let replies = feed(&mut em, b"\x1b[14t\x1b[16t\x1b[18t");
-    assert_eq!(replies, ["\x1b[4;1020;1600t", "\x1b[6;34;16t", "\x1b[8;30;100t"]);
+    assert_eq!(
+        replies,
+        ["\x1b[4;1020;1600t", "\x1b[6;34;16t", "\x1b[8;30;100t"]
+    );
 }
 
 #[test]
@@ -288,7 +309,10 @@ fn many_images_stay_within_the_storage_limit() {
     let data = b64(&rgba(100, 100, [5, 6, 7, 255]));
     let start = std::time::Instant::now();
     for id in 1..=400u32 {
-        feed(&mut em, &apc(&format!("a=T,f=32,s=100,v=100,i={id},q=2"), &data));
+        feed(
+            &mut em,
+            &apc(&format!("a=T,f=32,s=100,v=100,i={id},q=2"), &data),
+        );
         feed(&mut em, b"\r\n");
     }
     let held = em.image_bytes();

@@ -370,7 +370,8 @@ pub fn pictures<'a>(v: &mut PaneView, m: &Mirror, image: impl Fn(u32) -> Option<
     // A scrolled view draws one row more, below its last.
     let height = (f32::from(v.rows) + 1.0) * ch;
     let width = f32::from(v.cols) * cw;
-    let visible = |d: [f32; 4]| d[1] < height && d[1] + d[3] > 0.0 && d[0] < width && d[0] + d[2] > 0.0;
+    let visible =
+        |d: [f32; 4]| d[1] < height && d[1] + d[3] > 0.0 && d[0] < width && d[0] + d[2] > 0.0;
     let top = if v.primary { v.line0 as i64 } else { 0 };
     for pl in &p.list {
         let Some(s) = shown(pl.image, pl.gen) else {
@@ -587,7 +588,11 @@ mod tests {
         let mut live = build(&m, None);
         pictures(&mut live, &m, look);
         assert_eq!(live.cell_px, (10, 20));
-        let at: Vec<_> = live.pictures.iter().map(|p| (p.image.id, p.z, p.dst)).collect();
+        let at: Vec<_> = live
+            .pictures
+            .iter()
+            .map(|p| (p.image.id, p.z, p.dst))
+            .collect();
         // Lowest z first; the unknown image 9 and the one wholly scrolled off are left out.
         assert_eq!(
             at,
@@ -600,7 +605,11 @@ mod tests {
         assert_eq!(live.pictures[0].src, [0.0, 0.0, 4.0, 8.0]);
         let mut back = build(&m, Some(0));
         pictures(&mut back, &m, look);
-        let ys: Vec<_> = back.pictures.iter().map(|p| (p.image.id, p.dst[1])).collect();
+        let ys: Vec<_> = back
+            .pictures
+            .iter()
+            .map(|p| (p.image.id, p.dst[1]))
+            .collect();
         assert_eq!(ys, [(2, 63.0), (1, 0.0), (1, 3.0), (1, 63.0)]);
         // A newer generation than the pixels held is not drawn with the old ones.
         let stale = [shown(1, 2, (4, 8))];
@@ -633,7 +642,10 @@ mod tests {
         ]);
         let m = Mirror::from_snapshot(snap.clone()).expect("valid snapshot");
         let mut v = build(&m, None);
-        assert_eq!(v.text().lines().next(), Some("$\u{10EEEE}\u{305}\u{305}\u{10EEEE}"));
+        assert_eq!(
+            v.text().lines().next(),
+            Some("$\u{10EEEE}\u{305}\u{305}\u{10EEEE}")
+        );
         assert!(v.holders.is_empty(), "no virtual placement, nothing parsed");
         snap.placements = Some(Placements {
             cell_w: 10,
@@ -651,7 +663,10 @@ mod tests {
         v = build(&m, None);
         assert_eq!(v.text().lines().next(), Some("$"));
         assert_eq!(v.holders.len(), 1);
-        assert_eq!((v.holders[0].0, v.holders[0].1.x, v.holders[0].1.width), (0, 1, 2));
+        assert_eq!(
+            (v.holders[0].0, v.holders[0].1.x, v.holders[0].1.width),
+            (0, 1, 2)
+        );
         let images = [shown(7, 1, (20, 20))];
         pictures(&mut v, &m, |id| images.iter().find(|s| s.image.id == id));
         let at: Vec<_> = v.pictures.iter().map(|p| (p.src, p.dst)).collect();

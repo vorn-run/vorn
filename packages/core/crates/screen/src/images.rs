@@ -270,8 +270,14 @@ mod tests {
             to_rgba(ImageFormat::GrayAlpha, &[7, 8], 1),
             Some(vec![7, 7, 7, 8])
         );
-        assert_eq!(to_rgba(ImageFormat::Gray, &[9], 1), Some(vec![9, 9, 9, 255]));
-        assert_eq!(to_rgba(ImageFormat::Rgba, &[1, 2, 3, 4], 1), Some(vec![1, 2, 3, 4]));
+        assert_eq!(
+            to_rgba(ImageFormat::Gray, &[9], 1),
+            Some(vec![9, 9, 9, 255])
+        );
+        assert_eq!(
+            to_rgba(ImageFormat::Rgba, &[1, 2, 3, 4], 1),
+            Some(vec![1, 2, 3, 4])
+        );
         assert_eq!(to_rgba(ImageFormat::Rgb, &[1, 2], 1), None);
     }
 }

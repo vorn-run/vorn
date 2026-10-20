@@ -70,7 +70,8 @@ impl Runs {
                 && c.low == run.low
                 && c.placement == run.placement
                 && c.row.is_none_or(|r| Some(r) == run.row)
-                && c.col.is_none_or(|col| Some(col) == run.col.map(|rc| rc + *width))
+                && c.col
+                    .is_none_or(|col| Some(col) == run.col.map(|rc| rc + *width))
                 && c.high.is_none_or(|h| Some(h) == run.high);
             if joins {
                 *width += 1;
@@ -148,8 +149,24 @@ pub fn piece(run: &Run, v: &Virtual, image: (u32, u32), cell: (u32, u32)) -> Opt
         full_w * f64::from(run.width) / cols,
     );
     let (mut sy, mut sh) = (full_h * f64::from(run.row) / rows, full_h / rows);
-    let (dx, dw) = clip(&mut sx, &mut sw, off_x, full_w, img_w, scale, f64::from(run.width * cell.0));
-    let (dy, dh) = clip(&mut sy, &mut sh, off_y, full_h, img_h, scale, f64::from(cell.1));
+    let (dx, dw) = clip(
+        &mut sx,
+        &mut sw,
+        off_x,
+        full_w,
+        img_w,
+        scale,
+        f64::from(run.width * cell.0),
+    );
+    let (dy, dh) = clip(
+        &mut sy,
+        &mut sh,
+        off_y,
+        full_h,
+        img_h,
+        scale,
+        f64::from(cell.1),
+    );
     if sw <= 0.0 || sh <= 0.0 {
         return None;
     }
@@ -195,7 +212,10 @@ fn clip(
 
 /// A diacritic's value: its place in the table.
 fn index(c: char) -> Option<u32> {
-    DIACRITICS.binary_search(&u32::from(c)).ok().map(|i| i as u32)
+    DIACRITICS
+        .binary_search(&u32::from(c))
+        .ok()
+        .map(|i| i as u32)
 }
 
 /// The 24 bits of an id a colour carries.
@@ -204,94 +224,6 @@ fn color_id(c: Color) -> u32 {
         Color::Default => 0,
         Color::Palette(i) => u32::from(i),
         Color::Rgb(r, g, b) => u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const ROW0: char = '\u{0305}';
-    const ROW1: char = '\u{030D}';
-    const ROW2: char = '\u{030E}';
-
-    fn cell(marks: &str, fg: Color, underline: Color) -> Option<Cell> {
-        Cell::parse(&format!("{PLACEHOLDER}{marks}"), fg, underline)
-    }
-
-    fn runs(cells: &[Option<Cell>]) -> Vec<Run> {
-        let (mut runs, mut out) = (Runs::default(), Vec::new());
-        for (x, c) in cells.iter().enumerate() {
-            runs.push(x as u16, *c, &mut out);
-        }
-        runs.end(&mut out);
-        out
-    }
-
-    #[test]
-    fn diacritics_are_their_place_in_the_table() {
-        assert_eq!(DIACRITICS.len(), 297);
-        assert!(DIACRITICS.windows(2).all(|w| w[0] < w[1]));
-        assert_eq!((index(ROW0), index(ROW2), index('\u{1D244}')), (Some(0), Some(2), Some(296)));
-        assert_eq!(index('a'), None);
-        assert_eq!(Cell::parse("x", Color::Palette(1), Color::Default), None);
-    }
-
-    #[test]
-    fn cells_with_no_marks_continue_the_run_before_them() {
-        let id = Color::Rgb(0, 1, 2);
-        let first = cell(&format!("{ROW1}{ROW2}"), id, Color::Default);
-        let bare = cell("", id, Color::Default);
-        let got = runs(&[None, first, bare, bare, None, bare]);
-        let run = |x, width, row, col| Run { x, width, image: 258, placement: 0, row, col };
-        assert_eq!(got, [run(1, 3, 1, 2), run(5, 1, 0, 0)]);
-    }
-
-    #[test]
-    fn a_cell_that_does_not_follow_starts_a_new_run() {
-        let a = Color::Palette(7);
-        let at = |row: char, col: char| cell(&format!("{row}{col}"), a, Color::Palette(3));
-        let other_image = cell("", Color::Palette(8), Color::Palette(3));
-        let got = runs(&[at(ROW0, ROW0), at(ROW0, ROW1), at(ROW0, ROW0), at(ROW1, ROW1), other_image]);
-        let widths: Vec<_> = got.iter().map(|r| (r.width, r.row, r.col, r.image)).collect();
-        assert_eq!(widths, [(2, 0, 0, 7), (1, 0, 0, 7), (1, 1, 1, 7), (1, 0, 0, 8)]);
-        assert!(got.iter().all(|r| r.placement == 3));
-    }
-
-    #[test]
-    fn the_third_mark_is_the_high_byte_of_the_image_id() {
-        let c = cell(&format!("{ROW0}{ROW0}{ROW2}"), Color::Palette(5), Color::Default);
-        assert_eq!(runs(&[c])[0].image, 2 << 24 | 5);
-    }
-
-    #[test]
-    fn a_run_draws_the_placement_it_names_or_the_lowest() {
-        let v = |placement| Virtual { image: 4, gen: 1, placement, cols: 2, rows: 2 };
-        let virtuals = [v(9), v(3), Virtual { image: 5, ..v(1) }];
-        let run = |placement| Run { x: 0, width: 1, image: 4, placement, row: 0, col: 0 };
-        assert_eq!(target(&virtuals, &run(9)).map(|v| v.placement), Some(9));
-        assert_eq!(target(&virtuals, &run(0)).map(|v| v.placement), Some(3));
-        assert_eq!(target(&virtuals, &run(2)), None);
-    }
-
-    #[test]
-    fn an_image_the_grid_fits_is_cut_evenly() {
-        let v = Virtual { image: 1, gen: 1, placement: 0, cols: 4, rows: 2 };
-        let run = Run { x: 0, width: 2, image: 1, placement: 0, row: 1, col: 1 };
-        let p = piece(&run, &v, (20, 10), (10, 10)).unwrap();
-        assert_eq!((p.src, p.dst), ([5.0, 5.0, 10.0, 5.0], [0.0, 0.0, 20.0, 10.0]));
-    }
-
-    #[test]
-    fn a_narrow_image_is_centred_and_its_padding_draws_nothing() {
-        let v = Virtual { image: 1, gen: 1, placement: 0, cols: 4, rows: 2 };
-        let run = |col, width| Run { x: 0, width, image: 1, placement: 0, row: 0, col };
-        assert_eq!(piece(&run(0, 1), &v, (10, 10), (10, 10)), None);
-        assert_eq!(piece(&run(3, 1), &v, (10, 10), (10, 10)), None);
-        let inner = piece(&run(1, 1), &v, (10, 10), (10, 10)).unwrap();
-        assert_eq!((inner.src, inner.dst), ([0.0, 0.0, 5.0, 5.0], [0.0, 0.0, 10.0, 10.0]));
-        let whole = piece(&run(0, 4), &v, (10, 10), (10, 10)).unwrap();
-        assert_eq!((whole.src, whole.dst), ([0.0, 0.0, 10.0, 5.0], [10.0, 0.0, 20.0, 10.0]));
     }
 }
 
@@ -324,3 +256,165 @@ const DIACRITICS: [u32; 297] = [
     0xFE20, 0xFE21, 0xFE22, 0xFE23, 0xFE24, 0xFE25, 0xFE26, 0x10A0F, 0x10A38, 0x1D185, 0x1D186,
     0x1D187, 0x1D188, 0x1D189, 0x1D1AA, 0x1D1AB, 0x1D1AC, 0x1D1AD, 0x1D242, 0x1D243, 0x1D244,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROW0: char = '\u{0305}';
+    const ROW1: char = '\u{030D}';
+    const ROW2: char = '\u{030E}';
+
+    fn cell(marks: &str, fg: Color, underline: Color) -> Option<Cell> {
+        Cell::parse(&format!("{PLACEHOLDER}{marks}"), fg, underline)
+    }
+
+    fn runs(cells: &[Option<Cell>]) -> Vec<Run> {
+        let (mut runs, mut out) = (Runs::default(), Vec::new());
+        for (x, c) in cells.iter().enumerate() {
+            runs.push(x as u16, *c, &mut out);
+        }
+        runs.end(&mut out);
+        out
+    }
+
+    #[test]
+    fn diacritics_are_their_place_in_the_table() {
+        assert_eq!(DIACRITICS.len(), 297);
+        assert!(DIACRITICS.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(
+            (index(ROW0), index(ROW2), index('\u{1D244}')),
+            (Some(0), Some(2), Some(296))
+        );
+        assert_eq!(index('a'), None);
+        assert_eq!(Cell::parse("x", Color::Palette(1), Color::Default), None);
+    }
+
+    #[test]
+    fn cells_with_no_marks_continue_the_run_before_them() {
+        let id = Color::Rgb(0, 1, 2);
+        let first = cell(&format!("{ROW1}{ROW2}"), id, Color::Default);
+        let bare = cell("", id, Color::Default);
+        let got = runs(&[None, first, bare, bare, None, bare]);
+        let run = |x, width, row, col| Run {
+            x,
+            width,
+            image: 258,
+            placement: 0,
+            row,
+            col,
+        };
+        assert_eq!(got, [run(1, 3, 1, 2), run(5, 1, 0, 0)]);
+    }
+
+    #[test]
+    fn a_cell_that_does_not_follow_starts_a_new_run() {
+        let a = Color::Palette(7);
+        let at = |row: char, col: char| cell(&format!("{row}{col}"), a, Color::Palette(3));
+        let other_image = cell("", Color::Palette(8), Color::Palette(3));
+        let got = runs(&[
+            at(ROW0, ROW0),
+            at(ROW0, ROW1),
+            at(ROW0, ROW0),
+            at(ROW1, ROW1),
+            other_image,
+        ]);
+        let widths: Vec<_> = got
+            .iter()
+            .map(|r| (r.width, r.row, r.col, r.image))
+            .collect();
+        assert_eq!(
+            widths,
+            [(2, 0, 0, 7), (1, 0, 0, 7), (1, 1, 1, 7), (1, 0, 0, 8)]
+        );
+        assert!(got.iter().all(|r| r.placement == 3));
+    }
+
+    #[test]
+    fn the_third_mark_is_the_high_byte_of_the_image_id() {
+        let c = cell(
+            &format!("{ROW0}{ROW0}{ROW2}"),
+            Color::Palette(5),
+            Color::Default,
+        );
+        assert_eq!(runs(&[c])[0].image, 2 << 24 | 5);
+    }
+
+    #[test]
+    fn a_run_draws_the_placement_it_names_or_the_lowest() {
+        let v = |placement| Virtual {
+            image: 4,
+            gen: 1,
+            placement,
+            cols: 2,
+            rows: 2,
+        };
+        let virtuals = [v(9), v(3), Virtual { image: 5, ..v(1) }];
+        let run = |placement| Run {
+            x: 0,
+            width: 1,
+            image: 4,
+            placement,
+            row: 0,
+            col: 0,
+        };
+        assert_eq!(target(&virtuals, &run(9)).map(|v| v.placement), Some(9));
+        assert_eq!(target(&virtuals, &run(0)).map(|v| v.placement), Some(3));
+        assert_eq!(target(&virtuals, &run(2)), None);
+    }
+
+    #[test]
+    fn an_image_the_grid_fits_is_cut_evenly() {
+        let v = Virtual {
+            image: 1,
+            gen: 1,
+            placement: 0,
+            cols: 4,
+            rows: 2,
+        };
+        let run = Run {
+            x: 0,
+            width: 2,
+            image: 1,
+            placement: 0,
+            row: 1,
+            col: 1,
+        };
+        let p = piece(&run, &v, (20, 10), (10, 10)).unwrap();
+        assert_eq!(
+            (p.src, p.dst),
+            ([5.0, 5.0, 10.0, 5.0], [0.0, 0.0, 20.0, 10.0])
+        );
+    }
+
+    #[test]
+    fn a_narrow_image_is_centred_and_its_padding_draws_nothing() {
+        let v = Virtual {
+            image: 1,
+            gen: 1,
+            placement: 0,
+            cols: 4,
+            rows: 2,
+        };
+        let run = |col, width| Run {
+            x: 0,
+            width,
+            image: 1,
+            placement: 0,
+            row: 0,
+            col,
+        };
+        assert_eq!(piece(&run(0, 1), &v, (10, 10), (10, 10)), None);
+        assert_eq!(piece(&run(3, 1), &v, (10, 10), (10, 10)), None);
+        let inner = piece(&run(1, 1), &v, (10, 10), (10, 10)).unwrap();
+        assert_eq!(
+            (inner.src, inner.dst),
+            ([0.0, 0.0, 5.0, 5.0], [0.0, 0.0, 10.0, 10.0])
+        );
+        let whole = piece(&run(0, 4), &v, (10, 10), (10, 10)).unwrap();
+        assert_eq!(
+            (whole.src, whole.dst),
+            ([0.0, 0.0, 10.0, 5.0], [10.0, 0.0, 20.0, 10.0])
+        );
+    }
+}

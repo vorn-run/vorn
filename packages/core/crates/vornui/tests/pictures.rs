@@ -1,7 +1,7 @@
 //! Pictures drawn with [`Ui::picture`] on the CPU renderer: scaled into their rect, cut to their
 //! source rect, and a large one shrunk to fit the atlas but still drawn whole.
 
-use vornui::{RenderMode, Rect, Rgba, Ui, UiConfig};
+use vornui::{Rect, RenderMode, Rgba, Ui, UiConfig};
 
 const RED: [u8; 4] = [255, 0, 0, 255];
 const GREEN: [u8; 4] = [0, 255, 0, 255];
@@ -52,12 +52,23 @@ fn near(a: [u8; 4], b: [u8; 4]) -> bool {
 #[test]
 fn a_picture_is_scaled_into_its_rect() {
     let rgba = quadrants(4, 4);
-    let px = frame(|ui| ui.picture(1, (4, 4), &rgba, [0.0, 0.0, 4.0, 4.0], Rect::new(8.0, 8.0, 40.0, 40.0)));
+    let px = frame(|ui| {
+        ui.picture(
+            1,
+            (4, 4),
+            &rgba,
+            [0.0, 0.0, 4.0, 4.0],
+            Rect::new(8.0, 8.0, 40.0, 40.0),
+        )
+    });
     assert!(near(at(&px, 16, 16), RED));
     assert!(near(at(&px, 40, 16), GREEN));
     assert!(near(at(&px, 16, 40), BLUE));
     assert!(near(at(&px, 40, 40), WHITE));
-    assert!(near(at(&px, 4, 4), [0, 0, 0, 255]), "nothing outside the rect");
+    assert!(
+        near(at(&px, 4, 4), [0, 0, 0, 255]),
+        "nothing outside the rect"
+    );
     assert!(near(at(&px, 56, 56), [0, 0, 0, 255]));
 }
 
@@ -65,7 +76,15 @@ fn a_picture_is_scaled_into_its_rect() {
 fn only_the_source_rect_is_drawn() {
     let rgba = quadrants(64, 64);
     // The right half: green over white.
-    let px = frame(|ui| ui.picture(1, (64, 64), &rgba, [32.0, 0.0, 32.0, 64.0], Rect::new(0.0, 0.0, 64.0, 64.0)));
+    let px = frame(|ui| {
+        ui.picture(
+            1,
+            (64, 64),
+            &rgba,
+            [32.0, 0.0, 32.0, 64.0],
+            Rect::new(0.0, 0.0, 64.0, 64.0),
+        )
+    });
     assert!(near(at(&px, 8, 8), GREEN));
     assert!(near(at(&px, 56, 8), GREEN));
     assert!(near(at(&px, 8, 56), WHITE));
@@ -91,7 +110,13 @@ fn bad_sizes_draw_nothing() {
     let px = frame(|ui| {
         ui.picture(1, (0, 4), &[], [0.0; 4], Rect::new(0.0, 0.0, 64.0, 64.0));
         // Fewer bytes than the size says.
-        ui.picture(2, (4, 4), &[255; 8], [0.0, 0.0, 4.0, 4.0], Rect::new(0.0, 0.0, 64.0, 64.0));
+        ui.picture(
+            2,
+            (4, 4),
+            &[255; 8],
+            [0.0, 0.0, 4.0, 4.0],
+            Rect::new(0.0, 0.0, 64.0, 64.0),
+        );
     });
     assert!(near(at(&px, 32, 32), [0, 0, 0, 255]));
 }

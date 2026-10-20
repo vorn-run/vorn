@@ -1052,14 +1052,20 @@ mod tests {
             hub.handle(input, &ctx(&em, true), t0, &mut out);
         }
         // A 1×1 RGBA image, put at the cursor.
-        em.feed(b"\x1b_Ga=T,f=32,s=1,v=1,i=5,q=2;AQIDBA==\x1b\\", &mut Vec::new());
+        em.feed(
+            b"\x1b_Ga=T,f=32,s=1,v=1,i=5,q=2;AQIDBA==\x1b\\",
+            &mut Vec::new(),
+        );
         out.clear();
         hub.records(&ctx(&em, true), t0, &mut out);
         let one = sent(&out, 1);
         let ServerMsg::Image { image, .. } = one[0] else {
             panic!("{one:?}");
         };
-        assert_eq!((image.id, image.width, image.rgba.as_slice()), (5, 1, &[1, 2, 3, 4][..]));
+        assert_eq!(
+            (image.id, image.width, image.rgba.as_slice()),
+            (5, 1, &[1, 2, 3, 4][..])
+        );
         let ServerMsg::Snapshot { snap, .. } = one[1] else {
             panic!("{one:?}");
         };
@@ -1078,7 +1084,10 @@ mod tests {
             panic!("{one:?}");
         };
         assert_eq!(delta.scrolled, 1);
-        assert!(delta.placements.is_none(), "its absolute line stays put as it scrolls");
+        assert!(
+            delta.placements.is_none(),
+            "its absolute line stays put as it scrolls"
+        );
 
         em.feed(b"\x1b_Ga=d,d=I,i=5,q=2\x1b\\", &mut Vec::new());
         out.clear();

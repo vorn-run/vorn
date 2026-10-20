@@ -592,7 +592,12 @@ impl Grid {
         });
         let same = (self.placements.cell_w, self.placements.cell_h) == (cell_w, cell_h)
             && self.placements.list.iter().copied().eq(list.clone())
-            && self.placements.virtuals.iter().copied().eq(virtuals.clone());
+            && self
+                .placements
+                .virtuals
+                .iter()
+                .copied()
+                .eq(virtuals.clone());
         if same {
             return false;
         }
