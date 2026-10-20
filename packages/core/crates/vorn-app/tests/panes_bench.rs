@@ -5,8 +5,8 @@
 //! the app places it. The device pane on a real simulator, booted only for
 //! the bench and shut down after: the card's phone pressed until the
 //! picker has its list, an agent's claim and `device:openPane` until the
-//! pane has its first frame, and the frames a second that reach the pane
-//! while the screen changes (a page counting in Safari).
+//! pane has its first frame, and the frames a second that reach the pane,
+//! the screen still and then changing (apps opening over each other).
 //! `cargo test --test panes_bench -- --ignored --nocapture`.
 
 #![cfg(unix)]
@@ -151,6 +151,31 @@ fn bench_simulator() -> Option<String> {
         .and_then(|d| d["udid"].as_str().map(str::to_owned))
 }
 
+/// Keeps `udid`'s screen changing until the flag drops: Settings and
+/// Safari launched in turn, each launch a new screen.
+fn flip_screen(
+    udid: &str,
+) -> (
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    std::thread::JoinHandle<()>,
+) {
+    let on = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (udid, flag) = (udid.to_owned(), on.clone());
+    let mover = std::thread::spawn(move || {
+        let apps = ["com.apple.Preferences", "com.apple.mobilesafari"];
+        for app in apps.iter().cycle() {
+            if !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            let _ = vorn_spawn::command("xcrun")
+                .args(["simctl", "launch", &udid, app])
+                .output();
+            std::thread::sleep(Duration::from_millis(400));
+        }
+    });
+    (on, mover)
+}
+
 /// Shuts the bench's simulator down however the bench ends.
 struct Shutdown(String);
 
@@ -232,30 +257,27 @@ fn bench_device_pane() {
     let cold = since(t, &mut shot, &mut app, |a| first_frame(a, &sid));
     println!("BENCH device claim (boot) to first frame: {cold:.2}ms");
 
-    // A page that changes every frame, so each screen taken differs.
-    let counting = "data:text/html,<body style='font:20vw monospace'><script>\
-        setInterval(()=>document.body.textContent=Date.now(),16)</script>";
-    ask(
-        &mut app,
-        "device:launch",
-        json!({ "sessionId": sid, "bundleId": "com.apple.mobilesafari" }),
-    );
-    ask(
-        &mut app,
-        "device:openUrl",
-        json!({ "sessionId": sid, "url": counting }),
-    );
-    std::thread::sleep(Duration::from_secs(3));
+    // As the baseline measured it: right after the boot, the screen still.
+    // Frames the same as the last are no longer passed on.
+    let still = frame_rate(&mut shot, &mut app, &sid, Duration::from_secs(10));
+    println!("BENCH device frames reaching the pane (still screen): {still:.2}/s");
+
+    // A screen that changes: Safari opening a page and the Home screen
+    // again, back and forth for as long as frames are counted.
+    let (moving, mover) = flip_screen(&udid);
     let fps = frame_rate(&mut shot, &mut app, &sid, Duration::from_secs(10));
-    println!("BENCH device frames reaching the pane: {fps:.2}/s");
+    println!("BENCH device frames reaching the pane (changing screen): {fps:.2}/s");
+    moving.store(false, std::sync::atomic::Ordering::Relaxed);
+    let _ = mover.join();
 
     // The pane closed and opened again on the booted simulator.
     let mut opens = Vec::with_capacity(ROUNDS);
     for _ in 0..ROUNDS {
         let hide = phone(&mut shot, &mut app, &sid, "Hide device");
         shot.click(&mut app, hide);
-        forget_frame(&mut app, &sid);
+        // Shut for the app too: its frames stop and the last one goes.
         since(Instant::now(), &mut shot, &mut app, |a| {
+            pane_closed(a, &sid)?;
             first_frame(a, &sid).is_none().then_some(())
         });
         let t = Instant::now();
@@ -281,7 +303,10 @@ fn video(app: &App, sid: &str) -> Option<vorn_tree::Video> {
     video_part(app.st.points.tree(&key)?, sid).map(|(_, v)| v.clone())
 }
 
+/// The pane is open again and its picker has its list; a closed pane's
+/// last tree is not enough.
 fn picker_listed(app: &App, sid: &str) -> Option<()> {
+    app.st.bench.devices.contains(sid).then_some(())?;
     video(app, sid)?.picker.filter(|p| !p.loading).map(|_| ())
 }
 
@@ -292,11 +317,6 @@ fn pane_closed(app: &App, sid: &str) -> Option<()> {
 /// The pane has a frame to draw.
 fn first_frame(app: &App, sid: &str) -> Option<()> {
     app.st.bench.frames.get(sid).map(|_| ())
-}
-
-/// Drops the session's last frame, so the next open waits for a fresh one.
-fn forget_frame(app: &mut App, sid: &str) {
-    app.st.bench.frames.remove(sid);
 }
 
 /// The session's latest frame, as a token.

@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use web_time::Duration;
+use web_time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -22,7 +22,7 @@ use crate::points::kind;
 use crate::ui::{Laid, Ui};
 use crate::video::{self, Frame};
 
-/// How often a shown simulator's screen is taken.
+/// How often at most a shown simulator's screen is taken.
 const FRAME_EVERY: Duration = Duration::from_millis(250);
 
 /// What a simulator thread finished.
@@ -104,6 +104,7 @@ impl Video {
             .spawn(move || {
                 let mut last = Vec::new();
                 while !flag.load(Ordering::Relaxed) {
+                    let started = Instant::now();
                     // An unchanged screen is neither decoded nor drawn again.
                     if let Some(png) = video::screenshot(&u).ok().filter(|png| *png != last) {
                         if let Ok(frame) = video::frame(&png) {
@@ -119,7 +120,9 @@ impl Video {
                         }
                         last = png;
                     }
-                    std::thread::sleep(FRAME_EVERY);
+                    // A screenshot takes longer than the period; only what is
+                    // left of it is waited, so frames come as fast as simctl gives them.
+                    std::thread::sleep(FRAME_EVERY.saturating_sub(started.elapsed()));
                 }
             });
         match spawned {
@@ -314,6 +317,11 @@ impl App {
         for s in bench.devices.difference(&devices) {
             if bench.maximized.get(s) == Some(&PaneKind::Device) {
                 bench.maximized.remove(s);
+            }
+            // A closed pane's last tree goes, so opening it again never
+            // shows what it held before the Device draws it afresh.
+            if let Some(key) = device_key(&self.st.points, s) {
+                self.st.points.trees.remove(&key);
             }
         }
         bench.devices = devices;
