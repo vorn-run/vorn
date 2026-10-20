@@ -314,7 +314,8 @@ pub fn div() -> El {
 }
 
 /// A single-line label; screen readers read it as static text.
-pub fn text(s: impl Into<String>, size: f32, color: Rgba) -> El {
+pub fn text(s: impl Into<String>, size: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     let s = s.into();
     let mut e = div();
     e.a11y.role = Some(Role::Label);
@@ -330,7 +331,8 @@ pub fn text(s: impl Into<String>, size: f32, color: Rgba) -> El {
     e
 }
 
-pub fn icon(svg: impl Into<String>, size: f32, color: Rgba) -> El {
+pub fn icon(svg: impl Into<String>, size: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     div().size(size, size).content(Content::Icon {
         svg: svg.into(),
         size,
@@ -339,7 +341,8 @@ pub fn icon(svg: impl Into<String>, size: f32, color: Rgba) -> El {
 }
 
 /// `svg` stretched over a `w`×`h` box and tinted `color`.
-pub fn shape(svg: impl Into<String>, w: f32, h: f32, color: Rgba) -> El {
+pub fn shape(svg: impl Into<String>, w: f32, h: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     div().size(w, h).content(Content::Svg {
         svg: svg.into(),
         color,
@@ -369,8 +372,8 @@ impl El {
         self
     }
     /// The glyph's ink on a cells surface (an image's mark has none).
-    pub fn glyph_tint(mut self, c: Rgba) -> El {
-        self.glyph_tint = Some(c);
+    pub fn glyph_tint(mut self, c: impl Into<Rgba>) -> El {
+        self.glyph_tint = Some(c.into());
         self
     }
     /// An edit field's placeholder ink, for one without `placeholder-*`.
@@ -395,9 +398,9 @@ impl El {
         }
         self
     }
-    pub fn placeholder_color(mut self, c: Rgba) -> El {
+    pub fn placeholder_color(mut self, c: impl Into<Rgba>) -> El {
         if let Content::Edit(l) = &mut self.content {
-            l.placeholder_color = c;
+            l.placeholder_color = c.into();
         }
         self
     }
@@ -604,12 +607,12 @@ impl El {
         self.style.inset.bottom = length(0.0_f32);
         self
     }
-    pub fn bg(mut self, c: Rgba) -> El {
-        self.bg = Some(c);
+    pub fn bg(mut self, c: impl Into<Rgba>) -> El {
+        self.bg = Some(c.into());
         self
     }
-    pub fn border(mut self, w: f32, c: Rgba) -> El {
-        self.border = Some((w, c));
+    pub fn border(mut self, w: f32, c: impl Into<Rgba>) -> El {
+        self.border = Some((w, c.into()));
         self.style.border = Rect {
             left: length(w),
             right: length(w),
@@ -628,7 +631,7 @@ impl El {
     /// lists them.
     pub fn shadow(mut self, layers: &[(f32, f32, f32, f32)]) -> El {
         self.shadows.clear();
-        let black = |a: f32| Rgba::rgba_const(0, 0, 0, a);
+        let black = crate::theme::shadow;
         for &(y, blur, spread, a) in layers {
             self.shadows
                 .insert(0, Shadow::new(0.0, y, blur, spread, black(a)));
@@ -636,25 +639,29 @@ impl El {
         self
     }
     /// A top border only (`border-t`).
-    pub fn border_top(mut self, w: f32, c: Rgba) -> El {
+    pub fn border_top(mut self, w: f32, c: impl Into<Rgba>) -> El {
+        let c = c.into();
         self.style.border.top = length(w);
         self.rules[0] = Some((w, c));
         self
     }
     /// A right border only (`border-r`).
-    pub fn border_right(mut self, w: f32, c: Rgba) -> El {
+    pub fn border_right(mut self, w: f32, c: impl Into<Rgba>) -> El {
+        let c = c.into();
         self.style.border.right = length(w);
         self.rules[1] = Some((w, c));
         self
     }
     /// A bottom border only (`border-b`).
-    pub fn border_bottom(mut self, w: f32, c: Rgba) -> El {
+    pub fn border_bottom(mut self, w: f32, c: impl Into<Rgba>) -> El {
+        let c = c.into();
         self.style.border.bottom = length(w);
         self.rules[2] = Some((w, c));
         self
     }
     /// A left border only (`border-l`).
-    pub fn border_left(mut self, w: f32, c: Rgba) -> El {
+    pub fn border_left(mut self, w: f32, c: impl Into<Rgba>) -> El {
+        let c = c.into();
         self.style.border.left = length(w);
         self.rules[3] = Some((w, c));
         self

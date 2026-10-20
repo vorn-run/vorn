@@ -8,11 +8,12 @@ use web_time::Instant;
 
 use crate::element::{div, icon, text, Action, El, Id};
 use crate::scene::{Rect, Rgba};
-use crate::theme::rgb;
+use crate::theme::Color;
 use crate::widgets::item_id;
 use crate::{accesskit::Role, Ui};
 
-fn ico(name: &str, size: f32, stroke: f32, color: Rgba) -> El {
+fn ico(name: &str, size: f32, stroke: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     icon(
         crate::icons::lucide(name, stroke).unwrap_or_default(),
         size,
@@ -26,14 +27,14 @@ pub fn rule(margin: f32) -> El {
     div()
         .py(margin)
         .w_full()
-        .child(div().h(1.0).w_full().bg(Rgba::white(0.06)))
+        .child(div().h(1.0).w_full().bg(crate::theme::bright(0.06)))
 }
 
 /// One entry of a menu.
 pub struct Item<T> {
-    pub icon: Option<(&'static str, u32)>,
+    pub icon: Option<(&'static str, Color)>,
     /// A coloured dot instead of an icon (the status filter).
-    pub dot: Option<u32>,
+    pub dot: Option<Color>,
     pub label: String,
     pub detail: Option<String>,
     pub shortcut: Option<String>,
@@ -90,7 +91,7 @@ impl Inset {
 impl<T> Item<T> {
     pub fn new(icon: &'static str, label: impl Into<String>, act: T) -> Item<T> {
         Item {
-            icon: Some((icon, rgb::GRAY_500)),
+            icon: Some((icon, crate::theme::color::GRAY_500)),
             label: label.into(),
             act: Some(act),
             ..Item::default()
@@ -157,9 +158,9 @@ impl<T> Item<T> {
         self
     }
 
-    pub fn tint(mut self, color: u32) -> Item<T> {
+    pub fn tint(mut self, color: impl Into<Color>) -> Item<T> {
         if let Some((name, _)) = self.icon {
-            self.icon = Some((name, color));
+            self.icon = Some((name, color.into()));
         }
         self
     }
@@ -220,18 +221,26 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
     }
     if item.header && item.side.is_some() {
         return div().px(12.0).py(4.0).child(
-            text(item.label.to_uppercase(), 10.0, Rgba::hex(rgb::GRAY_500))
-                .tracking(0.05)
-                .line_height(15.0)
-                .role(Role::Label, item.label.as_str()),
+            text(
+                item.label.to_uppercase(),
+                10.0,
+                crate::theme::color::GRAY_500.rgba(),
+            )
+            .tracking(0.05)
+            .line_height(15.0)
+            .role(Role::Label, item.label.as_str()),
         );
     }
     if item.header && item.option_row {
         return div().px(12.0).py(4.0).child(
-            text(item.label.to_uppercase(), 10.0, Rgba::hex(rgb::GRAY_500))
-                .tracking(0.05)
-                .line_height(15.0)
-                .role(Role::Label, item.label.as_str()),
+            text(
+                item.label.to_uppercase(),
+                10.0,
+                crate::theme::color::GRAY_500.rgba(),
+            )
+            .tracking(0.05)
+            .line_height(15.0)
+            .role(Role::Label, item.label.as_str()),
         );
     }
     if let Some(m) = item.header.then(|| item.mark.take()).flatten() {
@@ -245,18 +254,26 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
             .pb(4.0)
             .child(m)
             .child(
-                text(item.label.to_uppercase(), 10.0, Rgba::hex(rgb::GRAY_500))
-                    .weight(500)
-                    .tracking(0.05)
-                    .line_height(15.0)
-                    .role(Role::Label, item.label.as_str()),
+                text(
+                    item.label.to_uppercase(),
+                    10.0,
+                    crate::theme::color::GRAY_500.rgba(),
+                )
+                .weight(500)
+                .tracking(0.05)
+                .line_height(15.0)
+                .role(Role::Label, item.label.as_str()),
             );
     }
     if item.header {
         return div().px(12.0).pt(6.0).pb(4.0).child(
-            text(item.label.to_uppercase(), 10.0, Rgba::hex(rgb::GRAY_500))
-                .line_height(14.0)
-                .role(Role::Label, item.label.as_str()),
+            text(
+                item.label.to_uppercase(),
+                10.0,
+                crate::theme::color::GRAY_500.rgba(),
+            )
+            .line_height(14.0)
+            .role(Role::Label, item.label.as_str()),
         );
     }
     let id = item_id(group, i);
@@ -274,16 +291,18 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
         return card_row(group, i, id, hot, item);
     }
     let fg = if item.danger {
-        Rgba::hex(rgb::DANGER)
+        crate::theme::color::DANGER.rgba()
     } else if item.checked {
-        Rgba::hex(rgb::WHITE)
+        crate::theme::color::WHITE.rgba()
     } else {
-        Rgba::hex(rgb::GRAY_300).mix(Rgba::hex(rgb::WHITE), hot)
+        crate::theme::color::GRAY_300
+            .rgba()
+            .mix(crate::theme::color::WHITE.rgba(), hot)
     };
     let bg = if item.checked {
-        Rgba::white(0.06)
+        crate::theme::bright(0.06)
     } else {
-        Rgba::white(0.0).mix(Rgba::white(0.06), hot)
+        crate::theme::bright(0.0).mix(crate::theme::bright(0.06), hot)
     };
     let mut r = div()
         .id(id)
@@ -302,19 +321,17 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
         r = r.on(Action::Select { group, index: i });
     }
     if let Some(dot) = item.dot {
-        r = r.child(
-            div()
-                .size(8.0, 8.0)
-                .rounded(4.0)
-                .bg(Rgba::hex(dot))
-                .shrink0(),
-        );
+        r = r.child(div().size(8.0, 8.0).rounded(4.0).bg(dot).shrink0());
     }
     if let Some(m) = item.mark {
         r = r.child(div().shrink0().child(m));
     } else if let Some((name, color)) = item.icon {
-        let color = if item.danger { rgb::DANGER } else { color };
-        r = r.child(ico(name, 14.0, 1.5, Rgba::hex(color)).shrink0());
+        let color = if item.danger {
+            crate::theme::color::DANGER
+        } else {
+            color
+        };
+        r = r.child(ico(name, 14.0, 1.5, color).shrink0());
     }
     let mut label = text(&item.label, 12.0, fg)
         .line_height(16.0)
@@ -329,7 +346,8 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
             text(
                 d,
                 10.0,
-                item.detail_color.unwrap_or(Rgba::hex(rgb::GRAY_600)),
+                item.detail_color
+                    .unwrap_or(crate::theme::color::GRAY_600.rgba()),
             )
             .line_height(14.0)
             .silent(),
@@ -337,7 +355,7 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
     }
     if let Some(s) = &item.shortcut {
         r = r.child(
-            text(s, 10.0, Rgba::hex(rgb::GRAY_600))
+            text(s, 10.0, crate::theme::color::GRAY_600.rgba())
                 .mono()
                 .line_height(14.0)
                 .silent(),
@@ -348,7 +366,7 @@ fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>)
             "chevron-right",
             11.0,
             2.0,
-            Rgba::hex(rgb::GRAY_500),
+            crate::theme::color::GRAY_500.rgba(),
         ));
     }
     if item.checked {
@@ -372,12 +390,16 @@ fn card_row<T>(group: Id, i: usize, id: Id, hot: f32, item: Item<T>) -> El {
         .gap(10.0)
         .px(12.0)
         .py(6.0)
-        .bg(Rgba::white(0.0).mix(Rgba::white(0.06), hot))
+        .bg(crate::theme::bright(0.0).mix(crate::theme::bright(0.06), hot))
         .role(Role::MenuItem, item.label.as_str())
         .on(Action::Select { group, index: i });
     if let Some((name, color)) = item.icon {
-        let color = if item.danger { rgb::DANGER } else { color };
-        r = r.child(ico(name, 14.0, 2.0, Rgba::hex(color)).shrink0());
+        let color = if item.danger {
+            crate::theme::color::DANGER
+        } else {
+            color
+        };
+        r = r.child(ico(name, 14.0, 2.0, color).shrink0());
     }
     r.child(
         text(&item.label, 12.0, crate::theme::color::INK_SECONDARY)
@@ -391,13 +413,24 @@ fn card_row<T>(group: Id, i: usize, id: Id, hot: f32, item: Item<T>) -> El {
 fn plain_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
     let hot = hot(ui, id);
     let (fg, bg) = if item.danger {
-        let fg = Rgba::hexa(rgb::DANGER, 0.8).mix(Rgba::hex(rgb::DANGER), hot);
-        (fg, Rgba::white(0.0).mix(Rgba::white(0.06), hot))
+        let fg = crate::theme::color::DANGER
+            .alpha(0.8)
+            .mix(crate::theme::color::DANGER.rgba(), hot);
+        (
+            fg,
+            crate::theme::bright(0.0).mix(crate::theme::bright(0.06), hot),
+        )
     } else if item.checked {
-        (Rgba::hex(rgb::WHITE), Rgba::white(0.04))
+        (
+            crate::theme::color::WHITE.rgba(),
+            crate::theme::bright(0.04),
+        )
     } else {
-        let fg = Rgba::hex(rgb::GRAY_400);
-        (fg, Rgba::white(0.0).mix(Rgba::white(0.06), hot))
+        let fg = crate::theme::color::GRAY_400.rgba();
+        (
+            fg,
+            crate::theme::bright(0.0).mix(crate::theme::bright(0.06), hot),
+        )
     };
     let mut r = div()
         .id(id)
@@ -428,7 +461,7 @@ fn plain_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
     );
     if let Some(d) = &item.detail {
         r = r.child(
-            text(d, 9.0, Rgba::hex(rgb::GRAY_600))
+            text(d, 9.0, crate::theme::color::GRAY_600.rgba())
                 .line_height(12.0)
                 .silent(),
         );
@@ -443,17 +476,26 @@ fn side_row<T>(ui: &Ui, group: Id, i: usize, id: Id, inset: Inset, item: Item<T>
     let hot = hot(ui, id);
     let (fg, bg) = match (item.danger, item.checked) {
         (true, true) => (
-            Rgba::hex(rgb::DANGER),
-            Rgba::hexa(rgb::DANGER, 0.10).mix(Rgba::hexa(rgb::DANGER, 0.20), hot),
+            crate::theme::color::DANGER.rgba(),
+            crate::theme::color::DANGER
+                .alpha(0.10)
+                .mix(crate::theme::color::DANGER.alpha(0.20), hot),
         ),
         (true, false) => (
-            Rgba::hexa(rgb::DANGER, 0.8).mix(Rgba::hex(rgb::DANGER), hot),
-            Rgba::white(0.0).mix(Rgba::white(0.06), hot),
+            crate::theme::color::DANGER
+                .alpha(0.8)
+                .mix(crate::theme::color::DANGER.rgba(), hot),
+            crate::theme::bright(0.0).mix(crate::theme::bright(0.06), hot),
         ),
-        (false, true) => (Rgba::hex(rgb::WHITE), Rgba::white(0.06)),
+        (false, true) => (
+            crate::theme::color::WHITE.rgba(),
+            crate::theme::bright(0.06),
+        ),
         (false, false) => (
-            Rgba::hex(rgb::GRAY_300).mix(Rgba::hex(rgb::WHITE), hot),
-            Rgba::white(0.0).mix(Rgba::white(0.06), hot),
+            crate::theme::color::GRAY_300
+                .rgba()
+                .mix(crate::theme::color::WHITE.rgba(), hot),
+            crate::theme::bright(0.0).mix(crate::theme::bright(0.06), hot),
         ),
     };
     let mut r = div()
@@ -496,14 +538,16 @@ fn side_row<T>(ui: &Ui, group: Id, i: usize, id: Id, inset: Inset, item: Item<T>
 fn picker_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
     let hot = hot(ui, id);
     let fg = if item.checked {
-        Rgba::hex(rgb::WHITE)
+        crate::theme::color::WHITE.rgba()
     } else {
-        Rgba::hex(rgb::GRAY_300).mix(Rgba::hex(rgb::WHITE), hot)
+        crate::theme::color::GRAY_300
+            .rgba()
+            .mix(crate::theme::color::WHITE.rgba(), hot)
     };
     let bg = if item.checked {
-        Rgba::white(0.06)
+        crate::theme::bright(0.06)
     } else {
-        Rgba::white(0.0).mix(Rgba::white(0.04), hot)
+        crate::theme::bright(0.0).mix(crate::theme::bright(0.04), hot)
     };
     let mut r = div()
         .id(id)
@@ -521,7 +565,7 @@ fn picker_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
             div().w(11.0).shrink0()
         });
     if let Some(d) = item.dot.filter(|_| item.option_row) {
-        r = r.child(div().size(6.0, 6.0).rounded(3.0).bg(Rgba::hex(d)).shrink0());
+        r = r.child(div().size(6.0, 6.0).rounded(3.0).bg(d).shrink0());
     }
     if item.disabled {
         r = r.opacity(0.4).disabled(true);
@@ -531,7 +575,7 @@ fn picker_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
     if let Some(m) = item.mark {
         r = r.child(div().shrink0().child(m));
     } else if let Some((name, color)) = item.icon {
-        r = r.child(ico(name, 12.0, 2.0, Rgba::hex(color)).shrink0());
+        r = r.child(ico(name, 12.0, 2.0, color).shrink0());
     }
     r = r.child(
         div().row().grow().min_w(0.0).child(
@@ -543,7 +587,7 @@ fn picker_row<T>(ui: &Ui, group: Id, i: usize, id: Id, item: Item<T>) -> El {
     );
     if let Some(d) = &item.detail {
         r = r.child(
-            text(d, 10.0, Rgba::hex(rgb::GRAY_600))
+            text(d, 10.0, crate::theme::color::GRAY_600.rgba())
                 .line_height(15.0)
                 .silent(),
         );
@@ -779,8 +823,8 @@ pub fn panel<T>(
         .col()
         .w(w)
         .py(pad)
-        .bg(Rgba::hex(rgb::SURFACE_OVERLAY))
-        .border(1.0, Rgba::white(edge))
+        .bg(crate::theme::color::SURFACE_OVERLAY.rgba())
+        .border(1.0, crate::theme::bright(edge))
         .rounded(8.0)
         .opacity(p)
         .transform(0.96 + 0.04 * p, (0.0, -4.0 * (1.0 - p)))
@@ -828,8 +872,8 @@ fn panel_inner<T>(ui: &Ui, group: Id, w: f32, items: Vec<Item<T>>) -> El {
         .col()
         .w(w)
         .py(4.0)
-        .bg(Rgba::hex(rgb::SURFACE_OVERLAY))
-        .border(1.0, Rgba::white(0.10))
+        .bg(crate::theme::color::SURFACE_OVERLAY.rgba())
+        .border(1.0, crate::theme::bright(0.10))
         .rounded(8.0)
         .role(Role::Menu, "Submenu");
     for (i, item) in items.into_iter().enumerate() {

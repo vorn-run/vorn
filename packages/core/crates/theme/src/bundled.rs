@@ -46,6 +46,18 @@ pub fn find_bundled(id: &str) -> Option<&'static Theme> {
     bundled().iter().find(|t| t.id == id)
 }
 
+/// Vorn Dark: the default, and what a missing theme falls back to.
+pub fn vorn_dark() -> &'static Theme {
+    #[allow(clippy::expect_used)]
+    find_bundled(VORN_DARK).expect("vorn-dark.toml is compiled in and its test reads it")
+}
+
+/// Vorn Light, the light default.
+pub fn vorn_light() -> &'static Theme {
+    #[allow(clippy::expect_used)]
+    find_bundled(VORN_LIGHT).expect("vorn-light.toml is compiled in and its test reads it")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

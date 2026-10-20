@@ -17,7 +17,7 @@ mod token;
 
 use std::fmt;
 
-pub use bundled::{bundled, find_bundled, manifests, VORN_DARK, VORN_LIGHT};
+pub use bundled::{bundled, find_bundled, manifests, vorn_dark, vorn_light, VORN_DARK, VORN_LIGHT};
 pub use color::{Oklch, Rgba8};
 pub use prefs::{Chrome, Materials, Prefs, Resolved, Scheme};
 pub use token::Token;
@@ -141,14 +141,12 @@ impl Theme {
     /// "neutral" interface style.
     pub fn with_neutral_chrome(&self) -> Theme {
         let vorn = match self.appearance {
-            Appearance::Dark => find_bundled(VORN_DARK),
-            Appearance::Light => find_bundled(VORN_LIGHT),
+            Appearance::Dark => vorn_dark(),
+            Appearance::Light => vorn_light(),
         };
         let mut out = self.clone();
-        if let Some(vorn) = vorn {
-            for t in Token::ALL.iter().filter(|t| t.is_chrome()) {
-                out.ui[*t as usize] = vorn.get(*t);
-            }
+        for t in Token::ALL.iter().filter(|t| t.is_chrome()) {
+            out.ui[*t as usize] = vorn.get(*t);
         }
         out
     }

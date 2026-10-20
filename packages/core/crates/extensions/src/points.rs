@@ -7,17 +7,29 @@ use serde_json::{json, Value};
 use crate::manifest::{Manifest, PaneDraws, Place};
 
 /// Every contribution of `manifest` a client draws or lists, as
-/// `{extension, kind, id, title, ..., tree?}`; a pane only when it is a tree.
+/// `{extension, kind, id, title, ..., tree?}`; a pane only when it is a tree,
+/// and its `[theme]` as kind `themes` with the section as written, so every
+/// client reads it with `vorn_theme` as vornd checked it.
 pub fn listed(manifest: &Manifest) -> Vec<Value> {
+    let mut out = Vec::new();
+    if let Some(theme) = manifest.theme() {
+        out.push(json!({
+            "extension": manifest.id,
+            "kind": "themes",
+            "id": manifest.id,
+            "title": manifest.name,
+            "appearance": theme.appearance.key(),
+            "theme": manifest.theme,
+        }));
+    }
     let Some(c) = &manifest.contributes else {
-        return Vec::new();
+        return out;
     };
     let entry = |place: Place, mut v: Value| {
         v["extension"] = json!(manifest.id);
         v["kind"] = json!(place.key());
         v
     };
-    let mut out = Vec::new();
     for pane in c.panes() {
         if pane.draws == PaneDraws::Tree {
             let v = json!({ "id": pane.base.id, "title": pane.base.title, "tree": true });
@@ -82,5 +94,16 @@ tree = true
         assert!(listed.iter().all(|p| p["extension"] == "checks"));
         assert_eq!(listed[2]["tree"], true);
         assert!(listed[1].get("tree").is_none());
+    }
+
+    #[test]
+    fn lists_a_theme_with_its_section() {
+        let text = vorn_theme::manifests()[2];
+        let listed = listed(&parse(text).unwrap());
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["kind"], "themes");
+        assert_eq!(listed[0]["id"], "solarized-dark");
+        assert_eq!(listed[0]["appearance"], "dark");
+        assert_eq!(listed[0]["theme"]["ui"]["accent"], "#b58900");
     }
 }

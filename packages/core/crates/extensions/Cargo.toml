@@ -28,6 +28,8 @@ tracing = "0.1"
 vorn-agents = { path = "../agents" }
 # `pack` reads a manifest's agent rules against the adapters Vorn ships.
 vorn-adapters = { path = "../adapters" }
+# A [theme] section is checked as the app reads it.
+vorn-theme = { path = "../theme" }
 
 # Services as sandboxed Wasm components: Wasmtime's runtime and component
 # model, and WASI preview 2 with nothing granted. The compiler is a separate

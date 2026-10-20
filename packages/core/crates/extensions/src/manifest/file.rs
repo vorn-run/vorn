@@ -119,6 +119,8 @@ struct Raw {
     mcp: BTreeMap<String, RawMcp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent: Option<toml::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    theme: Option<toml::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -700,6 +702,10 @@ impl Raw {
                 ));
             }
         }
+        if let Some(theme) = &self.theme {
+            vorn_theme::Theme::from_section(&self.id, &self.name, theme)
+                .map_err(|e| at(&e.field, e.message))?;
+        }
         if !is_id(&self.id) {
             return Err(at(
                 "id",
@@ -907,7 +913,8 @@ impl Raw {
                 .is_some_and(|c| !c.triggers.is_empty() || !c.actions.is_empty())
             || self.contributes.is_some()
             || !self.mcp.is_empty()
-            || self.agent.is_some();
+            || self.agent.is_some()
+            || self.theme.is_some();
         // A built-in's program is compiled into vornd: its switch alone may be what it adds.
         if !does_something && !builtin {
             return Err(at(
@@ -987,8 +994,8 @@ impl Raw {
         let mut manifest = super::read(&payload).map_err(|e| at("", e.to_string()))?;
         if !has_connector_work {
             manifest.actions.clear();
-            if self.agent.is_some() {
-                // An agent adapter adds to Vorn, as an extension does.
+            if self.agent.is_some() || self.theme.is_some() {
+                // An agent adapter or a theme adds to Vorn, as an extension does.
                 manifest.kind = super::Kind::Extension;
             }
         } else {
@@ -1043,6 +1050,7 @@ impl Raw {
             migrations: s.migrations,
         });
         manifest.agent = self.agent;
+        manifest.theme = self.theme;
         manifest.mcp = self
             .mcp
             .into_iter()
@@ -1854,6 +1862,7 @@ impl From<&Manifest> for Raw {
                 migrations: s.migrations.clone(),
             }),
             agent: m.agent.clone(),
+            theme: m.theme.clone(),
             mcp: m
                 .mcp
                 .iter()
@@ -2026,6 +2035,81 @@ header = "Authorization: Bearer {token}"
         );
         let err = parse("id = \"x\"\nname = = 1\n").unwrap_err();
         assert_eq!(err.line, 2);
+    }
+
+    const THEME: &str = r##"id = "acme.dusk"
+name = "Acme Dusk"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[theme]
+appearance = "dark"
+
+[theme.ui]
+accent = "#d08770"
+
+[theme.terminal]
+foreground = "#dddddd"
+background = "#111111"
+ansi = [
+  "#000000", "#cc3333", "#33cc33", "#cccc33", "#3333cc", "#cc33cc", "#33cccc", "#cccccc",
+  "#555555", "#ff5555", "#55ff55", "#ffff55", "#5555ff", "#ff55ff", "#55ffff", "#ffffff",
+]
+"##;
+
+    #[test]
+    fn a_theme_alone_is_an_extension() {
+        let m = parse(THEME).unwrap();
+        assert_eq!(m.kind, super::super::Kind::Extension);
+        let theme = m.theme().unwrap();
+        assert_eq!(
+            (theme.id.as_str(), theme.name.as_str()),
+            ("acme.dusk", "Acme Dusk")
+        );
+        assert_eq!(
+            theme.get(vorn_theme::Token::Accent),
+            vorn_theme::Rgba8::rgb(0xd08770)
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+    }
+
+    #[test]
+    fn names_the_line_and_field_of_a_bad_theme() {
+        let cases = [
+            (
+                "appearance = \"dark\"",
+                "appearance = \"dim\"",
+                7,
+                "theme.appearance",
+            ),
+            ("accent =", "accnet =", 10, "theme.ui.accnet"),
+            ("\"#d08770\"", "\"orange\"", 10, "theme.ui.accent"),
+            ("\"#111111\"", "\"#11\"", 14, "theme.terminal.background"),
+            ("\"#33cc33\"", "\"green\"", 16, "theme.terminal.ansi[2]"),
+            (", \"#ffffff\",", ",", 15, "theme.terminal.ansi"),
+            (
+                "foreground = \"#dddddd\"\n",
+                "",
+                12,
+                "theme.terminal.foreground",
+            ),
+        ];
+        for (from, to, line, field) in cases {
+            let err = parse(&THEME.replace(from, to)).unwrap_err();
+            assert_eq!(
+                (err.line, err.field.as_str()),
+                (line, field),
+                "{from} -> {to}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_theme_vorn_ships_reads_as_an_extension() {
+        for text in vorn_theme::manifests() {
+            let m = parse(text).unwrap_or_else(|e| panic!("{e}\n{text}"));
+            assert!(m.theme().is_some(), "{}", m.id);
+        }
     }
 
     #[test]

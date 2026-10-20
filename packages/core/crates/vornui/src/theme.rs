@@ -1,133 +1,100 @@
-//! The app's design tokens: the palette, grays, type scale, radii,
+//! The app's design tokens: the theme's colours, type scale, radii,
 //! transitions, focus ring and scrollbar. Widgets read these instead of
-//! literals, so each value is written once.
+//! literals; colours come from the installed theme (`crate::palette`).
 
 use web_time::Duration;
 
-use crate::scene::Rgba;
+pub use crate::palette::{bright, shadow, Color};
+pub use vorn_theme::Token;
 
-/// The palette as `0xRRGGBB`: the one place each value is written.
-/// [`color`] wraps these as [`Rgba`]; apps that keep `u32`s read them here.
-pub mod rgb {
-    pub const BRONZO: u32 = 0xc9972a;
-    pub const BRONZO_DARK: u32 = 0xb8862a;
-    pub const DANGER: u32 = 0xd4623f;
-    pub const INK: u32 = 0xfaf9f7;
-    pub const STATUS_SLATE: u32 = 0x7d8590;
-    pub const STATUS_BLUE: u32 = 0x6f8faf;
-    pub const STATUS_SAGE: u32 = 0x7d9471;
-    pub const DIFF_ADD: u32 = 0x7ea96a;
-    pub const DIFF_REMOVE: u32 = 0xc96f62;
-    pub const SURFACE_BASE: u32 = 0x0d0d0f;
-    pub const SURFACE_SUNKEN: u32 = 0x141416;
-    pub const SURFACE_PANEL: u32 = 0x101012;
-    pub const SURFACE_OVERLAY: u32 = 0x1c1c20;
-    pub const SURFACE_RAISED: u32 = SURFACE_SUNKEN;
-    pub const SURFACE_NODE: u32 = SURFACE_SUNKEN;
-    pub const WHITE: u32 = 0xffffff;
-    pub const BLACK: u32 = 0x000000;
-
-    /// Tailwind v4's palette (its OKLCH values in sRGB), the steps in use.
-    pub const GRAY_100: u32 = 0xf3f4f6;
-    pub const GRAY_200: u32 = 0xe5e7eb;
-    pub const GRAY_300: u32 = 0xd1d5dc;
-    pub const GRAY_400: u32 = 0x99a1af;
-    pub const GRAY_500: u32 = 0x6a7282;
-    pub const GRAY_600: u32 = 0x4a5565;
-    pub const GRAY_700: u32 = 0x364153;
-    pub const GRAY_900: u32 = 0x101828;
-    pub const GREEN_300: u32 = 0x7bf1a8;
-    pub const GREEN_400: u32 = 0x05df72;
-    pub const GREEN_500: u32 = 0x00c758;
-    pub const GREEN_600: u32 = 0x00a63e;
-    pub const EMERALD_400: u32 = 0x00d492;
-    pub const YELLOW_500: u32 = 0xedb200;
-    pub const RED_200: u32 = 0xffc9c9;
-    pub const RED_300: u32 = 0xffa2a2;
-    pub const RED_400: u32 = 0xff6467;
-    pub const RED_500: u32 = 0xfb2c36;
-    pub const RED_600: u32 = 0xe7000b;
-    pub const AMBER_300: u32 = 0xffd230;
-    pub const AMBER_400: u32 = 0xffba00;
-    pub const AMBER_500: u32 = 0xfe9a00;
-    pub const BLUE_300: u32 = 0x8ec5ff;
-    pub const BLUE_400: u32 = 0x54a2ff;
-    pub const BLUE_500: u32 = 0x2b7fff;
-    pub const BLUE_600: u32 = 0x155dfc;
-    pub const SKY_400: u32 = 0x00bcff;
-}
-
-/// The theme's colours and Tailwind's, ready to paint.
+/// The theme's colours by the names the widgets use: each a token the
+/// installed theme gives a value (`crate::palette`), never a literal.
 pub mod color {
-    use super::{rgb, Rgba};
+    use super::{Color, Token};
 
-    pub const BRONZO: Rgba = Rgba::hex(rgb::BRONZO);
-    pub const BRONZO_DARK: Rgba = Rgba::hex(rgb::BRONZO_DARK);
-    pub const DANGER: Rgba = Rgba::hex(rgb::DANGER);
-    pub const INK: Rgba = Rgba::hex(rgb::INK);
-    pub const INK_SECONDARY: Rgba = Rgba::white(0.55);
-    pub const INK_FAINT: Rgba = Rgba::white(0.35);
-    pub const INK_GHOST: Rgba = Rgba::white(0.18);
-    pub const STATUS_SLATE: Rgba = Rgba::hex(rgb::STATUS_SLATE);
-    pub const STATUS_BLUE: Rgba = Rgba::hex(rgb::STATUS_BLUE);
-    pub const STATUS_SAGE: Rgba = Rgba::hex(rgb::STATUS_SAGE);
-    pub const DIFF_ADD: Rgba = Rgba::hex(rgb::DIFF_ADD);
-    pub const DIFF_REMOVE: Rgba = Rgba::hex(rgb::DIFF_REMOVE);
-    pub const SURFACE_BASE: Rgba = Rgba::hex(rgb::SURFACE_BASE);
-    pub const SURFACE_SUNKEN: Rgba = Rgba::hex(rgb::SURFACE_SUNKEN);
-    pub const SURFACE_PANEL: Rgba = Rgba::hex(rgb::SURFACE_PANEL);
-    pub const SURFACE_OVERLAY: Rgba = Rgba::hex(rgb::SURFACE_OVERLAY);
-    pub const SURFACE_RAISED: Rgba = SURFACE_SUNKEN;
-    pub const SURFACE_NODE: Rgba = SURFACE_SUNKEN;
+    const fn t(token: Token) -> Color {
+        Color::Token(token)
+    }
 
-    pub const GRAY_100: Rgba = Rgba::hex(rgb::GRAY_100);
-    pub const GRAY_200: Rgba = Rgba::hex(rgb::GRAY_200);
-    pub const GRAY_300: Rgba = Rgba::hex(rgb::GRAY_300);
-    pub const GRAY_400: Rgba = Rgba::hex(rgb::GRAY_400);
-    pub const GRAY_500: Rgba = Rgba::hex(rgb::GRAY_500);
-    pub const GRAY_600: Rgba = Rgba::hex(rgb::GRAY_600);
-    pub const GRAY_700: Rgba = Rgba::hex(rgb::GRAY_700);
-    pub const GRAY_900: Rgba = Rgba::hex(rgb::GRAY_900);
-    pub const GREEN_300: Rgba = Rgba::hex(rgb::GREEN_300);
-    pub const GREEN_400: Rgba = Rgba::hex(rgb::GREEN_400);
-    pub const GREEN_500: Rgba = Rgba::hex(rgb::GREEN_500);
-    pub const GREEN_600: Rgba = Rgba::hex(rgb::GREEN_600);
-    pub const EMERALD_400: Rgba = Rgba::hex(rgb::EMERALD_400);
-    pub const YELLOW_500: Rgba = Rgba::hex(rgb::YELLOW_500);
-    pub const RED_200: Rgba = Rgba::hex(rgb::RED_200);
-    pub const RED_300: Rgba = Rgba::hex(rgb::RED_300);
-    pub const RED_400: Rgba = Rgba::hex(rgb::RED_400);
-    pub const RED_500: Rgba = Rgba::hex(rgb::RED_500);
-    pub const RED_600: Rgba = Rgba::hex(rgb::RED_600);
-    pub const AMBER_300: Rgba = Rgba::hex(rgb::AMBER_300);
-    pub const AMBER_400: Rgba = Rgba::hex(rgb::AMBER_400);
-    pub const AMBER_500: Rgba = Rgba::hex(rgb::AMBER_500);
-    pub const BLUE_300: Rgba = Rgba::hex(rgb::BLUE_300);
-    pub const BLUE_400: Rgba = Rgba::hex(rgb::BLUE_400);
-    pub const BLUE_500: Rgba = Rgba::hex(rgb::BLUE_500);
-    pub const BLUE_600: Rgba = Rgba::hex(rgb::BLUE_600);
-    pub const SKY_400: Rgba = Rgba::hex(rgb::SKY_400);
-    pub const WHITE: Rgba = Rgba::white(1.0);
+    pub const BRONZO: Color = t(Token::Accent);
+    pub const BRONZO_DARK: Color = t(Token::AccentStrong);
+    pub const DANGER: Color = t(Token::Danger);
+    pub const INK: Color = t(Token::Ink);
+    pub const INK_SECONDARY: Color = t(Token::InkSecondary);
+    pub const INK_FAINT: Color = t(Token::InkFaint);
+    pub const INK_GHOST: Color = t(Token::InkGhost);
+    pub const STATUS_SLATE: Color = t(Token::StatusSlate);
+    pub const STATUS_BLUE: Color = t(Token::StatusBlue);
+    pub const STATUS_SAGE: Color = t(Token::StatusSage);
+    pub const DIFF_ADD: Color = t(Token::DiffAdd);
+    pub const DIFF_REMOVE: Color = t(Token::DiffRemove);
+    pub const SURFACE_BASE: Color = t(Token::SurfaceBase);
+    pub const SURFACE_SUNKEN: Color = t(Token::SurfaceSunken);
+    pub const SURFACE_PANEL: Color = t(Token::SurfacePanel);
+    pub const SURFACE_OVERLAY: Color = t(Token::SurfaceOverlay);
+    pub const SURFACE_RAISED: Color = SURFACE_SUNKEN;
+    pub const SURFACE_NODE: Color = SURFACE_SUNKEN;
+    /// The brightest ink: white on a dark theme, black on a light one.
+    pub const WHITE: Color = t(Token::InkBright);
+    /// Scrims and shadows.
+    pub const SHADOW: Color = t(Token::Shadow);
 
-    /// Text selection: the colour Chromium paints `::selection` with when
-    /// the page does not style it.
-    pub const SELECTION: Rgba = Rgba::rgba_const(0x33, 0x90, 0xff, 0.4);
+    /// Tailwind v4's steps in use, as each theme maps them.
+    pub const GRAY_100: Color = t(Token::Gray100);
+    pub const GRAY_200: Color = t(Token::Gray200);
+    pub const GRAY_300: Color = t(Token::Gray300);
+    pub const GRAY_400: Color = t(Token::Gray400);
+    pub const GRAY_500: Color = t(Token::Gray500);
+    pub const GRAY_600: Color = t(Token::Gray600);
+    pub const GRAY_700: Color = t(Token::Gray700);
+    pub const GRAY_800: Color = t(Token::Gray800);
+    pub const GRAY_900: Color = t(Token::Gray900);
+    pub const GREEN_300: Color = t(Token::Green300);
+    pub const GREEN_400: Color = t(Token::Green400);
+    pub const GREEN_500: Color = t(Token::Green500);
+    pub const GREEN_600: Color = t(Token::Green600);
+    pub const EMERALD_400: Color = t(Token::Emerald400);
+    pub const YELLOW_400: Color = t(Token::Yellow400);
+    pub const YELLOW_500: Color = t(Token::Yellow500);
+    pub const RED_200: Color = t(Token::Red200);
+    pub const RED_300: Color = t(Token::Red300);
+    pub const RED_400: Color = t(Token::Red400);
+    pub const RED_500: Color = t(Token::Red500);
+    pub const RED_600: Color = t(Token::Red600);
+    pub const ORANGE_400: Color = t(Token::Orange400);
+    pub const ORANGE_500: Color = t(Token::Orange500);
+    pub const AMBER_300: Color = t(Token::Amber300);
+    pub const AMBER_400: Color = t(Token::Amber400);
+    pub const AMBER_500: Color = t(Token::Amber500);
+    pub const CYAN_400: Color = t(Token::Cyan400);
+    pub const SKY_400: Color = t(Token::Sky400);
+    pub const BLUE_300: Color = t(Token::Blue300);
+    pub const BLUE_400: Color = t(Token::Blue400);
+    pub const BLUE_500: Color = t(Token::Blue500);
+    pub const BLUE_600: Color = t(Token::Blue600);
+    pub const VIOLET_400: Color = t(Token::Violet400);
+    pub const VIOLET_500: Color = t(Token::Violet500);
+    pub const PURPLE_400: Color = t(Token::Purple400);
+    pub const PINK_400: Color = t(Token::Pink400);
+    pub const PINK_500: Color = t(Token::Pink500);
+
+    /// Text selection.
+    pub const SELECTION: Color = t(Token::Selection);
 }
 
-/// The hairlines and washes the components draw with, as `white/[a]`
-/// alphas: borders step 0.04 → 0.12, hover washes 0.04 → 0.10.
+/// The hairlines the components draw with, faint to strong.
 pub mod line {
-    use super::Rgba;
-    /// A card header's bottom rule (`border-white/[0.04]`).
-    pub const FAINT: Rgba = Rgba::white(0.04);
-    /// A pill or chip at rest (`border-white/[0.06]`).
-    pub const SOFT: Rgba = Rgba::white(0.06);
-    /// Tooltips, popovers and dividers (`border-white/[0.08]`).
-    pub const BASE: Rgba = Rgba::white(0.08);
-    /// Menus and dialogs (`border-white/10`).
-    pub const STRONG: Rgba = Rgba::white(0.10);
-    /// A pill or chip under the pointer (`border-white/[0.12]`).
-    pub const HOVER: Rgba = Rgba::white(0.12);
+    use super::{Color, Token};
+    /// A card header's bottom rule.
+    pub const FAINT: Color = Color::Token(Token::LineFaint);
+    /// A pill or chip at rest.
+    pub const SOFT: Color = Color::Token(Token::LineSoft);
+    /// Tooltips, popovers and dividers.
+    pub const BASE: Color = Color::Token(Token::LineBase);
+    /// Menus and dialogs.
+    pub const STRONG: Color = Color::Token(Token::LineStrong);
+    /// A pill or chip under the pointer.
+    pub const HOVER: Color = Color::Token(Token::LineHover);
 }
 
 /// Tailwind's type scale, logical pixels: (size, line height). The
@@ -314,8 +281,8 @@ pub mod blur {
 /// `:focus-visible` from `global.css`: a 1px outline, 1px out, and the
 /// element's corners forced to 4px.
 pub mod focus {
-    use super::Rgba;
-    pub const RING: Rgba = Rgba::white(0.45);
+    use super::{Color, Token};
+    pub const RING: Color = Color::Token(Token::FocusRing);
     pub const WIDTH: f32 = 1.0;
     pub const OFFSET: f32 = 1.0;
     pub const RADIUS: f32 = 4.0;
@@ -323,11 +290,11 @@ pub mod focus {
 
 /// `::-webkit-scrollbar` from `global.css`.
 pub mod scrollbar {
-    use super::Rgba;
+    use super::{Color, Token};
     pub const WIDTH: f32 = 6.0;
     pub const RADIUS: f32 = 3.0;
-    pub const THUMB: Rgba = Rgba::white(0.08);
-    pub const THUMB_HOVER: Rgba = Rgba::white(0.2);
+    pub const THUMB: Color = Color::Token(Token::ScrollThumb);
+    pub const THUMB_HOVER: Color = Color::Token(Token::ScrollThumbHover);
 }
 
 #[cfg(test)]

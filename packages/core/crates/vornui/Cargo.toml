@@ -18,6 +18,8 @@ taffy = { version = "0.10", default-features = false, features = ["std", "taffy_
 etagere = "0.3"
 resvg = { version = "0.48", default-features = false }
 png = "0.18"
+# The colour tokens and the theme a window draws with.
+vorn-theme = { path = "../theme" }
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "1.0"
 unicode-segmentation = "1"

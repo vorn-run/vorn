@@ -1259,7 +1259,7 @@ mod tests {
         list.begin(Rgba::hex(0x0d0d0f));
         list.push(
             Op::Frame {
-                color: Rgba::white(0.5),
+                color: crate::theme::bright(0.5),
                 round: true,
                 open: false,
             },
@@ -1268,7 +1268,7 @@ mod tests {
         list.push(
             Op::Text {
                 text: "Sessions".into(),
-                color: Rgba::white(1.0),
+                color: crate::theme::bright(1.0),
                 attr: attr::BOLD,
                 wrap: false,
             },
@@ -1290,7 +1290,7 @@ mod tests {
         let mut list = PaintList::default();
         list.begin(Rgba::hex(0x0d0d0f));
         let frame = Op::Frame {
-            color: Rgba::white(0.5),
+            color: crate::theme::bright(0.5),
             round: false,
             open: true,
         };
@@ -1399,7 +1399,7 @@ mod palette_tests {
             .to_vec();
         assert_eq!(idx, [232, 233, 234, 235]);
         // A hover tint over the base is a visible step up from every surface.
-        let tint = over([0x0d, 0x0d, 0x0f], Rgba::white(0.14), 1.0);
+        let tint = over([0x0d, 0x0d, 0x0f], crate::theme::bright(0.14), 1.0);
         assert!(ansi256(tint) > 235, "{tint:?} -> {}", ansi256(tint));
         assert_eq!(ansi256([255, 255, 255]), 231);
         assert_eq!(ansi256([0x6c, 0x6c, 0x6c]), 242);

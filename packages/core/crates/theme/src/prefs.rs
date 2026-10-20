@@ -3,7 +3,7 @@
 //! interface style keeps the theme's chrome or Vorn's, and contrast
 //! correction lifts what does not read.
 
-use crate::{bundled, Theme, VORN_DARK, VORN_LIGHT};
+use crate::{bundled, vorn_dark, vorn_light, Theme, VORN_DARK, VORN_LIGHT};
 
 /// Settings › Appearance › Colour scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -123,17 +123,16 @@ impl Prefs {
     ) -> Resolved {
         let id = preview.unwrap_or_else(|| self.chosen(system_dark));
         let fallback = if self.is_dark(system_dark) {
-            VORN_DARK
+            vorn_dark()
         } else {
-            VORN_LIGHT
+            vorn_light()
         };
         let base = installed
             .iter()
             .chain(bundled())
             .find(|t| t.id == id)
-            .or_else(|| bundled().iter().find(|t| t.id == fallback))
-            .cloned()
-            .unwrap_or_else(|| bundled()[0].clone());
+            .unwrap_or(fallback)
+            .clone();
         let theme = match self.chrome {
             Chrome::Neutral => base.with_neutral_chrome(),
             Chrome::Tinted => base,

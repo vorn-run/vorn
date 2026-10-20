@@ -175,7 +175,7 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{text, Rgba, UiConfig};
+    use crate::{text, UiConfig};
 
     fn keys(n: usize) -> Vec<Id> {
         (0..n).map(|i| Id::new("item").child(i)).collect()
@@ -196,8 +196,8 @@ mod tests {
                 .id(keys[i])
                 .h(50.0)
                 .shrink0()
-                .bg(Rgba::white(1.0))
-                .child(text(format!("{i}"), 12.0, Rgba::white(1.0)))
+                .bg(crate::theme::bright(1.0))
+                .child(text(format!("{i}"), 12.0, crate::theme::bright(1.0)))
         });
         ui.layout(div().w(300.0).h(400.0).child(el), (300.0, 400.0));
         w
@@ -277,7 +277,7 @@ mod tests {
             div()
                 .id(Id::new("after"))
                 .on(crate::Action::Click)
-                .child(text("x", 12.0, Rgba::white(1.0))),
+                .child(text("x", 12.0, crate::theme::bright(1.0))),
         );
         ui.layout(list, crate::cells::units::px(20, 20));
         assert_eq!(ui.rect_of(Id::new("after")).map(|r| r.y), Some(7.0));

@@ -227,7 +227,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         // load; elsewhere a window shown before its first frame flashes the system's white.
         #[cfg(target_os = "macos")]
         if !o.transparent {
-            let [r, g, b, _] = crate::theme::color::SURFACE_BASE.0;
+            let [r, g, b, _] = crate::theme::color::SURFACE_BASE.rgba().0;
             crate::macos::set_background(&window, (f64::from(r), f64::from(g), f64::from(b)));
             window.set_visible(true);
             crate::macos::flush();

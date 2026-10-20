@@ -392,7 +392,7 @@ fn hover_transitions_over_150ms() {
     r.frame(&build);
     near(
         r.pixel((x - 15.0, y)),
-        over(color::SURFACE_BASE, Rgba::white(0.06)),
+        over(color::SURFACE_BASE.rgba(), Rgba::white(0.06)),
     );
 }
 
@@ -629,7 +629,7 @@ fn tab_walks_focus_and_shows_the_ring() {
     let bb = r.node(b).and_then(Node::bounds).unwrap();
     // The ring sits 1px outside the box, at 45% white.
     let ring = r.pixel(((bb.x0 + bb.x1) as f32 / 2.0, bb.y0 as f32 - 1.5));
-    near(ring, over(color::SURFACE_BASE, Rgba::white(0.45)));
+    near(ring, over(color::SURFACE_BASE.rgba(), Rgba::white(0.45)));
     assert!(r.key("Space"));
     assert_eq!(r.ui.take_events(), vec![Event::Click(b)]);
 }

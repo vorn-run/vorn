@@ -41,7 +41,8 @@ impl Rgba {
 
     /// `self` at `t = 0`, `to` at `t = 1`, mixed premultiplied so a fade
     /// from transparent does not pass through black.
-    pub fn mix(self, to: Rgba, t: f32) -> Rgba {
+    pub fn mix(self, to: impl Into<Rgba>, t: f32) -> Rgba {
+        let to = to.into();
         let t = t.clamp(0.0, 1.0);
         let (a, b) = (self.0, to.0);
         let alpha = a[3] + (b[3] - a[3]) * t;
