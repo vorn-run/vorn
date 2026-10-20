@@ -86,10 +86,14 @@ fn tell(
 }
 
 fn find<'a>(n: &'a Node, id: &str) -> Option<&'a Node> {
-    if n.id.as_deref() == Some(id) {
+    find_by(n, &|i| i == id)
+}
+
+fn find_by<'a>(n: &'a Node, hit: &dyn Fn(&str) -> bool) -> Option<&'a Node> {
+    if n.id.as_deref().is_some_and(hit) {
         return Some(n);
     }
-    n.children.iter().find_map(|c| find(c, id))
+    n.children.iter().find_map(|c| find_by(c, hit))
 }
 
 fn tabs_of(n: &Node) -> Tabs {
@@ -100,7 +104,7 @@ fn tabs_of(n: &Node) -> Tabs {
 }
 
 fn code_of(n: &Node) -> Option<Code> {
-    match &find(n, "code")?.kind {
+    match &find_by(n, &|i| i.starts_with("code:"))?.kind {
         Kind::Code(c) => Some((**c).clone()),
         _ => None,
     }
@@ -169,7 +173,7 @@ fn the_pane_browses_previews_edits_and_saves() {
         &mut h,
         PANE,
         "s",
-        "code",
+        "code:/p/src/app.ts",
         EventKind::Change,
         "edited\n",
     );
@@ -179,7 +183,7 @@ fn the_pane_browses_previews_edits_and_saves() {
         &mut h,
         PANE,
         "s",
-        "code",
+        "code:/p/src/app.ts",
         EventKind::Change,
         "edited more\n",
     );
@@ -192,7 +196,7 @@ fn the_pane_browses_previews_edits_and_saves() {
         &mut h,
         PANE,
         "s",
-        "code",
+        "code:/p/src/app.ts",
         EventKind::Submit,
         "saved\n",
     );
@@ -230,7 +234,7 @@ fn edits_ask_before_they_go_and_outlive_the_instance() {
         &mut h,
         PANE,
         "s",
-        "code",
+        "code:/p/README.md",
         EventKind::Change,
         "# Mine\n",
     );
@@ -266,7 +270,7 @@ fn edits_ask_before_they_go_and_outlive_the_instance() {
         &mut h,
         PANE,
         "s",
-        "code",
+        "code:/p/README.md",
         EventKind::Click,
         "discard",
     );
@@ -400,7 +404,10 @@ fn the_desktops_own_panes_and_drafts_come_in_once() {
         &Ctx::default(),
     )
     .unwrap();
-    assert_eq!(n["imported"], 3);
+    assert_eq!(
+        (n["imported"].clone(), n["skipped"].clone()),
+        (json!(3), json!(0))
+    );
     let pane = render(&mut f, &mut h, PANE, "s", 900.0);
     assert_eq!(code_of(&pane).unwrap().draft.as_deref(), Some("# Kept\n"));
     assert_eq!(h.rows(CARDS).unwrap().len(), 1);
@@ -413,4 +420,87 @@ fn the_desktops_own_panes_and_drafts_come_in_once() {
     )
     .unwrap();
     assert!(h.rows(OPEN).unwrap().is_empty() && h.rows(CARDS).unwrap().is_empty());
+}
+
+#[test]
+fn an_edit_told_late_reaches_its_own_file_not_the_tab_in_front() {
+    let d = disk();
+    let mut h = host(&d);
+    let mut f = Files::init(&Init::default(), &mut h).unwrap();
+    let ctx = Ctx::default();
+    dispatch(&mut f, &mut h, "toggle", json!({ "session": "s" }), &ctx).unwrap();
+    for p in ["/p/README.md", "/p/src/app.ts"] {
+        tell(&mut f, &mut h, PANE, "s", "tree", EventKind::Open, p);
+    }
+    render(&mut f, &mut h, PANE, "s", 900.0);
+    // app.ts is in front; README.md's typing arrives after the switch.
+    tell(
+        &mut f,
+        &mut h,
+        PANE,
+        "s",
+        "code:/p/README.md",
+        EventKind::Change,
+        "# Late\n",
+    );
+    let t = tabs_of(&render(&mut f, &mut h, PANE, "s", 900.0));
+    let dirty: Vec<_> = t.tabs.iter().map(|t| (t.label.as_str(), t.dirty)).collect();
+    assert_eq!(dirty, [("README.md", true), ("app.ts", false)]);
+    // A closed tab's late edit leaves nothing behind.
+    tell(
+        &mut f,
+        &mut h,
+        PANE,
+        "s",
+        "tabs",
+        EventKind::Close,
+        "/p/src/app.ts",
+    );
+    tell(
+        &mut f,
+        &mut h,
+        PANE,
+        "s",
+        "code:/p/src/app.ts",
+        EventKind::Change,
+        "x",
+    );
+    assert!(buffer::read_draft(&mut h, &tab_key("s", "/p/src/app.ts"))
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn each_sessions_card_takes_its_own_draft_and_a_homeless_one_is_counted() {
+    let d = disk();
+    let mut h = host(&d);
+    let mut f = Files::init(&Init::default(), &mut h).unwrap();
+    let draft = |t: &str| json!({ "filePath": "/p/README.md", "text": t, "base": null });
+    let view = json!({
+        "cards": {
+            "card:a": { "sessionId": "s", "filePath": "/p/README.md" },
+            "card:b": { "sessionId": "t", "filePath": "/p/README.md" },
+        },
+    });
+    let drafts = json!({
+        "card:a": draft("from s"),
+        "card:b": draft("from t"),
+        "card:gone": draft("nowhere"),
+    });
+    let n = dispatch(
+        &mut f,
+        &mut h,
+        "import",
+        json!({ "view": view, "drafts": drafts }),
+        &Ctx::default(),
+    )
+    .unwrap();
+    assert_eq!(n["skipped"], 1);
+    let mut cards = f.cards(&mut h).unwrap();
+    assert_eq!(cards.all.len(), 2);
+    for (session, text) in [("s", "from s"), ("t", "from t")] {
+        let id = cards.promote(session, "/p/README.md");
+        let c = code_of(&render(&mut f, &mut h, CARD, &id, 600.0)).unwrap();
+        assert_eq!(c.draft.as_deref(), Some(text));
+    }
 }

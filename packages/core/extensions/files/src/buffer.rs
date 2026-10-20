@@ -144,16 +144,16 @@ impl Buffer {
         }
         let kept = read_draft(host, key)?.filter(|d| d.file_path == path);
         let editable = b.state == CodeState::Edit;
-        match kept.filter(|d| editable && Some(&d.text) != b.content.as_ref()) {
-            Some(d) => {
+        b.base = now.filter(|_| editable);
+        match kept {
+            Some(d) if editable && Some(&d.text) != b.content.as_ref() => {
                 b.base = d.base;
                 b.conflict = has_moved(d.base, now);
                 b.draft = Some(d.text);
             }
-            None => {
-                host.set(&draft_key(key), &Value::Null)?;
-                b.base = now.filter(|_| editable);
-            }
+            Some(_) if editable => host.set(&draft_key(key), &Value::Null)?,
+            // Gone, unreadable or too large to edit now: kept for when it loads again.
+            _ => {}
         }
         b.rev = match host.get(&rev_key(key))?.and_then(|v| v.as_u64()) {
             Some(r) => r,
@@ -188,6 +188,17 @@ impl Buffer {
             self.draft = None;
             return host.set(&draft_key(key), &Value::Null);
         }
+        self.keep(host, key, text, now_ms)
+    }
+
+    /// `text` as the draft, here and in storage.
+    fn keep(
+        &mut self,
+        host: &mut dyn Host,
+        key: &str,
+        text: String,
+        now_ms: u64,
+    ) -> Result<(), Error> {
         let d = Draft {
             file_path: self.path.clone(),
             text: text.clone(),
@@ -212,6 +223,7 @@ impl Buffer {
         key: &str,
         text: String,
         force: bool,
+        now_ms: u64,
     ) -> Result<(), Error> {
         if !self.editable() {
             return Ok(());
@@ -219,8 +231,7 @@ impl Buffer {
         self.error = None;
         if !force && has_moved(self.base, stamp(host, &self.path)) {
             self.conflict = true;
-            self.draft = Some(text);
-            return Ok(());
+            return self.keep(host, key, text, now_ms);
         }
         let wrote = host.call("files.write", json!({ "path": self.path, "content": text }));
         let failed = match &wrote {
@@ -235,8 +246,7 @@ impl Buffer {
         };
         if let Some(e) = failed {
             self.error = Some(e);
-            self.draft = Some(text);
-            return Ok(());
+            return self.keep(host, key, text, now_ms);
         }
         if is_truncated(&text) {
             self.state = CodeState::Read;
@@ -268,6 +278,9 @@ impl Buffer {
             self.error = Some("The file could not be read.".to_owned());
             return Ok(());
         };
+        if is_truncated(&text) {
+            self.state = CodeState::Read;
+        }
         self.content = Some(text);
         self.discard(host, key, now_ms)
     }
@@ -335,16 +348,16 @@ mod tests {
         // A new instance finds the draft and the same rev.
         let again = Buffer::load(&mut host, "k", "/f", 99).unwrap();
         assert_eq!((again.draft.as_deref(), again.rev), (Some("one!"), 10));
-        b.save(&mut host, "k", "one!".into(), false).unwrap();
+        b.save(&mut host, "k", "one!".into(), false, 13).unwrap();
         assert_eq!(file.borrow().0.as_deref(), Some("one!"));
         assert!(!b.dirty());
         // Someone else writes the file: the next save stops and says so.
         b.edited(&mut host, "k", "mine".into(), 12).unwrap();
         file.borrow_mut().1 += 5.0;
-        b.save(&mut host, "k", "mine".into(), false).unwrap();
+        b.save(&mut host, "k", "mine".into(), false, 13).unwrap();
         assert!(b.conflict);
         assert_eq!(file.borrow().0.as_deref(), Some("one!"));
-        b.save(&mut host, "k", "mine".into(), true).unwrap();
+        b.save(&mut host, "k", "mine".into(), true, 14).unwrap();
         assert_eq!(file.borrow().0.as_deref(), Some("mine"));
         assert!(!b.conflict);
     }
@@ -383,5 +396,75 @@ mod tests {
             Buffer::load(&mut host, "c", "/f", 1).unwrap().state,
             CodeState::Binary
         );
+    }
+
+    #[test]
+    fn a_draft_outlives_a_file_that_is_gone_or_too_large_for_a_while() {
+        let (mut host, file) = disk("one");
+        let mut b = Buffer::load(&mut host, "k", "/f", 1).unwrap();
+        b.edited(&mut host, "k", "mine".into(), 2).unwrap();
+        let was = file.borrow().0.clone();
+        file.borrow_mut().0 = None;
+        let gone = Buffer::load(&mut host, "k", "/f", 3).unwrap();
+        assert_eq!((gone.state, gone.dirty()), (CodeState::Unreadable, false));
+        file.borrow_mut().0 = Some("big\n\n--- truncated (9999 bytes total) ---".into());
+        let big = Buffer::load(&mut host, "k", "/f", 4).unwrap();
+        assert_eq!((big.state, big.dirty()), (CodeState::Read, false));
+        file.borrow_mut().0 = was;
+        let back = Buffer::load(&mut host, "k", "/f", 5).unwrap();
+        assert_eq!(back.draft.as_deref(), Some("mine"));
+    }
+
+    #[test]
+    fn a_draft_matching_the_file_is_let_go() {
+        let (mut host, _) = disk("one");
+        let mut b = Buffer::load(&mut host, "k", "/f", 1).unwrap();
+        b.edited(&mut host, "k", "two".into(), 2).unwrap();
+        let mut d = read_draft(&mut host, "k").unwrap().unwrap();
+        d.text = "one".into();
+        host.set("draft/k", &serde_json::to_value(&d).unwrap())
+            .unwrap();
+        assert!(!Buffer::load(&mut host, "k", "/f", 3).unwrap().dirty());
+        assert!(read_draft(&mut host, "k").unwrap().is_none());
+    }
+
+    #[test]
+    fn taking_a_disk_grown_past_the_cap_leaves_it_read_only() {
+        let (mut host, file) = disk("one");
+        let mut b = Buffer::load(&mut host, "k", "/f", 1).unwrap();
+        b.edited(&mut host, "k", "mine".into(), 2).unwrap();
+        file.borrow_mut().0 = Some("cut\n\n--- truncated (9999 bytes total) ---".into());
+        file.borrow_mut().1 = 5.0;
+        b.take_disk(&mut host, "k", 3).unwrap();
+        assert_eq!(b.state, CodeState::Read);
+        b.save(&mut host, "k", b.content.clone().unwrap(), true, 4)
+            .unwrap();
+        assert!(
+            file.borrow().1 == 5.0,
+            "a cut read was written over the file"
+        );
+    }
+
+    #[test]
+    fn a_save_that_stops_or_fails_keeps_its_text_as_the_draft() {
+        let (mut host, file) = disk("one");
+        let mut b = Buffer::load(&mut host, "k", "/f", 1).unwrap();
+        file.borrow_mut().1 = 9.0;
+        b.save(&mut host, "k", "typed".into(), false, 2).unwrap();
+        assert!(b.conflict);
+        let kept = read_draft(&mut host, "k").unwrap().map(|d| d.text);
+        assert_eq!(kept.as_deref(), Some("typed"));
+
+        let mut host = FakeHost::default()
+            .answer("files.read", |_| Ok(json!("one")))
+            .answer("files.stat", |_| Ok(json!({"size": 3, "mtimeMs": 1})))
+            .answer("files.write", |_| {
+                Ok(json!({"success": false, "error": "full"}))
+            });
+        let mut b = Buffer::load(&mut host, "j", "/f", 1).unwrap();
+        b.save(&mut host, "j", "typed".into(), false, 2).unwrap();
+        assert_eq!(b.error.as_deref(), Some("full"));
+        let kept = read_draft(&mut host, "j").unwrap().map(|d| d.text);
+        assert_eq!(kept.as_deref(), Some("typed"));
     }
 }

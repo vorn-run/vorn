@@ -40,6 +40,14 @@ pub const DISCARD: &str = "Discard unsaved changes?";
 /// The event a question's OK sends.
 const CONFIRMED: &str = "discard-ok";
 
+/// The code node drawing `path`: its events say which file they are for,
+/// so one told late reaches that file and not the tab in front by then.
+pub fn code_id(path: &str) -> String {
+    format!("{CODE}{path}")
+}
+
+const CODE: &str = "code:";
+
 /// An open tab's buffer and draft key.
 pub fn tab_key(owner: &str, path: &str) -> String {
     format!("files:{owner}:{path}")
@@ -361,12 +369,12 @@ impl Files {
                 Ok(Value::Null)
             }
             (EventKind::Submit, _) => {
-                b.save(host, key, e.value.clone(), false)?;
+                b.save(host, key, e.value.clone(), false, now_ms())?;
                 Ok(Value::Null)
             }
             (EventKind::Click, "force") => {
                 let text = b.draft.clone().unwrap_or_default();
-                b.save(host, key, text, true)?;
+                b.save(host, key, text, true, now_ms())?;
                 Ok(Value::Null)
             }
             (EventKind::Click, "disk") => {
@@ -479,10 +487,15 @@ impl Files {
                 self.tree(host, owner).filter = e.value.clone();
                 Ok(Value::Null)
             }
-            ("code", _) => {
-                let Some(path) = self.pane(host, owner)?.and_then(|p| p.active) else {
+            (id, _) if id.starts_with(CODE) => {
+                let path = &id[CODE.len()..];
+                let open = self
+                    .pane(host, owner)?
+                    .is_some_and(|p| p.tabs.iter().any(|t| t == path));
+                if !open {
                     return Ok(json!({ "same": true }));
-                };
+                }
+                let path = path.to_owned();
                 let key = tab_key(owner, &path);
                 let done = self.code_event(host, &key, &path, e)?;
                 if e.kind == EventKind::Change && self.dirty(host, &key) {
@@ -508,7 +521,7 @@ impl Files {
                     None => answer_ask(e),
                 })
             }
-            ("code", _) => {
+            (node, _) if node.starts_with(CODE) => {
                 let Some(card) = self.cards(host)?.get(id).cloned() else {
                     return Ok(json!({ "same": true }));
                 };
@@ -566,8 +579,11 @@ impl Files {
         }
     }
 
+    /// Takes what the desktop kept: answers how many things came over, and
+    /// how many drafts found no home, so their file is kept until they do.
     fn import(&mut self, host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
         let mut n = 0;
+        let mut skipped = 0;
         if let Some(panes) = args.pointer("/view/files").and_then(Value::as_object) {
             for (owner, p) in panes {
                 if self.pane(host, owner)?.is_none() {
@@ -578,31 +594,37 @@ impl Files {
                 }
             }
         }
+        let mut cards = self.cards(host)?;
+        // Each old card's key to the card it became, for its draft to follow.
+        let mut became = HashMap::new();
         if let Some(old) = args.pointer("/view/cards").and_then(Value::as_object) {
-            let mut cards = self.cards(host)?;
-            for c in old.values() {
+            for (key, c) in old {
                 let text = |k: &str| c.get(k).and_then(Value::as_str);
                 if let (Some(s), Some(p)) = (text("sessionId"), text("filePath")) {
-                    cards.promote(s, p);
+                    became.insert(key.as_str(), cards.promote(s, p));
                     n += 1;
                 }
             }
             self.save_cards(host, &cards)?;
         }
         if let Some(drafts) = args.get("drafts").and_then(Value::as_object) {
-            let cards = self.cards(host)?;
             for (key, d) in drafts {
                 let Ok(d) = serde_json::from_value::<Draft>(d.clone()) else {
+                    skipped += 1;
                     continue;
                 };
-                // A card's draft follows the card it became.
-                let key = match key.strip_prefix("card:") {
-                    Some(_) => match cards.all.iter().find(|c| c.path == d.file_path) {
-                        Some(c) => c.id.clone(),
-                        None => continue,
-                    },
-                    None => key.clone(),
+                let key = if key.starts_with("card:") {
+                    match became.get(key.as_str()) {
+                        Some(id) => id.clone(),
+                        None => {
+                            skipped += 1;
+                            continue;
+                        }
+                    }
+                } else {
+                    key.clone()
                 };
+                // A draft kept here since is newer than the desktop's.
                 if buffer::read_draft(host, &key)?.is_none() {
                     host.set(
                         &format!("draft/{key}"),
@@ -612,7 +634,7 @@ impl Files {
                 }
             }
         }
-        Ok(json!({ "imported": n }))
+        Ok(json!({ "imported": n, "skipped": skipped }))
     }
 }
 

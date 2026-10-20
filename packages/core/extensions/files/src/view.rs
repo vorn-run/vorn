@@ -32,7 +32,7 @@ fn tool(id: &str, label: &str, icon: &str) -> Tool {
 /// An open file's code, its strip ending with `buttons`.
 fn code_of(b: &Buffer, root: Option<String>, buttons: Vec<tree::Node>) -> tree::Node {
     code(
-        "code",
+        crate::code_id(&b.path),
         Code {
             path: b.path.clone(),
             root,
