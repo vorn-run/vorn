@@ -612,8 +612,10 @@ fn a_terminal_shows_a_scrollbar_that_drags_pages_and_fades() {
         -vorn_app::ui::WHEEL_LINE,
         WheelPhase::Line,
     );
-    settle(&mut shot, &mut app);
-    let thumb = shot.ui.rect_of(thumb_id(&id)).expect("the thumb shows");
+    // Read while it shows: on a slow machine settling would outlast its fade.
+    let thumb = shot.until(&mut app, "the thumb shows", |_, ui| {
+        ui.rect_of(thumb_id(&id))
+    });
     let bar = shot.ui.rect_of(scrollbar_id(&id)).expect("bar");
     assert!(
         thumb.y + thumb.h > bar.y + bar.h - 8.0,
@@ -634,13 +636,14 @@ fn a_terminal_shows_a_scrollbar_that_drags_pages_and_fades() {
     }
     shot.ui.pointer_up();
     app.events(&mut shot.ui);
-    settle(&mut shot, &mut app);
-    let p = app.pane(&id).expect("pane");
-    assert_eq!(p.back(), p.history, "the oldest line");
+    let thumb = shot.until(&mut app, "the oldest line", |app, ui| {
+        let p = app.pane(&id)?;
+        (p.back() == p.history).then_some(())?;
+        ui.rect_of(thumb_id(&id))
+    });
     shot.save(&mut app, "scrollbar-top");
 
     // A click in the track below the thumb pages down.
-    let thumb = shot.ui.rect_of(thumb_id(&id)).expect("thumb");
     let before = app.pane(&id).expect("pane").back();
     let rows = app.pane(&id).expect("pane").rows;
     shot.ui
@@ -648,11 +651,10 @@ fn a_terminal_shows_a_scrollbar_that_drags_pages_and_fades() {
     shot.ui.pointer_down();
     shot.ui.pointer_up();
     app.events(&mut shot.ui);
-    settle(&mut shot, &mut app);
-    assert_eq!(
-        app.pane(&id).expect("pane").back(),
-        before - u64::from(rows - 1)
-    );
+    let paged = before - u64::from(rows - 1);
+    shot.until(&mut app, "a page down", |app, _| {
+        (app.pane(&id)?.back() == paged).then_some(())
+    });
 
     // Away from it and left alone, it fades.
     shot.ui.pointer_move(1.0, 1.0);

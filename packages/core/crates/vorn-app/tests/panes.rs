@@ -305,14 +305,19 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     };
     let mut app = connect(&v);
     let project = add_project(&mut app, &v, "demo", json!({}));
+    std::fs::write(
+        project.join("package.json"),
+        r#"{ "dependencies": { "react-native": "0.80.0" } }"#,
+    )
+    .expect("package.json");
     let mut shot = Shot::new();
     let sid = agent(&mut shot, &mut app);
 
     // A mobile project offers the phone; it opens the picker.
-    app.st
-        .bench
-        .mobile
-        .insert(project.to_string_lossy().into_owned(), true);
+    let path = project.to_string_lossy().into_owned();
+    shot.until(&mut app, "the project seen as mobile", |app, _| {
+        app.st.bench.mobile.get(&path).copied()?.then_some(())
+    });
     shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
     shot.until(&mut app, "the picker's list", |app, _| {
         app.st

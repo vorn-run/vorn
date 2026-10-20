@@ -788,22 +788,23 @@ fn a_template_starts_the_canvas_and_names_what_it_still_needs() {
         &mut app,
         App::control("sidebar", &Act::Workflow(WfAct::New)),
     );
-    let at = shot.until(&mut app, "the templates", |app, _| {
-        app.st.wf.lib.templates.iter().position(|t| {
+    // The row it clicks, laid out: the list can land a frame before its panel draws it.
+    let (at, place) = shot.until(&mut app, "the templates", |app, ui| {
+        let at = app.st.wf.lib.templates.iter().position(|t| {
             t.pointer("/portable/requires")
                 .and_then(Value::as_array)
                 .is_some_and(|r| !r.is_empty())
-        })
+        })?;
+        let id = app.st.wf.lib.templates[at]["id"].as_str().unwrap_or("");
+        let place = format!("wf-template.{id}");
+        ui.rect_of(control(&place, WfAct::Template(at)))?;
+        Some((at, place))
     });
     shot.save(&mut app, "w-start-from");
     let name = app.st.wf.lib.templates[at]["name"]
         .as_str()
         .unwrap_or("")
         .to_owned();
-    let place = format!(
-        "wf-template.{}",
-        app.st.wf.lib.templates[at]["id"].as_str().unwrap_or("")
-    );
     shot.click(&mut app, control(&place, WfAct::Template(at)));
     assert_eq!(app.st.wf.panel, Panel::Properties);
     let d = app.st.wf.editor.as_ref().expect("the editor");

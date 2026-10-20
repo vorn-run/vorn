@@ -465,21 +465,17 @@ impl Grid {
     /// Bracketed paste of the person's clipboard. vornd asks first, as a
     /// [`Reply::ConfirmPaste`], when the program could take it for typed commands.
     pub fn paste_clipboard(&self, session: &str, utf8: &str) {
-        let seq = self.input(
-            session,
-            InputEvent::Paste {
-                utf8: utf8.to_owned(),
-                confirmed: false,
-            },
-        );
-        if let Some(seq) = seq {
-            let mut st = self.lock();
+        let event = InputEvent::Paste {
+            utf8: utf8.to_owned(),
+            confirmed: false,
+        };
+        self.input_then(session, event, |st, seq| {
             if st.pastes.len() == PASTES_KEPT {
                 st.pastes.pop_front();
             }
             st.pastes
                 .push_back((seq, session.to_owned(), utf8.to_owned()));
-        }
+        });
     }
 
     /// Bracketed paste of `utf8`, already confirmed by the person or written by the app.
@@ -571,10 +567,22 @@ impl Grid {
 
     /// Sends `event`; its input sequence, once the pane is attached.
     fn input(&self, session: &str, event: InputEvent) -> Option<u64> {
+        self.input_then(session, event, |_, _| {})
+    }
+
+    /// [`Self::input`], with `sent` run on its sequence number under the lock
+    /// its answer is read under, so the answer never arrives before it.
+    fn input_then(
+        &self,
+        session: &str,
+        event: InputEvent,
+        sent: impl FnOnce(&mut State, u64),
+    ) -> Option<u64> {
         let input_seq = {
             let mut st = self.lock();
             let sid = st.sid(session)?;
             let input_seq = st.client.input_seq();
+            sent(&mut st, input_seq);
             st.client.send(&ClientMsg::Input {
                 sid,
                 input_seq,
