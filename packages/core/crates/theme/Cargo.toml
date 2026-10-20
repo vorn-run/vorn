@@ -1,0 +1,13 @@
+[package]
+name = "vorn-theme"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "Themes for Vorn: the colour tokens every surface draws with, the [theme] section of an extension's manifest, the themes Vorn ships, and contrast correction"
+
+[dependencies]
+# The [theme] section is TOML a person writes; already in the tree.
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }

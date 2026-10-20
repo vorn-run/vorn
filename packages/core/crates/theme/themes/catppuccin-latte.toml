@@ -1,0 +1,31 @@
+# Catppuccin, Copyright (c) 2021 Catppuccin.
+# Licence: MIT (THIRD_PARTY_NOTICES.md).
+id = "catppuccin-latte"
+name = "Catppuccin Latte"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+publisher = "Vorn"
+description = "Catppuccin's light flavour."
+
+[theme]
+appearance = "light"
+
+[theme.ui]
+surface-base = "#eff1f5"
+surface-panel = "#e6e9ef"
+surface-sunken = "#f7f8fa"
+surface-overlay = "#ffffff"
+ink = "#4c4f69"
+ink-bright = "#2c2f45"
+accent = "#8839ef"
+danger = "#d20f39"
+
+[theme.terminal]
+foreground = "#4c4f69"
+background = "#eff1f5"
+cursor = "#dc8a78"
+selection = "#acb0be"
+ansi = [
+  "#5c5f77", "#d20f39", "#40a02b", "#df8e1d", "#1e66f5", "#ea76cb", "#179299", "#acb0be",
+  "#6c6f85", "#de293e", "#49af3d", "#eea02d", "#456eff", "#fe85d8", "#2d9fa8", "#bcc0cc",
+]

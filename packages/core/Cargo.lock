@@ -7534,6 +7534,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-theme"
+version = "0.0.0"
+dependencies = [
+ "toml 1.1.7+spec-1.1.0",
+]
+
+[[package]]
 name = "vorn-tree"
 version = "0.0.0"
 dependencies = [
