@@ -425,16 +425,16 @@ Vorn's SSH built-in edits the remote hosts and the stored SSH keys under the
 stay in vornd's config (`remoteHosts`) and the keys in its key store, so
 sessions on a remote host keep running with the built-in off.
 
-| method             | params                                            | answers                                                      |
-| ------------------ | ------------------------------------------------- | ------------------------------------------------------------ |
-| `remote.hosts`     |                                                   | the hosts as the config keeps them                           |
-| `remote.saveHosts` | `hosts`, the whole list                           | `null`, once the config is saved                             |
-| `remote.test`      | `host`, optional `then` and `key`                 | `{success, message, durationMs}`; with `then`, see below     |
-| `remote.keys`      |                                                   | the stored keys, without their private halves                |
-| `remote.storeKey`  | `label`, `privateKey`, `publicKey`, `certificate` | the stored key                                               |
-| `remote.importKey` | `path` (`~` is home)                              | the stored key, read from the file and its `.pub` beside it  |
-| `remote.deleteKey` | `id`                                              | `null`, the key and its secret gone                          |
-| `remote.vault`     |                                                   | `{keychain}`: `false` when the OS keychain is missing        |
+| method             | params                                            | answers                                                     |
+| ------------------ | ------------------------------------------------- | ----------------------------------------------------------- |
+| `remote.hosts`     |                                                   | the hosts as the config keeps them                          |
+| `remote.saveHosts` | `hosts`, the whole list                           | `null`, once the config is saved                            |
+| `remote.test`      | `host`, optional `then` and `key`                 | `{success, message, durationMs}`; with `then`, see below    |
+| `remote.keys`      |                                                   | the stored keys, without their private halves               |
+| `remote.storeKey`  | `label`, `privateKey`, `publicKey`, `certificate` | the stored key                                              |
+| `remote.importKey` | `path` (`~` is home)                              | the stored key, read from the file and its `.pub` beside it |
+| `remote.deleteKey` | `id`                                              | `null`, the key and its secret gone                         |
+| `remote.vault`     |                                                   | `{keychain}`: `false` when the OS keychain is missing       |
 
 A test logs in for up to ten seconds, and a component answers one call at a
 time, so with `then` `remote.test` answers `{testing: true}` at once and
