@@ -115,31 +115,55 @@ pub async fn answer(native: &Arc<Native>, method: &str, params: Value, viewer: &
                 Err(message) => Answer::Error(message),
             }
         }
-        "config:save" => {
-            let mut sent = params;
-            let passwords = super::credential::take_host_passwords(&mut sent);
-            let _order = native.config_order.lock().await;
-            let saved = blocking(method, move || {
-                for (id, password) in &passwords {
-                    n.secrets.put_item(Kind::HostPassword, id, password)?;
-                }
-                let saved = with_store(&n, |store| save(store, &sent, key.as_deref()))?;
-                for id in super::credential::dropped_host_passwords(&saved.before, &saved.after) {
-                    n.secrets.remove_item(Kind::HostPassword, &id);
-                }
-                Ok(saved.after)
-            });
-            match saved.await {
-                Ok(after) => {
-                    native.broadcast("config:changed", after);
-                    native.config_changed();
-                    Answer::Void
-                }
-                Err(message) => Answer::Error(message),
-            }
-        }
+        "config:save" => match write(native, key, move |_| Ok(params)).await {
+            Ok(()) => Answer::Void,
+            Err(message) => Answer::Error(message),
+        },
         _ => Answer::Unanswered,
     }
+}
+
+/// Saves the configuration `make` builds from the stored one, then tells
+/// every client. A host's typed `password` goes to the vault, and the
+/// passwords of the hosts the save drops leave it. Saves take turns, so
+/// what `make` read is still what is stored when it is written.
+async fn write(
+    native: &Arc<Native>,
+    key: Option<String>,
+    make: impl FnOnce(&mut Store) -> vorn_store::Result<Value> + Send + 'static,
+) -> Result<(), String> {
+    let n = Arc::clone(native);
+    let _order = native.config_order.lock().await;
+    let after = blocking("config:save", move || {
+        let mut sent = with_store(&n, make)?;
+        let passwords = super::credential::take_host_passwords(&mut sent);
+        for (id, password) in &passwords {
+            n.secrets.put_item(Kind::HostPassword, id, password)?;
+        }
+        let saved = with_store(&n, |store| save(store, &sent, key.as_deref()))?;
+        for id in super::credential::dropped_host_passwords(&saved.before, &saved.after) {
+            n.secrets.remove_item(Kind::HostPassword, &id);
+        }
+        Ok(saved.after)
+    })
+    .await?;
+    native.broadcast("config:changed", after);
+    native.config_changed();
+    Ok(())
+}
+
+/// Replaces the configuration's remote hosts with `hosts`, as a client's
+/// `config:save` of the whole configuration would, passwords and all.
+pub(crate) async fn save_hosts(native: &Arc<Native>, hosts: Vec<Value>) -> Result<(), String> {
+    if native.database().is_none() {
+        return Err("vornd has no database".to_owned());
+    }
+    write(native, None, move |store| {
+        let mut config = store.load_config()?;
+        config["remoteHosts"] = Value::Array(hosts);
+        Ok(config)
+    })
+    .await
 }
 
 /// Tells every client what changed after a write elsewhere (a workflow, a

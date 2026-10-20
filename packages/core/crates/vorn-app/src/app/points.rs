@@ -14,6 +14,7 @@ use std::sync::{mpsc::channel, Arc};
 use serde_json::{json, Value};
 
 use super::{App, Call};
+use crate::act::Act;
 use crate::client::RpcError;
 use crate::points::{self, kind, unscope, PointAct, Request};
 use crate::runs::s;
@@ -144,13 +145,24 @@ impl App {
                 }
                 self.tell(&key, &event);
             }
-            PointAct::TreeField { key, node } => {
+            PointAct::TreeField { key, node, blur } => {
+                // A field that saves on blur saves once, as Return leaves it.
+                if blur {
+                    ui.set_focus(None);
+                    return;
+                }
                 let text = ui
                     .focus()
                     .map(|id| ui.edit_text(id).to_owned())
                     .unwrap_or_default();
                 let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Submit, text);
                 self.tell(&key, &event);
+            }
+            PointAct::TreePick { key, node, title } => {
+                self.start_pick(
+                    super::Picked::Tree { key, node },
+                    crate::system::Pick::File(title),
+                );
             }
             PointAct::TreeLive { key, node } => {
                 let text = ui
@@ -185,6 +197,25 @@ impl App {
                 );
             }
         }
+    }
+
+    /// A tree field that submits on blur lost focus: what it holds is told
+    /// as `submit`, unless nothing was typed.
+    pub(super) fn tree_blur(&mut self, ui: &Ui, id: Id) {
+        let Some(Act::Point(PointAct::TreeField {
+            key,
+            node,
+            blur: true,
+        })) = self.acts.text_of(id)
+        else {
+            return;
+        };
+        let text = ui.edit_text(id);
+        if text.is_empty() {
+            return;
+        }
+        let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Submit, text);
+        self.tell(&key, &event);
     }
 
     /// Tells tree point `key`'s extension what happened, after any edit its
@@ -499,6 +530,8 @@ impl App {
         out.extend(page.flatten());
         out.extend(self.open_panes());
         out.extend(self.files_trees());
+        out.extend(self.browser_trees());
+        out.extend(self.device_trees());
         out.extend(self.shell_trees());
         out.extend(pts.dialog.clone());
         if pts.floating {

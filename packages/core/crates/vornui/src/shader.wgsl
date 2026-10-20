@@ -155,6 +155,10 @@ struct SpriteOut {
     @location(1) color: vec4<f32>,
     @location(2) kind: vec4<f32>,
     @location(3) clip: vec4<f32>,
+    // From the sprite's centre, and its half size, for a colour image's
+    // rounded corners (kind.y, its radius).
+    @location(4) local: vec2<f32>,
+    @location(5) half_size: vec2<f32>,
 };
 
 @vertex
@@ -177,6 +181,8 @@ fn sprite_vs(
     o.color = color;
     o.kind = kind;
     o.clip = clip;
+    o.half_size = rect.zw * 0.5;
+    o.local = (c - vec2<f32>(0.5, 0.5)) * rect.zw;
     return o;
 }
 
@@ -198,7 +204,11 @@ fn sprite_fs(i: SpriteOut) -> @location(0) vec4<f32> {
     }
     if (i.kind.x > 0.5) {
         let t = textureSampleLevel(color_tex, samp, i.uv, 0.0);
-        let a = t.a * i.color.a;
+        var a = t.a * i.color.a;
+        if (i.kind.y > 0.0) {
+            let r = min(i.kind.y, min(i.half_size.x, i.half_size.y));
+            a = a * clamp(0.5 - rounded_box(i.local, i.half_size, r), 0.0, 1.0);
+        }
         return vec4<f32>(t.rgb * a, a);
     }
     var m = textureSampleLevel(mask_tex, samp, i.uv, 0.0).r;

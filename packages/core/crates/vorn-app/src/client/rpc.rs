@@ -71,12 +71,12 @@ pub enum Event {
 
 type Reply = std_mpsc::Sender<Result<Value, RpcError>>;
 
-/// The calls vornd makes of the app once it holds the bridge: the browser
-/// pane and the device pane.
+/// The calls vornd makes of the app once it holds the bridge: the pages
+/// and simulators the built-ins show, and the connections' sessions.
 pub fn answers_for_vornd(method: &str) -> bool {
     matches!(
         method.split_once(':').map(|(g, _)| g),
-        Some("browser" | "device" | "session")
+        Some("web" | "video" | "session")
     )
 }
 
@@ -498,8 +498,14 @@ mod tests {
                 params: Value::Null,
             }
         );
-        assert!(answers_for_vornd("browser:readPage"));
-        assert!(answers_for_vornd("device:list"));
+        assert!(answers_for_vornd("web:read"));
+        assert!(
+            !answers_for_vornd("browser:readPage"),
+            "the Browser answers its own tools"
+        );
+        assert!(answers_for_vornd("video:list"));
+        // The Device answers its agents' calls itself, in vornd.
+        assert!(!answers_for_vornd("device:list"));
         assert!(answers_for_vornd("session:fetch"));
         assert!(!answers_for_vornd("terminal:create"));
         assert_eq!(classify("not json"), Incoming::Ignored);

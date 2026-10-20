@@ -139,10 +139,15 @@ pub const IDENTIFY: &str = "bridge:identify";
 /// Where a call is answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Route {
-    Desktop,
     Identify,
     Config,
     Tasks,
+    /// The Browser extension's `browser:*` calls.
+    Browser,
+    /// The Device extension's `device:*` calls.
+    Device,
+    /// The SSH extension's `ssh:*` calls.
+    Ssh,
     TaskList,
     Projects,
     SessionLog,
@@ -162,6 +167,9 @@ pub enum Route {
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
     (extensions::builtin::tasks::METHODS, Route::Tasks),
+    (extensions::builtin::browser::METHODS, Route::Browser),
+    (extensions::builtin::device::METHODS, Route::Device),
+    (extensions::builtin::ssh::METHODS, Route::Ssh),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),
@@ -179,9 +187,6 @@ const ROUTES: &[(&[&str], Route)] = &[
 /// Where core answers `method`; an extension's own methods are routed by
 /// [`Native::answers`], which also looks at what is installed.
 pub fn route(method: &str) -> Option<Route> {
-    if desktop::answers(method) {
-        return Some(Route::Desktop);
-    }
     if method == IDENTIFY {
         return Some(Route::Identify);
     }
@@ -313,7 +318,7 @@ pub struct Native {
     polls: Arc<vorn_extensions::polls::Polls>,
     /// The extension host, once vornd has a database and its own address.
     extensions: OnceLock<Arc<extensions::Extensions>>,
-    /// The desktop app, which answers the browser and device calls.
+    /// The desktop app, which answers the web views' and the devices' calls.
     main: Arc<desktop::Desktop>,
     /// The one lifecycle every extension program and connector child runs under.
     lifecycle: Arc<vorn_extensions::lifecycle::Lifecycle>,
@@ -712,13 +717,6 @@ impl Native {
         viewer: &config::Viewer,
     ) -> Answer {
         match route(&method) {
-            Some(Route::Desktop) => {
-                return match self.main.request(&method, params, desktop::TIMEOUT).await {
-                    Ok(Some(result)) => Answer::Result(result),
-                    Ok(None) => Answer::Void,
-                    Err(message) => Answer::Error(message),
-                };
-            }
             Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
             Some(Route::Tasks) => {
                 let Some(tasks) = self.tasks.get().cloned() else {
@@ -731,6 +729,15 @@ impl Native {
                     warn!(%method, %err, "a task call failed");
                     Answer::Error(format!("{method} failed in vornd"))
                 });
+            }
+            Some(Route::Browser) => {
+                return extensions::builtin::browser::answer(self, &method, params).await;
+            }
+            Some(Route::Device) => {
+                return extensions::builtin::device::answer(self, &method, params).await;
+            }
+            Some(Route::Ssh) => {
+                return extensions::builtin::ssh::answer(self, &method, params).await;
             }
             Some(Route::TaskList) => return task_list::answer(self, &method, params).await,
             Some(Route::Projects) => return projects::answer(self, &method, params).await,
@@ -1343,7 +1350,12 @@ mod tests {
             assert!(route(method).is_none(), "{method}");
         }
         assert_eq!(route("extension:install"), Some(Route::Extensions));
-        assert_eq!(route("browser:readPage"), Some(Route::Desktop));
+        assert_eq!(route("browser:readPage"), Some(Route::Browser));
+        assert_eq!(route("device:list"), Some(Route::Device));
+        assert_eq!(route("ssh:testConnection"), Some(Route::Ssh));
+        for method in ["web:read", "video:list"] {
+            assert_eq!(route(method), None, "only a built-in's call asks the app");
+        }
         for method in projects::METHODS {
             assert_eq!(route(method), Some(Route::Projects), "{method}");
         }

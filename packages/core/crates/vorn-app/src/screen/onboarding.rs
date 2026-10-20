@@ -804,7 +804,11 @@ fn step_shortcuts(s: &Screen<'_>) -> El {
 
 fn step_ready(s: &Screen<'_>) -> El {
     let mut list = div().col().gap(6.0);
-    for (glyph, label, category) in EXPLORE {
+    // An extension's page shows while the extension contributes it.
+    let explore = EXPLORE.into_iter().filter(|(_, _, to)| {
+        crate::settings::Category::from_id(to).is_some() || s.st.points.get(to).is_some()
+    });
+    for (glyph, label, category) in explore {
         let id = s
             .acts
             .on("onboard", onb(OnbAct::Then(Then::Settings(category))));

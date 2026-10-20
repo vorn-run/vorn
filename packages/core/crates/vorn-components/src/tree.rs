@@ -20,8 +20,16 @@ pub const NUMBER_WIDTH: f32 = 80.0;
 pub enum Ev {
     /// Tells the extension `event`; `ask` when the control asks first.
     Send { event: Event, ask: bool },
-    /// A one-line field holding `value`; Return sends it as `submit`.
-    Field { node: String, value: String },
+    /// A field holding `value`; Return sends it as `submit`, and so does
+    /// leaving it when `blur`, Return then only leaving it.
+    Field {
+        node: String,
+        value: String,
+        blur: bool,
+    },
+    /// A button that opens the client's file dialog titled `title`, then
+    /// tells `event` (a `submit`) with the chosen path as its value.
+    Pick { event: Event, title: String },
     /// Checks rows of a list, or unchecks them.
     Check {
         list: String,
@@ -96,6 +104,18 @@ pub trait TreeBind {
     /// A shell's commands over its live rows, which the client cuts from its screen.
     fn log(&self, log: &vorn_tree::Log) -> Option<El> {
         let _ = log;
+        None
+    }
+    /// A web page in the client's own web view, under the bar the client draws
+    /// for it; `None` (a client with no web views) draws nothing.
+    fn web(&self, node: &str, web: &vorn_tree::Web) -> Option<El> {
+        let _ = (node, web);
+        None
+    }
+    /// A device's screen the client draws and polls itself; `None` (a
+    /// client that shows no devices) draws nothing.
+    fn video(&self, node: &str, video: &vorn_tree::Video) -> Option<El> {
+        let _ = (node, video);
         None
     }
 }
@@ -214,6 +234,7 @@ impl Cx<'_> {
                         div().row().justify_end().w(NUMBER_WIDTH).shrink0().child(e)
                     }
                     TextStyle::Heading => e.role(Role::Heading, t.as_str()),
+                    TextStyle::Label => e.role(Role::Label, t.as_str()).shrink0(),
                     // Growing, it takes the room left and still cuts short in it.
                     _ if n.props.grow => div().min_w0().child(e),
                     _ if *wrap => e,
@@ -253,10 +274,11 @@ impl Cx<'_> {
                 icon,
                 style,
                 confirm,
+                pick,
             } => {
                 let id = n.id.as_deref().unwrap_or_default();
                 let name = n.props.label.as_deref().unwrap_or(label);
-                let ev = send(id, EventKind::Click, confirm.is_some());
+                let ev = press(id, confirm.as_deref(), pick.as_deref());
                 self.button(ev, label, name, icon.as_deref(), *style, confirm.as_deref())
                     .1
             }
@@ -265,6 +287,8 @@ impl Cx<'_> {
                 placeholder,
                 secret,
                 live,
+                lines,
+                blur,
             } => {
                 let node = n.id.clone().unwrap_or_default();
                 let name = n.props.label.as_deref().unwrap_or(placeholder);
@@ -272,15 +296,29 @@ impl Cx<'_> {
                 let id = self.bind.on(if *live {
                     Ev::Live { node, value }
                 } else {
-                    Ev::Field { node, value }
+                    Ev::Field {
+                        node,
+                        value,
+                        blur: *blur,
+                    }
                 });
-                let input = widgets::text_input(self.ui, id, name, placeholder)
-                    .grow()
-                    .min_w0();
+                let input = if *lines > 1 {
+                    let lines = (*lines).min(vorn_tree::MAX_FIELD_LINES);
+                    widgets::text_area_input(self.ui, id, name, placeholder, lines).shrink0()
+                } else {
+                    widgets::text_input(self.ui, id, name, placeholder).grow()
+                };
+                let input = input.min_w0();
                 let input = if *secret { input.secure() } else { input };
                 self.sem(input, || Sem::Field(name.to_owned()))
             }
-            Kind::Choice { options } => self.choice(n, options),
+            // Native and cells draw the options as they always did: a
+            // platform picker, and chips a menu would only hide.
+            Kind::Choice {
+                options,
+                dropdown: true,
+            } if !self.ui.is_native() && !self.ui.is_cells() => self.dropdown(n, options),
+            Kind::Choice { options, .. } => self.choice(n, options),
             Kind::Badge(b) => self.sem(badge(&b.text, b.tone), || Sem::Badge {
                 value: b.text.clone(),
                 tone: sem_tone(b.tone),
@@ -437,6 +475,14 @@ impl Cx<'_> {
                 .code(key(n), c, &n.children)
                 .unwrap_or_else(|| parts::plain_code(c)),
             Kind::Log(l) => self.bind.log(l).unwrap_or_else(|| div().sem(Sem::Hidden)),
+            Kind::Web(w) => self
+                .bind
+                .web(key(n), w)
+                .unwrap_or_else(|| div().sem(Sem::Hidden)),
+            Kind::Video(v) => self
+                .bind
+                .video(key(n), v)
+                .unwrap_or_else(|| div().sem(Sem::Hidden)),
         };
         sized(el, &n.props)
     }
@@ -584,6 +630,75 @@ impl Cx<'_> {
                         .silent(),
                 )
         }))
+    }
+
+    /// The chosen option (or the first) on a field-like trigger, the options
+    /// in a menu under it: the tree's more-menu mechanism, so a client binds
+    /// nothing new, and each option tells `select` as a chip does.
+    fn dropdown(&self, n: &Node, options: &[vorn_tree::Choose]) -> El {
+        let node = key(n);
+        let name = n.props.label.as_deref().unwrap_or(node);
+        let menu = self.bind.on(Ev::Menu {
+            node: node.to_owned(),
+        });
+        let open = self.bind.menu_open(menu);
+        let hot = self.ui.hover(menu);
+        let shown = options
+            .iter()
+            .find(|o| o.selected)
+            .or_else(|| options.first())
+            .map_or("", |o| o.label.as_str());
+        let trigger = div()
+            .id(menu)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(8.0)
+            .px(6.0)
+            .py(2.0)
+            .min_w0()
+            .rounded(radius::SM)
+            .border(
+                1.0,
+                Rgba::white(0.12).mix(Rgba::white(0.25), if open { 1.0 } else { hot }),
+            )
+            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), hot))
+            .ring(radius::SM)
+            .role(Role::ComboBox, name)
+            .value(shown)
+            .expanded(open)
+            .child(
+                div().grow().min_w0().child(
+                    text(shown, 12.0, color::GRAY_300)
+                        .line_height(18.0)
+                        .truncate()
+                        .silent(),
+                ),
+            )
+            .child(self.icon(
+                if open { "chevron-up" } else { "chevron-down" },
+                12.0,
+                color::GRAY_500,
+            ));
+        if !open {
+            return trigger;
+        }
+        let panel = div()
+            .col()
+            .min_w(180.0)
+            .py(4.0)
+            .bg(color::SURFACE_OVERLAY)
+            .border(1.0, Rgba::white(0.10))
+            .rounded(radius::SM)
+            .role(Role::Menu, name)
+            .children(options.iter().map(|o| {
+                let event = Event::new(node, EventKind::Select, o.id.clone());
+                let id = self.bind.on(Ev::Send { event, ask: false });
+                let check = if o.selected { Some("check") } else { None };
+                self.menu_item(id, &o.label, ButtonStyle::Plain, check)
+                    .toggled(o.selected)
+            }));
+        trigger.overlay(panel, Place::BelowStart, 4.0)
     }
 
     /// A figure under its quiet label, as a page's total; `end` at the right, smaller.
@@ -888,6 +1003,7 @@ impl Cx<'_> {
                     icon,
                     style,
                     confirm,
+                    ..
                 } = &b.kind
                 else {
                     return None;
@@ -1126,13 +1242,14 @@ impl Cx<'_> {
             icon,
             style,
             confirm,
+            pick,
         } = &b.kind
         else {
             return None;
         };
         let bid = b.id.as_deref().unwrap_or_default();
         let name = b.props.label.as_deref().unwrap_or(label);
-        let ev = send(bid, EventKind::Click, confirm.is_some());
+        let ev = press(bid, confirm.as_deref(), pick.as_deref());
         let (id, el) = self.button(ev, label, name, icon.as_deref(), *style, confirm.as_deref());
         Some((id, el, *style))
     }
@@ -1207,14 +1324,37 @@ impl Cx<'_> {
                     .map(|(_, el, _)| el),
             )
             .child_if(self.more(node, &menu))
+            .child_if(e.expanded.map(|open| {
+                // A platform row is not pressed as a whole; a chevron opens it.
+                let event = Event::new(node, EventKind::Toggle, (!open).to_string());
+                let ev = Ev::Item {
+                    event,
+                    slot: "disclose".to_owned(),
+                };
+                let name = if open { "Close" } else { "Open" };
+                let icon = if open {
+                    "chevron-down"
+                } else {
+                    "chevron-right"
+                };
+                self.button(ev, "", name, Some(icon), ButtonStyle::Plain, None)
+                    .1
+            }))
     }
 
     /// One entry; its actions show on hover, and on cells join its more menu.
     fn entry(&self, n: &Node, e: &Entry, l: Option<&Listing<'_>>) -> El {
         let node = key(n);
-        let id = self.bind.on(Ev::Hover {
-            node: node.to_owned(),
-        });
+        let id = match e.expanded {
+            // An entry that opens is pressed as a whole, as a disclosure.
+            Some(open) => self.bind.on(Ev::Send {
+                event: Event::new(node, EventKind::Toggle, (!open).to_string()),
+                ask: false,
+            }),
+            None => self.bind.on(Ev::Hover {
+                node: node.to_owned(),
+            }),
+        };
         if self.ui.is_native() {
             return self.native_entry(n, e, l, id);
         }
@@ -1324,6 +1464,12 @@ impl Cx<'_> {
                         )
                 }))
         });
+        // An entry that opens draws its children under it instead.
+        let inline: &[Node] = if e.expanded.is_some() {
+            &[]
+        } else {
+            &n.children
+        };
         let middle = div()
             .col()
             .grow()
@@ -1331,7 +1477,7 @@ impl Cx<'_> {
             .child(line)
             .child_if(second)
             .child_if(chips)
-            .children(n.children.iter().map(|k| self.node(k)));
+            .children(inline.iter().map(|k| self.node(k)));
         let mut acts = Vec::new();
         let mut menu: Vec<&Node> = e.more.iter().collect();
         for b in &e.actions {
@@ -1375,7 +1521,6 @@ impl Cx<'_> {
             .px(12.0)
             .min_w0()
             .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.03), hot))
-            .role(Role::ListItem, e.title.as_str())
             .child_if(check)
             .child_if(lead)
             .child(middle);
@@ -1386,7 +1531,33 @@ impl Cx<'_> {
         if !acts.is_empty() {
             row = row.child(div().row().items_center().gap(4.0).shrink0().children(acts));
         }
-        row.child_if(column).child_if(self.more(node, &menu))
+        let row = row.child_if(column).child_if(self.more(node, &menu));
+        let Some(open) = e.expanded else {
+            return row.role(Role::ListItem, e.title.as_str());
+        };
+        let chevron = if open {
+            "chevron-down"
+        } else {
+            "chevron-right"
+        };
+        let row = row
+            .on(Action::Click)
+            .role(Role::Button, e.title.as_str())
+            .expanded(open)
+            .child(self.icon(chevron, 14.0, color::GRAY_500.mix(color::GRAY_300, hot)));
+        if !open || n.children.is_empty() {
+            return row;
+        }
+        div().col().min_w0().child(row).child(
+            div()
+                .col()
+                .gap(12.0)
+                .px(12.0)
+                .pt(4.0)
+                .pb(12.0)
+                .min_w0()
+                .children(n.children.iter().map(|k| self.node(k))),
+        )
     }
 
     /// A "more" button and its open menu; a confirm asks under the button.
@@ -1405,6 +1576,7 @@ impl Cx<'_> {
                 icon,
                 style,
                 confirm,
+                pick,
             } = &b.kind
             else {
                 continue;
@@ -1412,7 +1584,9 @@ impl Cx<'_> {
             let bid = b.id.as_deref().unwrap_or_default();
             let name = b.props.label.as_deref().unwrap_or(label);
             let shown = if label.is_empty() { name } else { label };
-            let id = self.bind.on(send(bid, EventKind::Click, confirm.is_some()));
+            let id = self
+                .bind
+                .on(press(bid, confirm.as_deref(), pick.as_deref()));
             if let (Some(q), Some(ids)) = (confirm, self.bind.confirming(id)) {
                 asking = Some((q.as_str(), shown, *style, ids));
             }
@@ -1555,6 +1729,18 @@ fn send(id: &str, kind: EventKind, ask: bool) -> Ev {
     }
 }
 
+/// What pressing button `id` does: with `pick`, the file dialog that
+/// submits its path; else its click, asking first with `confirm`.
+fn press(id: &str, confirm: Option<&str>, pick: Option<&str>) -> Ev {
+    match pick {
+        Some(title) => Ev::Pick {
+            event: Event::new(id, EventKind::Submit, ""),
+            title: title.to_owned(),
+        },
+        None => send(id, EventKind::Click, confirm.is_some()),
+    }
+}
+
 fn key(n: &Node) -> &str {
     n.id.as_deref().unwrap_or_default()
 }
@@ -1655,7 +1841,7 @@ fn text_role(style: TextStyle, t: Option<Tone>) -> &'static str {
         (_, Some(Tone::Bad)) => "error",
         (TextStyle::Title | TextStyle::Heading, _) => "title",
         (TextStyle::Body, _) => "body",
-        (TextStyle::Secondary, _) => "secondary",
+        (TextStyle::Secondary | TextStyle::Label, _) => "secondary",
         (TextStyle::Mono, _) => "mono",
         (TextStyle::Number, _) => "number",
     }
@@ -1705,9 +1891,10 @@ fn styled(s: &str, style: TextStyle, ink: Option<Rgba>) -> El {
         TextStyle::Secondary => (11.0, 16.0, color::GRAY_500),
         TextStyle::Mono => (11.0, 16.0, color::GRAY_400),
         TextStyle::Heading => (size::XS.0, size::XS.1, color::GRAY_500),
+        TextStyle::Label => (10.0, 15.0, color::GRAY_600),
     };
     let ink = ink.unwrap_or(rest);
-    let shown = if style == TextStyle::Heading {
+    let shown = if matches!(style, TextStyle::Heading | TextStyle::Label) {
         s.to_uppercase()
     } else {
         s.to_owned()
@@ -1717,6 +1904,7 @@ fn styled(s: &str, style: TextStyle, ink: Option<Rgba>) -> El {
         TextStyle::Title => t.weight(size::SEMIBOLD),
         TextStyle::Mono => t.mono(),
         TextStyle::Heading => t.weight(size::MEDIUM).tracking(0.05),
+        TextStyle::Label => t.tracking(0.05),
         _ => t,
     }
 }

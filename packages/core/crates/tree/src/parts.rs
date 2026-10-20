@@ -46,6 +46,9 @@ pub struct Tab {
     /// Holds edits not saved: a dot where its ✕ is, until hovered.
     #[serde(default, skip_serializing_if = "is_false")]
     pub dirty: bool,
+    /// A kit icon before the label, as what kind of page a browser tab shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// A small control in a strip: an icon with its label as the tooltip, or a
@@ -53,12 +56,23 @@ pub struct Tab {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Tool {
     pub id: String,
+    /// What it is read out as; the tooltip too, unless `tip` says otherwise.
     pub label: String,
     /// A kit icon by name; a list line may go without.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub icon: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub on: bool,
+    /// The tooltip, when it should read other than the label: shorter, or
+    /// saying what a click goes on to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
+    /// Working on its last click: a spinner instead of the icon, and no click.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub busy: bool,
+    /// A divider before it, setting it apart from the tools before.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub divider: bool,
 }
 
 /// Rows in a tree of folders, as a file tree: a row `select`s on a click (a
@@ -175,6 +189,118 @@ pub enum CodeState {
     Read,
     Binary,
     Unreadable,
+}
+
+/// A web page the client shows in a native web view, under the bar the client
+/// draws for it (back, forward, reload and the address, or a review's
+/// controls). `view` names the web view: the same view keeps its page, its
+/// history and what it logged while the tree is drawn again, so one per
+/// session's pane, as its id. The view loads `url` whenever `url` changes;
+/// where the page wanders since is reported, not loaded again.
+///
+/// What the page does is reported as [`EventKind::Page`](crate::EventKind::Page)
+/// on the node, its `value` a JSON object with a `type`: `state` (`url`,
+/// `title` and, for a design, `design` with its title) whenever one
+/// changes, `submit` (`text` typed in the address), `opened` (`url` a page
+/// asked to open in a new window) and `go` (`url` the client's own controls
+/// moved the page to, as another version of a review).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Web {
+    pub view: String,
+    pub url: String,
+    /// A line over the page saying what went wrong, as an address that could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
+/// A device's live screen the client draws itself, as a simulator's, under a
+/// header (an icon, `title`, `tools`, the pane's own controls) and over a
+/// bar (`controls`, then the zoom the client draws). `view` names what it is
+/// shown for, one per session's pane as its id; `device` names the device
+/// the client polls for frames and draws. Frames never travel in the tree:
+/// the client fetches and paints them itself, for as long as the part shows.
+/// A `picker` shows under the title, to choose the device from.
+///
+/// A click on a tool reports [`EventKind::Click`](crate::EventKind::Click)
+/// with the tool's id, and a choice in the picker
+/// [`EventKind::Select`](crate::EventKind::Select) with the choice's id. The
+/// rest is reported as
+/// [`EventKind::Page`](crate::EventKind::Page) on the node, its `value` a
+/// JSON object with a `type`: `switch` (the title was clicked, or the open
+/// picker dismissed), `dismiss`
+/// (the notice's ✕), `zoom` (`zoom`, the scale chosen, absent to fit the
+/// pane); for a part with `boot` set, `booted` (`bootedHere` when the
+/// client started the device) or `failed` (`message`) once the client has
+/// started `device` or could not; for a `loading` picker, `listed`
+/// (`devices`, as `video:list` answers them, or `error`) once the client
+/// has listed them; and for a part with `save` set, `saved` (`path`, or
+/// `error`) once the client has saved a screenshot of `device`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Video {
+    pub view: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    /// The title shows it is working, as while a device starts.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub busy: bool,
+    /// The client starts `device` before it draws it, and reports how that went.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub boot: bool,
+    /// The client saves a screenshot of `device`, and reports where it went.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub save: bool,
+    /// Screen points per logical pixel; none fits the screen to the pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom: Option<f64>,
+    /// A line over the screen saying what went wrong; its ✕ reports `dismiss`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    /// The header's tools, after the title.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<Tool>,
+    /// The bar's tools, before the zoom.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controls: Vec<Tool>,
+    /// The list open under the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picker: Option<Picker>,
+}
+
+/// What a [`Video`]'s title offers to show instead: its `heading`, then
+/// what went wrong, `empty` with no choices, or the choices.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Picker {
+    pub heading: String,
+    /// A spinner while the client lists the devices, which it reports as
+    /// `listed` on the part: listing takes a while, and the picker shows at once.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub loading: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub empty: Option<String>,
+    #[serde(default)]
+    pub choices: Vec<Choice>,
+}
+
+/// One device a [`Picker`] offers.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Choice {
+    pub id: String,
+    pub title: String,
+    /// What tells it apart from another of the same title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Its icon's tone, as a running device's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<crate::Tone>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub badge: Option<crate::Badge>,
+    /// Shown, but not to be chosen, as one another session holds.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disabled: bool,
 }
 
 /// A shell's commands, one per prompt it reported, oldest first: the client

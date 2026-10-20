@@ -19,6 +19,9 @@ use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
 
 /// How long one `net.fetch` may take.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long `video.call`'s `boot` waits for a simulator to start: a cold
+/// boot takes tens of seconds, and the router gives the whole call 60.
+const VIDEO_BOOT: Duration = Duration::from_secs(55);
 
 /// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
@@ -310,6 +313,66 @@ async fn worktrees(
     Ok(Value::Array(out))
 }
 
+/// `remote.test`: logs in to `host` and answers how it went. With `then`,
+/// it answers `{testing: true}` at once and tells the caller's action
+/// `then` `{key, result}` once the test is done, so a component, which
+/// answers one call at a time, can draw the test running for its ten seconds.
+async fn remote_test(native: &Arc<Native>, caller: &str, args: &Value) -> Result<Value, ExtError> {
+    let host = args
+        .get("host")
+        .cloned()
+        .ok_or_else(|| needs("remote.test", "the host"))?;
+    let Some(then) = text(args, "then") else {
+        return crate::native::about::test_host(native, host)
+            .await
+            .map_err(|e| ExtError::new("failed", e));
+    };
+    let ext = native
+        .extensions()
+        .cloned()
+        .ok_or_else(|| ExtError::new("unsupported", "vornd runs no extensions"))?;
+    let (n, caller, key) = (
+        Arc::clone(native),
+        caller.to_owned(),
+        args.get("key").cloned().unwrap_or(Value::Null),
+    );
+    tokio::spawn(async move {
+        let result = match crate::native::about::test_host(&n, host).await {
+            Ok(tested) => tested,
+            Err(e) => json!({ "success": false, "message": e, "durationMs": 0 }),
+        };
+        let told = json!({ "key": key, "result": result });
+        if let Some(Err(e)) = ext.builtins().call(&caller, &then, told).await {
+            info!(
+                "[extensions] {caller} did not take its test's result: {}",
+                e.message
+            );
+        }
+    });
+    Ok(json!({ "testing": true }))
+}
+
+/// `remote.importKey`: the private key at `path` (`~` is the home folder)
+/// and the public key beside it (`.pub`), labelled with the file's name, as
+/// `credential:storeKey` takes them.
+fn read_key(path: &str) -> Result<Value, String> {
+    let full = match path.strip_prefix("~/") {
+        Some(rest) => std::path::Path::new(&crate::native::shell::home_dir()).join(rest),
+        None => PathBuf::from(path),
+    };
+    let private = std::fs::read_to_string(&full).map_err(|e| format!("{path}: {e}"))?;
+    let label = full
+        .file_name()
+        .map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned());
+    let mut key = json!({ "label": label, "privateKey": private });
+    let mut public = full.into_os_string();
+    public.push(".pub");
+    if let Ok(p) = std::fs::read_to_string(public) {
+        key["publicKey"] = json!(p.trim());
+    }
+    Ok(key)
+}
+
 impl World for Wired {
     fn call(&self, caller: &Caller, method: &str, args: Value) -> Answer<Value> {
         let native = self.native.upgrade();
@@ -327,6 +390,13 @@ impl World for Wired {
                     "denied",
                     format!("{m} is open only to the extensions Vorn ships"),
                 ));
+            }
+            // What runs is read once vornd knows it, as a client's reads are.
+            if matches!(m, "sessions.list" | "sessions.get") {
+                if let Some(registry) = native.registry.get().cloned() {
+                    let settle = move || registry.settle(crate::native::SETTLE_LIMIT);
+                    let _ = tokio::task::spawn_blocking(settle).await;
+                }
             }
             match m {
                 "sessions.list" => {
@@ -664,6 +734,80 @@ impl World for Wired {
                     crate::native::signin::completed(&native, &key).await;
                     Ok(Value::Null)
                 }
+                "web.call" => {
+                    let view = text(&args, "view").ok_or_else(|| needs(m, "the view"))?;
+                    let op = text(&args, "op").ok_or_else(|| needs(m, "the op"))?;
+                    let mut params = match args.get("params") {
+                        Some(Value::Object(p)) => p.clone(),
+                        _ => serde_json::Map::new(),
+                    };
+                    params.insert("view".into(), Value::String(view));
+                    crate::bridge::Bridge::request(
+                        native.main_process().as_ref(),
+                        &format!("web:{op}"),
+                        Value::Object(params),
+                        crate::native::desktop::TIMEOUT,
+                    )
+                    .await
+                    .map_err(|e| ExtError::new("failed", e))
+                }
+                // The app's simulators, asked as `video:{op}`. Starting one
+                // takes as long as it takes, up to just under a call's own limit.
+                "video.call" => {
+                    let op = text(&args, "op").ok_or_else(|| needs(m, "the op"))?;
+                    let mut params = match args.get("params") {
+                        Some(Value::Object(p)) => p.clone(),
+                        _ => serde_json::Map::new(),
+                    };
+                    if let Some(view) = text(&args, "view") {
+                        params.insert("view".into(), Value::String(view));
+                    }
+                    let wait = if op == "boot" {
+                        VIDEO_BOOT
+                    } else {
+                        crate::native::desktop::TIMEOUT
+                    };
+                    crate::bridge::Bridge::request(
+                        native.main_process().as_ref(),
+                        &format!("video:{op}"),
+                        Value::Object(params),
+                        wait,
+                    )
+                    .await
+                    .map_err(|e| ExtError::new("failed", e))
+                }
+                "remote.hosts" => {
+                    let config = ask(&native, "config:load", Value::Null).await?;
+                    Ok(match config.get("remoteHosts") {
+                        Some(Value::Array(hosts)) => Value::Array(hosts.clone()),
+                        _ => json!([]),
+                    })
+                }
+                "remote.saveHosts" => {
+                    let Some(Value::Array(hosts)) = args.get("hosts").cloned() else {
+                        return Err(needs(m, "the hosts, a list"));
+                    };
+                    crate::native::config::save_hosts(&native, hosts)
+                        .await
+                        .map(|()| Value::Null)
+                        .map_err(|e| ExtError::new("failed", e))
+                }
+                "remote.test" => remote_test(&native, &extension, &args).await,
+                "remote.keys" => ask(&native, "credential:listKeys", Value::Null).await,
+                "remote.storeKey" => ask(&native, "credential:storeKey", args).await,
+                "remote.importKey" => {
+                    let path = text(&args, "path").ok_or_else(|| needs(m, "the key's path"))?;
+                    let key = tokio::task::spawn_blocking(move || read_key(&path))
+                        .await
+                        .map_err(|e| ExtError::new("failed", e.to_string()))?
+                        .map_err(|e| ExtError::new("failed", e))?;
+                    ask(&native, "credential:storeKey", key).await
+                }
+                "remote.deleteKey" => {
+                    let id = text(&args, "id").ok_or_else(|| needs(m, "the key's id"))?;
+                    ask(&native, "credential:deleteKey", json!(id)).await
+                }
+                "remote.vault" => Ok(json!({ "keychain": !native.secrets.keychain_missing() })),
                 other => Err(ExtError::new(
                     "unknown-method",
                     format!("Vorn has no method {other}"),

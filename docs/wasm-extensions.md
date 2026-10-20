@@ -153,6 +153,14 @@ its tree with `ui.render` (`{point, surface}` in, `{tokens, tree}` out),
 in its manifest. The host asks again whenever the extension's rows change,
 and when the place shows.
 
+A settings page is listed under Extensions in the Settings sidebar, and in
+the palette as its title and "Settings". One of the extensions Vorn ships may name
+the app's own page it follows with `after` (`appearance`, `general`,
+`updates`, `notifications`, `experimental`, `agents`, `mcp`, `keys` or
+`network`): a page that moved out of the app into a built-in, as SSH &
+Hosts after `agents`, so it keeps its place and its palette entry, its bare
+title. Another extension's `after` is ignored.
+
 A badge, a card footer and a sidebar row's marks draw once per session: the
 tree's root is a box holding one child per session, its id the session's
 id, and each card draws its own. `per_session` builds it; a session with no
@@ -197,11 +205,13 @@ every key or pointer move (hover, typing, a drag) to itself:
 
 | part      | holds                                                                                  | reports                                                                                       |
 | --------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `tabs`    | tabs (label, file, preview, dirty, active), `lead`, `tools` and `more` tools           | `select`, `open` (double click) and `close` a tab; `click` a tool                             |
+| `tabs`    | tabs (label, file, preview, dirty, active, `icon`), `lead`, `tools` and `more` tools   | `select`, `open` (double click) and `close` a tab; `click` a tool                             |
 | `outline` | rows a tree of folders deep, the one chosen, a `filter`, an `action`                   | `select` a row, `open` a leaf, `change` the filter, `click` the action with the row's id      |
 | `split`   | one child or two, side by side, `ratio` to the first; under `narrow` px only the first | `resize` with the ratio dragged to                                                            |
 | `code`    | a file's `text` on disk, a `draft` to start from, `rev`, `state`, `conflict`, `error`  | `change` and `submit` (save) with the text; `click` with `discard`, `force`, `disk` or `keep` |
 | `log`     | a shell's commands, one per prompt, oldest first                                       |                                                                                               |
+| `web`     | a web view: its `view` (the session it shows beside), the `url` asked for, a `notice`  | `page`, a JSON object in the value: what the page or its controls did (below)                 |
+| `video`   | a device's screen: its `view` (session), `device`, `title`, `zoom`, `tools`, `picker`  | `page` (below), `click` a tool, `select` a picker's choice with its id                        |
 
 A `code`'s text is typed, coloured and searched in the client, which takes
 `draft`, else `text`, whenever `rev` changes, and tells the extension the
@@ -210,7 +220,71 @@ before any other event from its tree, so a tab switch never overtakes it. A
 `code` whose tree shows several files gives each its own node id.
 A `log` is cut into blocks by the client, from the shell's screen, pairing
 the newest command with the newest prompt. A field with `live` reports
-`change` as it is typed.
+`change` as it is typed. A field with `lines` above 1 (`.lines(n)`, up to
+twelve) is that many lines tall, for a key or a certificate; Return breaks
+the line and Cmd+Return submits it. A one-line field with `blur`
+(`.submits_on_blur()`) also submits what it holds when it loses focus, as a
+password saves once typed and left; Return there just leaves it.
+
+A few more shapes for a settings form:
+
+- A button with `pick` (`.picks_file(title)`) opens the OS file dialog
+  titled `title` instead of telling `click`; a file chosen comes back as
+  `submit` on the button's id with the file's path. Nothing comes back when
+  the dialog is cancelled, or where there is none (the web client).
+- A choice with `dropdown` (`.dropdown()`) is a field showing the option
+  chosen that opens a menu of the options, rather than a row of chips; it
+  reports `select` the same way. The terminal and the platform's own
+  controls draw it as chips.
+- An entry with `expanded` (`.expanded(open)`) is a disclosure: the whole
+  row is pressed, with a chevron, and tells `toggle` on the entry's id with
+  `true` to open or `false` to close. Open, its children show under the row
+  rather than beside its title.
+- Text with the `label` style is a form field's small, uppercase caption.
+
+A `web` part is a native web view the client places and seats, with the
+address bar, back and forward, and an artifact's review controls over it.
+It loads `url` whenever that changes, so an extension changes the address it
+asks for, not what the page wanders to. Its `page` events carry:
+
+| `type`   | fields                   | when                                                      |
+| -------- | ------------------------ | --------------------------------------------------------- |
+| `state`  | `url`, `title`, `design` | the page moved or titled itself; `design` names a design  |
+| `submit` | `text`                   | Enter in the address bar, as typed; an error is shown     |
+| `opened` | `url`                    | the page opened a window                                  |
+| `go`     | `url`, `version`         | the client's own controls moved it, as to another version |
+
+Only the extensions Vorn ships may hold a `web` part (the `web` permission).
+
+A `video` part is a simulator's screen the client takes and draws itself, a
+few times a second, inside its bezel, with the header's `tools`, a bar of
+`controls` and the zoom under it; no frame passes through the extension.
+`device` names the simulator shown; with `boot` set the client starts it
+first and reports how that went, and `busy` spins the title meanwhile.
+With `save` set it saves a screenshot of `device` to Downloads and reports
+that too. Each tool and control has an `id`, `label` and `icon`, and may
+add a shorter `tip`, `on`, `busy` (it spins) and `divider` (a line before
+it). `zoom` is screen points per pixel, none fitting the screen to the pane;
+`notice` is a line over the screen, and `picker` a list under the title
+(`heading`, `loading`, `error`, `empty`, `choices` with `id`, `title`,
+`detail`, a `status` tone and a `badge`); while it is `loading` the client
+lists the simulators and reports them. Its `page` events carry:
+
+| `type`    | fields               | when                                                   |
+| --------- | -------------------- | ------------------------------------------------------ |
+| `switch`  |                      | the title was clicked, to open or shut the picker      |
+| `dismiss` |                      | the notice's ✕                                         |
+| `zoom`    | `zoom`               | a zoom button; without `zoom`, fit to the pane         |
+| `booted`  | `bootedHere`         | the client started `device`; whether it was off before |
+| `failed`  | `message`            | it could not                                           |
+| `listed`  | `devices` or `error` | the simulators a `loading` picker asked for            |
+| `saved`   | `path` or `error`    | how the screenshot `save` asked for went               |
+
+Only the extensions Vorn ships may hold a `video` part (the `video`
+permission); Vorn's own Device (`packages/core/extensions/device`) draws
+the device pane with one. A Device row with `card` set is drawn over the
+session card's phone button instead of in a pane: its picker, then the
+button waiting while what was picked there starts.
 
 A board holds columns, each holding its cards. A board of thousands cannot
 travel as a tree: `board_of(Cards::Tasks, lanes)` names the core's task list
@@ -222,8 +296,10 @@ a page at a time, windows them, drags them between columns and opens them.
 `examples/extensions/agent-footer` a card footer. Vorn's own Tasks
 (`packages/core/extensions/tasks`) and Workflow editor
 (`packages/core/extensions/workflow-editor`) draw their main views this way;
-Files (`packages/core/extensions/files`) draws its pane and cards, and Shell
-blocks (`packages/core/extensions/blocks`) a shell's commands.
+Files (`packages/core/extensions/files`) draws its pane and cards, Shell
+blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
+(`packages/core/extensions/browser`) a session's tabs over its page, and
+the Device (`packages/core/extensions/device`) a session's simulator.
 
 ## The new API
 
@@ -297,6 +373,76 @@ current, isGitRepo}`, under `git.read`.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
   changed).
+
+### `web.call`: the Browser's web views
+
+`web.call` (`{view, op, params}`) asks the app's web view `view`, a session
+id, under the `web` permission, which only the extensions Vorn ships hold.
+vornd passes it to the app as `web:{op}` with `view` among the params, and
+answers what the app does; with no app connected it fails.
+
+| `op`      | params                           | answers                                      |
+| --------- | -------------------------------- | -------------------------------------------- |
+| `load`    | `url`                            | `{url}`, loaded again even when it was shown |
+| `history` | `direction`: `back` or `forward` | `{url}`                                      |
+| `read`    | `filter`, `cursor`, `limit`      | the page's nodes, a page at a time           |
+| `text`    | `cursor`                         | the page's text, a page at a time            |
+| `find`    | `text`, `limit`                  | the nodes that hold it                       |
+| `act`     | what `browser:interact` takes    | what clicking, typing or scrolling did       |
+| `console` | `limit`                          | its console messages                         |
+| `network` | `limit`                          | its requests                                 |
+
+The app refuses a `file:` address outside the session's project, on disk as
+well as by name, and anything it would not load from the address bar.
+
+### `video.call`: the Device's simulators
+
+`video.call` (`{view, op, params}`) asks the app for the simulators on behalf
+of the session `view`, under the `video` permission, which only the
+extensions Vorn ships hold. vornd passes it to the app as `video:{op}` with
+`view` among the params, and answers what the app does; with no app
+connected it fails. `udid` names the simulator in all but `list`.
+
+| `op`         | params             | answers                                                     |
+| ------------ | ------------------ | ----------------------------------------------------------- |
+| `list`       |                    | `[{udid, name, runtime, booted}]`, the available simulators |
+| `boot`       | `udid`             | `{name, bootedHere}`, once it is up; waits for a slow boot  |
+| `shutdown`   | `udid`             | `{ok}`                                                      |
+| `launch`     | `udid`, `bundleId` | `{ok}`                                                      |
+| `terminate`  | `udid`, `bundleId` | `{ok}`                                                      |
+| `openUrl`    | `udid`, `url`      | `{ok}`                                                      |
+| `install`    | `udid`, `path`     | `{ok}`                                                      |
+| `screenshot` | `udid`             | `{data, width, height}`, a PNG in base64                    |
+| `save`       | `udid`, `name`     | `{path}`, a screenshot saved to Downloads                   |
+
+Any other `op`, such as reading the screen or the logs, fails with a message
+saying the native app cannot yet.
+
+### `remote.*`: the SSH built-in's hosts and keys
+
+Vorn's SSH built-in edits the remote hosts and the stored SSH keys under the
+`remote` permission, which only the extensions Vorn ships hold. The hosts
+stay in vornd's config (`remoteHosts`) and the keys in its key store, so
+sessions on a remote host keep running with the built-in off.
+
+| method             | params                                            | answers                                                     |
+| ------------------ | ------------------------------------------------- | ----------------------------------------------------------- |
+| `remote.hosts`     |                                                   | the hosts as the config keeps them                          |
+| `remote.saveHosts` | `hosts`, the whole list                           | `null`, once the config is saved                            |
+| `remote.test`      | `host`, optional `then` and `key`                 | `{success, message, durationMs}`; with `then`, see below    |
+| `remote.keys`      |                                                   | the stored keys, without their private halves               |
+| `remote.storeKey`  | `label`, `privateKey`, `publicKey`, `certificate` | the stored key                                              |
+| `remote.importKey` | `path` (`~` is home)                              | the stored key, read from the file and its `.pub` beside it |
+| `remote.deleteKey` | `id`                                              | `null`, the key and its secret gone                         |
+| `remote.vault`     |                                                   | `{keychain}`: `false` when the OS keychain is missing       |
+
+A test logs in for up to ten seconds, and a component answers one call at a
+time, so with `then` `remote.test` answers `{testing: true}` at once and
+later calls the extension's action `then` with `{key, result}`.
+
+`remote.vault` says `keychain: false` only when vornd wanted the OS keychain
+and found none, so its secrets sit in a private file instead; told not to
+use it (`VORND_KEYCHAIN=0`), it says `true`.
 
 Vorn's own Tasks keeps the board's tables, `tasks` and `task_source_links`,
 which it is lent by name beside its own; no installed extension is.

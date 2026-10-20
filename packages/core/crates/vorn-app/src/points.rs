@@ -109,6 +109,9 @@ pub struct Point {
     pub deny: Option<String>,
     /// Drawn from the element tree its extension answers `ui.render` with.
     pub tree: bool,
+    /// A built-in's settings page: the app's own page it follows in the
+    /// sidebar, as `agents`; `None` lists it under Extensions.
+    pub after: Option<String>,
 }
 
 impl Point {
@@ -138,6 +141,7 @@ impl Point {
             rows: text("rows"),
             deny: text("deny"),
             tree: v.get("tree").and_then(Value::as_bool) == Some(true),
+            after: text("after"),
         })
     }
 
@@ -147,6 +151,15 @@ impl Point {
             self.kind.as_str(),
             kind::BADGES | kind::CARD_FOOTERS | kind::DECORATIONS
         )
+    }
+
+    /// The app settings page a built-in's settings page follows in the
+    /// sidebar; another extension's page never leaves Extensions.
+    pub fn placed_after(&self) -> Option<crate::settings::Category> {
+        self.after
+            .as_deref()
+            .filter(|_| self.builtin && self.kind == kind::SETTINGS)
+            .and_then(crate::settings::Category::from_id)
     }
 
     /// `extension/kind/id`: the point's name in ids and error boxes.
@@ -228,10 +241,19 @@ pub enum PointAct {
         key: String,
         event: vorn_tree::Event,
     },
-    /// A tree field's Return sends what it holds.
+    /// A tree field's Return sends what it holds; a `blur` one's sends it
+    /// as it loses focus instead, Return only leaving it.
     TreeField {
         key: String,
         node: String,
+        blur: bool,
+    },
+    /// A tree button asks for a file, titled `title`: the OS dialog's
+    /// answer is told to `node` as `submit` with the path.
+    TreePick {
+        key: String,
+        node: String,
+        title: String,
     },
     /// A live tree field changed: what it holds is told as `change`.
     TreeLive {
@@ -751,6 +773,33 @@ mod tests {
     fn point(kind: &str) -> Value {
         json!({ "extension": "x", "extensionName": "X", "kind": kind, "id": "p",
                 "title": "P", "rows": "items", "call": "run" })
+    }
+
+    #[test]
+    fn only_a_builtin_settings_page_follows_an_app_page() {
+        let mut v = point(kind::SETTINGS);
+        v["after"] = json!("agents");
+        let other = Point::from_value(&v).expect("a point");
+        assert_eq!(
+            other.placed_after(),
+            None,
+            "another extension's stays under Extensions"
+        );
+        v["builtin"] = json!(true);
+        let builtin = Point::from_value(&v).expect("a point");
+        assert_eq!(
+            builtin.placed_after(),
+            Some(crate::settings::Category::Agents)
+        );
+        v["after"] = json!("nowhere");
+        assert_eq!(Point::from_value(&v).expect("a point").placed_after(), None);
+        let mut menu = point(kind::MENUS);
+        menu["after"] = json!("agents");
+        menu["builtin"] = json!(true);
+        assert_eq!(
+            Point::from_value(&menu).expect("a point").placed_after(),
+            None
+        );
     }
 
     #[test]

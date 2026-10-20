@@ -209,8 +209,6 @@ pub enum MenuKind {
     SetShell,
     /// A settings `<select>`, by the default it writes.
     SetSelect(String),
-    /// A host's stored-key select.
-    SshKey(String),
     /// A session's branch switcher.
     Branch(String),
     /// The editors a session's project opens in.

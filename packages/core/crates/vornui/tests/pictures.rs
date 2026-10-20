@@ -1,5 +1,5 @@
 //! Pictures drawn with [`Ui::picture`] on the CPU renderer: scaled into their rect, cut to their
-//! source rect, and one as large as vornd sends drawn whole.
+//! source rect, one as large as vornd sends drawn whole, and one with rounded corners cut.
 
 use vornui::{Rect, RenderMode, Rgba, Ui, UiConfig};
 
@@ -119,4 +119,26 @@ fn bad_sizes_draw_nothing() {
         );
     });
     assert!(near(at(&px, 32, 32), [0, 0, 0, 255]));
+}
+
+#[test]
+fn a_rounded_picture_leaves_its_corners_out() {
+    let rgba = vec![255; 16 * 16 * 4];
+    // At its own size too, where a square picture is copied texel for texel.
+    for dst in [
+        Rect::new(8.0, 8.0, 48.0, 48.0),
+        Rect::new(24.0, 24.0, 16.0, 16.0),
+    ] {
+        let px = frame(|ui| {
+            ui.picture_rounded(1, (16, 16), &rgba, [0.0, 0.0, 16.0, 16.0], dst, 6.0);
+        });
+        let (x0, y0) = (dst.x as usize, dst.y as usize);
+        let (x1, y1) = (x0 + dst.w as usize - 1, y0 + dst.h as usize - 1);
+        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+            assert!(near(at(&px, x, y), [0, 0, 0, 255]), "corner {x},{y} is cut");
+        }
+        let mid = (x0 + x1) / 2;
+        assert!(near(at(&px, mid, y0), WHITE), "an edge's middle stays");
+        assert!(near(at(&px, mid, (y0 + y1) / 2), WHITE));
+    }
 }

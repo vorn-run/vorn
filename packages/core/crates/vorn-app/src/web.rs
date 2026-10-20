@@ -7,10 +7,9 @@
 //! Without a window (an offscreen shot) there are no views: the screen
 //! still draws the pane's chrome and leaves the page box empty.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
 use crate::ui::Rect;
+
+pub mod address;
 
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "webview")))]
 mod off;
@@ -27,24 +26,6 @@ pub use tabs::Host;
 
 /// The script every page gets before its own (`window.__vorn`).
 pub const PAGE_SCRIPT: &str = include_str!("web/page.js");
-
-/// The page a device pane shows: the latest frame, refreshed. Taps need the
-/// simulator companion, so the frame is view-only.
-#[cfg(all(not(target_arch = "wasm32"), feature = "webview"))]
-const DEVICE_PAGE: &str = include_str!("web/device.html");
-
-/// The latest screen of each session's device, as PNG bytes.
-pub type Frames = Arc<Mutex<HashMap<String, Vec<u8>>>>;
-
-/// The address of `session`'s device page, served by the views themselves.
-pub fn device_url(session: &str) -> String {
-    // WebView2 and Android serve custom schemes over http on `<scheme>.localhost`.
-    if cfg!(windows) {
-        format!("http://vorn.localhost/device/{session}")
-    } else {
-        format!("vorn://localhost/device/{session}")
-    }
-}
 
 /// What a web view reported, by its key.
 #[derive(Debug, Clone, PartialEq)]

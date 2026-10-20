@@ -150,6 +150,8 @@ impl Cx<'_> {
                 .selected(tab.active);
             if tab.file {
                 el = el.child(self.file_icon(&tab.label, 12.0));
+            } else if let Some(icon) = &tab.icon {
+                el = el.child(self.icon(icon, 12.0, color::INK.alpha(0.6)));
             }
             el = el.child(name);
             if let Some(n) = &tab.note {

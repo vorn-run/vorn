@@ -1,7 +1,7 @@
 //! The desktop app's side: what only it can do, such as fetching through a
 //! connection's signed-in window. Asked by method name, the same names the
 //! desktop answers (`session:fetch`, `session:check`, `session:forget`,
-//! `browser:*`, `device:*`), over the connection the app claims
+//! `web:*`, `device:*`), over the connection the app claims
 //! ([`crate::native::desktop`]).
 
 use std::future::Future;

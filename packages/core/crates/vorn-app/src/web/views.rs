@@ -1,45 +1,17 @@
 //! The OS web views behind the browser pane, seated in the app's window.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, PoisonError};
+use std::sync::Arc;
 use web_time::Instant;
 
 use wry::dpi::{PhysicalPosition, PhysicalSize};
-use wry::http::{header, Request, Response};
 use wry::{NewWindowResponse, PageLoadEvent, WebView, WebViewBuilder};
 
 use crate::client::rpc::Wake;
 use crate::ui::{NativeWindow, Rect};
 
-use super::{Frames, Slot, WebEvent, DEVICE_PAGE, NO_PANE, PAGE_SCRIPT};
-
-/// Answers `vorn://localhost/device/<session>[/frame.png]`.
-fn serve(frames: &Frames, req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
-    let path = req.uri().path();
-    let reply = |status: u16, kind: &str, body: Cow<'static, [u8]>| {
-        Response::builder()
-            .status(status)
-            .header(header::CONTENT_TYPE, kind)
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(body)
-            .unwrap_or_else(|_| Response::new(Cow::Borrowed(&[][..])))
-    };
-    let Some(rest) = path.strip_prefix("/device/") else {
-        return reply(404, "text/plain", Cow::Borrowed(b"not found"));
-    };
-    match rest.strip_suffix("/frame.png") {
-        Some(session) => {
-            let frames = frames.lock().unwrap_or_else(PoisonError::into_inner);
-            match frames.get(session) {
-                Some(png) => reply(200, "image/png", Cow::Owned(png.clone())),
-                None => reply(404, "text/plain", Cow::Borrowed(b"no frame")),
-            }
-        }
-        None => reply(200, "text/html", Cow::Borrowed(DEVICE_PAGE.as_bytes())),
-    }
-}
+use super::{Slot, WebEvent, NO_PANE, PAGE_SCRIPT};
 
 struct View {
     wv: WebView,
@@ -80,8 +52,6 @@ pub struct Host {
     rx: Receiver<WebEvent>,
     wake: Wake,
     next_token: u64,
-    /// Device frames the `vorn` scheme serves.
-    pub frames: Frames,
     /// Where connection profiles keep their data, off macOS.
     profiles: Option<std::path::PathBuf>,
 }
@@ -97,7 +67,6 @@ impl Host {
             rx,
             wake,
             next_token: 0,
-            frames: Frames::default(),
             profiles: None,
         }
     }
@@ -238,7 +207,6 @@ impl Host {
         let title = send(|key, title| WebEvent::Title { key, title });
         let message = send(|key, body| WebEvent::Message { key, body });
         let popup = send(|key, url| WebEvent::NewWindow { key, url });
-        let frames = Arc::clone(&self.frames);
         let mut context = self.context_for(slot.profile.as_deref());
         let builder = match context.as_deref_mut() {
             Some(ctx) => WebViewBuilder::new_with_web_context(ctx),
@@ -270,9 +238,7 @@ impl Host {
             }
             None if foreign => {}
             None => {
-                builder = builder
-                    .with_initialization_script(PAGE_SCRIPT)
-                    .with_custom_protocol("vorn".to_owned(), move |_, req| serve(&frames, &req));
+                builder = builder.with_initialization_script(PAGE_SCRIPT);
             }
         }
         let wv = builder

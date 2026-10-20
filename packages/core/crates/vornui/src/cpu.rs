@@ -709,7 +709,9 @@ impl Job<'_> {
         }
         let [x, y, w, h] = s.rect;
         let uv = s.uv;
-        let exact = w == uv[2] && h == uv[3] && x.fract() == 0.0 && y.fract() == 0.0;
+        let radius = s.corner_radius().min(w.min(h) * 0.5);
+        let exact =
+            radius <= 0.0 && w == uv[2] && h == uv[3] && x.fract() == 0.0 && y.fract() == 0.0;
         if exact {
             let ca = unit(s.color[3]);
             let tint = pack(s.color, s.color[3], self.bgra);
@@ -751,7 +753,14 @@ impl Job<'_> {
                 let u = uv[0] + (px as f32 + 0.5 - x) * sx - 0.5;
                 let t = bilinear(tex, size, bpp, u, v);
                 let c = if colored {
-                    let al = t[3] * s.color[3];
+                    // The shader's corner cut, at the pixel's centre.
+                    let cover = if radius > 0.0 {
+                        let local = [px as f32 + 0.5 - x - w * 0.5, py as f32 + 0.5 - y - h * 0.5];
+                        (0.5 - rounded_box(local, [w * 0.5, h * 0.5], radius)).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let al = t[3] * s.color[3] * cover;
                     [t[0] * al, t[1] * al, t[2] * al, al]
                 } else {
                     let m = match lut {

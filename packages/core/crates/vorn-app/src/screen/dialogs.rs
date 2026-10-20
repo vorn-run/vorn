@@ -368,6 +368,9 @@ fn project(s: &Screen<'_>, editing: Option<&str>) -> El {
                 .silent(),
         );
     let form = &s.st.form;
+    // Remote hosts are offered while SSH is on; a project already on one
+    // keeps its remote path either way.
+    let ssh_on = s.st.points.get(crate::settings::SSH_PAGE).is_some();
     let hosts: Vec<(String, String)> = s
         .store
         .config
@@ -375,6 +378,7 @@ fn project(s: &Screen<'_>, editing: Option<&str>) -> El {
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
+        .filter(|_| ssh_on)
         .filter_map(|h| {
             Some((
                 h.get("id")?.as_str()?.to_owned(),

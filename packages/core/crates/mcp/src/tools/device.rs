@@ -3,6 +3,8 @@
 //! as the browser tools are, and fenced the same way, under a label that says
 //! a device wrote it rather than a web page.
 
+use std::time::Duration;
+
 use serde_json::{json, Value};
 
 use super::browser::{page_result, with_session};
@@ -11,6 +13,9 @@ use crate::json;
 use crate::rpc::Rpc;
 
 const DEVICE_FENCE: &str = "DEVICE CONTENT";
+/// How long a claim may wait: vornd starts a simulator that is down and
+/// answers once it is up, or after 55 seconds that it is still starting.
+const CLAIM_TIMEOUT: Duration = Duration::from_secs(60);
 
 const NO_SESSION: &str = "Error: no Vorn session context (VORN_SESSION_ID is unset). Device tools only work from a terminal session started by the Vorn app.";
 
@@ -58,9 +63,10 @@ pub async fn device_list<R: Rpc>(cx: &Cx<'_, R>) -> Outcome {
 pub async fn device_claim<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     with_session(session(cx), NO_SESSION, |id| async move {
         let r = cx
-            .call(
+            .call_for(
                 "device:claim",
                 Some(with_id(id, vec![("udid", args.get("udid").cloned())])),
+                CLAIM_TIMEOUT,
             )
             .await?;
         // A refusal is raised as an error, so the agent reads a failed call.
@@ -229,9 +235,10 @@ pub async fn device_logs<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
 pub async fn open_device_pane<R: Rpc>(cx: &Cx<'_, R>, args: &Args) -> Outcome {
     with_session(session(cx), NO_SESSION, |id| async move {
         let r = cx
-            .call(
+            .call_for(
                 "device:openPane",
                 Some(with_id(id, vec![("udid", args.get("udid").cloned())])),
+                CLAIM_TIMEOUT,
             )
             .await?;
         let udid = json::prop(Some(&r), "udid")?;

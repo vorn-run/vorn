@@ -26,6 +26,8 @@ pub struct Component {
     pub on_by_default: bool,
     /// What it is called as it is switched on, to publish what it shows; none starts it at its first use.
     pub start: Option<&'static str>,
+    /// What it is called as it is switched off, to let go of what it holds outside Vorn.
+    pub stop: Option<&'static str>,
 }
 
 /// The Workflow editor's id.
@@ -39,6 +41,7 @@ pub fn worktrees() -> Component {
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/worktrees.wasm")),
         on_by_default: true,
         start: None,
+        stop: None,
     }
 }
 
@@ -59,6 +62,7 @@ pub fn widget() -> Component {
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/widget.wasm")),
         on_by_default: false,
         start: None,
+        stop: None,
     }
 }
 
@@ -72,6 +76,7 @@ pub fn workflow_editor() -> Component {
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/workflow-editor.wasm")),
         on_by_default: true,
         start: Some("refresh"),
+        stop: None,
     }
 }
 
@@ -84,6 +89,7 @@ pub fn blocks() -> Component {
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/blocks.wasm")),
         on_by_default: true,
         start: None,
+        stop: None,
     }
 }
 
@@ -95,6 +101,31 @@ pub fn files() -> Component {
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/files.wasm")),
         on_by_default: true,
         start: None,
+        stop: None,
+    }
+}
+
+/// A core route's call to built-in `id`'s action of the same name, as an
+/// agent's `browser:*` or `device:*`; while it is off, `off`.
+pub async fn answer(
+    native: &crate::native::Native,
+    id: &str,
+    off: &str,
+    method: &str,
+    params: Value,
+) -> crate::native::Answer {
+    use crate::native::Answer;
+    let Some(ext) = native.extensions() else {
+        return Answer::Error("vornd is not hosting extensions".to_owned());
+    };
+    let builtins = ext.builtins();
+    if !builtins.is_on(id) {
+        return Answer::Error(off.to_owned());
+    }
+    match builtins.call(id, method, params).await {
+        Some(Ok(v)) => Answer::Result(v),
+        Some(Err(e)) => Answer::Error(e.message),
+        None => Answer::Unanswered,
     }
 }
 
@@ -103,6 +134,21 @@ impl Component {
         Bundled {
             manifest: Arc::clone(&api.manifest),
             wasm: self.wasm,
+        }
+    }
+
+    /// Its own `action`, called by vornd as it starts or stops it.
+    async fn call_own(&self, api: &Api, action: &str) {
+        let ctx = CallCtx {
+            caller: "client".to_owned(),
+            project: None,
+        };
+        if let Err(e) = api
+            .router
+            .call_bundled(&self.bundled(api), action, Value::Null, ctx)
+            .await
+        {
+            tracing::warn!(extension = %api.manifest.id, %action, error = %e.message, "failed");
         }
     }
 }
@@ -124,17 +170,8 @@ impl Builtin for Component {
     /// start: the first call or event compiles it into the cache.
     fn start<'a>(&'a self, api: &'a Api) -> BoxFuture<'a, ()> {
         async move {
-            let Some(action) = self.start else { return };
-            let ctx = CallCtx {
-                caller: "client".to_owned(),
-                project: None,
-            };
-            if let Err(e) = api
-                .router
-                .call_bundled(&self.bundled(api), action, Value::Null, ctx)
-                .await
-            {
-                tracing::warn!(extension = %api.manifest.id, error = %e.message, "could not start");
+            if let Some(action) = self.start {
+                self.call_own(api, action).await;
             }
         }
         .boxed()
@@ -163,6 +200,12 @@ impl Builtin for Component {
     }
 
     fn stop<'a>(&'a self, api: &'a Api) -> BoxFuture<'a, ()> {
-        async move { api.router.stop(&api.manifest.id).await }.boxed()
+        async move {
+            if let Some(action) = self.stop {
+                self.call_own(api, action).await;
+            }
+            api.router.stop(&api.manifest.id).await;
+        }
+        .boxed()
     }
 }

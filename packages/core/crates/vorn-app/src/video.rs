@@ -1,88 +1,23 @@
-//! iOS simulators for the device pane: what `simctl` lists, the picker's order,
-//! when a card offers the device button, and claiming one for a session.
-//! Simulators exist only on macOS; elsewhere the list is empty and a claim says
-//! why.
+//! The video primitive's host: the iOS simulators a `video` part shows,
+//! driven through `simctl` for `video:*` calls, their screens turned into
+//! frames the pane draws itself, and the zoom and bezel those are drawn
+//! with. Simulators exist only on macOS; elsewhere the list is empty and a
+//! boot says why. Which session holds which simulator is the Device
+//! extension's to decide, not this host's.
 
-use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use serde_json::Value;
 
-/// One simulator, as `device:list` answers it.
+/// One simulator, as `video:list` answers it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Device {
+pub struct Sim {
     pub udid: String,
     pub name: String,
     pub runtime: String,
     pub booted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub claimed_by: Option<String>,
-}
-
-/// A device in the picker: whether this session may take it, and what
-/// tells it apart from another of the same name.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Listed {
-    pub device: Device,
-    pub selectable: bool,
-    pub subtitle: Option<String>,
-}
-
-/// Free, or already this session's.
-pub fn is_selectable(d: &Device, session: &str) -> bool {
-    d.claimed_by.as_deref().is_none_or(|c| c == session)
-}
-
-/// Selectable first, then booted, then by name and runtime;
-/// a subtitle only where the name alone is ambiguous.
-pub fn order_devices(devices: &[Device], session: &str) -> Vec<Listed> {
-    let mut by_name: HashMap<&str, usize> = HashMap::new();
-    let mut by_both: HashMap<(&str, &str), usize> = HashMap::new();
-    for d in devices {
-        *by_name.entry(&d.name).or_default() += 1;
-        *by_both.entry((&d.name, &d.runtime)).or_default() += 1;
-    }
-    let mut out: Vec<Listed> = devices
-        .iter()
-        .map(|d| {
-            let subtitle = (by_name[d.name.as_str()] > 1).then(|| {
-                if by_both[&(d.name.as_str(), d.runtime.as_str())] > 1 {
-                    let head: String = d.udid.chars().take(8).collect();
-                    format!("{} \u{b7} {head}", d.runtime)
-                } else {
-                    d.runtime.clone()
-                }
-            });
-            Listed {
-                device: d.clone(),
-                selectable: is_selectable(d, session),
-                subtitle,
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| {
-        b.selectable
-            .cmp(&a.selectable)
-            .then(b.device.booted.cmp(&a.device.booted))
-            .then_with(|| locale_cmp(&a.device.name, &b.device.name))
-            .then_with(|| locale_cmp(&a.device.runtime, &b.device.runtime))
-    });
-    out
-}
-
-/// Close to `localeCompare`: case folds first, so "iPad" sorts with "IPAD".
-fn locale_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b))
-}
-
-/// An open pane always keeps its button; a shell
-/// never offers one; otherwise only a mobile project does.
-pub fn should_show_button(mobile: Option<bool>, has_pane: bool, shell: bool) -> bool {
-    if has_pane {
-        return true;
-    }
-    !shell && mobile == Some(true)
 }
 
 /// `com.apple.CoreSimulator.SimRuntime.iOS-26-2` reads
@@ -99,7 +34,7 @@ pub fn format_runtime(id: &str) -> String {
 
 /// The iOS simulators in `simctl list devices available -j`'s output;
 /// watchOS and tvOS ones are left out.
-pub fn parse_simctl(json: &Value, claims: &HashMap<String, String>) -> Vec<Device> {
+pub fn parse_simctl(json: &Value) -> Vec<Sim> {
     let Some(Value::Object(runtimes)) = json.get("devices") else {
         return Vec::new();
     };
@@ -118,13 +53,11 @@ pub fn parse_simctl(json: &Value, claims: &HashMap<String, String>) -> Vec<Devic
                     .unwrap_or_default()
                     .to_owned()
             };
-            let udid = s("udid");
-            out.push(Device {
-                claimed_by: claims.get(&udid).cloned(),
+            out.push(Sim {
+                udid: s("udid"),
                 name: s("name"),
                 runtime: format_runtime(runtime),
                 booted: s("state") == "Booted",
-                udid,
             });
         }
     }
@@ -175,8 +108,8 @@ fn simctl(args: &[&str]) -> Result<String, String> {
     }
 }
 
-/// Every simulator on this machine, with who holds it. Empty off macOS.
-pub fn list(claims: &HashMap<String, String>) -> Result<Vec<Device>, String> {
+/// Every simulator on this machine. Empty off macOS.
+pub fn list() -> Result<Vec<Sim>, String> {
     if cfg!(target_arch = "wasm32") {
         return Err(IN_BROWSER.to_owned());
     }
@@ -185,68 +118,34 @@ pub fn list(claims: &HashMap<String, String>) -> Result<Vec<Device>, String> {
     }
     let raw = simctl(&["list", "devices", "available", "-j"])?;
     let json: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    Ok(parse_simctl(&json, claims))
+    Ok(parse_simctl(&json))
 }
 
-/// What a claim did: the device and whether the app booted it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Claimed {
-    pub udid: String,
-    pub name: String,
-    pub booted_here: bool,
-}
-
-/// Takes `udid` for `session`, booting it when it is shut down. Blocks for
-/// as long as the boot takes, so it runs off the UI thread.
-pub fn claim(
-    udid: &str,
-    session: &str,
-    claims: &HashMap<String, String>,
-) -> Result<Claimed, String> {
-    let devices = list(claims)?;
-    let Some(d) = devices.iter().find(|d| d.udid == udid) else {
+/// Starts `udid` when it is shut down, and waits until it is up. Its name,
+/// and whether this started it. Blocks for as long as the boot takes, so it
+/// runs off the UI thread.
+pub fn boot(udid: &str) -> Result<(String, bool), String> {
+    let sims = list()?;
+    let Some(d) = sims.iter().find(|d| d.udid == udid) else {
         return Err(format!(
             "No simulator with udid {udid}. Call device_list to see what is available."
         ));
     };
-    if !is_selectable(d, session) {
-        return Err(format!(
-            "{} is in use by session {}.",
-            d.name,
-            d.claimed_by.as_deref().unwrap_or_default()
-        ));
-    }
     if !d.booted {
         simctl(&["boot", udid])?;
         simctl(&["bootstatus", udid, "-b"])?;
     }
-    Ok(Claimed {
-        udid: udid.to_owned(),
-        name: d.name.clone(),
-        booted_here: !d.booted,
-    })
+    Ok((d.name.clone(), !d.booted))
 }
 
-/// Shuts down a simulator the app booted; one the person booted stays up.
-pub fn shutdown(udid: &str) {
-    let _ = simctl(&["shutdown", udid]);
+/// Shuts the simulator down.
+pub fn shutdown(udid: &str) -> Result<(), String> {
+    simctl(&["shutdown", udid]).map(drop)
 }
 
 /// Starts the app `bundle`, bringing it forward when it already runs.
 pub fn launch(udid: &str, bundle: &str) -> Result<(), String> {
-    simctl(&["launch", "--terminate-running-process", udid, bundle])
-        .map(drop)
-        .map_err(|e| {
-            let lower = e.to_lowercase();
-            if ["not installed", "no such", "cannot find", "not found"]
-                .iter()
-                .any(|p| lower.contains(p))
-            {
-                format!("{bundle} is not installed on this device. Install it first.")
-            } else {
-                e
-            }
-        })
+    simctl(&["launch", "--terminate-running-process", udid, bundle]).map(drop)
 }
 
 pub fn terminate(udid: &str, bundle: &str) -> Result<(), String> {
@@ -352,6 +251,20 @@ pub fn outer_radius(drawn: (f64, f64), points: (f64, f64)) -> f64 {
     (drawn.0.min(drawn.1) * k).round()
 }
 
+/// The frame around a screen drawn `drawn` in a stage `area` (unmeasured
+/// at first, when the frame is 8 wide): its width, its outer corner radius,
+/// and the screen's own corner radius inside it, which the screen's picture
+/// is cut to as the 0.8 pane's web view rounded it.
+pub fn frame_metrics(
+    drawn: (f64, f64),
+    area: Option<(f64, f64)>,
+    points: (f64, f64),
+) -> (f64, f64, f64) {
+    let inset = area.map_or(8.0, |a| bezel_thickness(a, points));
+    let outer = outer_radius(drawn, points);
+    (inset, outer, (outer - inset).max(2.0))
+}
+
 /// The device's name made safe for a file, and when, as
 /// `iso` (`toISOString`) gives it.
 pub fn screenshot_name(name: &str, iso: &str) -> String {
@@ -388,21 +301,79 @@ pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
         .flatten()
 }
 
-/// Standard base64 with padding, for the PNGs the agent reads.
-pub fn base64(bytes: &[u8]) -> String {
-    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, b)| n | u32::from(*b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(char::from(ABC[(n >> (18 - 6 * i) & 63) as usize]));
-            } else {
-                out.push('=');
+/// Where a saved screenshot goes: Downloads, else home.
+fn downloads() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    let home = PathBuf::from(home);
+    let down = home.join("Downloads");
+    Some(if down.is_dir() { down } else { home })
+}
+
+/// Saves the screen of `udid`, named for `name` and now. Where it went.
+pub fn save(udid: &str, name: &str) -> Result<PathBuf, String> {
+    let png = screenshot(udid)?;
+    let dir = downloads().ok_or("No folder to save the screenshot in.")?;
+    let iso = crate::tasks::iso(crate::state::now_ms());
+    let path = dir.join(screenshot_name(name, &iso));
+    std::fs::write(&path, png).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// The longest side a frame is kept at: the colour atlas takes no bigger
+/// picture, and a pane never shows a phone larger.
+const FRAME_SIDE: u32 = 1024;
+
+/// A screen as the pane draws it: straight RGBA, shrunk to fit
+/// [`FRAME_SIDE`], and the screen's size in points.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Frame {
+    /// The picture's key in the atlas, new for each frame.
+    pub key: u64,
+    pub size: (u32, u32),
+    pub rgba: Vec<u8>,
+    pub points: (f64, f64),
+}
+
+/// The atlas keys of frames, apart from the terminals' pictures.
+const FRAME_KEYS: u64 = 1 << 62;
+
+/// Decodes a screenshot into a frame: shrunk by a whole factor with a box
+/// filter, once, on the thread that took it.
+pub fn frame(png: &[u8]) -> Result<Frame, String> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let (w, h, rgba) = crate::ui::decode_png(png)?;
+    let k = w.max(h).div_ceil(FRAME_SIDE).max(1);
+    let scale = point_scale(w, h);
+    Ok(Frame {
+        key: FRAME_KEYS | NEXT.fetch_add(1, Ordering::Relaxed),
+        size: (w / k, h / k),
+        rgba: shrink(&rgba, (w, h), k),
+        points: (f64::from(w) / scale, f64::from(h) / scale),
+    })
+}
+
+/// `rgba` (`w`×`h`) shrunk `k` times each way, each pixel the mean of its
+/// `k`×`k` block; a ragged edge is dropped.
+fn shrink(rgba: &[u8], (w, h): (u32, u32), k: u32) -> Vec<u8> {
+    if k <= 1 {
+        return rgba.to_vec();
+    }
+    let (w, h, k) = (w as usize, h as usize, k as usize);
+    let (ow, oh) = (w / k, h / k);
+    let mut out = Vec::with_capacity(ow * oh * 4);
+    let n = (k * k) as u32;
+    for oy in 0..oh {
+        for ox in 0..ow {
+            let mut sum = [0u32; 4];
+            for y in oy * k..oy * k + k {
+                let row = &rgba[(y * w + ox * k) * 4..(y * w + ox * k + k) * 4];
+                for px in row.chunks_exact(4) {
+                    for (s, &b) in sum.iter_mut().zip(px) {
+                        *s += u32::from(b);
+                    }
+                }
             }
+            out.extend(sum.map(|s| (s / n) as u8));
         }
     }
     out
@@ -421,15 +392,6 @@ mod tests {
             "iPhone-16-Pro-2 2026-03-04 05-06-07.png"
         );
         assert_eq!(screenshot_name("  ", at), "device 2026-03-04 05-06-07.png");
-    }
-
-    #[test]
-    fn base64_pads_like_btoa() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(&[0xff, 0xfe]), "//4=");
     }
 
     #[test]
@@ -459,37 +421,6 @@ mod tests {
         assert_eq!(png_size(b"GIF89a"), None);
     }
 
-    fn dev(udid: &str, name: &str, runtime: &str, booted: bool, by: Option<&str>) -> Device {
-        Device {
-            udid: udid.into(),
-            name: name.into(),
-            runtime: runtime.into(),
-            booted,
-            claimed_by: by.map(Into::into),
-        }
-    }
-
-    #[test]
-    fn the_picker_puts_free_and_booted_devices_first() {
-        let all = [
-            dev("aaaaaaaa1", "iPhone 16", "iOS 18.0", false, None),
-            dev("bbbbbbbb2", "iPhone 16", "iOS 18.0", false, None),
-            dev("c", "iPhone 16", "iOS 17.5", true, None),
-            dev("d", "iPad", "iOS 18.0", false, Some("other")),
-            dev("e", "iPad mini", "iOS 18.0", false, Some("me")),
-        ];
-        let listed = order_devices(&all, "me");
-        let order: Vec<&str> = listed.iter().map(|l| l.device.udid.as_str()).collect();
-        assert_eq!(order, ["c", "e", "aaaaaaaa1", "bbbbbbbb2", "d"]);
-        assert_eq!(listed[0].subtitle.as_deref(), Some("iOS 17.5"));
-        assert_eq!(
-            listed[2].subtitle.as_deref(),
-            Some("iOS 18.0 \u{b7} aaaaaaaa")
-        );
-        assert_eq!(listed[1].subtitle, None);
-        assert!(!listed[4].selectable);
-    }
-
     #[test]
     fn simctl_lists_only_available_ios_devices() {
         let raw = json!({"devices": {
@@ -501,18 +432,24 @@ mod tests {
                 {"udid": "w", "name": "Watch", "state": "Shutdown", "isAvailable": true}
             ]
         }});
-        let claims = HashMap::from([("u1".to_owned(), "s".to_owned())]);
-        assert_eq!(
-            parse_simctl(&raw, &claims),
-            [dev("u1", "iPhone", "iOS 26.2", true, Some("s"))]
-        );
+        let sim = Sim {
+            udid: "u1".into(),
+            name: "iPhone".into(),
+            runtime: "iOS 26.2".into(),
+            booted: true,
+        };
+        assert_eq!(parse_simctl(&raw), [sim]);
     }
 
     #[test]
-    fn the_device_button_follows_the_pane_then_the_project() {
-        assert!(should_show_button(None, true, true));
-        assert!(!should_show_button(Some(true), false, true));
-        assert!(should_show_button(Some(true), false, false));
-        assert!(!should_show_button(None, false, false));
+    fn a_frame_shrinks_by_whole_blocks() {
+        // 2x2 blocks of a 4x2 image: two pixels, each its block's mean.
+        let px = |v: u8| [v, v, v, 255];
+        let rgba: Vec<u8> = [0, 10, 100, 110, 20, 30, 120, 130]
+            .into_iter()
+            .flat_map(px)
+            .collect();
+        assert_eq!(shrink(&rgba, (4, 2), 2), [px(15), px(115)].concat());
+        assert_eq!(shrink(&rgba, (4, 2), 1), rgba);
     }
 }

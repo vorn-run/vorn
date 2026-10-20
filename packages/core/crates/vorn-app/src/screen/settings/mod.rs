@@ -4,15 +4,12 @@
 
 mod agents;
 mod pages;
-mod ssh;
 
 pub use agents::agent_field_id;
 pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
 pub(crate) use pages::{select_items, shell_panel};
-pub(crate) use ssh::ssh_key_items;
-pub use ssh::{host_id, key_field_id};
 
-use super::{c, ico, white, Screen};
+use super::{c, white, Screen};
 use crate::act::Act;
 use crate::look;
 use crate::settings::{Category, SetAct, CONNECTIONS_PAGE, EXTENSIONS, SECTIONS};
@@ -43,9 +40,6 @@ fn nav_svg(cat: Category) -> String {
         }
         Category::Agents => {
             r#"<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>"#
-        }
-        Category::Ssh => {
-            r##"<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1" fill="#ffffff"/><circle cx="6" cy="18" r="1" fill="#ffffff"/>"##
         }
         Category::Mcp => {
             r#"<path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="4"/>"#
@@ -182,6 +176,8 @@ fn sidebar(s: &Screen<'_>) -> El {
         .scroll_y()
         .px(12.0)
         .pt(4.0);
+    // A built-in's page that left the app keeps its place after the page it names.
+    let pages: Vec<_> = s.st.points.at(crate::points::kind::SETTINGS).collect();
     for (title, cats) in SECTIONS {
         list = list.child(
             div().px(12.0).pt(20.0).pb(6.0).child(
@@ -195,11 +191,17 @@ fn sidebar(s: &Screen<'_>) -> El {
         let mut items = div().col().gap(2.0);
         for cat in cats.iter().filter(|c| c.shown()) {
             items = items.child(nav_item(s, *cat, c(look::GRAY_400)));
+            for p in pages.iter().filter(|p| p.placed_after() == Some(*cat)) {
+                items = items.child(ext_item(s, p));
+            }
         }
         list = list.child(items);
     }
     // Connections, the Connectors built-in's page, leads the extensions' pages.
-    let mut pages: Vec<_> = s.st.points.at(crate::points::kind::SETTINGS).collect();
+    let mut pages: Vec<_> = pages
+        .into_iter()
+        .filter(|p| p.placed_after().is_none_or(|c| !c.shown()))
+        .collect();
     pages.sort_by_key(|p| p.key() != CONNECTIONS_PAGE);
     let pages = pages.into_iter().map(|p| ext_item(s, p));
     list = list
@@ -256,7 +258,6 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
         Category::Notifications => pages::notifications(s),
         Category::Experimental => pages::experimental(s),
         Category::Agents => agents::page(s),
-        Category::Ssh => ssh::page(s),
         Category::Mcp => pages::mcp(s),
         Category::Keys => pages::keys(s),
         Category::About => pages::about(s),
@@ -465,28 +466,6 @@ pub(super) fn button(s: &Screen<'_>, place: &str, label: &str, act: SetAct, enab
         b.opacity(0.4)
     };
     b
-}
-
-/// A section title: an icon, the label in small caps, and a count.
-pub(super) fn section(name: &str, label: &str, count: Option<usize>) -> El {
-    div()
-        .row()
-        .items_center()
-        .gap(8.0)
-        .mb(12.0)
-        .child(ico(name, 12.0, 2.0, c(look::GRAY_600)))
-        .child(
-            text(label.to_uppercase(), 12.0, c(look::GRAY_500))
-                .weight(500)
-                .tracking(0.05)
-                .line_height(16.0)
-                .role(Role::Heading, label),
-        )
-        .child_if(count.map(|n| {
-            text(n.to_string(), 10.0, c(look::GRAY_600))
-                .line_height(15.0)
-                .silent()
-        }))
 }
 
 /// A form label: `text-[10px] text-gray-600 uppercase tracking-wider`.

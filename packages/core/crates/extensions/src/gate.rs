@@ -169,6 +169,16 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("signin.check", Permission::BrowserSession),
     ("signin.forget", Permission::BrowserSession),
     ("signin.completed", Permission::BrowserSession),
+    ("web.call", Permission::Web),
+    ("video.call", Permission::Video),
+    ("remote.hosts", Permission::Remote),
+    ("remote.saveHosts", Permission::Remote),
+    ("remote.test", Permission::Remote),
+    ("remote.keys", Permission::Remote),
+    ("remote.storeKey", Permission::Remote),
+    ("remote.importKey", Permission::Remote),
+    ("remote.deleteKey", Permission::Remote),
+    ("remote.vault", Permission::Remote),
 ];
 
 /// The core methods open only to the extensions Vorn ships: they write the
@@ -178,6 +188,11 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 /// `connection.synced` Connectors',
 /// called by the other built-ins; `task.changed` is Tasks' own, which tells
 /// clients the rows a write changed and emits the events it fires.
+/// `web.call` drives the client's web views, which are named by session and
+/// shared, so only the Browser that Vorn ships drives them; `video.call`
+/// drives the machine's simulators the same way, for the Device it ships.
+/// The `remote.*` methods hold the hosts every remote session runs on and
+/// the keys those sessions log in with, which only the SSH built-in edits.
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
     "task.changed",
@@ -199,6 +214,16 @@ pub const BUILTIN_ONLY: &[&str] = &[
     "signin.check",
     "signin.forget",
     "signin.completed",
+    "web.call",
+    "video.call",
+    "remote.hosts",
+    "remote.saveHosts",
+    "remote.test",
+    "remote.keys",
+    "remote.storeKey",
+    "remote.importKey",
+    "remote.deleteKey",
+    "remote.vault",
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call needs it.

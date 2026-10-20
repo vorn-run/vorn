@@ -7174,6 +7174,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-ext-browser"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "url",
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-ext-device"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-ext-files"
 version = "0.0.0"
 dependencies = [
@@ -7183,6 +7202,13 @@ dependencies = [
 
 [[package]]
 name = "vorn-ext-probe"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-ext-ssh"
 version = "0.0.0"
 dependencies = [
  "vorn-extension-sdk",

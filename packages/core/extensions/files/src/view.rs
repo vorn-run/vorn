@@ -25,7 +25,7 @@ fn tool(id: &str, label: &str, icon: &str) -> Tool {
         id: id.to_owned(),
         label: label.to_owned(),
         icon: icon.to_owned(),
-        on: false,
+        ..Tool::default()
     }
 }
 
@@ -64,6 +64,7 @@ pub fn pane(files: &mut Files, host: &mut dyn Host, owner: &str) -> Result<tree:
             active: p.active.as_deref() == Some(t.as_str()),
             preview: p.preview.as_deref() == Some(t.as_str()),
             dirty: files.dirty(host, &tab_key(owner, t)),
+            icon: None,
         });
     }
     let tree_shown = p.tree_shown();

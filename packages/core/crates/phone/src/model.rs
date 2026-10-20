@@ -428,7 +428,7 @@ impl Model {
 
     /// A tree field's Return: the extension is told what the field holds.
     pub fn submit(&mut self, ui: &Ui, id: Id) {
-        if let Some(Act::Point(PointAct::TreeField { key, node })) = self.acts.text_of(id) {
+        if let Some(Act::Point(PointAct::TreeField { key, node, .. })) = self.acts.text_of(id) {
             let event = vorn_tree::Event::new(
                 node,
                 vorn_tree::EventKind::Submit,

@@ -1,0 +1,15 @@
+[package]
+name = "vorn-ext-ssh"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "SSH, an extension Vorn ships as a Wasm component: the remote hosts sessions run on and the SSH keys they log in with, edited and tested from its settings page"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../crates/extension-sdk" }

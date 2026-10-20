@@ -595,7 +595,26 @@ pub struct Point {
     /// For attention: the method denying an item calls, with its `id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deny: Option<String>,
+    /// For a built-in's settings page: the app's own page it follows in the
+    /// sidebar, one of [`SETTINGS_PAGES`], so a page that left the app for
+    /// a built-in keeps its place. Another extension's page stays under
+    /// Extensions whatever it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
 }
+
+/// The app's own settings pages a settings contribution can follow.
+pub const SETTINGS_PAGES: [&str; 9] = [
+    "appearance",
+    "general",
+    "updates",
+    "notifications",
+    "experimental",
+    "agents",
+    "mcp",
+    "keys",
+    "network",
+];
 
 /// The id, title and where-it-shows every contribution carries.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -732,10 +751,18 @@ pub enum Permission {
     WorkflowsWrite,
     #[serde(rename = "inbox.write")]
     InboxWrite,
+    /// Drives the client's web views: loads, reads and acts on their pages.
+    Web,
+    /// Drives the devices the client shows: lists, starts and stops
+    /// simulators and acts on their apps.
+    Video,
+    /// Reads and writes the remote hosts and the SSH keys Vorn keeps, and
+    /// tests logging in to a host.
+    Remote,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 24] = [
+    pub const ALL: [Permission; 27] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -760,6 +787,9 @@ impl Permission {
         Permission::WorkflowsRead,
         Permission::WorkflowsWrite,
         Permission::InboxWrite,
+        Permission::Web,
+        Permission::Video,
+        Permission::Remote,
     ];
 
     pub fn name(self) -> &'static str {
@@ -788,6 +818,9 @@ impl Permission {
             Permission::WorkflowsRead => "workflows.read",
             Permission::WorkflowsWrite => "workflows.write",
             Permission::InboxWrite => "inbox.write",
+            Permission::Web => "web",
+            Permission::Video => "video",
+            Permission::Remote => "remote",
         }
     }
 
@@ -1644,6 +1677,7 @@ fn read_point(
     let raise = opt("raise");
     let rows = opt("rows");
     let deny = opt("deny");
+    let after = opt("after");
     if icon.as_deref().is_some_and(|i| !icon_name(i)) {
         return Err(("icon", "is not an icon name such as trash-2".into()));
     }
@@ -1734,9 +1768,19 @@ fn read_point(
     if place != Place::Attention && deny.is_some() {
         return Err(("deny", "belongs to attention".into()));
     }
+    match after.as_deref() {
+        Some(_) if place != Place::Settings => {
+            return Err(("after", "belongs to a settings page".into()));
+        }
+        Some(a) if !SETTINGS_PAGES.contains(&a) => {
+            return Err(("after", format!("is one of {}", SETTINGS_PAGES.join(", "))));
+        }
+        _ => {}
+    }
     Ok(Point {
         rows,
         deny,
+        after,
         base,
         tree,
         icon,

@@ -1,8 +1,9 @@
 //! The desktop app's bridge connection: the app answers what only it can.
 //!
-//! The browser pane's web views and the device registry live in the desktop
-//! app, so `browser:*` and `device:*` are asked of it over
-//! the socket it opened to vornd, as are the connectors' `session:*` calls
+//! The web views and the devices it shows live in the desktop app, so
+//! `web:*` and `video:*` (a built-in's `web.call` and `video.call`) are
+//! asked of it over the socket it opened to vornd, as are the connectors'
+//! `session:*` calls
 //! ([`crate::bridge::Bridge`]). The app claims that socket with
 //! `bridge:identify`; vornd sends each call down it as a request of its own
 //! and hands the answer to whoever asked.
@@ -36,14 +37,6 @@ pub const NOT_RUNNING: &str = "Vorn app is not running (no main process connecte
 pub const DISCONNECTED: &str = "Vorn main process disconnected";
 
 const ID_PREFIX: &str = "vornd-";
-
-/// The groups the app answers.
-pub fn answers(method: &str) -> bool {
-    matches!(
-        method.split_once(':').map(|(g, _)| g),
-        Some("browser" | "device")
-    )
-}
 
 type Reply = oneshot::Sender<Result<Option<Value>, String>>;
 
@@ -146,7 +139,7 @@ impl Desktop {
             Ok(Err(_)) => Err(DISCONNECTED.to_owned()),
             Err(_) => {
                 self.lock_pending().remove(&id);
-                Err(format!("Browser request timed out: {method}"))
+                Err(format!("Vorn app request timed out: {method}"))
             }
         }
     }
@@ -231,14 +224,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn answers_only_the_browser_and_device_groups() {
-        assert!(answers("browser:readPage"));
-        assert!(answers("device:list"));
-        assert!(!answers("bridge:identify"));
-        assert!(!answers("browserless:x"));
-    }
-
     #[tokio::test]
     async fn asks_main_and_hands_back_its_answer() {
         let streams = Streams::new();
@@ -251,12 +236,12 @@ mod tests {
             let desktop = std::sync::Arc::clone(&desktop);
             tokio::spawn(async move {
                 desktop
-                    .request("browser:tabs", json!({ "sessionId": "s" }), TIMEOUT)
+                    .request("video:list", json!({ "sessionId": "s" }), TIMEOUT)
                     .await
             })
         };
         let frame = sent(&mut main).await;
-        assert_eq!(frame["method"], "browser:tabs");
+        assert_eq!(frame["method"], "video:list");
         assert_eq!(frame["params"], json!({ "sessionId": "s" }));
         let id = frame["id"].as_str().unwrap().to_owned();
         assert!(id.starts_with(ID_PREFIX));
@@ -284,7 +269,7 @@ mod tests {
             let asking = {
                 let desktop = std::sync::Arc::clone(&desktop);
                 tokio::spawn(
-                    async move { desktop.request("device:list", Value::Null, TIMEOUT).await },
+                    async move { desktop.request("video:list", Value::Null, TIMEOUT).await },
                 )
             };
             let frame = sent(&mut main).await;
@@ -337,7 +322,7 @@ mod tests {
     async fn refuses_without_main_and_after_its_deadline() {
         let desktop = Desktop::default();
         assert_eq!(
-            desktop.request("browser:tabs", Value::Null, TIMEOUT).await,
+            desktop.request("video:list", Value::Null, TIMEOUT).await,
             Err(NOT_RUNNING.to_owned())
         );
         let streams = Streams::new();
@@ -345,9 +330,9 @@ mod tests {
         desktop.claim(main.id(), &main.forwarder());
         assert_eq!(
             desktop
-                .request("browser:tabs", Value::Null, Duration::from_millis(5))
+                .request("web:read", Value::Null, Duration::from_millis(5))
                 .await,
-            Err("Browser request timed out: browser:tabs".to_owned())
+            Err("Vorn app request timed out: web:read".to_owned())
         );
         assert!(desktop.lock_pending().is_empty());
     }
@@ -365,7 +350,7 @@ mod tests {
 
         let asking = {
             let desktop = std::sync::Arc::clone(&desktop);
-            tokio::spawn(async move { desktop.request("device:list", Value::Null, TIMEOUT).await })
+            tokio::spawn(async move { desktop.request("video:list", Value::Null, TIMEOUT).await })
         };
         sent(&mut main).await;
         desktop.release(other.id());

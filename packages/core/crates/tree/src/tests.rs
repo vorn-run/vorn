@@ -270,6 +270,7 @@ fn the_parts_a_pane_draws_travel_and_check() {
                     label: "Hide file tree".into(),
                     icon: "list-tree".into(),
                     on: true,
+                    ..Tool::default()
                 }],
                 ..Tabs::default()
             },
@@ -375,4 +376,107 @@ fn an_event_carries_its_scope_and_an_answer_can_ask_first() {
     assert_eq!(a.ask.map(|q| q.event.value), Some("/a".to_owned()));
     let s: Surface = serde_json::from_value(json!({"cells": true, "scope": "s1"})).unwrap();
     assert_eq!(s.scope.as_deref(), Some("s1"));
+}
+
+#[test]
+fn a_video_travels_with_its_picker_and_names_its_view() {
+    let shown = Video {
+        view: "s1".into(),
+        device: Some("UDID".into()),
+        title: "iPhone 17".into(),
+        zoom: Some(1.25),
+        picker: Some(Picker {
+            heading: "Simulators".into(),
+            choices: vec![Choice {
+                id: "UDID".into(),
+                title: "iPhone 17".into(),
+                status: Some(Tone::Good),
+                ..Choice::default()
+            }],
+            ..Picker::default()
+        }),
+        tools: vec![Tool {
+            id: "draw".into(),
+            label: "Draw".into(),
+            icon: "pencil".into(),
+            tip: Some("Draw for the agent".into()),
+            divider: true,
+            ..Tool::default()
+        }],
+        ..Video::default()
+    };
+    let tree = col([video("screen", shown.clone())]);
+    let v = serde_json::to_value(Rendered::new(tree.clone())).unwrap();
+    let part = &v["tree"]["children"][0];
+    assert_eq!(part["kind"], "video");
+    assert_eq!(part["view"], "s1");
+    assert_eq!(part["device"], "UDID");
+    assert_eq!(part["tools"][0]["id"], "draw");
+    assert_eq!(part["tools"][0]["tip"], "Draw for the agent");
+    assert_eq!(part["tools"][0]["divider"], true);
+    assert!(part["tools"][0].get("busy").is_none());
+    assert!(part.get("boot").is_none(), "false flags stay off the wire");
+    assert_eq!(part["picker"]["choices"][0]["status"], "good");
+    let back: Rendered = serde_json::from_value(v).unwrap();
+    assert_eq!(back.tree, tree);
+    assert!(check(&tree).is_ok());
+
+    let blank = Video {
+        view: " ".into(),
+        ..Video::default()
+    };
+    let e = check(&col([video("screen", blank)])).unwrap_err();
+    assert!(
+        e.iter().any(|m| m.contains(".view: names the video")),
+        "{e:?}"
+    );
+    let shrunk = Video {
+        zoom: Some(0.0),
+        ..shown
+    };
+    let e = check(&col([video("screen", shrunk)])).unwrap_err();
+    assert!(
+        e.iter().any(|m| m.contains("a zoom is a positive number")),
+        "{e:?}"
+    );
+    let e = check(&col([video("screen", Video::default()).child(text("no"))])).unwrap_err();
+    assert!(e.iter().any(|m| m.contains("holds no children")), "{e:?}");
+}
+
+#[test]
+fn a_web_page_travels_and_names_its_view() {
+    let tree = col([
+        tabs(
+            "tabs",
+            Tabs {
+                tabs: vec![Tab {
+                    id: "0".into(),
+                    label: "Plan".into(),
+                    active: true,
+                    icon: Some("file-text".into()),
+                    ..Tab::default()
+                }],
+                ..Tabs::default()
+            },
+        ),
+        web("page", "s1", "https://example.com/"),
+    ]);
+    let v = serde_json::to_value(Rendered::new(tree.clone())).unwrap();
+    assert_eq!(v["tree"]["children"][1]["kind"], "web");
+    assert_eq!(v["tree"]["children"][1]["view"], "s1");
+    assert_eq!(v["tree"]["children"][0]["tabs"][0]["icon"], "file-text");
+    let back: Rendered = serde_json::from_value(v).unwrap();
+    assert_eq!(back.tree, tree);
+    assert!(check(&tree).is_ok());
+
+    let e = check(&col([web("page", " ", "about:blank")])).unwrap_err();
+    assert!(
+        e.iter().any(|m| m.contains(".view: names the web view")),
+        "{e:?}"
+    );
+    let e = check(&col([web("page", "s1", "").child(text("no"))])).unwrap_err();
+    assert!(e.iter().any(|m| m.contains("holds no children")), "{e:?}");
+
+    let page = Event::new("page", EventKind::Page, r#"{"type":"submit","text":"a"}"#);
+    assert_eq!(serde_json::to_value(&page).unwrap()["kind"], "page");
 }

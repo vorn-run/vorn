@@ -155,6 +155,8 @@ impl App {
             };
             self.st.points.widths.insert(key, r.w);
         }
+        self.browser_tick();
+        self.video_tick();
         self.codes_tick(ui);
     }
 

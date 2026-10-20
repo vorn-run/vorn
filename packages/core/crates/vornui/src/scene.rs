@@ -341,7 +341,9 @@ pub struct Sprite {
     pub uv: [f32; 4],
     pub color: [f32; 4],
     /// [`Sprite::MASK`] or [`Sprite::COLOR`]; then, for a glyph mask, its
-    /// [`TextGamma`]'s contrast and gamma (gamma 0: no correction); unused.
+    /// [`TextGamma`]'s contrast and gamma (gamma 0: no correction), and for
+    /// a colour image the radius its corners are rounded to (0: square);
+    /// unused.
     pub kind: [f32; 4],
     /// Visible region: x0, y0, x1, y1.
     pub clip: [f32; 4],
@@ -355,6 +357,15 @@ impl Sprite {
 
     pub fn is_color(&self) -> bool {
         self.kind[0] > 0.5
+    }
+
+    /// The radius a colour image's corners are rounded to; 0 for square.
+    pub fn corner_radius(&self) -> f32 {
+        if self.is_color() {
+            self.kind[1].max(0.0)
+        } else {
+            0.0
+        }
     }
 
     /// The glyph correction this sprite's mask takes, if any.
@@ -580,6 +591,14 @@ impl Scene {
             [Sprite::MASK, gamma.contrast, gamma.gamma, 0.0]
         };
         self.push_sprite(r, uv, color, kind);
+    }
+
+    /// A colour image, the texels `uv` drawn into `r` with its corners
+    /// rounded to `radius`, as a picture in a rounded frame: the corners
+    /// are cut in the shader, so a picture needs no mask of its own.
+    pub fn rounded_image(&mut self, r: Rect, uv: [f32; 4], color: Rgba, radius: f32) {
+        let k = self.transform().scale;
+        self.push_sprite(r, uv, color, [Sprite::COLOR, radius.max(0.0) * k, 0.0, 0.0]);
     }
 
     fn push_sprite(&mut self, r: Rect, uv: [f32; 4], color: Rgba, kind: [f32; 4]) {

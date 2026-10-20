@@ -25,6 +25,7 @@ pub mod side;
 pub mod sidebar;
 mod signin;
 pub mod tasks;
+mod video;
 pub mod workflows;
 
 use std::collections::HashMap;

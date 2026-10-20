@@ -4,18 +4,22 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use vorn_extensions::api::types::{Request, Response};
 use vorn_extensions::api::ExtError;
-use vorn_extensions::events::{AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, WORKTREE_IDLE};
-use vorn_extensions::gate::{Answer, Caller, World};
+use vorn_extensions::events::{
+    AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_EXITED, WORKTREE_IDLE,
+};
+use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
 use vorn_extensions::router::{Router, RouterSettings};
 
 use super::*;
 
-/// Answers the core methods the built-ins call, and keeps what they asked.
+/// Answers the core methods the built-ins call, and keeps what they asked
+/// and what they store, by extension and key.
 #[derive(Default)]
 struct Core {
     calls: Mutex<Vec<(String, Value)>>,
+    kept: Mutex<BTreeMap<(String, String), Value>>,
 }
 
 impl World for Core {
@@ -50,9 +54,43 @@ impl World for Core {
     fn secret(&self, _: &Caller, _: &str, _: &str) -> Answer<Option<String>> {
         Box::pin(async { Ok(None) })
     }
+
+    fn storage(
+        &self,
+        caller: &Caller,
+        _: Option<std::path::PathBuf>,
+        call: StorageCall,
+    ) -> Answer<Value> {
+        let mut kept = guard(&self.kept);
+        let answer = match call {
+            StorageCall::Get { key } => kept
+                .get(&(caller.extension.clone(), key))
+                .cloned()
+                .unwrap_or(Value::Null),
+            StorageCall::Set { key, value } => {
+                kept.insert((caller.extension.clone(), key), value);
+                Value::Null
+            }
+            _ => Value::Null,
+        };
+        Box::pin(async move { Ok(answer) })
+    }
 }
 
 impl Core {
+    fn keep(&self, extension: &str, key: &str, value: Value) {
+        guard(&self.kept).insert((extension.to_owned(), key.to_owned()), value);
+    }
+
+    /// The simulators the Device asked the client to shut down, in order.
+    fn shut_down(&self) -> Vec<String> {
+        self.asked("video.call")
+            .iter()
+            .filter(|a| a["op"] == "shutdown")
+            .filter_map(|a| a["params"]["udid"].as_str().map(str::to_owned))
+            .collect()
+    }
+
     fn asked(&self, method: &str) -> Vec<Value> {
         guard(&self.calls)
             .iter()
@@ -124,6 +162,9 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
         [
             ("vorn.files", "panes"),
             ("vorn.files", "cards"),
+            ("vorn.browser", "panes"),
+            ("vorn.device", "panes"),
+            ("vorn.ssh", "settings"),
             ("vorn.blocks", "shell"),
             ("vorn.worktrees", "sidebar"),
             ("vorn.worktrees", "settings"),
@@ -596,4 +637,34 @@ async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
         (removed["close"].clone(), removed["toast"].clone()),
         (json!(true), json!("Worktree removed"))
     );
+}
+
+#[tokio::test]
+async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
+    let s = setup();
+    let claim = |udid: &str| json!({ "udid": udid, "name": "iPhone", "bootedHere": true });
+    // Kept from before vornd started: `gone` ended meanwhile, `t1` still runs.
+    s.core.keep(
+        device::ID,
+        "claims",
+        json!({ "gone": claim("u1"), "t1": claim("u2") }),
+    );
+    s.builtins.start();
+    until(|| s.core.shut_down() == ["u1"]).await;
+
+    s.router.bus().emit(
+        SESSION_EXITED,
+        || json!({ "sessionId": "t1", "kind": "terminal" }),
+    );
+    until(|| s.core.shut_down() == ["u1", "u2"]).await;
+    assert_eq!(
+        guard(&s.core.kept)[&(device::ID.to_owned(), "claims".to_owned())],
+        json!({})
+    );
+
+    s.core
+        .keep(device::ID, "claims", json!({ "t1": claim("u3") }));
+    s.builtins.set(device::ID, false).unwrap();
+    until(|| s.core.shut_down() == ["u1", "u2", "u3"]).await;
+    assert!(s.router.rows(device::ID, "open").is_empty());
 }
