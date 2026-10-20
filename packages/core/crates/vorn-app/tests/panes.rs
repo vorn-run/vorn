@@ -446,18 +446,17 @@ fn the_device_button_opens_the_picker_and_the_pane() {
     assert_eq!(app.st.bench.video_picker.as_deref(), Some(sid.as_str()));
     shot.save(&mut app, "device-picker");
 
-    // Escape shuts it and leaves the pane.
+    // Escape with nothing picked shuts the picker and the pane with it.
     shot.send(&mut app, key("Escape", 0, None));
-    until_video(&mut shot, &mut app, &sid, "the picker shut", |v| {
-        v.picker.is_none()
+    shot.until(&mut app, "the picker shut", |app, _| {
+        app.pump();
+        app.st.bench.kinds(&sid).is_empty().then_some(())
     });
-    shot.frame(&mut app);
     assert!(app.st.bench.video_picker.is_none());
-    assert!(
-        shot.labelled(&mut app, "Toolbar", "Device controls").is_some(),
-        "the control bar"
-    );
-    shot.save(&mut app, "device-pane");
+    shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
+    until_video(&mut shot, &mut app, &sid, "the picker again", |v| {
+        v.picker.as_ref().is_some_and(|p| !p.loading)
+    });
 
     // A simulator that is not there: the app's start fails into the pane's notice.
     let key = device_key(&app.st.points, &sid).expect("the pane's tree");
@@ -481,6 +480,11 @@ fn the_device_button_opens_the_picker_and_the_pane() {
         "{failed:?}"
     );
     assert!(!failed.boot && failed.device.is_none(), "{failed:?}");
+    shot.save(&mut app, "device-pane");
+    assert!(
+        shot.labelled(&mut app, "Toolbar", "Device controls").is_some(),
+        "the control bar"
+    );
     let dismiss = shot
         .labelled(&mut app, "Button", "Dismiss error")
         .expect("the notice's ✕");
