@@ -112,7 +112,11 @@ fn every_drawn_colour_is_a_theme_token() {
     let found: Vec<String> = files
         .iter()
         .filter_map(|file| {
-            let rel = file.strip_prefix(crates).ok()?.to_string_lossy().replace('\\', "/");
+            let rel = file
+                .strip_prefix(crates)
+                .ok()?
+                .to_string_lossy()
+                .replace('\\', "/");
             (!DEFINITIONS.contains(&rel.as_str())).then_some((file, rel))
         })
         .flat_map(|(file, rel)| {

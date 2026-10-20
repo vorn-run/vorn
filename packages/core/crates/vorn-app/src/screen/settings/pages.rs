@@ -295,7 +295,11 @@ fn colour_rows(s: &Screen<'_>) -> El {
         s,
         a::MATERIALS,
         prefs.materials.key(),
-        &[("Solid", "solid"), ("Native", "native"), ("Themed", "themed")],
+        &[
+            ("Solid", "solid"),
+            ("Native", "native"),
+            ("Themed", "themed"),
+        ],
     );
     div()
         .col()
@@ -334,7 +338,13 @@ fn colour_rows(s: &Screen<'_>) -> El {
 }
 
 /// A row of tiles, one per theme of `look`, each drawn in its own colours.
-fn theme_row(s: &Screen<'_>, key: &str, title: &str, kind: vorn_theme::Appearance, chosen: &str) -> El {
+fn theme_row(
+    s: &Screen<'_>,
+    key: &str,
+    title: &str,
+    kind: vorn_theme::Appearance,
+    chosen: &str,
+) -> El {
     let installed = s.st.settings.appearance.installed();
     let mut tiles = div().row().wrap_children().gap(8.0).mt(12.0);
     for t in vorn_theme::bundled()
@@ -372,7 +382,8 @@ fn theme_row(s: &Screen<'_>, key: &str, title: &str, kind: vorn_theme::Appearanc
 fn theme_tile(s: &Screen<'_>, key: &str, t: &vorn_theme::Theme, on: bool) -> El {
     use vorn_theme::Token as T;
     let id = theme_tile_id(&t.id);
-    s.acts.bind(id, set(default_act(key, format!("\"{}\"", t.id))));
+    s.acts
+        .bind(id, set(default_act(key, format!("\"{}\"", t.id))));
     let hot = s.ui.hover(id);
     let rgba = |token| Rgba::from(t.get(token));
     let line = |w: f32, token| div().size(w, 3.0).rounded(1.5).bg(rgba(token));
@@ -415,7 +426,11 @@ fn theme_tile(s: &Screen<'_>, key: &str, t: &vorn_theme::Theme, on: bool) -> El 
                 .child(div().size(20.0, 6.0).rounded(2.0).bg(rgba(T::Accent)))
                 .child(ansi),
         );
-    let name = if on { c(look::GRAY_100) } else { c(look::GRAY_400) };
+    let name = if on {
+        c(look::GRAY_100)
+    } else {
+        c(look::GRAY_400)
+    };
     div()
         .id(id)
         .on(Action::Click)

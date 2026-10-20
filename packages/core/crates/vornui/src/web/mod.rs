@@ -707,7 +707,8 @@ fn follow_system_look<A: App>(
     shared: &Rc<RefCell<Live<A>>>,
     win: &web_sys::Window,
 ) -> Result<(), JsValue> {
-    let queries: [(&str, fn(&mut Ui, bool)); 2] = [
+    type Set = fn(&mut Ui, bool);
+    let queries: [(&str, Set); 2] = [
         ("(prefers-color-scheme: dark)", Ui::set_system_dark),
         (
             "(prefers-reduced-transparency: reduce)",
@@ -719,10 +720,15 @@ fn follow_system_look<A: App>(
             continue;
         };
         set(&mut shared.borrow_mut().ui, list.matches());
-        on(&list, "change", shared, move |s, e: web_sys::MediaQueryListEvent| {
-            set(&mut s.ui, e.matches());
-            s.redraw_later();
-        })?;
+        on(
+            &list,
+            "change",
+            shared,
+            move |s, e: web_sys::MediaQueryListEvent| {
+                set(&mut s.ui, e.matches());
+                s.redraw_later();
+            },
+        )?;
     }
     Ok(())
 }

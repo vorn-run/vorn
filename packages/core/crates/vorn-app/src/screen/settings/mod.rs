@@ -6,6 +6,7 @@ mod agents;
 mod pages;
 
 pub use agents::agent_field_id;
+pub(crate) use pages::theme_tile_id;
 pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
 pub(crate) use pages::{select_items, shell_panel};
 

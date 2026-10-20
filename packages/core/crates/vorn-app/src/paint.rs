@@ -321,4 +321,3 @@ mod tests {
         assert_eq!(row.trim_end(), "─┼─");
     }
 }
-

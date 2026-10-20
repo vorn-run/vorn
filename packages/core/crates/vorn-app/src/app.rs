@@ -837,6 +837,18 @@ impl App {
         }
     }
 
+    /// The theme whose tile in Settings › Appearance is under the pointer.
+    fn hovered_theme(&self, ui: &Ui) -> Option<String> {
+        if !self.st.settings.open {
+            return None;
+        }
+        let bundled = vorn_theme::bundled().iter();
+        bundled
+            .chain(self.st.settings.appearance.installed())
+            .find(|t| ui.hovered(crate::screen::settings::theme_tile_id(&t.id)))
+            .map(|t| t.id.clone())
+    }
+
     /// Installs the palette the appearance settings resolve to; when the
     /// colours change, every terminal is drawn again in the new ones.
     fn retheme(&mut self) {
@@ -3282,6 +3294,7 @@ impl App {
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
         self.system_look = (ui.system_dark(), ui.reduced_transparency());
+        self.st.settings.theme_preview = self.hovered_theme(ui);
         self.pump();
         self.flex_tick(ui);
         self.grid_replies(ui);

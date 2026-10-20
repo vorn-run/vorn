@@ -578,7 +578,11 @@ fn os_material(window: &Window, dark: Option<bool>) -> bool {
         return false;
     };
     let hwnd = h.hwnd.get() as HWND;
-    let kind = if dark.is_some() { DWMSBT_MAINWINDOW } else { DWMSBT_NONE };
+    let kind = if dark.is_some() {
+        DWMSBT_MAINWINDOW
+    } else {
+        DWMSBT_NONE
+    };
     let edge = if dark.is_some() { -1 } else { 0 };
     let margins = MARGINS {
         cxLeftWidth: edge,

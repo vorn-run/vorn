@@ -8,9 +8,6 @@ use crate::look::{self, Color};
 use crate::onboarding::{self, OnbAct, Then, EXPLORE, MCP_CAPS, STEPS};
 use crate::ui::{div, text, Action, El, Id, Rgba, Role};
 
-/// Tailwind v4's `emerald-400`, `cyan-400` and `violet-400`: the guide's
-/// status and demo tints.
-
 const W: f32 = 520.0;
 /// The header's and footer's heights with their hairlines, for the body's
 /// share of `max-h-[85vh]`.

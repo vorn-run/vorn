@@ -21,7 +21,13 @@ fn grid() -> El {
         rows = rows.child(row);
     }
     let mut menu = div().col().w(220.0).py(4.0).rounded(8.0).floating();
-    for item in ["New Session", "Split Right", "Split Down", "Rename", "Close"] {
+    for item in [
+        "New Session",
+        "Split Right",
+        "Split Down",
+        "Rename",
+        "Close",
+    ] {
         menu = menu.child(div().px(12.0).py(6.0).child(text(item, 13.0, color::INK)));
     }
     rows.child(

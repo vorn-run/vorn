@@ -251,7 +251,12 @@ pub fn icon_colors_from(
             .border(1.0, if on { white(0.2) } else { white(0.0) })
             .role(Role::Button, label)
             .selected(on)
-            .child(ico(glyph, 12.0, 1.5, if on { tint } else { c(look::GRAY_400) }));
+            .child(ico(
+                glyph,
+                12.0,
+                1.5,
+                if on { tint } else { c(look::GRAY_400) },
+            ));
         grid = grid.child(tooltip(s.ui, b, id, label, None));
     }
     let mut swatches = div().row().gap(6.0);

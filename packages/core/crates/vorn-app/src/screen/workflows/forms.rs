@@ -557,7 +557,10 @@ fn project_glyph(s: &Screen<'_>, name: &str) -> El {
 /// `ProjectPicker` (`variant="form"`): the project, or From Context.
 fn project(s: &Screen<'_>, node: &str, path: &str, current: &str, from_context: bool) -> El {
     let (label, glyph) = if from_context {
-        (Some("From Context"), ico("zap", 13.0, 1.5, c(look::BLUE_400)))
+        (
+            Some("From Context"),
+            ico("zap", 13.0, 1.5, c(look::BLUE_400)),
+        )
     } else {
         (
             (!current.is_empty()).then_some(current),

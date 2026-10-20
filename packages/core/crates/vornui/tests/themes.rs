@@ -88,7 +88,10 @@ fn each_bundled_theme_draws_its_surfaces_and_readable_ink_in_a_window() {
             let i = ((y * SIZE.0 + x) * 4) as usize;
             rgb(&rgba[i..i + 4])
         };
-        let (base, panel) = (theme.get(Token::SurfaceBase), theme.get(Token::SurfacePanel));
+        let (base, panel) = (
+            theme.get(Token::SurfaceBase),
+            theme.get(Token::SurfacePanel),
+        );
         assert_eq!(at(SIZE.0 - 2, SIZE.1 - 2), base, "{}: base", theme.id);
         assert_eq!(at(2, SIZE.1 - 2), panel, "{}: panel", theme.id);
         let on_panel = strongest(&rgba, (16, 16, 140, 16), panel);
@@ -125,7 +128,11 @@ fn each_bundled_theme_reads_in_a_terminal() {
                 seen += 1;
             }
         }
-        assert!(seen >= 3 * 10, "{}: the three lines show ({seen} cells)", theme.id);
+        assert!(
+            seen >= 3 * 10,
+            "{}: the three lines show ({seen} cells)",
+            theme.id
+        );
         let corner = buf.get(cols - 1, rows - 1).unwrap().bg;
         let base = theme.get(Token::SurfaceBase);
         assert_eq!(

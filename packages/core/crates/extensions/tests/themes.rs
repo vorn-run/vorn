@@ -69,7 +69,10 @@ fn a_theme_installs_from_git_and_is_listed() {
     assert_eq!(sheet.id, "acme.dusk");
     let pack = installs.confirm(&sheet.token, "acme.dusk").unwrap();
 
-    let theme = pack.manifest.theme().expect("its theme survives the install");
+    let theme = pack
+        .manifest
+        .theme()
+        .expect("its theme survives the install");
     assert_eq!(theme.name, "Acme Dusk");
     assert_eq!(
         theme.get(vorn_theme::Token::Accent),
