@@ -876,7 +876,14 @@ impl App {
                         self.layout_opened(&params);
                     }
                     let before = self.store.workspace().to_owned();
-                    if self.store.apply(&method, params) == crate::client::Change::TasksStale {
+                    // A read running may predate these rows, and rows may predate the app's
+                    // own writes: either way the list is read again once both have landed.
+                    let rows = method == "task:rows";
+                    self.st.tasks.reload_stale |= rows && self.st.tasks.reloading;
+                    if rows && self.st.tasks.writing > 0 {
+                        self.reload_tasks();
+                    } else if self.store.apply(&method, params) == crate::client::Change::TasksStale
+                    {
                         self.reload_tasks();
                     }
                     if self.store.workspace() != before {

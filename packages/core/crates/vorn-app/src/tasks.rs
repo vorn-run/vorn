@@ -739,6 +739,11 @@ pub struct Tasks {
     pub reloading: bool,
     /// It was asked to be read again while a read ran.
     pub reload_again: bool,
+    /// The app's own task writes on their way to vornd.
+    pub writing: u32,
+    /// One of them overlapped the read running, which may predate it: the
+    /// read is dropped for a new one rather than undoing the change.
+    pub reload_stale: bool,
 }
 
 impl Tasks {

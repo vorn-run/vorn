@@ -51,6 +51,8 @@ pub(super) enum TaskCall {
         task: Option<String>,
         toast: Option<&'static str>,
     },
+    /// A task written to vornd, as the app's own change.
+    Written,
     /// A page of the task list read again from `offset`, after `read`.
     Page {
         offset: u64,
@@ -60,12 +62,15 @@ pub(super) enum TaskCall {
 
 impl App {
     /// Reads the task list again, a page at a time, as vornd asks when tasks
-    /// were written without saying which; one read at a time.
+    /// were written without saying which; one read at a time, and none while
+    /// the app's own writes are on their way, which it could predate.
     pub(super) fn reload_tasks(&mut self) {
-        if std::mem::replace(&mut self.st.tasks.reloading, true) {
-            self.st.tasks.reload_again = true;
+        let t = &mut self.st.tasks;
+        if t.reloading || t.writing > 0 {
+            t.reload_again = true;
             return;
         }
+        t.reloading = true;
         self.call(
             Call::Task(TaskCall::Page {
                 offset: 0,
@@ -80,6 +85,7 @@ impl App {
         if let TaskCall::Page { offset, mut read } = call {
             let Ok(page) = answer else {
                 self.st.tasks.reloading = false;
+                self.st.tasks.reload_stale = false;
                 return;
             };
             let next = crate::client::store::next_page(offset, &page);
@@ -94,17 +100,35 @@ impl App {
                 );
                 return;
             }
-            self.store.set_tasks(Value::Array(read));
-            self.st.tasks.reloading = false;
+            let t = &mut self.st.tasks;
+            t.reloading = false;
+            // A read a write of the app's overlapped could undo it: read again.
+            if std::mem::take(&mut t.reload_stale) {
+                t.reload_again = true;
+            } else {
+                self.store.set_tasks(Value::Array(read));
+            }
             if std::mem::take(&mut self.st.tasks.reload_again) {
                 self.reload_tasks();
+            }
+            return;
+        }
+        if let TaskCall::Written = call {
+            let t = &mut self.st.tasks;
+            t.writing = t.writing.saturating_sub(1);
+            t.reload_stale |= t.reloading;
+            if t.writing == 0 && !t.reloading && std::mem::take(&mut t.reload_again) {
+                self.reload_tasks();
+            }
+            if let Err(e) = answer {
+                self.st.toast(e.to_string(), true);
             }
             return;
         }
         let t = &mut self.st.tasks;
         match call {
             // Read above, before the task state is borrowed.
-            TaskCall::Page { .. } => {}
+            TaskCall::Page { .. } | TaskCall::Written => {}
             TaskCall::Runs(id) => {
                 if t.selected.as_deref() == Some(id.as_str()) {
                     t.runs = list(answer);
@@ -223,7 +247,10 @@ impl App {
         self.store.reread_task(id);
         let after = row(&self.store.config);
         for (method, params) in crate::client::sync::task(before.as_ref(), after.as_ref()) {
-            self.call(Call::Quiet, method, params);
+            let t = &mut self.st.tasks;
+            t.writing += 1;
+            t.reload_stale |= t.reloading;
+            self.call(Call::Task(TaskCall::Written), method, params);
         }
         if let Some(text) = text {
             self.st.toast(text, false);
