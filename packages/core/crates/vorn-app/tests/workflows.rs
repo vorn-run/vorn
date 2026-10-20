@@ -12,7 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 use support::{
-    add_project, connect, key, replace_workflows, seed_runs, seed_workflows, Shot, TestVornd,
+    add_project, connect, key, replace_workflows, seed_runs, seed_workflows, wait_for, Shot,
+    TestVornd,
 };
 use vorn_app::act::Act;
 use vorn_app::app::forms::field_of;
@@ -788,24 +789,34 @@ fn a_template_starts_the_canvas_and_names_what_it_still_needs() {
         &mut app,
         App::control("sidebar", &Act::Workflow(WfAct::New)),
     );
-    // The row it clicks, laid out: the list can land a frame before its panel draws it.
-    let (at, place) = shot.until(&mut app, "the templates", |app, ui| {
-        let at = app.st.wf.lib.templates.iter().position(|t| {
-            t.pointer("/portable/requires")
-                .and_then(Value::as_array)
-                .is_some_and(|r| !r.is_empty())
-        })?;
-        let id = app.st.wf.lib.templates[at]["id"].as_str().unwrap_or("");
-        let place = format!("wf-template.{id}");
-        ui.rect_of(control(&place, WfAct::Template(at)))?;
-        Some((at, place))
+    let needs = |t: &Value| {
+        t.pointer("/portable/requires")
+            .and_then(Value::as_array)
+            .is_some_and(|r| !r.is_empty())
+    };
+    let id = shot.until(&mut app, "the templates", |app, _| {
+        let t = app.st.wf.lib.templates.iter().find(|t| needs(t))?;
+        t["id"].as_str().map(str::to_owned)
     });
     shot.save(&mut app, "w-start-from");
-    let name = app.st.wf.lib.templates[at]["name"]
-        .as_str()
-        .unwrap_or("")
-        .to_owned();
-    shot.click(&mut app, control(&place, WfAct::Template(at)));
+    // A refreshed catalog can reorder the list, so the row is found by id on the frame it is clicked.
+    let place = format!("wf-template.{id}");
+    let name = wait_for("the template's row clicked", || {
+        shot.frame(&mut app);
+        let at = app
+            .st
+            .wf
+            .lib
+            .templates
+            .iter()
+            .position(|t| t["id"] == id.as_str())?;
+        let name = app.st.wf.lib.templates[at]["name"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        app.click(&mut shot.ui, control(&place, WfAct::Template(at)))
+            .then_some(name)
+    });
     assert_eq!(app.st.wf.panel, Panel::Properties);
     let d = app.st.wf.editor.as_ref().expect("the editor");
     assert_eq!(d.wf["name"], name);
