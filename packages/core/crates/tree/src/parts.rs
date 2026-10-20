@@ -46,6 +46,9 @@ pub struct Tab {
     /// Holds edits not saved: a dot where its ✕ is, until hovered.
     #[serde(default, skip_serializing_if = "is_false")]
     pub dirty: bool,
+    /// A kit icon before the label, as what kind of page a browser tab shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// A small control in a strip: an icon with its label as the tooltip, or a
@@ -175,6 +178,28 @@ pub enum CodeState {
     Read,
     Binary,
     Unreadable,
+}
+
+/// A web page the client shows in a native web view, under the bar the client
+/// draws for it (back, forward, reload and the address, or a review's
+/// controls). `view` names the web view: the same view keeps its page, its
+/// history and what it logged while the tree is drawn again, so one per
+/// session's pane, as its id. The view loads `url` whenever `url` changes;
+/// where the page wanders since is reported, not loaded again.
+///
+/// What the page does is reported as [`EventKind::Page`](crate::EventKind::Page)
+/// on the node, its `value` a JSON object with a `type`: `state` (`url`,
+/// `title` and, for a design, `design` with its title) whenever one
+/// changes, `submit` (`text` typed in the address), `opened` (`url` a page
+/// asked to open in a new window) and `go` (`url` the client's own controls
+/// moved the page to, as another version of a review).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Web {
+    pub view: String,
+    pub url: String,
+    /// A line over the page saying what went wrong, as an address that could not be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
 }
 
 /// A shell's commands, one per prompt it reported, oldest first: the client

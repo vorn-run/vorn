@@ -1,7 +1,7 @@
 //! The desktop app's bridge connection: the app answers what only it can.
 //!
-//! The browser pane's web views and the device registry live in the desktop
-//! app, so `browser:*` and `device:*` are asked of it over
+//! The web views and the device registry live in the desktop app, so
+//! `web:*` (an extension's `web.call`) and `device:*` are asked of it over
 //! the socket it opened to vornd, as are the connectors' `session:*` calls
 //! ([`crate::bridge::Bridge`]). The app claims that socket with
 //! `bridge:identify`; vornd sends each call down it as a request of its own
@@ -37,12 +37,9 @@ pub const DISCONNECTED: &str = "Vorn main process disconnected";
 
 const ID_PREFIX: &str = "vornd-";
 
-/// The groups the app answers.
+/// The groups a client asks of the app directly; `web:*` comes only through `web.call`.
 pub fn answers(method: &str) -> bool {
-    matches!(
-        method.split_once(':').map(|(g, _)| g),
-        Some("browser" | "device")
-    )
+    matches!(method.split_once(':').map(|(g, _)| g), Some("device"))
 }
 
 type Reply = oneshot::Sender<Result<Option<Value>, String>>;
@@ -232,8 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn answers_only_the_browser_and_device_groups() {
-        assert!(answers("browser:readPage"));
+    fn answers_only_the_device_group() {
+        assert!(!answers("browser:readPage"), "the Browser extension's");
+        assert!(!answers("web:read"), "only through web.call");
         assert!(answers("device:list"));
         assert!(!answers("bridge:identify"));
         assert!(!answers("browserless:x"));
@@ -251,12 +249,12 @@ mod tests {
             let desktop = std::sync::Arc::clone(&desktop);
             tokio::spawn(async move {
                 desktop
-                    .request("browser:tabs", json!({ "sessionId": "s" }), TIMEOUT)
+                    .request("device:list", json!({ "sessionId": "s" }), TIMEOUT)
                     .await
             })
         };
         let frame = sent(&mut main).await;
-        assert_eq!(frame["method"], "browser:tabs");
+        assert_eq!(frame["method"], "device:list");
         assert_eq!(frame["params"], json!({ "sessionId": "s" }));
         let id = frame["id"].as_str().unwrap().to_owned();
         assert!(id.starts_with(ID_PREFIX));
@@ -337,7 +335,7 @@ mod tests {
     async fn refuses_without_main_and_after_its_deadline() {
         let desktop = Desktop::default();
         assert_eq!(
-            desktop.request("browser:tabs", Value::Null, TIMEOUT).await,
+            desktop.request("device:list", Value::Null, TIMEOUT).await,
             Err(NOT_RUNNING.to_owned())
         );
         let streams = Streams::new();
@@ -345,9 +343,9 @@ mod tests {
         desktop.claim(main.id(), &main.forwarder());
         assert_eq!(
             desktop
-                .request("browser:tabs", Value::Null, Duration::from_millis(5))
+                .request("web:read", Value::Null, Duration::from_millis(5))
                 .await,
-            Err("Browser request timed out: browser:tabs".to_owned())
+            Err("Browser request timed out: web:read".to_owned())
         );
         assert!(desktop.lock_pending().is_empty());
     }

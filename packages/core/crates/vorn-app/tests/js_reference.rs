@@ -1,4 +1,4 @@
-//! The browser, artifact and device pane logic against recorded answers in
+//! The page, artifact and device pane logic against recorded answers in
 //! `tests/fixtures/js-reference/browser-pane.json` at the repository root.
 //!
 //! Every recorded input runs through the Rust and must give the recorded
@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 use vorn_app::artifact::{self, Artboard, DocEdit};
-use vorn_app::{browser, device};
+use vorn_app::device;
+use vorn_app::web::address;
 
 const EPSILON: f64 = 1e-9;
 
@@ -76,22 +77,12 @@ fn boards(v: &Value) -> Vec<Artboard> {
 }
 
 #[test]
-fn addresses_load_and_read_as_the_bar_did() {
+fn pages_are_named_and_read_as_the_pane_did() {
     let all = fixture();
-    for c in cases(&all, "normalizeUrl") {
-        let input = c["input"].as_str().unwrap();
-        let allow = c["allowFile"].as_bool().unwrap();
-        let want = c["out"].as_str();
-        assert_eq!(
-            browser::normalize_url(input, allow).as_deref(),
-            want,
-            "normalizeUrl({input:?}, {allow})"
-        );
-    }
     for c in cases(&all, "displayHost") {
         let input = c["input"].as_str().unwrap();
         assert_eq!(
-            browser::display_host(input),
+            address::display_host(input),
             c["out"].as_str().unwrap(),
             "displayHost({input:?})"
         );
@@ -100,7 +91,7 @@ fn addresses_load_and_read_as_the_bar_did() {
         let raw = c["raw"].as_str().unwrap();
         let max = usize::try_from(c["max"].as_u64().unwrap()).unwrap();
         assert_eq!(
-            browser::flatten_page_text(raw, max),
+            address::flatten_page_text(raw, max),
             c["out"].as_str().unwrap(),
             "flattenPageText({raw:?}, {max})"
         );

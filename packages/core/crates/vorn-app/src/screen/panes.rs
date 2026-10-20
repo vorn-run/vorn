@@ -1,24 +1,24 @@
-//! The panes beside a session's terminal: the browser
-//! with its artifact bar, banner, design canvas, doc editor
-//! and comment rail; the device with its frame and controls;
+//! The panes beside a session's terminal: the Browser extension's tree,
+//! and in its page part the address or artifact bar, banner, design canvas,
+//! doc editor and comment rail; the device with its frame and controls;
 //! and the simulator picker. Pages and the device's screen
 //! are native web views the app seats in the custom boxes left for them.
 
 use super::{c, ico, white, Screen};
 use crate::act::{Act, Acts};
 use crate::artifact::{self, Anchor, Comment, Tweak};
-use crate::browser::{self, Pane};
 use crate::client::Session;
 use crate::components::card::{card_button, CardButton, CardVariant};
 use crate::look;
 use crate::panes::{
-    board_key, canvas_id, compare_key, device_key, note_id, page_key, rail_text_id, stage_id, Live,
-    PaneAct, PaneKind,
+    board_key, browser_key, canvas_id, compare_key, device_key, note_id, page_key, rail_text_id,
+    stage_id, Live, PageArtifact, PaneAct, PaneKind,
 };
 use crate::ui::{
     custom, div, field, text, textarea, tooltip, Action, El, Id, Place, Rgba, Role, Sense,
     TextStyle,
 };
+use crate::web::address::display_host;
 
 fn ink() -> Rgba {
     c(look::INK)
@@ -309,7 +309,7 @@ fn web_box(s: &Screen<'_>, key: &str, url: Option<&str>) -> El {
 /// "Open in a new tab", for a page a web view cannot hold.
 fn open_in_tab(s: &Screen<'_>, url: &str) -> El {
     let id = s.acts.on("pane", Act::OpenUrl(url.to_owned()));
-    let label = format!("Open {} in a new tab", browser::display_host(url));
+    let label = format!("Open {} in a new tab", display_host(url));
     div()
         .id(id)
         .on(Action::Click)
@@ -328,16 +328,23 @@ fn open_in_tab(s: &Screen<'_>, url: &str) -> El {
 
 // ---- browser ------------------------------------------------------------
 
+/// The Browser's tree for the session, its tab strip ending with the
+/// pane's own controls; its page part is drawn by [`web_part`].
 fn browser_pane(s: &Screen<'_>, session: &Session) -> El {
     let sid = session.info.id.as_str();
-    let bench = &s.st.bench;
-    let Some(p) = bench.browsers.get(sid) else {
-        return div();
+    let host = display_host(page_url(s, sid));
+    let chrome = |tools: Vec<El>| {
+        div()
+            .row()
+            .items_center()
+            .gap(4.0)
+            .shrink0()
+            .children(tools)
+            .child(controls(s, sid, PaneKind::Browser, &host))
     };
-    let live = bench.live(sid);
-    let url = p.active().map_or("", |t| t.current());
-    let host = browser::display_host(url);
-    let agent = session.info.agent_type.as_str();
+    let body = browser_key(&s.st.points, sid)
+        .and_then(|key| super::points::draw_scoped(s, &key, Some(&chrome), None))
+        .unwrap_or_else(|| div().grow());
     div()
         .col()
         .grow()
@@ -346,7 +353,29 @@ fn browser_pane(s: &Screen<'_>, session: &Session) -> El {
         .clip()
         .bg(c(look::SURFACE_PANEL))
         .role(Role::Region, "Browser")
-        .child(tab_strip(s, sid, p, live, &host))
+        .child(body)
+}
+
+/// Where the session's page is: as it last reported, else as asked.
+fn page_url<'a>(s: &'a Screen<'_>, sid: &str) -> &'a str {
+    let bench = &s.st.bench;
+    bench
+        .live(sid)
+        .and_then(|l| l.url.as_deref())
+        .or_else(|| bench.pages.get(sid).map(String::as_str))
+        .unwrap_or("")
+}
+
+/// A session's page where the Browser's tree puts it: the address or
+/// artifact bar, the banner, a failure, and the page or what reviews it.
+pub(super) fn web_part(s: &Screen<'_>, sid: &str, agent: &str) -> El {
+    let live = s.st.bench.live(sid);
+    let url = page_url(s, sid);
+    div()
+        .col()
+        .grow()
+        .min_h(0.0)
+        .min_w0()
         .child(header(s, sid, live, url, agent))
         .child_if(banner(s, sid, live))
         .child_if(live.and_then(|l| l.failed.as_deref()).map(|f| {
@@ -358,121 +387,6 @@ fn browser_pane(s: &Screen<'_>, session: &Session) -> El {
             )
         }))
         .child(page_body(s, sid, live, agent))
-}
-
-/// The tabs, a new one, and the pane's controls.
-fn tab_strip(s: &Screen<'_>, sid: &str, p: &Pane, live: Option<&Live>, host: &str) -> El {
-    let manifest = live.and_then(|l| l.manifest.as_ref());
-    let mut tabs = div()
-        .row()
-        .gap(2.0)
-        .grow()
-        .min_w0()
-        .clip()
-        .role(Role::TabList, "Browser tabs");
-    for (i, tab) in p.tabs.iter().enumerate() {
-        let active = i == p.active_tab;
-        let shown = browser::display_host(tab.current());
-        let label = tab
-            .artifact
-            .as_ref()
-            .map(|a| a.title.clone())
-            .filter(|t| !t.is_empty())
-            .or_else(|| {
-                manifest
-                    .filter(|_| active)
-                    .and_then(|m| m.title.clone())
-                    .filter(|t| !t.is_empty())
-            })
-            .unwrap_or_else(|| shown.clone());
-        let id = s
-            .acts
-            .on("pane-tab", pane(PaneAct::SelectTab(sid.to_owned(), i)));
-        let close_id = s
-            .acts
-            .on("pane-tab", pane(PaneAct::CloseTab(sid.to_owned(), i)));
-        let hot = s.ui.hovered(id) || s.ui.hovered(close_id) || s.ui.focused(close_id);
-        let (fg, bg) = if active {
-            (c(look::GRAY_200), white(0.06))
-        } else {
-            let h = s.ui.hover(id).max(s.ui.hover(close_id));
-            (
-                c(look::GRAY_500).mix(c(look::GRAY_300), h),
-                white(0.0).mix(white(0.03), h),
-            )
-        };
-        let icon = match tab.artifact.as_ref().map(|a| a.kind.as_str()) {
-            Some("doc") => Some(ico("align-left", 11.0, 2.0, ink())),
-            Some("design") => Some(ico("shapes", 11.0, 2.0, ink())),
-            Some(_) => Some(ico("file-text", 11.0, 2.0, ink())),
-            None if active && manifest.is_some_and(|m| m.kind == "design") => {
-                Some(ico("shapes", 11.0, 2.0, c(look::BRONZO)))
-            }
-            None => None,
-        };
-        let close = div()
-            .id(close_id)
-            .on(Action::Click)
-            .p(2.0)
-            .rounded(4.0)
-            .shrink0()
-            .opacity(if hot { 1.0 } else { 0.0 })
-            .role(Role::Button, format!("Close tab {shown}"))
-            .child(ico(
-                "x",
-                10.0,
-                2.5,
-                c(look::GRAY_600).mix(c(look::WHITE), s.ui.hover(close_id)),
-            ));
-        tabs = tabs.child(
-            div()
-                .id(id)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(4.0)
-                .pl(10.0)
-                .pr(4.0)
-                .py(4.0)
-                .rounded(4.0)
-                .max_w(170.0)
-                .shrink0()
-                .bg(bg)
-                .role(Role::Tab, label.as_str())
-                .selected(active)
-                .child_if(icon.map(El::shrink0))
-                .child(text(label.as_str(), 11.0, fg).truncate().silent())
-                .child(close),
-        );
-    }
-    let add = s.acts.on("pane", pane(PaneAct::AddTab(sid.to_owned())));
-    let add_hot = s.ui.hover(add);
-    div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .pl(6.0)
-        .pr(4.0)
-        .pt(4.0)
-        .shrink0()
-        .child(tabs)
-        .child(
-            div()
-                .id(add)
-                .on(Action::Click)
-                .p(4.0)
-                .rounded(4.0)
-                .shrink0()
-                .bg(white(0.0).mix(white(0.06), add_hot))
-                .role(Role::Button, "New tab")
-                .child(ico(
-                    "plus",
-                    13.0,
-                    2.0,
-                    c(look::GRAY_600).mix(c(look::GRAY_200), add_hot),
-                )),
-        )
-        .child(controls(s, sid, PaneKind::Browser, host))
 }
 
 /// The row under the tabs: the doc's edit bar, the artifact bar, a
@@ -532,7 +446,7 @@ fn header(s: &Screen<'_>, sid: &str, live: Option<&Live>, url: &str, agent: &str
             );
         }
         Some((a, state)) => {
-            row = artifact_bar(s, row, sid, a, state, live, agent);
+            row = artifact_bar(s, row, sid, &a, state, live, agent);
             if !boards {
                 row = row.child_if(manifest.and_then(|m| tweak_row(s, sid, m, live)));
             }
@@ -647,7 +561,7 @@ fn artifact_bar(
     s: &Screen<'_>,
     mut row: El,
     sid: &str,
-    a: &browser::TabArtifact,
+    a: &PageArtifact,
     state: Option<&artifact::State>,
     live: Option<&Live>,
     agent: &str,
@@ -1106,7 +1020,8 @@ fn banner(s: &Screen<'_>, sid: &str, live: Option<&Live>) -> Option<El> {
 /// tweaks and comments beside them.
 fn page_body(s: &Screen<'_>, sid: &str, live: Option<&Live>, agent: &str) -> El {
     let bench = &s.st.bench;
-    let art = bench.artifact(sid);
+    let owned = bench.artifact(sid);
+    let art = owned.as_ref().map(|(a, st)| (a, *st));
     let editing = live.and_then(|l| l.editing.as_ref());
     let comparing =
         live.is_some_and(|l| l.comparing && l.compare_url.is_some()) && editing.is_none();
@@ -1141,15 +1056,7 @@ fn page_body(s: &Screen<'_>, sid: &str, live: Option<&Live>, agent: &str) -> El 
     main = main.child(match (editing, bench.boards(sid)) {
         (Some(draft), _) => doc_editor(s, sid, draft, art, agent),
         (None, Some(boards)) => canvas(s, sid, boards),
-        (None, None) => web_box(
-            s,
-            &page_key(sid),
-            bench
-                .browsers
-                .get(sid)
-                .and_then(|p| p.active())
-                .map(|t| t.current()),
-        ),
+        (None, None) => web_box(s, &page_key(sid), bench.pages.get(sid).map(String::as_str)),
     });
     body = body.child(main);
     if let (Some(board), Some(m), None) = (
@@ -1259,7 +1166,7 @@ fn doc_editor(
     s: &Screen<'_>,
     sid: &str,
     draft: &crate::panes::DocDraft,
-    art: Option<(&browser::TabArtifact, Option<&artifact::State>)>,
+    art: Option<(&PageArtifact, Option<&artifact::State>)>,
     agent: &str,
 ) -> El {
     let (_, edits) = artifact::merge_doc_edit(&draft.original, &draft.edited);
@@ -2201,7 +2108,8 @@ pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVaria
     let sid = session.info.id.as_str();
     let bench = &s.st.bench;
     let mut out = Vec::new();
-    if !session.is_shell() || bench.browsers.get(sid).is_some() {
+    let browser_on = browser_key(&s.st.points, sid).is_some();
+    if browser_on && (!session.is_shell() || bench.pages.contains_key(sid)) {
         out.push(button(
             Act::Pane(PaneAct::ToggleBrowser(sid.to_owned())),
             "globe",

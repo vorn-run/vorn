@@ -732,10 +732,12 @@ pub enum Permission {
     WorkflowsWrite,
     #[serde(rename = "inbox.write")]
     InboxWrite,
+    /// Drives the client's web views: loads, reads and acts on their pages.
+    Web,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 24] = [
+    pub const ALL: [Permission; 25] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -760,6 +762,7 @@ impl Permission {
         Permission::WorkflowsRead,
         Permission::WorkflowsWrite,
         Permission::InboxWrite,
+        Permission::Web,
     ];
 
     pub fn name(self) -> &'static str {
@@ -788,6 +791,7 @@ impl Permission {
             Permission::WorkflowsRead => "workflows.read",
             Permission::WorkflowsWrite => "workflows.write",
             Permission::InboxWrite => "inbox.write",
+            Permission::Web => "web",
         }
     }
 

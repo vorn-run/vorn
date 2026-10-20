@@ -1,5 +1,6 @@
 //! The wave 4 panes driven as a user would, on a vornd with its own HOME:
-//! the browser pane from the card's globe with its address bar and tabs, an
+//! the Browser's pane from the card's globe with its address bar and tabs
+//! (the `vorn.browser` built-in's tree), switched off, an
 //! artifact the agent publishes with its bar, versions, doc editor and
 //! comments rail, a design's canvas and tweaks, and the device picker and
 //! pane. No web view is seated offscreen, so the page itself never loads;
@@ -14,11 +15,12 @@ use serde_json::{json, Value};
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::act::{Act, Acts};
 use vorn_app::app::MOD;
-use vorn_app::panes::{note_id, stage_id, DevicePane, PaneAct, PaneKind};
+use vorn_app::panes::{browser_key, note_id, stage_id, DevicePane, PaneAct, PaneKind, BROWSER};
 use vorn_app::screen::term_id;
 use vorn_app::ui::Id;
 use vorn_app::App;
 use vorn_app::{artifact, device};
+use vorn_tree::Kind;
 
 fn pane(act: PaneAct) -> Id {
     App::control("pane", &Act::Pane(act))
@@ -54,13 +56,37 @@ fn ask(shot: &mut Shot, app: &mut App, method: &str, params: Value) -> Value {
     .unwrap_or_else(|e| panic!("{method}: {e:?}"))
 }
 
-fn tabs(app: &App, sid: &str) -> Vec<String> {
+/// The page the session's pane shows, once the app has vetted it.
+fn shown(app: &App, sid: &str) -> Option<String> {
     app.st
         .bench
-        .browsers
+        .pages
         .get(sid)
-        .map(|p| p.tabs.iter().map(|t| t.url.clone()).collect())
-        .unwrap_or_default()
+        .filter(|u| !u.is_empty())
+        .cloned()
+}
+
+/// The labels of the Browser's tabs, as its tree draws them.
+fn tabs(app: &App, sid: &str) -> Vec<String> {
+    let Some(tree) = browser_key(&app.st.points, sid).and_then(|k| app.st.points.tree(&k)) else {
+        return Vec::new();
+    };
+    let mut stack = vec![tree];
+    while let Some(n) = stack.pop() {
+        if let Kind::Tabs(t) = &n.kind {
+            return t.tabs.iter().map(|t| t.label.clone()).collect();
+        }
+        stack.extend(&n.children);
+    }
+    Vec::new()
+}
+
+/// Frames until the pane shows `url`.
+fn until_shown(shot: &mut Shot, app: &mut App, sid: &str, url: &str) {
+    shot.until(app, url, |app, _| {
+        app.pump();
+        (shown(app, sid).as_deref() == Some(url)).then_some(())
+    });
 }
 
 /// The page's view sits in its pane, under the address bar, in physical
@@ -107,15 +133,16 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
 
     // The globe opens an empty pane beside the terminal.
     shot.click(&mut app, card(PaneAct::ToggleBrowser(sid.clone())));
+    until_shown(&mut shot, &mut app, &sid, "about:blank");
     assert_eq!(app.st.bench.kinds(&sid), [PaneKind::Browser]);
-    assert_eq!(tabs(&app, &sid), ["about:blank"]);
+    assert_eq!(tabs(&app, &sid), ["New tab"]);
     shot.save(&mut app, "browser-blank");
 
     // The address bar loads what was typed.
     let address = Acts::id("address", &Act::Pane(PaneAct::Address(sid.clone())));
     shot.click(&mut app, address);
     shot.type_line(&mut app, "localhost:3000");
-    assert_eq!(tabs(&app, &sid), ["http://localhost:3000/"]);
+    until_shown(&mut shot, &mut app, &sid, "http://localhost:3000/");
     shot.save(&mut app, "browser");
     page_under_its_address_bar(&mut shot, &mut app, address);
 
@@ -127,11 +154,17 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
     shot.frame(&mut app);
     assert_eq!(shot.ui.edit_text(address), "http://localhost:3000/");
     assert!(shot.ui.focused(address));
-    assert_eq!(tabs(&app, &sid), ["http://localhost:3000/"]);
+    assert_eq!(shown(&app, &sid).as_deref(), Some("http://localhost:3000/"));
 
-    // A second tab, then the agent's view of them.
-    shot.click(&mut app, pane(PaneAct::AddTab(sid.clone())));
-    assert_eq!(tabs(&app, &sid).len(), 2);
+    // A second tab from the strip, then the agent's view of them.
+    let new_tab = shot
+        .labelled(&mut app, "Button", "New tab")
+        .expect("the strip's new tab");
+    shot.click(&mut app, new_tab);
+    shot.until(&mut app, "a second tab", |app, _| {
+        app.pump();
+        (tabs(app, &sid).len() == 2).then_some(())
+    });
     shot.save(&mut app, "browser-tabs");
     let listed = ask(
         &mut shot,
@@ -148,11 +181,52 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
         json!({ "sessionId": sid, "url": "example.com" }),
     );
     assert!(went.is_object(), "{went}");
-    assert!(tabs(&app, &sid).contains(&"https://example.com/".to_owned()));
+    until_shown(&mut shot, &mut app, &sid, "https://example.com/");
 
     // The globe closes it again.
     shot.click(&mut app, card(PaneAct::ToggleBrowser(sid.clone())));
-    assert!(app.st.bench.kinds(&sid).is_empty());
+    shot.until(&mut app, "the pane closed", |app, _| {
+        app.pump();
+        app.st.bench.kinds(&sid).is_empty().then_some(())
+    });
+}
+
+#[test]
+fn switched_off_the_browser_leaves_no_globe_and_refuses_its_calls() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    add_project(&mut app, &v, "demo", json!({}));
+    let mut shot = Shot::new();
+    let sid = agent(&mut shot, &mut app);
+    shot.click(&mut app, card(PaneAct::ToggleBrowser(sid.clone())));
+    until_shown(&mut shot, &mut app, &sid, "about:blank");
+
+    app.rpc()
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": BROWSER, "on": false }),
+        )
+        .expect("switched off");
+    shot.until(&mut app, "the pane gone", |app, _| {
+        app.pump();
+        (app.st.points.loaded && app.st.bench.kinds(&sid).is_empty()).then_some(())
+    });
+    shot.hover(&mut app, term_id(&sid));
+    assert!(
+        shot.labelled(&mut app, "Button", "Open browser").is_none(),
+        "no globe while it is off"
+    );
+    let refused = app
+        .rpc()
+        .call("browser:listTabs", json!({ "sessionId": sid }))
+        .expect_err("refused");
+    let refused = format!("{refused:?}");
+    assert!(
+        refused.contains("Browser is off. Turn it on in Settings \u{2192} Extensions."),
+        "{refused}"
+    );
 }
 
 const DOC: &str = "# Plan\n\nShip the panes first.\n\nThen the device.";
@@ -255,6 +329,7 @@ fn a_design_lays_its_artboards_on_the_canvas_with_its_tweaks() {
         json!({ "sessionId": sid, "title": "Pricing", "kind": "design", "content": page }),
     );
     shot.until(&mut app, "the design's tab", |app, _| {
+        app.pump();
         app.st.bench.artifact(&sid).map(|_| ())
     });
 

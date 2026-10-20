@@ -2,7 +2,7 @@
 
 use crate::{
     Badge, ButtonStyle, Cards, Choose, Code, Entry, Kind, Log, Meter, Node, Outline, Paint,
-    Segment, Tabs, TextStyle, Tone,
+    Segment, Tabs, TextStyle, Tone, Web,
 };
 
 fn node(kind: Kind) -> Node {
@@ -318,6 +318,16 @@ pub fn code(id: impl Into<String>, c: Code, buttons: impl IntoIterator<Item = No
 /// A shell's commands.
 pub fn log(l: Log) -> Node {
     node(Kind::Log(Box::new(l)))
+}
+
+/// Web view `view` showing `url`; its page's events come to node `id`.
+pub fn web(id: impl Into<String>, view: impl Into<String>, url: impl Into<String>) -> Node {
+    node(Kind::Web(Box::new(Web {
+        view: view.into(),
+        url: url.into(),
+        notice: None,
+    })))
+    .id(id)
 }
 
 /// `items` in runs by `key`, in the order each key first shows.

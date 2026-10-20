@@ -1,6 +1,9 @@
-//! The browser and device panes' side of the app: the tools vornd forwards
-//! from an agent (`browser:*`, `device:*`), what the web views report, and
-//! what a pane's controls do.
+//! The pages and device panes' side of the app: the page work vornd forwards
+//! for the Browser extension (`web:*`) and the device tools it forwards from
+//! an agent (`device:*`), what the web views report, and what a pane's
+//! controls do. The Browser keeps a session's tabs; this side shows the page
+//! its tree asks for, reports what the page does back to it, and draws the
+//! artifact review around it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -15,17 +18,18 @@ use serde_json::{json, Map, Value};
 use super::{App, Call};
 use crate::act::Act;
 use crate::artifact::{self, Anchor, Comment};
-use crate::browser::{self, TabArtifact};
 use crate::client::rpc::Wake;
 use crate::client::RpcError;
 use crate::device::{self, Claimed, Device};
 use crate::panes::{
-    board_key, canvas_id, compare_key, device_key, note_id, page_key, rail_text_id, session_of,
-    stage_id, Claim, DocDraft, PaneAct, PaneKind, PendingComment, Picker, WebSlot, LOG_LIMIT,
+    artifact_address, board_key, browser_key, canvas_id, compare_key, device_key, note_id,
+    page_key, rail_text_id, session_of, stage_id, Claim, DocDraft, PageArtifact, PaneAct, PaneKind,
+    PendingComment, Picker, WebSlot, BROWSER, BROWSER_OPEN, BROWSER_PANE, LOG_LIMIT,
     SELECTION_SETTLE,
 };
+use crate::points::kind;
 use crate::ui::{Event as UiEvent, Laid, NativeWindow, Rect, Ui};
-use crate::web::{self, Host, WebEvent, NO_PANE};
+use crate::web::{self, address, Host, WebEvent, NO_PANE};
 
 /// How long a page has to answer a script before the agent hears so.
 const ANSWER_WAIT: Duration = Duration::from_secs(10);
@@ -42,26 +46,23 @@ const NO_COMPANION: &str = "This needs the simulator companion, which the native
 
 const NO_INK: &str = "Drawing over the page is not in the native app yet.";
 
+/// A design's controls as last set, by the file it was loaded from.
+const TWEAKS_FILE: &str = "web-tweaks.json";
+/// Where this app kept the browser's tabs before the Browser extension did.
+const LEGACY_FILE: &str = "browser-panes.json";
+
 /// A pane call whose answer changes the screen.
 pub enum PaneCall {
     /// `artifact:get`.
     Artifact(String),
-    /// `artifact:versionUrl` for a tab's version.
-    Version {
-        session: String,
-        index: usize,
-        version: u32,
-    },
+    /// `artifact:versionUrl` for the version a session's page goes to.
+    Version { session: String, version: u32 },
     /// `artifact:versionUrl` for the compare page.
     Compare(String),
     /// `artifact:readSource`, to edit.
     Source(String),
     /// `artifact:saveUserVersion`.
-    SavedDoc {
-        session: String,
-        index: usize,
-        artifact: String,
-    },
+    SavedDoc { session: String, artifact: String },
     /// `artifact:send`.
     Sent { session: String, artifact: String },
     /// A comment saved, edited or deleted; `None` says nothing on failure.
@@ -125,7 +126,16 @@ struct Watch {
 /// The web views and everything in flight for the panes.
 pub struct Web {
     pub host: Host,
-    file: Option<PathBuf>,
+    /// A design's controls as last set, by its file, and where they are kept.
+    tweaks: HashMap<String, Map<String, Value>>,
+    tweaks_file: Option<PathBuf>,
+    /// The tabs this app kept before the Browser did, handed to it once.
+    legacy: Option<PathBuf>,
+    imported: bool,
+    /// The Browser was told which sessions are left, and has not answered with fewer.
+    pruning: bool,
+    /// The address each open page's part last asked for, before it was vetted.
+    asked: HashMap<String, String>,
     waiting: HashMap<u64, Wait>,
     tx: Sender<DevDone>,
     rx: Receiver<DevDone>,
@@ -135,7 +145,7 @@ pub struct Web {
     /// unchanged set is not sent again.
     painted: HashMap<String, String>,
     /// Artifacts asked for, so each is fetched once until it changes.
-    asked: HashSet<String>,
+    fetched: HashSet<String>,
     /// Each view's size as last shown, in logical pixels.
     areas: HashMap<String, (f32, f32)>,
     /// Where each view was last put, physical pixels.
@@ -148,14 +158,19 @@ impl Web {
         let (tx, rx) = channel();
         Web {
             host: Host::new(Arc::clone(&wake)),
-            file: None,
+            tweaks: HashMap::new(),
+            tweaks_file: None,
+            legacy: None,
+            imported: false,
+            pruning: false,
+            asked: HashMap::new(),
             waiting: HashMap::new(),
             tx,
             rx,
             pollers: HashMap::new(),
             watching: HashMap::new(),
             painted: HashMap::new(),
-            asked: HashSet::new(),
+            fetched: HashSet::new(),
             areas: HashMap::new(),
             placed: HashMap::new(),
             wake,
@@ -191,7 +206,7 @@ fn page_answer(json: &str) -> Result<Value, String> {
 /// The agent's pick, as lines for its terminal: every field is page
 /// content, flattened so none can pose as a line of its own.
 fn pick_message(sel: &Value) -> String {
-    let f = |k: &str, max: usize| browser::flatten_page_text(sel[k].as_str().unwrap_or(""), max);
+    let f = |k: &str, max: usize| address::flatten_page_text(sel[k].as_str().unwrap_or(""), max);
     let present = |k: &str| sel[k].as_str().is_some_and(|s| !s.is_empty());
     let mut lines = vec![
         "[The person pointed at an element in the browser pane. This describes".to_owned(),
@@ -230,16 +245,43 @@ fn downloads() -> Option<PathBuf> {
     Some(if down.is_dir() { down } else { home })
 }
 
+/// The page part of a Browser tree that shows `session`'s page.
+fn web_part<'a>(tree: &'a vorn_tree::Node, session: &str) -> Option<&'a vorn_tree::Web> {
+    let mut stack = vec![tree];
+    while let Some(n) = stack.pop() {
+        if let vorn_tree::Kind::Web(w) = &n.kind {
+            if w.view == session {
+                return Some(w);
+            }
+        }
+        stack.extend(&n.children);
+    }
+    None
+}
+
 fn js(v: impl serde::Serialize) -> String {
     serde_json::to_string(&v).unwrap_or_else(|_| "null".to_owned())
 }
 
 impl App {
-    /// Reads the browser panes saved in `dir`, and saves there from now on.
+    /// Reads the design controls kept in `dir`, and keeps them there from
+    /// now on; the tabs kept there before the Browser go to it once it is on.
     pub fn load_panes(&mut self, dir: &Path) {
-        let file = dir.join("browser-panes.json");
-        self.st.bench.browsers = browser::Panes::load(&file);
-        self.web.file = Some(file);
+        let file = dir.join(TWEAKS_FILE);
+        let legacy = dir.join(LEGACY_FILE);
+        let read = |p: &Path| crate::keep::read(p).and_then(|b| serde_json::from_str(&b).ok());
+        let kept: Option<Value> = read(&file);
+        let tweaks = kept
+            .clone()
+            .or_else(|| read(&legacy).map(|v: Value| v["tweaks"].clone()))
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+        self.web.tweaks = tweaks;
+        self.web.tweaks_file = Some(file);
+        self.web.legacy = Some(legacy);
+        if kept.is_none() && !self.web.tweaks.is_empty() {
+            self.save_tweaks();
+        }
     }
 
     /// The window exists: pages can be seated in it, and this app answers
@@ -274,11 +316,15 @@ impl App {
         self.web.host.tick()
     }
 
-    fn save_panes(&self) {
-        if let Some(file) = &self.web.file {
-            if let Err(e) = self.st.bench.browsers.save(file) {
-                eprintln!("browser panes not saved: {e}");
-            }
+    fn save_tweaks(&self) {
+        let Some(file) = &self.web.tweaks_file else {
+            return;
+        };
+        let saved = serde_json::to_string(&self.web.tweaks)
+            .map_err(std::io::Error::other)
+            .and_then(|body| crate::keep::write(file, &body));
+        if let Err(e) = saved {
+            eprintln!("design controls not saved: {e}");
         }
     }
 
@@ -290,19 +336,159 @@ impl App {
         ))
     }
 
-    fn active_index(&self, session: &str) -> Option<usize> {
-        self.st.bench.browsers.get(session).map(|p| p.active_tab)
+    /// The artifact the session's page shows.
+    fn art(&self, session: &str) -> Option<PageArtifact> {
+        self.st.bench.artifact(session).map(|(a, _)| a)
     }
 
-    /// The artifact the session's active tab shows.
-    fn art(&self, session: &str) -> Option<TabArtifact> {
+    /// Tells the Browser what the session's page did (`{type, ...}`).
+    fn tell_page(&mut self, session: &str, what: Value) {
+        let Some(key) = browser_key(&self.st.points, session) else {
+            return;
+        };
+        let mut event = vorn_tree::Event::new("page", vorn_tree::EventKind::Page, what.to_string());
+        event.scope = Some(session.to_owned());
+        self.send_told(&key, &event);
+    }
+
+    /// Where the session's page is, what it is called and the design it
+    /// declares, for the Browser's tab.
+    fn report_page(&mut self, session: &str) {
+        let live = self.st.bench.live(session);
+        let what = json!({
+            "type": "state",
+            "url": live.and_then(|l| l.url.as_deref()),
+            "title": live.and_then(|l| l.title.as_deref()),
+            "design": live
+                .and_then(|l| l.manifest.as_ref())
+                .filter(|m| m.kind == "design")
+                .map(|m| m.title.clone().unwrap_or_default()),
+        });
+        self.tell_page(session, what);
+    }
+
+    /// The trees the Browser draws now: each open pane's.
+    pub(super) fn browser_trees(&self) -> Vec<String> {
         self.st
             .bench
-            .browsers
-            .get(session)?
-            .active()?
-            .artifact
-            .clone()
+            .pages
+            .keys()
+            .filter_map(|s| browser_key(&self.st.points, s))
+            .collect()
+    }
+
+    /// Before a frame: the panes the Browser lists, the address each page
+    /// part asks for, and what is left of the dead sessions' panes.
+    pub(super) fn browser_tick(&mut self) {
+        let open = (BROWSER.to_owned(), BROWSER_OPEN.to_owned());
+        if !self.st.points.wanted.contains(&open) {
+            self.st.points.wanted.insert(open);
+        }
+        let on = self
+            .st
+            .points
+            .find(BROWSER, kind::PANES, BROWSER_PANE)
+            .is_some();
+        let live: HashSet<String> = self
+            .store
+            .sessions
+            .iter()
+            .map(|s| s.info.id.clone())
+            .collect();
+        let rows: Vec<String> = if on {
+            self.st
+                .points
+                .rows_of(BROWSER)
+                .get(BROWSER_OPEN)
+                .into_iter()
+                .flatten()
+                .map(|r| r.id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let gone = self.store.sessions_known && rows.iter().any(|id| !live.contains(id.as_str()));
+        let mut pages = HashMap::new();
+        let mut moved = Vec::new();
+        for session in rows.iter().filter(|id| live.contains(id.as_str())) {
+            let asked = browser_key(&self.st.points, session)
+                .and_then(|k| self.st.points.tree(&k))
+                .and_then(|t| web_part(t, session))
+                .map(|w| w.url.clone())
+                .unwrap_or_default();
+            let url = match self.st.bench.pages.get(session) {
+                Some(was) if self.web.asked.get(session) == Some(&asked) => was.clone(),
+                _ => {
+                    moved.push(session.clone());
+                    self.web.asked.insert(session.clone(), asked.clone());
+                    self.shown_url(session, asked)
+                }
+            };
+            pages.insert(session.clone(), url);
+        }
+        self.web.asked.retain(|s, _| pages.contains_key(s));
+        let closed: Vec<String> = self
+            .st
+            .bench
+            .pages
+            .keys()
+            .filter(|s| !pages.contains_key(*s))
+            .cloned()
+            .collect();
+        for s in closed {
+            if self.st.bench.maximized.get(&s) == Some(&PaneKind::Browser) {
+                self.st.bench.maximized.remove(&s);
+            }
+        }
+        self.st.bench.pages = pages;
+        for session in moved {
+            self.tab_changed(&session);
+        }
+        if gone && !self.web.pruning {
+            self.web.pruning = true;
+            let ids: Vec<&String> = live.iter().collect();
+            self.call(
+                Call::Ignore,
+                "extension:call",
+                json!({ "id": BROWSER, "action": "prune", "args": { "live": ids } }),
+            );
+        } else if !gone {
+            self.web.pruning = false;
+        }
+        if on && !self.web.imported {
+            self.web.imported = true;
+            self.import_browser();
+        }
+    }
+
+    /// The address a page part asked for, as the page may load it: a
+    /// `file:` page whose links lead out of the session's folder stays blank.
+    fn shown_url(&self, session: &str, asked: String) -> String {
+        if !asked.starts_with("file:") {
+            return asked;
+        }
+        self.root(session)
+            .and_then(|root| address::file_inside(&asked, &root))
+            .unwrap_or_else(|| "about:blank".to_owned())
+    }
+
+    /// Hands the tabs this app kept to the Browser, once; the file goes
+    /// when it has them.
+    fn import_browser(&mut self) {
+        let Some(file) = self.web.legacy.clone() else {
+            return;
+        };
+        let Some(kept) =
+            crate::keep::read(&file).and_then(|b| serde_json::from_str::<Value>(&b).ok())
+        else {
+            return;
+        };
+        let args = json!({ "open": kept["open"], "memory": kept["memory"] });
+        self.call(
+            Call::Imported(file),
+            "extension:call",
+            json!({ "id": BROWSER, "action": "import", "args": args }),
+        );
     }
 
     fn refresh_artifact(&mut self, id: &str) {
@@ -313,12 +499,20 @@ impl App {
         );
     }
 
-    /// Tab `index` goes to `version` once its address is known.
-    fn show_version(&mut self, session: &str, index: usize, id: &str, version: u32) {
+    /// The card's globe: the Browser opens the pane as it was left, or closes it.
+    fn toggle_browser(&mut self, session: &str) {
+        self.call(
+            Call::Ignore,
+            "extension:call",
+            json!({ "id": BROWSER, "action": "toggle", "args": { "session": session } }),
+        );
+    }
+
+    /// The session's page goes to `version` once its address is known.
+    fn show_version(&mut self, session: &str, id: &str, version: u32) {
         self.call(
             Call::Pane(PaneCall::Version {
                 session: session.to_owned(),
-                index,
                 version,
             }),
             "artifact:versionUrl",
@@ -339,7 +533,13 @@ impl App {
         if method.starts_with("session:") {
             return self.session_bridge(id, method, params);
         }
-        let session = params["sessionId"].as_str().unwrap_or_default().to_owned();
+        // A web view is a session's page; vornd names it as the Browser asked.
+        let session = match method.strip_prefix("web:") {
+            Some(_) => params["view"].as_str(),
+            None => params["sessionId"].as_str(),
+        }
+        .unwrap_or_default()
+        .to_owned();
         if self.store.session(&session).is_none() && method != "device:chrome" {
             self.rpc
                 .respond(id, Err(format!("No session {session} in this app.")));
@@ -349,21 +549,25 @@ impl App {
         let gen = self.web.host.generation(&key);
         let limit = |default: u64| params["limit"].as_u64().unwrap_or(default) as usize;
         let answer = match method {
-            "browser:openPane" => self.bridge_open(&session, &params),
-            "browser:navigate" => self.bridge_navigate(&session, &params),
-            "browser:tabs" => self.bridge_tabs(&session, &params),
-            "browser:listTabs" => self.has_pane(&session).map(|()| {
-                json!({ "tabs": self.st.bench.browsers.tab_infos(&session) })
-            }),
-            "browser:history" => self.has_pane(&session).and_then(|()| {
+            // With no view seated yet the tree's address is loaded when one is,
+            // so only a seated page is loaded again here.
+            "web:load" => self
+                .vet(&session, params["url"].as_str().unwrap_or_default())
+                .map(|url| {
+                    if gen.is_some() {
+                        self.web.host.load(&key, &url);
+                    }
+                    json!({ "url": url })
+                }),
+            "web:history" => self.has_page(&session).and_then(|()| {
                 let back = params["direction"].as_str() != Some("forward");
                 self.web.host.step(&key, back).map(|url| json!({ "url": url }))
             }),
-            "browser:readPage" => {
+            "web:read" => {
                 let Some(gen) = gen else {
                     return self.rpc.respond(id, Err(NO_PANE.to_owned()));
                 };
-                let start = browser::parse_cursor(params["cursor"].as_str(), gen);
+                let start = address::parse_cursor(params["cursor"].as_str(), gen);
                 let all = params["filter"].as_str() == Some("all");
                 let script = format!(
                     "JSON.stringify(window.__vorn.read({gen}, {all}, {start}, {}))",
@@ -371,15 +575,15 @@ impl App {
                 );
                 return self.ask_page(id, &key, &script, WaitKind::Read { gen });
             }
-            "browser:getText" => {
+            "web:text" => {
                 let Some(gen) = gen else {
                     return self.rpc.respond(id, Err(NO_PANE.to_owned()));
                 };
-                let start = browser::parse_cursor(params["cursor"].as_str(), gen);
+                let start = address::parse_cursor(params["cursor"].as_str(), gen);
                 let script = "JSON.stringify(window.__vorn.text())";
                 return self.ask_page(id, &key, script, WaitKind::Text { gen, start });
             }
-            "browser:find" => {
+            "web:find" => {
                 let Some(gen) = gen else {
                     return self.rpc.respond(id, Err(NO_PANE.to_owned()));
                 };
@@ -390,15 +594,19 @@ impl App {
                 );
                 return self.ask_page(id, &key, &script, WaitKind::Find { gen });
             }
-            "browser:interact" => {
-                let script = format!("JSON.stringify(window.__vorn.act({}))", js(&params));
+            "web:act" => {
+                let mut act = params.clone();
+                if let Some(o) = act.as_object_mut() {
+                    o.remove("view");
+                }
+                let script = format!("JSON.stringify(window.__vorn.act({}))", js(&act));
                 return self.ask_page(id, &key, &script, WaitKind::Act);
             }
-            "browser:consoleMessages" | "browser:networkRequests" => {
-                self.has_pane(&session).map(|()| {
+            "web:console" | "web:network" => {
+                self.has_page(&session).map(|()| {
                     let live = self.st.bench.live(&session);
                     let log = live.map(|l| {
-                        if method == "browser:consoleMessages" {
+                        if method == "web:console" {
                             &l.console
                         } else {
                             &l.network
@@ -409,10 +617,6 @@ impl App {
                     Value::Array(all[all.len().saturating_sub(n)..].iter().map(|v| (*v).clone()).collect())
                 })
             }
-            "browser:screenshot" => Err(
-                "Page screenshots are not available in the native app yet. Use read_page or get_page_text."
-                    .to_owned(),
-            ),
             "device:list" => {
                 let holders = self.st.bench.holders();
                 return self.spawn_reply(id, move || {
@@ -477,83 +681,24 @@ impl App {
         self.rpc.respond(id, answer);
     }
 
-    fn has_pane(&self, session: &str) -> Result<(), String> {
-        match self.st.bench.browsers.get(session) {
+    /// Whether the session's page is up: the Browser's pane is open and drawn.
+    fn has_page(&self, session: &str) -> Result<(), String> {
+        match self.web.host.generation(&page_key(session)) {
             Some(_) => Ok(()),
             None => Err(NO_PANE.to_owned()),
         }
     }
 
-    fn vet(&self, session: &str, url: &str, verb: &str) -> Result<String, String> {
-        browser::loadable_url(url, self.root(session).as_deref()).ok_or_else(|| {
-            format!("Refusing to {verb} \"{url}\" \u{2014} not an allowed web address.")
-        })
-    }
-
-    fn bridge_open(&mut self, session: &str, params: &Value) -> Result<Value, String> {
-        let Some(url) = params["url"].as_str() else {
-            if self.st.bench.browsers.open(session, None) {
-                self.save_panes();
-            }
-            return Ok(json!({ "url": "" }));
-        };
-        let url = self.vet(session, url, "open")?;
-        match serde_json::from_value::<TabArtifact>(params["artifact"].clone()) {
-            Ok(art) => self
-                .st
-                .bench
-                .browsers
-                .open_artifact(session, url.clone(), art),
-            Err(_) => {
-                self.st.bench.browsers.open(session, Some(url.clone()));
-            }
+    /// `url` as the page may load it: a `file:` address only inside the
+    /// session's folder, checked on disk here since the Browser cannot see it.
+    fn vet(&self, session: &str, url: &str) -> Result<String, String> {
+        let refused =
+            || format!("Refusing to navigate to \"{url}\" \u{2014} not an allowed web address.");
+        if !url.starts_with("file:") {
+            return Ok(url.to_owned());
         }
-        self.save_panes();
-        Ok(json!({ "url": url }))
-    }
-
-    fn bridge_navigate(&mut self, session: &str, params: &Value) -> Result<Value, String> {
-        self.has_pane(session)?;
-        let raw = params["url"].as_str().unwrap_or_default();
-        let url = self.vet(session, raw, "navigate to")?;
-        self.st.bench.browsers.open(session, Some(url.clone()));
-        self.web.host.load(&page_key(session), &url);
-        self.save_panes();
-        Ok(json!({ "url": url }))
-    }
-
-    fn bridge_tabs(&mut self, session: &str, params: &Value) -> Result<Value, String> {
-        self.has_pane(session)?;
-        let action = params["action"].as_str().unwrap_or_default();
-        let index = params["index"].as_u64().map(|i| i as usize);
-        let panes = &mut self.st.bench.browsers;
-        match (action, index) {
-            ("add", _) => {
-                let url = match params["url"].as_str() {
-                    Some(u) => Some(
-                        browser::loadable_url(u, self.root(session).as_deref()).ok_or_else(
-                            || {
-                                format!(
-                                    "Refusing to open \"{u}\" \u{2014} not an allowed web address."
-                                )
-                            },
-                        )?,
-                    ),
-                    None => None,
-                };
-                self.st.bench.browsers.add_tab(session, url);
-            }
-            ("close", Some(i)) => {
-                panes.close_tab(session, i);
-            }
-            ("select", Some(i)) => {
-                panes.select_tab(session, i);
-            }
-            (action, _) => return Err(format!("A tab index is required to {action} a tab.")),
-        }
-        self.tab_changed(session);
-        self.save_panes();
-        Ok(json!({ "ok": true }))
+        let root = self.root(session).ok_or_else(refused)?;
+        crate::web::address::file_inside(url, &root).ok_or_else(refused)
     }
 
     /// Runs `script` in `key`'s page; the answer settles `id`.
@@ -664,31 +809,17 @@ impl App {
             .unwrap_or_default();
         let held = read.as_ref().and_then(|v| v["live"].as_object()).cloned();
         let manifest = artifact::parse_manifest(declared);
-        let url = self
-            .st
-            .bench
-            .browsers
-            .get(session)
-            .and_then(|p| p.active())
-            .map(|t| t.current().to_owned())
-            .unwrap_or_default();
-        let path = browser::design_path(&url);
+        let path = address::design_path(&self.page_url(session));
         let Some(m) = manifest else {
             let live = self.st.bench.live_mut(session);
             live.manifest = None;
             live.values.clear();
             self.web.watching.remove(session);
-            return;
+            return self.report_page(session);
         };
         let stored = path
             .as_ref()
-            .and_then(|p| {
-                self.st
-                    .bench
-                    .browsers
-                    .tweaks
-                    .get(&p.to_string_lossy().into_owned())
-            })
+            .and_then(|p| self.web.tweaks.get(p.to_string_lossy().as_ref()))
             .cloned()
             .unwrap_or_default();
         let merged = artifact::merge_tweaks(&m.tweaks, &stored, held.as_ref());
@@ -721,6 +852,17 @@ impl App {
         let live = self.st.bench.live_mut(session);
         live.values = merged;
         live.manifest = Some(m);
+        self.report_page(session);
+    }
+
+    /// Where the session's page is: as it last reported, else as asked.
+    fn page_url(&self, session: &str) -> String {
+        let bench = &self.st.bench;
+        bench
+            .live(session)
+            .and_then(|l| l.url.clone())
+            .or_else(|| bench.pages.get(session).cloned())
+            .unwrap_or_default()
     }
 
     // ---- devices ------------------------------------------------------
@@ -981,7 +1123,7 @@ impl App {
         self.settle_selections(now);
         self.paint_marks();
         self.watch_files(now);
-        self.refresh_artifact_tabs();
+        self.refresh_artifact_pages();
         self.sync_pollers();
         let (host, bench, store, ext) = (
             &mut self.web.host,
@@ -1001,7 +1143,7 @@ impl App {
                 } else if key.ends_with("#device") {
                     !bench.devices.contains_key(session)
                 } else {
-                    bench.browsers.get(session).is_none()
+                    !bench.pages.contains_key(session)
                 }
         });
     }
@@ -1036,17 +1178,19 @@ impl App {
                 self.web.painted.remove(&key);
                 let session = session_of(&key).to_owned();
                 if key == page_key(&session) {
-                    let index = self.active_index(&session).unwrap_or(0);
-                    if !url.is_empty() {
-                        self.st
-                            .bench
-                            .browsers
-                            .sync_tab(&session, index, Some(url), None);
-                    }
                     let nav = self.web.host.nav(&key);
                     let live = self.st.bench.live_mut(&session);
+                    let moved = !url.is_empty() && live.url.as_deref() != Some(url.as_str());
+                    if moved {
+                        live.url = Some(url);
+                        live.title = None;
+                    }
                     live.loading = !finished;
                     live.draft = None;
+                    if moved {
+                        self.report_page(&session);
+                    }
+                    let live = self.st.bench.live_mut(&session);
                     if finished {
                         live.nav = nav;
                         live.found.clear();
@@ -1075,11 +1219,8 @@ impl App {
             WebEvent::Title { key, title } => {
                 let session = session_of(&key).to_owned();
                 if key == page_key(&session) {
-                    let index = self.active_index(&session).unwrap_or(0);
-                    self.st
-                        .bench
-                        .browsers
-                        .sync_tab(&session, index, None, Some(title));
+                    self.st.bench.live_mut(&session).title = Some(title);
+                    self.report_page(&session);
                 }
             }
             WebEvent::Message { key, body } => {
@@ -1101,12 +1242,11 @@ impl App {
                 }
             }
             WebEvent::NewWindow { key, url } => {
+                // The Browser vets the address; a file it allows is checked
+                // on disk again before its page shows it.
                 let session = session_of(&key).to_owned();
-                if let Some(url) = browser::loadable_url(&url, self.root(&session).as_deref()) {
-                    if self.st.bench.browsers.add_tab(&session, Some(url)) {
-                        self.tab_changed(&session);
-                        self.save_panes();
-                    }
+                if key == page_key(&session) {
+                    self.tell_page(&session, json!({ "type": "opened", "url": url }));
                 }
             }
         }
@@ -1331,7 +1471,7 @@ impl App {
     /// The comments' marks on an artifact page, and pins on artboards, sent
     /// whenever they change.
     fn paint_marks(&mut self) {
-        let sessions: Vec<String> = self.st.bench.browsers.open.keys().cloned().collect();
+        let sessions: Vec<String> = self.st.bench.pages.keys().cloned().collect();
         for session in sessions {
             if self.art(&session).is_none() {
                 continue;
@@ -1426,36 +1566,34 @@ impl App {
     }
 
     /// An artifact's address carries the server's port, which a restart
-    /// changes: each tab's version is asked for again once, and each
-    /// artifact shown is fetched.
-    fn refresh_artifact_tabs(&mut self) {
+    /// changes: each page's version is asked for again once, and each
+    /// artifact shown is fetched, which is what makes its page a review.
+    fn refresh_artifact_pages(&mut self) {
         let mut versions = Vec::new();
         let mut fetch = Vec::new();
-        for (session, pane) in &self.st.bench.browsers.open {
-            for (i, t) in pane.tabs.iter().enumerate() {
-                let Some(a) = &t.artifact else {
-                    continue;
-                };
-                let tag = format!("{}:{}", a.id, a.version);
-                let seen = self
-                    .st
-                    .bench
-                    .live(session)
-                    .is_some_and(|l| l.refreshed.contains(&tag));
-                if !seen {
-                    versions.push((session.clone(), i, a.id.clone(), a.version, tag));
-                }
-                if !self.web.asked.contains(&a.id) {
-                    fetch.push(a.id.clone());
-                }
+        for (session, url) in &self.st.bench.pages {
+            let Some((id, version)) = artifact_address(url) else {
+                continue;
+            };
+            let tag = format!("{id}:{version}");
+            let seen = self
+                .st
+                .bench
+                .live(session)
+                .is_some_and(|l| l.refreshed.contains(&tag));
+            if !seen {
+                versions.push((session.clone(), id.clone(), version, tag));
+            }
+            if !self.web.fetched.contains(&id) {
+                fetch.push(id);
             }
         }
-        for (session, i, id, version, tag) in versions {
+        for (session, id, version, tag) in versions {
             self.st.bench.live_mut(&session).refreshed.insert(tag);
-            self.show_version(&session, i, &id, version);
+            self.show_version(&session, &id, version);
         }
         for id in fetch {
-            if self.web.asked.insert(id.clone()) {
+            if self.web.fetched.insert(id.clone()) {
                 self.refresh_artifact(&id);
             }
         }
@@ -1475,13 +1613,15 @@ impl App {
         live.draft = None;
         live.failed = None;
         live.versions = false;
+        live.url = None;
+        live.title = None;
         self.web.watching.remove(session);
     }
 
     fn save_comment(
         &mut self,
         session: &str,
-        art: &TabArtifact,
+        art: &PageArtifact,
         anchor: Option<Anchor>,
         body: String,
     ) {
@@ -1514,31 +1654,18 @@ impl App {
                     self.st.bench.artifacts.insert(id, state);
                 }
             }
-            PaneCall::Version {
-                session,
-                index,
-                version,
-            } => {
-                if let Some(url) = answer
+            PaneCall::Version { session, version } => {
+                let url = answer
                     .ok()
-                    .and_then(|v| v["url"].as_str().map(str::to_owned))
-                {
-                    let before = self.st.bench.browsers.get(&session).cloned();
-                    self.st
-                        .bench
-                        .browsers
-                        .set_artifact_version(&session, index, url, version);
-                    let tag = self
-                        .art(&session)
-                        .map(|a| format!("{}:{}", a.id, a.version));
-                    if let Some(tag) = tag {
+                    .and_then(|v| v["url"].as_str().map(str::to_owned));
+                if let Some(url) = url {
+                    if let Some((id, _)) = artifact_address(&url) {
+                        let tag = format!("{id}:{version}");
                         self.st.bench.live_mut(&session).refreshed.insert(tag);
                     }
-                    if self.st.bench.browsers.get(&session) != before.as_ref() {
-                        if self.active_index(&session) == Some(index) {
-                            self.tab_changed(&session);
-                        }
-                        self.save_panes();
+                    if self.st.bench.pages.get(&session) != Some(&url) {
+                        let what = json!({ "type": "go", "url": url, "version": version });
+                        self.tell_page(&session, what);
                     }
                 }
             }
@@ -1563,18 +1690,14 @@ impl App {
                     self.st.bench.live_mut(&session).failed = Some("Could not read the doc".into())
                 }
             },
-            PaneCall::SavedDoc {
-                session,
-                index,
-                artifact,
-            } => {
+            PaneCall::SavedDoc { session, artifact } => {
                 self.st.bench.live_mut(&session).saving = false;
                 match answer {
                     Ok(v) => {
                         self.st.bench.live_mut(&session).editing = None;
                         if let Some(n) = v["version"]["version"].as_u64() {
                             let n = n as u32;
-                            self.show_version(&session, index, &artifact, n);
+                            self.show_version(&session, &artifact, n);
                             if let Some(e) = v["sendError"].as_str() {
                                 self.st.bench.live_mut(&session).failed =
                                     Some(format!("Saved v{n}, not sent: {e}"));
@@ -1641,9 +1764,8 @@ impl App {
     pub(super) fn run_pane(&mut self, ui: &mut Ui, act: PaneAct) {
         match act {
             PaneAct::ToggleBrowser(s) => {
-                self.st.bench.browsers.toggle(&s);
                 self.st.bench.maximized.remove(&s);
-                self.save_panes();
+                self.toggle_browser(&s);
             }
             PaneAct::DeviceButton(s) => {
                 if self.st.bench.devices.remove(&s).is_some() {
@@ -1678,8 +1800,9 @@ impl App {
                 }
                 match kind {
                     PaneKind::Browser => {
-                        self.st.bench.browsers.close(&s);
-                        self.save_panes();
+                        if self.st.bench.pages.contains_key(&s) {
+                            self.toggle_browser(&s);
+                        }
                     }
                     PaneKind::Device => {
                         self.st.bench.devices.remove(&s);
@@ -1692,27 +1815,6 @@ impl App {
                     self.st.bench.maximized.remove(&s);
                 } else {
                     self.st.bench.maximized.insert(s, kind);
-                }
-            }
-            PaneAct::AddTab(s) => {
-                if self.st.bench.browsers.add_tab(&s, None) {
-                    self.tab_changed(&s);
-                    self.save_panes();
-                }
-            }
-            PaneAct::CloseTab(s, i) => {
-                let was = self.active_index(&s);
-                if self.st.bench.browsers.close_tab(&s, i) {
-                    if self.active_index(&s) != was || was == Some(i) {
-                        self.tab_changed(&s);
-                    }
-                    self.save_panes();
-                }
-            }
-            PaneAct::SelectTab(s, i) => {
-                if self.st.bench.browsers.select_tab(&s, i) {
-                    self.tab_changed(&s);
-                    self.save_panes();
                 }
             }
             PaneAct::Back(s) => {
@@ -1754,8 +1856,8 @@ impl App {
             }
             PaneAct::Version(s, v) => {
                 self.st.bench.live_mut(&s).versions = false;
-                if let (Some(i), Some(a)) = (self.active_index(&s), self.art(&s)) {
-                    self.show_version(&s, i, &a.id, v);
+                if let Some(a) = self.art(&s) {
+                    self.show_version(&s, &a.id, v);
                 }
             }
             PaneAct::Comments(s) => {
@@ -1794,8 +1896,8 @@ impl App {
                     .art(&s)
                     .and_then(|a| self.st.bench.artifacts.get(&a.id))
                     .map(|st| (st.artifact.id.clone(), st.artifact.latest_version));
-                if let (Some(i), Some((id, v))) = (self.active_index(&s), latest) {
-                    self.show_version(&s, i, &id, v);
+                if let Some((id, v)) = latest {
+                    self.show_version(&s, &id, v);
                 }
             }
             PaneAct::Compare(s) => {
@@ -1914,7 +2016,7 @@ impl App {
     }
 
     fn save_doc(&mut self, session: &str, send: bool) {
-        let (Some(art), Some(index)) = (self.art(session), self.active_index(session)) else {
+        let Some(art) = self.art(session) else {
             return;
         };
         let Some(draft) = self.st.bench.live(session).and_then(|l| l.editing.clone()) else {
@@ -1928,7 +2030,6 @@ impl App {
         self.call(
             Call::Pane(PaneCall::SavedDoc {
                 session: session.to_owned(),
-                index,
                 artifact: art.id.clone(),
             }),
             "artifact:saveUserVersion",
@@ -1939,23 +2040,13 @@ impl App {
     /// Shown at once, kept for the design's file, and
     /// written into every view of the page.
     fn apply_tweak(&mut self, session: &str, key: &str, value: Value) {
-        let url = self
-            .st
-            .bench
-            .browsers
-            .get(session)
-            .and_then(|p| p.active())
-            .map(|t| t.current().to_owned())
-            .unwrap_or_default();
-        if let Some(path) = browser::design_path(&url) {
-            self.st
-                .bench
-                .browsers
+        if let Some(path) = address::design_path(&self.page_url(session)) {
+            self.web
                 .tweaks
                 .entry(path.to_string_lossy().into_owned())
                 .or_default()
                 .insert(key.to_owned(), value.clone());
-            self.save_panes();
+            self.save_tweaks();
         }
         self.st
             .bench
@@ -2012,23 +2103,14 @@ impl App {
         let submit = matches!(event, UiEvent::Submit(_));
         let text = ui.edit_text(id).to_owned();
         match act {
-            PaneAct::Address(s) if submit => match browser::address_target(&text) {
-                None => {
-                    self.st.bench.live_mut(&s).failed =
-                        Some("That does not look like a web address".to_owned());
-                }
-                Some(url) => {
-                    let live = self.st.bench.live_mut(&s);
-                    live.failed = None;
-                    live.draft = None;
-                    live.loading = true;
-                    self.st.bench.browsers.open(&s, Some(url.clone()));
-                    // Enter on the page already shown loads it again.
-                    self.web.host.load(&page_key(&s), &url);
-                    self.save_panes();
-                    ui.set_focus(None);
-                }
-            },
+            // The Browser reads the words: an address, or a search.
+            PaneAct::Address(s) if submit => {
+                let live = self.st.bench.live_mut(&s);
+                live.failed = None;
+                live.draft = None;
+                self.tell_page(&s, json!({ "type": "submit", "text": text }));
+                ui.set_focus(None);
+            }
             PaneAct::Address(s) => self.st.bench.live_mut(&s).draft = Some(text),
             PaneAct::DocText(s) => {
                 if let Some(e) = self.st.bench.live_mut(&s).editing.as_mut() {
@@ -2053,14 +2135,8 @@ impl App {
         let Some(Act::Pane(PaneAct::Address(s))) = self.acts.text_of(id) else {
             return false;
         };
-        let url = self
-            .st
-            .bench
-            .browsers
-            .get(&s)
-            .and_then(|p| p.active())
-            .map_or("", |t| t.current());
-        let shown = if url == "about:blank" { "" } else { url }.to_owned();
+        let url = self.page_url(&s);
+        let shown = if url == "about:blank" { "" } else { &url }.to_owned();
         ui.set_edit_text(id, &shown);
         self.st.bench.live_mut(&s).draft = None;
         true
@@ -2095,7 +2171,7 @@ impl App {
         if !covered {
             for s in &self.store.sessions {
                 let session = s.info.id.as_str();
-                if let Some(tab) = bench.browsers.get(session).and_then(|p| p.active()) {
+                if let Some(url) = bench.pages.get(session).filter(|u| !u.is_empty()) {
                     let live = bench.live(session);
                     match (bench.boards(session), live.and_then(|l| l.editing.as_ref())) {
                         (_, Some(_)) => {}
@@ -2105,7 +2181,7 @@ impl App {
                             for b in boards {
                                 slots.push(WebSlot {
                                     key: board_key(session, &b.id),
-                                    url: artifact::artboard_url(&tab.url, &b.id),
+                                    url: artifact::artboard_url(url, &b.id),
                                     zoom,
                                     profile: None,
                                 });
@@ -2113,7 +2189,7 @@ impl App {
                         }
                         (None, None) => slots.push(WebSlot {
                             key: page_key(session),
-                            url: tab.url.clone(),
+                            url: url.clone(),
                             zoom: 1.0,
                             profile: None,
                         }),
@@ -2122,7 +2198,7 @@ impl App {
                     if bench.boards(session).is_some() {
                         slots.push(WebSlot {
                             key: page_key(session),
-                            url: tab.url.clone(),
+                            url: url.clone(),
                             zoom: 1.0,
                             profile: None,
                         });

@@ -143,6 +143,8 @@ pub enum Route {
     Identify,
     Config,
     Tasks,
+    /// The Browser extension's `browser:*` calls.
+    Browser,
     TaskList,
     Projects,
     SessionLog,
@@ -162,6 +164,7 @@ pub enum Route {
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
     (extensions::builtin::tasks::METHODS, Route::Tasks),
+    (extensions::builtin::browser::METHODS, Route::Browser),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),
@@ -731,6 +734,9 @@ impl Native {
                     warn!(%method, %err, "a task call failed");
                     Answer::Error(format!("{method} failed in vornd"))
                 });
+            }
+            Some(Route::Browser) => {
+                return extensions::builtin::browser::answer(self, &method, params).await;
             }
             Some(Route::TaskList) => return task_list::answer(self, &method, params).await,
             Some(Route::Projects) => return projects::answer(self, &method, params).await,
@@ -1343,7 +1349,13 @@ mod tests {
             assert!(route(method).is_none(), "{method}");
         }
         assert_eq!(route("extension:install"), Some(Route::Extensions));
-        assert_eq!(route("browser:readPage"), Some(Route::Desktop));
+        assert_eq!(route("browser:readPage"), Some(Route::Browser));
+        assert_eq!(route("device:list"), Some(Route::Desktop));
+        assert_eq!(
+            route("web:read"),
+            None,
+            "only an extension's web.call asks it"
+        );
         for method in projects::METHODS {
             assert_eq!(route(method), Some(Route::Projects), "{method}");
         }

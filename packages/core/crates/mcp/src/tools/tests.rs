@@ -170,6 +170,14 @@ fn page_reads_are_fenced_and_failures_reported() {
         json!({ "content": [{ "type": "text", "text": "Error: No browser pane" }], "isError": true })
     );
 
+    // Switched off, vornd refuses every browser method and the tool says so.
+    let off = "Browser is off. Turn it on in Settings → Extensions.";
+    rpc.fail("browser:listTabs", off);
+    assert_eq!(
+        text(&run(&rpc, "browser_tabs", json!({ "action": "list" }))),
+        format!("Error: {off}")
+    );
+
     rpc.answer(
         "device:claim",
         json!({ "ok": false, "message": "held by s2" }),

@@ -8,8 +8,8 @@ pub mod sdk;
 mod tests;
 
 pub use parts::{
-    Code, CodeState, Command, Filter, Line, LineKind, Log, Outline, Tab, Tabs, Tool, MAX_SPLIT,
-    MIN_SPLIT,
+    Code, CodeState, Command, Filter, Line, LineKind, Log, Outline, Tab, Tabs, Tool, Web,
+    MAX_SPLIT, MIN_SPLIT,
 };
 
 /// The call that asks an extension for its tree: args `{point, surface}`, answer [`Rendered`].
@@ -196,6 +196,8 @@ pub enum Kind {
     Code(Box<Code>),
     /// A shell's commands over its live rows; drawn in a shell's `shell` place.
     Log(Box<Log>),
+    /// A web page in a native web view, under the bar the client draws for it.
+    Web(Box<Web>),
 }
 
 /// Where a board's cards come from when the client reads them itself.
@@ -451,6 +453,8 @@ pub enum EventKind {
     Change,
     /// A split's divider was dragged to the ratio in `value`.
     Resize,
+    /// What a [`Web`] part's page did, as a JSON object in `value`.
+    Page,
 }
 
 /// Something that happened to node `id`.
@@ -963,6 +967,17 @@ impl Checker {
                             "a code's strip holds buttons only",
                         );
                     }
+                }
+            }
+            Kind::Web(web) => {
+                self.named(n, at, "web page");
+                self.text(at, "url", &web.url);
+                if web.view.trim().is_empty() {
+                    self.err(&format!("{at}.view"), "names the web view; it is empty");
+                }
+                self.text(at, "view", &web.view);
+                if let Some(t) = &web.notice {
+                    self.text(at, "notice", t);
                 }
             }
             Kind::Log(log) => {

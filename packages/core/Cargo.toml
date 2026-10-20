@@ -50,6 +50,7 @@ members = [
   "extensions/workflow-editor",
   "extensions/blocks",
   "extensions/files",
+  "extensions/browser",
   "../../examples/extensions/turns",
   "../../examples/extensions/agent-footer",
   "bench/scale",

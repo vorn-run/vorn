@@ -15,7 +15,6 @@ pub mod act;
 pub mod agents;
 pub mod app;
 pub mod artifact;
-pub mod browser;
 pub mod canvas;
 pub mod cli_link;
 pub mod client;

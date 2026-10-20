@@ -376,3 +376,41 @@ fn an_event_carries_its_scope_and_an_answer_can_ask_first() {
     let s: Surface = serde_json::from_value(json!({"cells": true, "scope": "s1"})).unwrap();
     assert_eq!(s.scope.as_deref(), Some("s1"));
 }
+
+#[test]
+fn a_web_page_travels_and_names_its_view() {
+    let tree = col([
+        tabs(
+            "tabs",
+            Tabs {
+                tabs: vec![Tab {
+                    id: "0".into(),
+                    label: "Plan".into(),
+                    active: true,
+                    icon: Some("file-text".into()),
+                    ..Tab::default()
+                }],
+                ..Tabs::default()
+            },
+        ),
+        web("page", "s1", "https://example.com/"),
+    ]);
+    let v = serde_json::to_value(Rendered::new(tree.clone())).unwrap();
+    assert_eq!(v["tree"]["children"][1]["kind"], "web");
+    assert_eq!(v["tree"]["children"][1]["view"], "s1");
+    assert_eq!(v["tree"]["children"][0]["tabs"][0]["icon"], "file-text");
+    let back: Rendered = serde_json::from_value(v).unwrap();
+    assert_eq!(back.tree, tree);
+    assert!(check(&tree).is_ok());
+
+    let e = check(&col([web("page", " ", "about:blank")])).unwrap_err();
+    assert!(
+        e.iter().any(|m| m.contains(".view: names the web view")),
+        "{e:?}"
+    );
+    let e = check(&col([web("page", "s1", "").child(text("no"))])).unwrap_err();
+    assert!(e.iter().any(|m| m.contains("holds no children")), "{e:?}");
+
+    let page = Event::new("page", EventKind::Page, r#"{"type":"submit","text":"a"}"#);
+    assert_eq!(serde_json::to_value(&page).unwrap()["kind"], "page");
+}

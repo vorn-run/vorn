@@ -664,6 +664,23 @@ impl World for Wired {
                     crate::native::signin::completed(&native, &key).await;
                     Ok(Value::Null)
                 }
+                "web.call" => {
+                    let view = text(&args, "view").ok_or_else(|| needs(m, "the view"))?;
+                    let op = text(&args, "op").ok_or_else(|| needs(m, "the op"))?;
+                    let mut params = match args.get("params") {
+                        Some(Value::Object(p)) => p.clone(),
+                        _ => serde_json::Map::new(),
+                    };
+                    params.insert("view".into(), Value::String(view));
+                    crate::bridge::Bridge::request(
+                        native.main_process().as_ref(),
+                        &format!("web:{op}"),
+                        Value::Object(params),
+                        crate::native::desktop::TIMEOUT,
+                    )
+                    .await
+                    .map_err(|e| ExtError::new("failed", e))
+                }
                 other => Err(ExtError::new(
                     "unknown-method",
                     format!("Vorn has no method {other}"),

@@ -1012,6 +1012,7 @@ fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
         "auth.borrow" => ("Sign-in", "borrows a command line tool's sign-in", false),
         "browser.session" => ("Sign-in", "uses a signed-in browser window", false),
         "process.run" => ("Programs", "runs programs", false),
+        "web" => ("Browser", "loads, reads and acts on web pages", true),
         _ => return None,
     })
 }

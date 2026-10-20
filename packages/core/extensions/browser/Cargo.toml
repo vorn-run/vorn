@@ -1,0 +1,20 @@
+[package]
+name = "vorn-ext-browser"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The Browser, an extension Vorn ships as a Wasm component: web pages in tabs beside a session's terminal, opened from its card or by its agent, which reads them and acts on them"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../crates/extension-sdk" }
+serde = { version = "1", features = ["derive"] }
+url = "2"
+
+[dev-dependencies]
+serde_json = "1"

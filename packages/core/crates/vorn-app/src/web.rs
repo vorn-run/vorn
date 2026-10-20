@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::ui::Rect;
 
+pub mod address;
+
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "webview")))]
 mod off;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "webview")))]

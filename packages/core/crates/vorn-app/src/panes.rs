@@ -1,7 +1,7 @@
-//! The panes beside a session's terminal: its browser and
-//! its device, what each shows between frames, and what their controls do.
-//! The browser's tabs persist ([`crate::browser::Panes`]); the rest lives as
-//! long as the app.
+//! The panes beside a session's terminal: the page the Browser extension
+//! shows and the review drawn around it, its device, what each shows
+//! between frames, and what their controls do. The Browser's tabs live in
+//! the extension; what is here lives as long as the app.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use web_time::Instant;
@@ -10,9 +10,50 @@ use serde_json::{Map, Value};
 
 use crate::act::{Act, Acts};
 use crate::artifact::{self, Anchor, Comment, Manifest};
-use crate::browser::{Panes, TabArtifact};
 use crate::device::Listed;
+use crate::points::{kind, scoped, Points};
 use crate::ui::Id;
+
+/// The Browser, the built-in that keeps a session's tabs and draws them
+/// over a page this app shows.
+pub const BROWSER: &str = "vorn.browser";
+/// Its pane, and its collection of the sessions whose pane is open.
+pub const BROWSER_PANE: &str = "browser";
+pub const BROWSER_OPEN: &str = "open";
+
+/// The Browser's pane tree for `session`, while the Browser is on.
+pub fn browser_key(points: &Points, session: &str) -> Option<String> {
+    let p = points.find(BROWSER, kind::PANES, BROWSER_PANE)?;
+    Some(scoped(&p.key(), session))
+}
+
+/// The artifact an address shows, `(id, version)`: vornd serves each
+/// version at `/artifact/<id>/<version>?t=<token>` on its own host.
+pub fn artifact_address(url: &str) -> Option<(String, u32)> {
+    let u = url::Url::parse(url).ok()?;
+    let local = matches!(u.host_str(), Some("127.0.0.1" | "localhost"));
+    if !local || !u.query_pairs().any(|(k, v)| k == "t" && !v.is_empty()) {
+        return None;
+    }
+    let mut parts = u.path_segments()?;
+    let (Some("artifact"), Some(id), Some(version), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return None;
+    };
+    let version = version.parse().ok().filter(|v| *v > 0)?;
+    (!id.is_empty()).then(|| (id.to_owned(), version))
+}
+
+/// The artifact a session's page shows, once vornd has said what it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageArtifact {
+    pub id: String,
+    /// `page`, `doc` or `design`.
+    pub kind: String,
+    pub version: u32,
+    pub title: String,
+}
 
 /// Custom ids at and above this are web views: `WEB_ID_BASE + i` shows
 /// `Workbench::slots[i]`.
@@ -27,6 +68,7 @@ pub fn web_index(id: u64) -> Option<usize> {
 /// Which pane of a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PaneKind {
+    /// The Browser extension's pane: its tabs over the page.
     Browser,
     Device,
     /// The pane an extension opened.
@@ -94,9 +136,12 @@ pub struct DocDraft {
     pub edited: String,
 }
 
-/// The browser pane's state that is not its tabs.
+/// What a session's page shows and does, which the Browser's tabs do not keep.
 #[derive(Debug, Clone, Default)]
 pub struct Live {
+    /// Where the page is and what it is called, as the view last reported.
+    pub url: Option<String>,
+    pub title: Option<String>,
     /// The address bar while it is being typed in.
     pub draft: Option<String>,
     pub failed: Option<String>,
@@ -129,7 +174,7 @@ pub struct Live {
     pub versions: bool,
     /// The rail's comment being edited, and its words.
     pub rail_edit: Option<String>,
-    /// The `id:version` the address of each artifact tab was asked for.
+    /// The `id:version` whose address was asked for again this run.
     pub refreshed: HashSet<String>,
     /// The page's history, as the view reports it.
     pub nav: (bool, bool),
@@ -191,7 +236,9 @@ pub struct WebSlot {
 /// Every pane's state.
 #[derive(Debug, Default)]
 pub struct Workbench {
-    pub browsers: Panes,
+    /// The sessions whose Browser pane is open, each with the address its
+    /// page part asks for: empty until the pane's tree is drawn.
+    pub pages: HashMap<String, String>,
     pub live: HashMap<String, Live>,
     /// `artifact:get` answers, by artifact id.
     pub artifacts: HashMap<String, artifact::State>,
@@ -224,7 +271,7 @@ impl Workbench {
     /// The panes a session's card shows, in the column's order.
     pub fn kinds(&self, session: &str) -> Vec<PaneKind> {
         let mut out = Vec::new();
-        if self.browsers.get(session).is_some() {
+        if self.pages.contains_key(session) {
             out.push(PaneKind::Browser);
         }
         if self.devices.contains_key(session) {
@@ -300,11 +347,18 @@ impl Workbench {
         self.picker.is_some() || self.live.values().any(|l| l.versions)
     }
 
-    /// The artifact the session's active tab shows, and what vornd said of
-    /// it, once asked.
-    pub fn artifact(&self, session: &str) -> Option<(&TabArtifact, Option<&artifact::State>)> {
-        let art = self.browsers.get(session)?.active()?.artifact.as_ref()?;
-        Some((art, self.artifacts.get(&art.id)))
+    /// The artifact the session's page shows, and what vornd said of it:
+    /// a page is a review only once vornd knows its artifact.
+    pub fn artifact(&self, session: &str) -> Option<(PageArtifact, Option<&artifact::State>)> {
+        let (id, version) = artifact_address(self.pages.get(session)?)?;
+        let state = self.artifacts.get(&id)?;
+        let art = PageArtifact {
+            kind: state.artifact.kind.clone(),
+            title: state.artifact.title.clone(),
+            id,
+            version,
+        };
+        Some((art, Some(state)))
     }
 
     /// The artifact's unsent comments and the last batch sent, as the rail
@@ -323,7 +377,7 @@ impl Workbench {
 /// What a pane's control does.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PaneAct {
-    /// The card's globe: opens or closes the browser.
+    /// The card's globe: asks the Browser to open or close the pane.
     ToggleBrowser(String),
     /// The card's phone: the picker, or closes the device.
     DeviceButton(String),
@@ -336,9 +390,6 @@ pub enum PaneAct {
     ClosePicker,
     Close(String, PaneKind),
     Maximize(String, PaneKind),
-    AddTab(String),
-    CloseTab(String, usize),
-    SelectTab(String, usize),
     Back(String),
     Forward(String),
     ReloadOrStop(String),
@@ -402,5 +453,19 @@ mod tests {
         }
         assert_eq!(web_index(WEB_ID_BASE + 3), Some(3));
         assert_eq!(web_index(1_000), None);
+    }
+
+    #[test]
+    fn an_artifact_is_read_from_its_address_on_vornds_host() {
+        let id = |u: &str| artifact_address(u);
+        assert_eq!(
+            id("http://127.0.0.1:4310/artifact/a1/3?t=k"),
+            Some(("a1".to_owned(), 3))
+        );
+        assert_eq!(id("http://127.0.0.1:4310/artifact/a1/3"), None, "no token");
+        assert_eq!(id("https://example.com/artifact/a1/3?t=k"), None);
+        assert_eq!(id("http://127.0.0.1:4310/artifact/a1/0?t=k"), None);
+        assert_eq!(id("http://127.0.0.1:4310/artifact/a1/3/x?t=k"), None);
+        assert_eq!(id("about:blank"), None);
     }
 }

@@ -197,11 +197,12 @@ every key or pointer move (hover, typing, a drag) to itself:
 
 | part      | holds                                                                                  | reports                                                                                       |
 | --------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `tabs`    | tabs (label, file, preview, dirty, active), `lead`, `tools` and `more` tools           | `select`, `open` (double click) and `close` a tab; `click` a tool                             |
+| `tabs`    | tabs (label, file, preview, dirty, active, `icon`), `lead`, `tools` and `more` tools   | `select`, `open` (double click) and `close` a tab; `click` a tool                             |
 | `outline` | rows a tree of folders deep, the one chosen, a `filter`, an `action`                   | `select` a row, `open` a leaf, `change` the filter, `click` the action with the row's id      |
 | `split`   | one child or two, side by side, `ratio` to the first; under `narrow` px only the first | `resize` with the ratio dragged to                                                            |
 | `code`    | a file's `text` on disk, a `draft` to start from, `rev`, `state`, `conflict`, `error`  | `change` and `submit` (save) with the text; `click` with `discard`, `force`, `disk` or `keep` |
 | `log`     | a shell's commands, one per prompt, oldest first                                       |                                                                                               |
+| `web`     | a web view: its `view` (the session it shows beside), the `url` asked for, a `notice`  | `page`, a JSON object in the value: what the page or its controls did (below)                 |
 
 A `code`'s text is typed, coloured and searched in the client, which takes
 `draft`, else `text`, whenever `rev` changes, and tells the extension the
@@ -211,6 +212,20 @@ before any other event from its tree, so a tab switch never overtakes it. A
 A `log` is cut into blocks by the client, from the shell's screen, pairing
 the newest command with the newest prompt. A field with `live` reports
 `change` as it is typed.
+
+A `web` part is a native web view the client places and seats, with the
+address bar, back and forward, and an artifact's review controls over it.
+It loads `url` whenever that changes, so an extension changes the address it
+asks for, not what the page wanders to. Its `page` events carry:
+
+| `type`   | fields                     | when                                                         |
+| -------- | -------------------------- | ------------------------------------------------------------ |
+| `state`  | `url`, `title`, `design`   | the page moved or titled itself; `design` names a design     |
+| `submit` | `text`                     | Enter in the address bar, as typed; an error is shown        |
+| `opened` | `url`                      | the page opened a window                                     |
+| `go`     | `url`, `version`           | the client's own controls moved it, as to another version    |
+
+Only the extensions Vorn ships may hold a `web` part (the `web` permission).
 
 A board holds columns, each holding its cards. A board of thousands cannot
 travel as a tree: `board_of(Cards::Tasks, lanes)` names the core's task list
@@ -222,8 +237,9 @@ a page at a time, windows them, drags them between columns and opens them.
 `examples/extensions/agent-footer` a card footer. Vorn's own Tasks
 (`packages/core/extensions/tasks`) and Workflow editor
 (`packages/core/extensions/workflow-editor`) draw their main views this way;
-Files (`packages/core/extensions/files`) draws its pane and cards, and Shell
-blocks (`packages/core/extensions/blocks`) a shell's commands.
+Files (`packages/core/extensions/files`) draws its pane and cards, Shell
+blocks (`packages/core/extensions/blocks`) a shell's commands, and the
+Browser (`packages/core/extensions/browser`) a session's tabs over its page.
 
 ## The new API
 
@@ -297,6 +313,27 @@ current, isGitRepo}`, under `git.read`.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
   changed).
+
+### `web.call`: the Browser's web views
+
+`web.call` (`{view, op, params}`) asks the app's web view `view`, a session
+id, under the `web` permission, which only the extensions Vorn ships hold.
+vornd passes it to the app as `web:{op}` with `view` among the params, and
+answers what the app does; with no app connected it fails.
+
+| `op`      | params                                  | answers                                          |
+| --------- | --------------------------------------- | ------------------------------------------------ |
+| `load`    | `url`                                   | `{url}`, loaded again even when it was shown     |
+| `history` | `direction`: `back` or `forward`        | `{url}`                                          |
+| `read`    | `filter`, `cursor`, `limit`             | the page's nodes, a page at a time               |
+| `text`    | `cursor`                                | the page's text, a page at a time                |
+| `find`    | `text`, `limit`                         | the nodes that hold it                           |
+| `act`     | what `browser:interact` takes           | what clicking, typing or scrolling did           |
+| `console` | `limit`                                 | its console messages                             |
+| `network` | `limit`                                 | its requests                                     |
+
+The app refuses a `file:` address outside the session's project, on disk as
+well as by name, and anything it would not load from the address bar.
 
 Vorn's own Tasks keeps the board's tables, `tasks` and `task_source_links`,
 which it is lent by name beside its own; no installed extension is.

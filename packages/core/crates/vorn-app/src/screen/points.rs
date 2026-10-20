@@ -263,6 +263,23 @@ impl TreeBind for ScopedBinder<'_, '_> {
         });
         Some(super::code::panel(self.s, &inst, code, extra))
     }
+
+    /// The session's page, for the Browser drawing the pane of the session
+    /// it names: a tree can seat only its own scope's page, so one session's
+    /// pane never shows another's.
+    fn web(&self, _node: &str, web: &vorn_tree::Web) -> Option<El> {
+        let (base, scope) = crate::points::unscope(self.key);
+        let browser = self.s.st.points.get(base)?.extension == crate::panes::BROWSER;
+        if !browser || scope != Some(web.view.as_str()) {
+            return None;
+        }
+        let session = self.s.store.session(&web.view)?;
+        Some(super::panes::web_part(
+            self.s,
+            &web.view,
+            &session.info.agent_type,
+        ))
+    }
 }
 
 /// Tree `key` drawn for its scope, or its error box; nothing until it renders.

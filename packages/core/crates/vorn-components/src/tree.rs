@@ -98,6 +98,12 @@ pub trait TreeBind {
         let _ = log;
         None
     }
+    /// A web page in the client's own web view, under the bar the client draws
+    /// for it; `None` (a client with no web views) draws nothing.
+    fn web(&self, node: &str, web: &vorn_tree::Web) -> Option<El> {
+        let _ = (node, web);
+        None
+    }
 }
 
 /// A lazy list's height: it scrolls on its own, building the rows in view.
@@ -437,6 +443,10 @@ impl Cx<'_> {
                 .code(key(n), c, &n.children)
                 .unwrap_or_else(|| parts::plain_code(c)),
             Kind::Log(l) => self.bind.log(l).unwrap_or_else(|| div().sem(Sem::Hidden)),
+            Kind::Web(w) => self
+                .bind
+                .web(key(n), w)
+                .unwrap_or_else(|| div().sem(Sem::Hidden)),
         };
         sized(el, &n.props)
     }
