@@ -755,13 +755,21 @@ pub enum ServerMsg {
 // ---------------------------------------------------------------------------
 
 /// Appends one frame: the length, `kind` and the payload `body` writes.
-fn frame(out: &mut Vec<u8>, kind: u8, body: impl FnOnce(&mut Writer<'_>)) {
+/// Appends one frame; one over [`MAX_FRAME`] is left out, since a peer would close the
+/// connection on it. Returns whether it was written.
+fn frame(out: &mut Vec<u8>, kind: u8, body: impl FnOnce(&mut Writer<'_>)) -> bool {
     let start = out.len();
     out.extend_from_slice(&[0; 4]);
     out.push(kind);
     body(&mut Writer::new(out));
-    let len = (out.len() - start - 4) as u32;
-    out[start..start + 4].copy_from_slice(&len.to_le_bytes());
+    let len = out.len() - start - 4;
+    if len > MAX_FRAME {
+        out.truncate(start);
+        return false;
+    }
+    // MAX_FRAME fits a u32.
+    out[start..start + 4].copy_from_slice(&(len as u32).to_le_bytes());
+    true
 }
 
 /// Splits a byte stream into frames. Feed it whatever a read returned.
@@ -1465,8 +1473,8 @@ impl ClientMsg {
         }
     }
 
-    /// Appends this message as one frame.
-    pub fn encode(&self, out: &mut Vec<u8>) {
+    /// Appends this message as one frame; one over [`MAX_FRAME`] is left out and returns false.
+    pub fn encode(&self, out: &mut Vec<u8>) -> bool {
         frame(out, self.kind(), |w| {
             w.map();
             match self {
@@ -1621,7 +1629,7 @@ impl ClientMsg {
                 ClientMsg::Unhandled(_) => {}
             }
             w.end();
-        });
+        })
     }
 
     /// Reads one frame's message. `Ok(None)` for an optional kind this
@@ -1952,8 +1960,8 @@ impl ServerMsg {
         }
     }
 
-    /// Appends this message as one frame.
-    pub fn encode(&self, out: &mut Vec<u8>) {
+    /// Appends this message as one frame; one over [`MAX_FRAME`] is left out and returns false.
+    pub fn encode(&self, out: &mut Vec<u8>) -> bool {
         frame(out, self.kind(), |w| {
             w.map();
             match self {
@@ -2023,6 +2031,8 @@ impl ServerMsg {
                     w.key(4).uint(u64::from(image.width));
                     w.key(5).uint(u64::from(image.height));
                     w.key(6).bytes(&image.rgba);
+                    w.key(7).uint(u64::from(image.source_width));
+                    w.key(8).uint(u64::from(image.source_height));
                 }
                 ServerMsg::ResetTables { sid, table_gen } => {
                     w.key(1).uint(u64::from(*sid));
@@ -2168,7 +2178,7 @@ impl ServerMsg {
                 }
             }
             w.end();
-        });
+        })
     }
 
     /// Reads one frame's message. `Ok(None)` for a kind the client may skip:
@@ -2358,6 +2368,8 @@ impl ServerMsg {
                     gen: d.num_or_zero(3)?,
                     width: d.num(4)?,
                     height: d.num(5)?,
+                    source_width: d.num(7)?,
+                    source_height: d.num(8)?,
                     rgba: d.bytes(6)?,
                 };
                 let len = (image.width as usize)
@@ -2623,6 +2635,8 @@ mod tests {
                 gen: 1,
                 width: 2,
                 height: 2,
+                source_width: 2,
+                source_height: 2,
                 rgba: vec![0; 15],
             }),
         }
@@ -2720,6 +2734,8 @@ mod tests {
                 gen: 1 << 40,
                 width: 2,
                 height: 1,
+                source_width: 4,
+                source_height: 2,
                 rgba: vec![1, 2, 3, 4, 5, 6, 7, 8],
             }),
         });
@@ -2876,6 +2892,35 @@ mod tests {
         assert!(major_supported(PROTO_MAJOR));
         assert!(!major_supported(PROTO_MAJOR - 1));
         assert!(!major_supported(PROTO_MAJOR + 1));
+    }
+
+    #[test]
+    fn a_frame_over_the_limit_is_left_out_and_the_stream_stays_whole() {
+        let side = 4200;
+        let big = ServerMsg::Image {
+            sid: 1,
+            image: Box::new(Image {
+                id: 1,
+                gen: 1,
+                width: side,
+                height: side,
+                source_width: side,
+                source_height: side,
+                rgba: vec![0; side as usize * side as usize * 4],
+            }),
+        };
+        let small = ServerMsg::Error {
+            code: 1,
+            message: "after".into(),
+        };
+        let mut out = Vec::new();
+        assert!(!big.encode(&mut out));
+        assert!(out.is_empty());
+        assert!(small.encode(&mut out));
+        let mut r = FrameReader::new();
+        r.push(&out);
+        let (k, payload) = r.next_frame().unwrap().unwrap();
+        assert_eq!(ServerMsg::decode(k, payload).unwrap(), Some(small));
     }
 
     #[test]
