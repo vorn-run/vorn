@@ -132,6 +132,7 @@ impl CpuRaster {
     }
 
     /// The last frame, row-major, one pixel each in memory order.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn pixels(&self) -> &[u32] {
         &self.pixels
     }
@@ -180,15 +181,18 @@ impl CpuRaster {
     }
 
     /// The side of the square tiles damage is tracked in, in pixels.
+    #[cfg(not(target_arch = "wasm32"))]
     pub const TILE_PX: u32 = TILE as u32;
 
     /// Per tile, row-major and [`CpuRaster::tiles_x`] wide: whether the
     /// last [`CpuRaster::render`] changed it.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn dirty_tiles(&self) -> &[bool] {
         &self.dirty
     }
 
     /// How many tiles a row of the frame has.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn tiles_x(&self) -> usize {
         (self.size.0 as usize).div_ceil(TILE)
     }
@@ -521,6 +525,7 @@ fn intersect(a: [i32; 4], b: [i32; 4]) -> [i32; 4] {
 
 /// The pixels the layers `range` of `scene` may touch in a `size` frame,
 /// as `[x0, y0, x1, y1)`; `None` when they draw nothing there.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn layers_bounds(
     scene: &Scene,
     range: std::ops::Range<usize>,
