@@ -225,10 +225,8 @@ impl Ssh {
         let (what, id) = e.id.split_once(':').unwrap_or((e.id.as_str(), ""));
         match (&e.kind, what) {
             (EventKind::Click, "add-host") => self.add_host(host),
-            (EventKind::Click, "toggle-host") => {
-                if !self.open_hosts.remove(id) {
-                    self.open_hosts.insert(id.to_owned());
-                }
+            (EventKind::Toggle, "host") => {
+                set_open(&mut self.open_hosts, id, &e.value);
                 Ok(redraw())
             }
             (EventKind::Click, "test") => self.test(host, id),
@@ -257,13 +255,18 @@ impl Ssh {
                 Ok(redraw())
             }
             (EventKind::Select, "key") => {
-                Ssh::write_host(host, id, |h| h["credentialId"] = json!(e.value))?;
+                let key = if e.value == NO_KEY { "" } else { &e.value };
+                Ssh::write_host(host, id, |h| h["credentialId"] = json!(key))?;
                 Ok(redraw())
             }
-            (EventKind::Click, "toggle-key") => {
-                if !self.open_keys.remove(id) {
-                    self.open_keys.insert(id.to_owned());
-                }
+            (EventKind::Submit, "browse-key") => {
+                Ssh::write_host(host, id, |h| {
+                    hosts::set_field(h, Field::KeyPath, &e.value);
+                })?;
+                Ok(redraw())
+            }
+            (EventKind::Toggle, "keyrow") => {
+                set_open(&mut self.open_keys, id, &e.value);
                 Ok(redraw())
             }
             (EventKind::Click, "delete-key") => self.delete_key(host, id),
@@ -271,7 +274,7 @@ impl Ssh {
                 self.importing = !self.importing;
                 Ok(redraw())
             }
-            (EventKind::Submit, "import-path") => self.import_key(host, &e.value),
+            (EventKind::Submit, "import-path" | "import-browse") => self.import_key(host, &e.value),
             (EventKind::Click, "paste") => {
                 self.adding = Some(NewKey::default());
                 Ok(redraw())
@@ -303,21 +306,47 @@ impl Ssh {
 
     fn render_page(&self, host: &mut dyn Host) -> Result<Node, Error> {
         let (list, keys) = (hosts_of(host)?, keys_of(host)?);
-        Ok(page(self, &list, &keys))
+        // Without an answer, as from a core before `remote.vault`, the keychain is taken as there.
+        let keychain = host
+            .call("remote.vault", Value::Null)
+            .map_or(true, |v| v["keychain"] != json!(false));
+        Ok(page(self, &list, &keys, keychain))
     }
+}
+
+/// The stored-key choice that picks none, first as 0.8's "Select a key...".
+const NO_KEY: &str = "none";
+
+/// Opens or closes row `id` of `open` as a disclosure's toggle says: `true` opens.
+fn set_open(open: &mut BTreeSet<String>, id: &str, to: &str) {
+    if to == "true" {
+        open.insert(id.to_owned());
+    } else {
+        open.remove(id);
+    }
+}
+
+/// A field's label over it, `gap` apart.
+fn label_over(label: &str, gap: f32, input: Node) -> Node {
+    col([text(label).style(TextStyle::Label), input.label(label)]).gap(gap)
 }
 
 /// A field's label over it.
 fn labelled(label: &str, input: Node) -> Node {
-    col([text(label).style(TextStyle::Secondary), input.label(label)]).gap(4.0)
+    label_over(label, 4.0, input)
 }
 
 fn hint(line: &str) -> Node {
     text(line).style(TextStyle::Secondary)
 }
 
-/// The whole page: the hosts, then the keys.
-pub fn page(ssh: &Ssh, list: &[Value], keys: &[Value]) -> Node {
+/// What the page says when the OS keychain is missing, as 0.8 did; the
+/// key vault's Import and Paste go with it.
+pub const NO_KEYCHAIN: &str = "Keychain encryption is not available on this system. Install libsecret (gnome-keyring) to use the SSH key vault.";
+
+/// The whole page: the keychain's warning when it is missing, the hosts,
+/// then the keys.
+pub fn page(ssh: &Ssh, list: &[Value], keys: &[Value], keychain: bool) -> Node {
     let hosts = list.iter().map(|h| host_entry(ssh, h, keys));
     let hosts = section(
         "Remote Hosts",
@@ -327,24 +356,36 @@ pub fn page(ssh: &Ssh, list: &[Value], keys: &[Value]) -> Node {
         ],
     );
     let key_rows = keys.iter().map(|k| key_entry(ssh, k, list));
-    let mut key_section = vec![
-        list_of("keys", key_rows, keys.len(), "No stored keys yet."),
-        row([
-            button("import", "Import Key").icon("upload"),
-            button("paste", "Paste Key").icon("clipboard-paste"),
-        ])
-        .gap(8.0),
-    ];
-    if ssh.importing {
-        key_section.push(labelled(
-            "Private key file",
-            field("import-path", "").placeholder("~/.ssh/id_ed25519"),
-        ));
-    }
+    let mut key_section = vec![list_of("keys", key_rows, keys.len(), "No stored keys yet.")];
     if let Some(k) = &ssh.adding {
         key_section.push(new_key(k));
     }
-    col([hosts, section("SSH Keys", key_section)]).gap(24.0)
+    if ssh.importing {
+        // The path typed, as 0.8 took it, or one picked in the file dialog.
+        key_section.push(
+            row([
+                field("import-path", "")
+                    .placeholder("Path to a key file, then Enter")
+                    .label("Key file to import")
+                    .grow(),
+                button("import-browse", "Browse…").picks_file("Import SSH key"),
+            ])
+            .gap(6.0),
+        );
+    }
+    if keychain {
+        let mut buttons = vec![button("import", "Import Key").icon("upload")];
+        if ssh.adding.is_none() {
+            buttons.push(button("paste", "Paste Key").icon("plus"));
+        }
+        key_section.push(row(buttons).gap(8.0));
+    }
+    let mut page = Vec::with_capacity(3);
+    if !keychain {
+        page.push(notice(NO_KEYCHAIN, Tone::Warn));
+    }
+    page.extend([hosts, section("SSH Keys", key_section)]);
+    col(page).gap(24.0)
 }
 
 /// A list with its count, or what it says with nothing in it.
@@ -361,6 +402,7 @@ fn list_of(id: &str, rows: impl IntoIterator<Item = Node>, n: usize, empty: &str
     list(id, [group(heading, rows)])
 }
 
+/// A host's row; a click opens its form under it, as 0.8's card did.
 fn host_entry(ssh: &Ssh, h: &Value, keys: &[Value]) -> Node {
     let id = hosts::id(h);
     let open = ssh.open_hosts.contains(id);
@@ -368,34 +410,18 @@ fn host_entry(ssh: &Ssh, h: &Value, keys: &[Value]) -> Node {
         "" => "Unnamed host",
         l => l,
     };
-    let toggle = if open {
-        button(format!("toggle-host:{id}"), "Close").icon("chevron-up")
-    } else {
-        button(format!("toggle-host:{id}"), "Edit").icon("chevron-down")
-    };
-    let mut e = entry(format!("host:{id}"), label)
+    let e = entry(format!("host:{id}"), label)
         .icon("server")
         .code(hosts::subtitle(h))
-        .actions([toggle])
-        .more([button(format!("delete-host:{id}"), "Delete Host")
-            .icon("trash-2")
-            .danger()
-            .confirm(format!(
-                "Delete {label}? New sessions can no longer start on it."
-            ))]);
-    match ssh.tests.get(id) {
-        Some(Test::Done { ok: true, .. }) => e = e.badge("Connected", Tone::Good),
-        Some(Test::Done { ok: false, .. }) => e = e.badge("Failed", Tone::Bad),
-        Some(Test::Testing) => e = e.badge("Testing", Tone::Busy),
-        None => {}
-    }
+        .expanded(open);
     if open {
-        e = e.child(host_form(ssh, h, keys));
+        e.child(host_form(ssh, h, keys, label))
+    } else {
+        e
     }
-    e
 }
 
-fn host_form(ssh: &Ssh, h: &Value, keys: &[Value]) -> Node {
+fn host_form(ssh: &Ssh, h: &Value, keys: &[Value], label: &str) -> Node {
     let id = hosts::id(h);
     let input = |f: Field, placeholder: &str| {
         let value = match f {
@@ -407,6 +433,18 @@ fn host_form(ssh: &Ssh, h: &Value, keys: &[Value]) -> Node {
             .live()
     };
     let method = hosts::auth(h);
+    let testing = ssh.tests.get(id) == Some(&Test::Testing);
+    let test = button(format!("test:{id}"), "Test Connection").icon(if testing {
+        "loader-circle"
+    } else {
+        "wifi"
+    });
+    let delete = button(format!("delete-host:{id}"), "Delete Host")
+        .icon("trash-2")
+        .danger()
+        .confirm(format!(
+            "Delete {label}? New sessions can no longer start on it."
+        ));
     let mut form = vec![
         labelled("Label", input(Field::Label, "Host label")),
         row([
@@ -415,8 +453,9 @@ fn host_form(ssh: &Ssh, h: &Value, keys: &[Value]) -> Node {
         ])
         .gap(8.0),
         labelled("Username", input(Field::User, "e.g. ubuntu")),
-        labelled(
+        label_over(
             "Authentication",
+            6.0,
             choice(format!("auth:{id}"), hosts::AUTH_METHODS, method),
         ),
         credential(h, method, keys),
@@ -424,18 +463,13 @@ fn host_form(ssh: &Ssh, h: &Value, keys: &[Value]) -> Node {
             "Extra SSH Options",
             input(Field::Options, "e.g. -o ForwardAgent=yes"),
         ),
+        row([test, delete]).between(),
     ];
-    let testing = ssh.tests.get(id) == Some(&Test::Testing);
-    form.push(row([if testing {
-        button(format!("test:{id}"), "Testing…").icon("loader-circle")
-    } else {
-        button(format!("test:{id}"), "Test Connection").icon("wifi")
-    }]));
     if let Some(Test::Done { ok, message }) = ssh.tests.get(id) {
         let tone = if *ok { Tone::Good } else { Tone::Bad };
         form.push(notice(message, tone));
     }
-    col(form).gap(12.0).py(8.0)
+    col(form).gap(12.0)
 }
 
 /// What the host logs in with, by its method.
@@ -449,38 +483,57 @@ fn credential(h: &Value, method: &str, keys: &[Value]) -> Node {
                     "Password",
                     field(format!("password:{id}"), "")
                         .secret()
+                        .submits_on_blur()
                         .placeholder(if saved { "(saved)" } else { "Enter password" }),
                 ),
-                hint("Press Return to save. Encrypted with your OS keychain"),
+                hint("Encrypted with your OS keychain"),
             ])
             .gap(4.0)
         }
-        "key-stored" if keys.is_empty() => {
-            labelled("Stored Key", hint("No stored keys yet. Add one below."))
-        }
         "key-stored" => {
-            let options: Vec<(String, String)> = keys
-                .iter()
-                .map(|k| (hosts::id(k).to_owned(), hosts::key_choice(k)))
-                .collect();
-            labelled(
+            let options: Vec<(String, String)> =
+                std::iter::once((NO_KEY.to_owned(), "Select a key...".to_owned()))
+                    .chain(
+                        keys.iter()
+                            .map(|k| (hosts::id(k).to_owned(), hosts::key_choice(k))),
+                    )
+                    .collect();
+            let chosen = match hosts::text(h, "credentialId") {
+                c if keys.iter().any(|k| hosts::id(k) == c) => c,
+                _ => NO_KEY,
+            };
+            let picker = labelled(
                 "Stored Key",
-                choice(format!("key:{id}"), options, hosts::text(h, "credentialId")),
-            )
+                choice(format!("key:{id}"), options, chosen).dropdown(),
+            );
+            if keys.is_empty() {
+                col([picker, hint("No stored keys yet. Add one below.")]).gap(4.0)
+            } else {
+                picker
+            }
         }
         "key-file" => labelled(
             "SSH Key Path",
-            field(
-                format!("{}:{id}", Field::KeyPath.key()),
-                hosts::text(h, Field::KeyPath.key()),
-            )
-            .placeholder("~/.ssh/id_ed25519")
-            .live(),
+            row([
+                field(
+                    format!("{}:{id}", Field::KeyPath.key()),
+                    hosts::text(h, Field::KeyPath.key()),
+                )
+                .placeholder("~/.ssh/id_ed25519")
+                .live()
+                .grow(),
+                button(format!("browse-key:{id}"), "Browse")
+                    .icon("key")
+                    .picks_file("Choose an SSH key"),
+            ])
+            .gap(6.0),
         ),
         _ => hint("Uses your running SSH agent (ssh-agent)"),
     }
 }
 
+/// A stored key's row; a click opens its public key, the hosts that use
+/// it and Delete Key under it.
 fn key_entry(ssh: &Ssh, k: &Value, list: &[Value]) -> Node {
     let id = hosts::id(k);
     let open = ssh.open_keys.contains(id);
@@ -489,50 +542,44 @@ fn key_entry(ssh: &Ssh, k: &Value, list: &[Value]) -> Node {
         l => l,
     };
     let public = hosts::text(k, "publicKey");
-    let toggle = if open {
-        button(format!("toggle-key:{id}"), "Close").icon("chevron-up")
-    } else {
-        button(format!("toggle-key:{id}"), "Details").icon("chevron-down")
-    };
     let mut e = entry(format!("keyrow:{id}"), label)
         .icon("file-key")
         .code(hosts::truncate_key(public))
-        .actions([toggle])
-        .more([button(format!("delete-key:{id}"), "Delete Key")
-            .icon("trash-2")
-            .danger()
-            .confirm(format!(
-                "Delete {label}? Hosts that use it can no longer log in with it."
-            ))]);
+        .expanded(open);
     let kind = hosts::text(k, "keyType");
     if !kind.is_empty() {
         e = e.badge(kind.to_uppercase(), Tone::Neutral);
     }
-    if open {
-        let users: Vec<String> = list
-            .iter()
-            .filter(|h| hosts::text(h, "credentialId") == id)
-            .map(|h| hosts::text(h, "label").to_owned())
-            .collect();
-        let used = if users.is_empty() {
-            hint("No hosts using this key")
-        } else {
-            row(users.into_iter().map(|u| badge(u, Tone::Neutral)))
-                .gap(4.0)
-                .wrap()
-        };
-        let public = if public.is_empty() {
-            hint("No public key stored")
-        } else {
-            text(public).style(TextStyle::Mono)
-        };
-        e = e.child(
-            col([labelled("Public Key", public), labelled("Used By", used)])
-                .gap(12.0)
-                .py(8.0),
-        );
+    if !open {
+        return e;
     }
-    e
+    let users: Vec<&str> = list
+        .iter()
+        .filter(|h| hosts::auth(h) == "key-stored" && hosts::text(h, "credentialId") == id)
+        .map(|h| hosts::text(h, "label"))
+        .collect();
+    let used = if users.is_empty() {
+        hint("No hosts using this key")
+    } else {
+        row(users.into_iter().map(|u| badge(u, Tone::Neutral)))
+            .gap(6.0)
+            .wrap()
+    };
+    let mut detail = Vec::with_capacity(3);
+    if !public.is_empty() {
+        detail.push(labelled("Public Key", text(public).style(TextStyle::Mono)));
+    }
+    detail.push(label_over("Used By", 6.0, used));
+    detail.push(
+        row([button(format!("delete-key:{id}"), "Delete Key")
+            .icon("trash-2")
+            .danger()
+            .confirm(format!(
+                "Delete {label}? Hosts that use it can no longer log in with it."
+            ))])
+        .end(),
+    );
+    e.child(col(detail).gap(12.0))
 }
 
 fn new_key(k: &NewKey) -> Node {
@@ -546,19 +593,19 @@ fn new_key(k: &NewKey) -> Node {
         labelled(
             "Private key *",
             input("private", &k.private)
-                .multiline()
+                .lines(3)
                 .placeholder("-----BEGIN OPENSSH PRIVATE KEY-----"),
         ),
         labelled(
             "Public key",
             input("public", &k.public)
-                .multiline()
+                .lines(2)
                 .placeholder("ssh-ed25519 AAAA..."),
         ),
         labelled(
             "Certificate",
             input("certificate", &k.certificate)
-                .multiline()
+                .lines(2)
                 .placeholder("Optional"),
         ),
         hint("If your key has a passphrase, remove it first with ssh-keygen -p"),

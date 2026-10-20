@@ -87,6 +87,11 @@ fn click(s: &mut Ssh, h: &mut FakeHost, id: &str) -> Value {
     tell(s, h, id, EventKind::Click, "")
 }
 
+/// Opens (`true`) or closes a row as a click on its disclosure does.
+fn disclose(s: &mut Ssh, h: &mut FakeHost, id: &str, open: bool) -> Value {
+    tell(s, h, id, EventKind::Toggle, &open.to_string())
+}
+
 /// Every node in `n`, depth first.
 fn walk<'a>(n: &'a Node, out: &mut Vec<&'a Node>) {
     out.push(n);
@@ -118,6 +123,13 @@ fn texts(n: &Node) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+fn icon_of<'a>(n: &'a Node, id: &str) -> Option<&'a str> {
+    match &find(n, id)?.kind {
+        Kind::Button { icon, .. } => icon.as_deref(),
+        _ => None,
+    }
 }
 
 fn shows(n: &Node, line: &str) -> bool {
@@ -158,10 +170,10 @@ fn nothing_kept_says_so() {
 }
 
 #[test]
-fn edit_opens_the_form_with_the_host_as_kept() {
+fn opening_a_host_shows_its_form_as_kept() {
     let kept = Kept::default();
     let (mut s, mut h) = (Ssh::default(), host(&kept));
-    click(&mut s, &mut h, "toggle-host:h1");
+    disclose(&mut s, &mut h, "host:h1", true);
     let page = render(&mut s, &mut h);
     let Some(Node {
         kind: Kind::Field { value, .. },
@@ -173,7 +185,20 @@ fn edit_opens_the_form_with_the_host_as_kept() {
     assert_eq!(value, "dev.example.com");
     assert!(shows(&page, "Uses your running SSH agent (ssh-agent)"));
     assert!(shows(&page, "Test Connection"));
-    click(&mut s, &mut h, "toggle-host:h1");
+    assert!(shows(&page, "Delete Host"), "in the form, as 0.8 had it");
+    let Some(Node {
+        kind: Kind::Entry(e),
+        ..
+    }) = find(&page, "host:h1")
+    else {
+        panic!("no host row");
+    };
+    assert_eq!(e.expanded, Some(true));
+    assert!(
+        e.actions.is_empty() && e.more.is_empty(),
+        "no Edit or Close"
+    );
+    disclose(&mut s, &mut h, "host:h1", false);
     assert!(find(&render(&mut s, &mut h), "hostname:h1").is_none());
 }
 
@@ -199,7 +224,7 @@ fn typing_in_a_field_saves_the_host() {
 fn switching_auth_shows_its_credential_and_saves() {
     let kept = Kept::default();
     let (mut s, mut h) = (Ssh::default(), host(&kept));
-    click(&mut s, &mut h, "toggle-host:h1");
+    disclose(&mut s, &mut h, "host:h1", true);
     tell(&mut s, &mut h, "auth:h1", EventKind::Select, "key-stored");
     assert_eq!(kept.hosts.borrow()[0]["authMethod"], "key-stored");
     let page = render(&mut s, &mut h);
@@ -238,7 +263,7 @@ fn a_host_without_an_address_is_not_tested() {
     tell(&mut s, &mut h, "hostname:h1", EventKind::Change, "");
     click(&mut s, &mut h, "test:h1");
     assert!(h.asked("remote.test").is_empty());
-    click(&mut s, &mut h, "toggle-host:h1");
+    disclose(&mut s, &mut h, "host:h1", true);
     assert!(shows(&render(&mut s, &mut h), hosts::NEEDS_ADDRESS));
 }
 
@@ -246,14 +271,15 @@ fn a_host_without_an_address_is_not_tested() {
 fn a_test_runs_in_vornd_and_its_result_shows() {
     let kept = Kept::default();
     let (mut s, mut h) = (Ssh::default(), host(&kept));
-    click(&mut s, &mut h, "toggle-host:h1");
+    disclose(&mut s, &mut h, "host:h1", true);
     click(&mut s, &mut h, "test:h1");
     let asked = h.asked("remote.test");
     assert_eq!(asked.len(), 1);
     assert_eq!(asked[0]["then"], TESTED);
     assert_eq!(asked[0]["key"], "h1");
     assert_eq!(asked[0]["host"]["hostname"], "dev.example.com");
-    assert!(shows(&render(&mut s, &mut h), "Testing…"));
+    let page = render(&mut s, &mut h);
+    assert_eq!(icon_of(&page, "test:h1"), Some("loader-circle"), "testing");
 
     click(&mut s, &mut h, "test:h1");
     assert_eq!(h.asked("remote.test").len(), 1, "one test at a time");
@@ -273,7 +299,7 @@ fn a_test_runs_in_vornd_and_its_result_shows() {
     );
     let page = render(&mut s, &mut h);
     assert!(shows(&page, "Permission denied"));
-    assert!(shows(&page, "Test Connection"));
+    assert_eq!(icon_of(&page, "test:h1"), Some("wifi"));
 }
 
 #[test]
@@ -359,7 +385,7 @@ fn import_and_delete_a_key() {
 
     tell(&mut s, &mut h, "auth:h1", EventKind::Select, "key-stored");
     tell(&mut s, &mut h, "key:h1", EventKind::Select, "k1");
-    click(&mut s, &mut h, "toggle-key:k1");
+    disclose(&mut s, &mut h, "keyrow:k1", true);
     let page = render(&mut s, &mut h);
     assert!(shows(&page, "Public Key"));
     assert!(
@@ -368,4 +394,127 @@ fn import_and_delete_a_key() {
     );
     click(&mut s, &mut h, "delete-key:k1");
     assert!(kept.keys.borrow().is_empty());
+}
+
+#[test]
+fn the_password_saves_when_left() {
+    let kept = Kept::default();
+    let (mut s, mut h) = (Ssh::default(), host(&kept));
+    disclose(&mut s, &mut h, "host:h1", true);
+    tell(&mut s, &mut h, "auth:h1", EventKind::Select, "password");
+    let page = render(&mut s, &mut h);
+    let Some(Node {
+        kind: Kind::Field { secret, blur, .. },
+        ..
+    }) = find(&page, "password:h1")
+    else {
+        panic!("no password field");
+    };
+    assert!(*secret && *blur, "a hidden field that submits on blur");
+    assert!(shows(&page, "Encrypted with your OS keychain"));
+}
+
+#[test]
+fn the_stored_key_is_picked_from_a_dropdown_that_starts_with_none() {
+    let kept = Kept::default();
+    let (mut s, mut h) = (Ssh::default(), host(&kept));
+    disclose(&mut s, &mut h, "host:h1", true);
+    tell(&mut s, &mut h, "auth:h1", EventKind::Select, "key-stored");
+    let page = render(&mut s, &mut h);
+    let Some(Node {
+        kind: Kind::Choice { options, dropdown },
+        ..
+    }) = find(&page, "key:h1")
+    else {
+        panic!("no stored key choice");
+    };
+    assert!(*dropdown);
+    let chosen: Vec<&str> = options
+        .iter()
+        .filter(|o| o.selected)
+        .map(|o| o.id.as_str())
+        .collect();
+    assert_eq!(chosen, [NO_KEY]);
+    let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+    assert_eq!(labels, ["Select a key...", "Work (ed25519)"]);
+    tell(&mut s, &mut h, "key:h1", EventKind::Select, "k1");
+    assert_eq!(kept.hosts.borrow()[0]["credentialId"], "k1");
+    tell(&mut s, &mut h, "key:h1", EventKind::Select, NO_KEY);
+    assert_eq!(kept.hosts.borrow()[0]["credentialId"], "");
+}
+
+#[test]
+fn browse_picks_a_key_file_for_a_host_and_to_import() {
+    let kept = Kept::default();
+    let (mut s, mut h) = (Ssh::default(), host(&kept));
+    disclose(&mut s, &mut h, "host:h1", true);
+    tell(&mut s, &mut h, "auth:h1", EventKind::Select, "key-file");
+    let page = render(&mut s, &mut h);
+    let Some(Node {
+        kind: Kind::Button { pick, .. },
+        ..
+    }) = find(&page, "browse-key:h1")
+    else {
+        panic!("no browse button");
+    };
+    assert!(pick.is_some(), "it asks Vorn for a file");
+    tell(
+        &mut s,
+        &mut h,
+        "browse-key:h1",
+        EventKind::Submit,
+        "/k/id_rsa",
+    );
+    assert_eq!(kept.hosts.borrow()[0]["sshKeyPath"], "/k/id_rsa");
+
+    click(&mut s, &mut h, "import");
+    let page = render(&mut s, &mut h);
+    assert!(find(&page, "import-path").is_some(), "the path field stays");
+    assert!(matches!(
+        &find(&page, "import-browse").expect("browse").kind,
+        Kind::Button { pick: Some(_), .. }
+    ));
+    tell(
+        &mut s,
+        &mut h,
+        "import-browse",
+        EventKind::Submit,
+        "~/.ssh/id_ed25519",
+    );
+    assert_eq!(
+        h.asked("remote.importKey"),
+        [json!({ "path": "~/.ssh/id_ed25519" })]
+    );
+    assert!(!s.importing);
+}
+
+#[test]
+fn without_the_keychain_the_page_warns_and_offers_no_key_to_add() {
+    let kept = Kept::default();
+    let mut s = Ssh::default();
+    let mut h = host(&kept).answer("remote.vault", |_| Ok(json!({ "keychain": false })));
+    let page = render(&mut s, &mut h);
+    assert!(shows(&page, NO_KEYCHAIN));
+    assert!(!shows(&page, "Import Key") && !shows(&page, "Paste Key"));
+
+    let mut h = host(&Kept::default()).answer("remote.vault", |_| Ok(json!({ "keychain": true })));
+    let page = render(&mut s, &mut h);
+    assert!(!shows(&page, NO_KEYCHAIN));
+}
+
+#[test]
+fn paste_key_hides_while_its_form_shows() {
+    let kept = Kept::default();
+    let (mut s, mut h) = (Ssh::default(), host(&kept));
+    click(&mut s, &mut h, "paste");
+    let page = render(&mut s, &mut h);
+    assert!(!shows(&page, "Paste Key") && shows(&page, "Import Key"));
+    let Some(Node {
+        kind: Kind::Field { lines, .. },
+        ..
+    }) = find(&page, "new-key:private")
+    else {
+        panic!("no private key field");
+    };
+    assert_eq!(*lines, 3);
 }

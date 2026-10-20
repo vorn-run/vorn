@@ -153,6 +153,14 @@ its tree with `ui.render` (`{point, surface}` in, `{tokens, tree}` out),
 in its manifest. The host asks again whenever the extension's rows change,
 and when the place shows.
 
+A settings page is listed under Extensions in the Settings sidebar, and in
+the palette as "<title> Settings". One of the extensions Vorn ships may name
+the app's own page it follows with `after` (`appearance`, `general`,
+`updates`, `notifications`, `experimental`, `agents`, `mcp`, `keys` or
+`network`): a page that moved out of the app into a built-in, as SSH &
+Hosts after `agents`, so it keeps its place and its palette entry, its bare
+title. Another extension's `after` is ignored.
+
 A badge, a card footer and a sidebar row's marks draw once per session: the
 tree's root is a box holding one child per session, its id the session's
 id, and each card draws its own. `per_session` builds it; a session with no
@@ -212,8 +220,27 @@ before any other event from its tree, so a tab switch never overtakes it. A
 `code` whose tree shows several files gives each its own node id.
 A `log` is cut into blocks by the client, from the shell's screen, pairing
 the newest command with the newest prompt. A field with `live` reports
-`change` as it is typed. A field with `multiline` takes several lines, for a
-key or a certificate; Return breaks the line and Cmd+Return submits it.
+`change` as it is typed. A field with `lines` above 1 (`.lines(n)`, at most
+12) is that many lines tall, for a key or a certificate; Return breaks the
+line and Cmd+Return submits it. A one-line field with `blur`
+(`.submits_on_blur()`) also submits what it holds when it loses focus, as a
+password saves once typed and left; Return there just leaves it.
+
+A few more shapes for a settings form:
+
+- A button with `pick` (`.picks_file(title)`) opens the OS file dialog
+  titled `title` instead of telling `click`; a file chosen comes back as
+  `submit` on the button's id with the file's path. Nothing comes back when
+  the dialog is cancelled, or where there is none (the web client).
+- A choice with `dropdown` (`.dropdown()`) is a field showing the option
+  chosen that opens a menu of the options, rather than a row of chips; it
+  reports `select` the same way. The terminal and the platform's own
+  controls draw it as chips.
+- An entry with `expanded` (`.expanded(open)`) is a disclosure: the whole
+  row is pressed, with a chevron, and tells `toggle` on the entry's id with
+  `true` to open or `false` to close. Open, its children show under the row
+  rather than beside its title.
+- Text with the `label` style is a form field's small, uppercase caption.
 
 A `web` part is a native web view the client places and seats, with the
 address bar, back and forward, and an artifact's review controls over it.
@@ -407,10 +434,15 @@ sessions on a remote host keep running with the built-in off.
 | `remote.storeKey`  | `label`, `privateKey`, `publicKey`, `certificate` | the stored key                                               |
 | `remote.importKey` | `path` (`~` is home)                              | the stored key, read from the file and its `.pub` beside it  |
 | `remote.deleteKey` | `id`                                              | `null`, the key and its secret gone                          |
+| `remote.vault`     |                                                   | `{keychain}`: `false` when the OS keychain is missing        |
 
 A test logs in for up to ten seconds, and a component answers one call at a
 time, so with `then` `remote.test` answers `{testing: true}` at once and
 later calls the extension's action `then` with `{key, result}`.
+
+`remote.vault` says `keychain: false` only when vornd wanted the OS keychain
+and found none, so its secrets sit in a private file instead; told not to
+use it (`VORND_KEYCHAIN=0`), it says `true`.
 
 Vorn's own Tasks keeps the board's tables, `tasks` and `task_source_links`,
 which it is lent by name beside its own; no installed extension is.

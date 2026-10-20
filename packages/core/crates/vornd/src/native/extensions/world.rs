@@ -800,6 +800,7 @@ impl World for Wired {
                     let id = text(&args, "id").ok_or_else(|| needs(m, "the key's id"))?;
                     ask(&native, "credential:deleteKey", json!(id)).await
                 }
+                "remote.vault" => Ok(json!({ "keychain": !native.secrets.keychain_missing() })),
                 other => Err(ExtError::new(
                     "unknown-method",
                     format!("Vorn has no method {other}"),

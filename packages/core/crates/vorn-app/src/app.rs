@@ -238,6 +238,8 @@ enum Picked {
     Import,
     /// A folder to install an extension from, or link.
     ExtFolder(crate::plugins::Origin),
+    /// A file a tree point's button asked for, told to its `node`.
+    Tree { key: String, node: String },
 }
 
 /// A call whose answer changes the screen.
@@ -716,6 +718,10 @@ impl App {
             Picked::Export(id) => self.export(&id, &path),
             Picked::Import => self.import(&path),
             Picked::ExtFolder(origin) => self.plug_picked(ui, origin, &path),
+            Picked::Tree { key, node } => {
+                let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Submit, path);
+                self.tell(&key, &event);
+            }
         }
     }
 
@@ -3295,6 +3301,7 @@ impl App {
         if focus != self.last_focus {
             if let Some(old) = self.last_focus {
                 self.settings_blur(ui, old);
+                self.tree_blur(ui, old);
             }
             self.last_focus = focus;
         }

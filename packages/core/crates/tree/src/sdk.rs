@@ -67,6 +67,7 @@ pub fn button(id: impl Into<String>, label: impl Into<String>) -> Node {
         icon: None,
         style: ButtonStyle::Plain,
         confirm: None,
+        pick: None,
     })
     .id(id)
 }
@@ -77,7 +78,8 @@ pub fn field(id: impl Into<String>, value: impl Into<String>) -> Node {
         placeholder: String::new(),
         secret: false,
         live: false,
-        multiline: false,
+        lines: 1,
+        blur: false,
     })
     .id(id)
 }
@@ -103,7 +105,11 @@ where
             }
         })
         .collect();
-    node(Kind::Choice { options }).id(id)
+    node(Kind::Choice {
+        options,
+        dropdown: false,
+    })
+    .id(id)
 }
 
 pub fn badge(text: impl Into<String>, tone: Tone) -> Node {
@@ -519,10 +525,43 @@ impl Node {
         self
     }
 
-    /// A field of several lines, for text such as a pasted key.
-    pub fn multiline(mut self) -> Node {
-        if let Kind::Field { multiline, .. } = &mut self.kind {
-            *multiline = true;
+    /// A field `n` lines tall that holds several, for text such as a pasted key.
+    pub fn lines(mut self, n: u8) -> Node {
+        if let Kind::Field { lines, .. } = &mut self.kind {
+            *lines = n;
+        }
+        self
+    }
+
+    /// A field that also submits what it holds when it loses focus.
+    pub fn submits_on_blur(mut self) -> Node {
+        if let Kind::Field { blur, .. } = &mut self.kind {
+            *blur = true;
+        }
+        self
+    }
+
+    /// A button that opens the client's file dialog, titled `title`, and
+    /// reports `submit` with the chosen path.
+    pub fn picks_file(mut self, title: impl Into<String>) -> Node {
+        if let Kind::Button { pick, .. } = &mut self.kind {
+            *pick = Some(title.into());
+        }
+        self
+    }
+
+    /// A choice drawn as a button that opens its options as a menu.
+    pub fn dropdown(mut self) -> Node {
+        if let Kind::Choice { dropdown, .. } = &mut self.kind {
+            *dropdown = true;
+        }
+        self
+    }
+
+    /// An entry that opens: `open` says whether it is, and its children draw under it.
+    pub fn expanded(mut self, open: bool) -> Node {
+        if let Kind::Entry(e) = &mut self.kind {
+            e.expanded = Some(open);
         }
         self
     }

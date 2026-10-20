@@ -319,21 +319,32 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     shot.until(&mut app, "the SSH page", |a, _| {
         a.st.points.get(page).map(|_| ())
     });
-    shot.click(
-        &mut app,
-        control(
-            "settings-nav-ext",
-            Act::Point(PointAct::Settings(page.to_owned())),
-        ),
+    // In the sidebar it keeps 0.8's place: under Connections, after Coding Agents.
+    let nav = control(
+        "settings-nav-ext",
+        Act::Point(PointAct::Settings(page.to_owned())),
     );
+    shot.frame(&mut app);
+    let y = |id| shot.ui.rect_of(id).map(|r| r.y).expect("in the sidebar");
+    let agents = y(control(
+        "settings-nav",
+        Act::Set(SetAct::Open(Category::Agents)),
+    ));
+    let mcp = y(control(
+        "settings-nav",
+        Act::Set(SetAct::Open(Category::Mcp)),
+    ));
+    let ssh = y(nav);
+    assert!(agents < ssh && ssh < mcp, "{agents} < {ssh} < {mcp}");
+    shot.click(&mut app, nav);
     shot.until(&mut app, "the hosts", |a, _| {
         entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "Build box")
     });
     shot.save(&mut app, "set-ssh");
     let base = vorn_app::ui::Id::new(page).child("tree");
     let button = |node: &str| base.child(node).child("");
-    shot.hover(&mut app, base.child("entry").child("host:host-1"));
-    shot.click(&mut app, button("toggle-host:host-1"));
+    // The row itself opens the host, as 0.8's card did.
+    shot.click(&mut app, base.child("host:host-1").child("true"));
     let user = base.child("live").child("user:host-1");
     shot.until(&mut app, "the host's form", |a, _| {
         let tree = a.st.points.trees.get(page)?.as_ref().ok()?;
@@ -346,9 +357,30 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     saved(&mut app, "the host's user", |c| {
         c.pointer("/remoteHosts/0/user") == Some(&json!("deploy"))
     });
+    // A typed password saves when the field is left, as in 0.8.
+    shot.click(&mut app, base.child("auth:host-1").child("password"));
+    let password = base.child("field").child("password:host-1");
+    shot.until(&mut app, "the password field", |_, ui| ui.rect_of(password));
+    shot.click(&mut app, password);
+    shot.type_text(&mut app, "hunter2");
+    shot.click(&mut app, user);
+    saved(&mut app, "the host's password", |c| {
+        c.pointer("/remoteHosts/0/encryptedPassword")
+            .and_then(Value::as_str)
+            .is_some_and(|p| !p.is_empty())
+    });
     shot.click(&mut app, base.child("auth:host-1").child("key-file"));
     saved(&mut app, "the key-file method", |c| {
         c.pointer("/remoteHosts/0/authMethod") == Some(&json!("key-file"))
+    });
+    // Browse asks the OS for the key file.
+    app.set_picker(std::sync::Arc::new(|_| Some("/keys/id_build".into())));
+    let browse = button("browse-key:host-1");
+    shot.until(&mut app, "the browse button", |_, ui| ui.rect_of(browse));
+    shot.click(&mut app, browse);
+    shot.until(&mut app, "the picked key path", |a, _| {
+        let c = a.rpc().call("config:load", Value::Null).ok()?;
+        (c.pointer("/remoteHosts/0/sshKeyPath") == Some(&json!("/keys/id_build"))).then_some(())
     });
     shot.reveal(&mut app, CONTENT, button("paste"));
     shot.click(&mut app, button("paste"));
@@ -419,7 +451,7 @@ fn switching_ssh_off_removes_its_surfaces() {
     let in_palette = |app: &App| {
         vorn_app::palette::commands(&app.store, &app.st, "Cmd", "Alt")
             .iter()
-            .any(|e| e.label == "SSH & Hosts Settings")
+            .any(|e| e.label == "SSH & Hosts")
     };
     shot.until(&mut app, "the SSH page", |a, _| {
         a.st.points.get(page).map(|_| ())

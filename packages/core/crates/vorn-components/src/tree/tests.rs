@@ -197,7 +197,7 @@ fn field_one_line_and_secret() {
     pixels(&f, &bind);
     assert!(
         bind.any(
-            |e| matches!(e, Ev::Field { node, value } if node == "token" && value == "s3cret")
+            |e| matches!(e, Ev::Field { node, value, .. } if node == "token" && value == "s3cret")
         ),
         "a field binds with what it holds"
     );
@@ -214,6 +214,102 @@ fn choice_chips() {
         .iter()
         .find(|(_, n)| n.role() == Role::RadioButton && n.label() == Some("MCP"));
     assert_eq!(on.and_then(|(_, n)| n.toggled()), Some(Toggled::True));
+}
+
+#[test]
+fn choice_as_a_dropdown_opens_a_menu_of_its_options() {
+    let c = choice(
+        "key",
+        [("none", "Select a key..."), ("k1", "Work (ed25519)")],
+        "k1",
+    )
+    .dropdown()
+    .label("Stored Key");
+    both(
+        "dropdown",
+        c.clone(),
+        Role::ComboBox,
+        "Stored Key",
+        "Work (ed25519)",
+    );
+    let closed = Rec::default();
+    assert!(!named(
+        &pixels(&c, &closed),
+        Role::MenuItem,
+        "Select a key..."
+    ));
+    let open = Rec {
+        menu: Some("key"),
+        ..Rec::default()
+    };
+    let laid = pixels(&c, &open);
+    assert!(
+        named(&laid, Role::MenuItem, "Select a key..."),
+        "open, it lists the options"
+    );
+    assert!(open.any(|e| matches!(e, Ev::Send { event, .. }
+        if event.id == "key" && event.kind == EventKind::Select && event.value == "none")));
+}
+
+#[test]
+fn a_button_that_picks_a_file_binds_a_pick() {
+    let b = button("browse", "Browse…").picks_file("Import SSH key");
+    both("pick", b.clone(), Role::Button, "Browse…", "Browse…");
+    let bind = Rec::default();
+    pixels(&b, &bind);
+    assert!(bind.any(|e| matches!(e, Ev::Pick { event, title }
+        if event.id == "browse" && title == "Import SSH key")));
+}
+
+#[test]
+fn a_field_of_several_lines_and_one_that_submits_on_blur() {
+    let f = col([
+        field("private", "").lines(3).placeholder("Private"),
+        field("password", "")
+            .secret()
+            .submits_on_blur()
+            .placeholder("Password"),
+    ]);
+    both(
+        "lines",
+        f.clone(),
+        Role::MultilineTextInput,
+        "Private",
+        "Private",
+    );
+    let bind = Rec::default();
+    pixels(&f, &bind);
+    assert!(bind.any(|e| matches!(e, Ev::Field { node, blur: true, .. } if node == "password")));
+    assert!(bind.any(|e| matches!(e, Ev::Field { node, blur: false, .. } if node == "private")));
+}
+
+#[test]
+fn an_entry_that_opens_is_pressed_as_a_disclosure() {
+    let closed = list("rows", [entry("host:h1", "Build box").expanded(false)]);
+    both(
+        "disclosure",
+        closed.clone(),
+        Role::Button,
+        "Build box",
+        "Build box",
+    );
+    let bind = Rec::default();
+    pixels(&closed, &bind);
+    assert!(bind.any(|e| matches!(e, Ev::Send { event, .. }
+        if event.id == "host:h1" && event.kind == EventKind::Toggle && event.value == "true")));
+    let open = list(
+        "rows",
+        [entry("host:h1", "Build box")
+            .expanded(true)
+            .child(text("Hostname").style(vorn_tree::TextStyle::Label))],
+    );
+    let bind = Rec::default();
+    let laid = pixels(&open, &bind);
+    assert!(
+        named(&laid, Role::Label, "Hostname"),
+        "open, its children show under it"
+    );
+    assert!(bind.any(|e| matches!(e, Ev::Send { event, .. } if event.value == "false")));
 }
 
 #[test]

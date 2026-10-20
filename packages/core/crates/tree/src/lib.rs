@@ -24,6 +24,8 @@ pub const MAX_NODES: usize = 20_000;
 pub const MAX_DEPTH: usize = 48;
 pub const MAX_TEXT: usize = 8 * 1024;
 pub const MAX_SVG: usize = 64 * 1024;
+/// The tallest a field is, in lines; past it, a field scrolls.
+pub const MAX_FIELD_LINES: u8 = 12;
 
 /// One box of the tree: what it is, the id its events carry, how it sits, and what it holds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +72,11 @@ pub enum Kind {
         ink: Option<Paint>,
     },
     /// Reports `click`; with `confirm`, only once the question is answered.
+    /// With `pick`, a click opens the client's dialog for choosing a file,
+    /// titled `pick`, and the button reports `submit` with the chosen file's
+    /// path instead; nothing when the dialog is cancelled or the client has
+    /// none. A Wasm component cannot open a dialog itself, and the path is
+    /// what core methods such as `remote.importKey` read.
     Button {
         label: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,10 +85,14 @@ pub enum Kind {
         style: ButtonStyle,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         confirm: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pick: Option<String>,
     },
     /// A field: reports `submit` with what it holds on Return and, when `live`, `change` as it is typed.
-    /// A `multiline` one holds several lines, as a pasted key: Return starts
-    /// a line there, and Cmd+Return (Ctrl+Return off macOS) submits.
+    /// One of more than one `lines` is that many lines tall and holds several, as a pasted key:
+    /// Return starts a line there, and Cmd+Return (Ctrl+Return off macOS) submits.
+    /// A `blur` one also submits what it holds when it loses focus, as a
+    /// password saves once it is typed and left; Return then only leaves it.
     Field {
         #[serde(default)]
         value: String,
@@ -91,12 +102,18 @@ pub enum Kind {
         secret: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         live: bool,
+        #[serde(default = "one_line", skip_serializing_if = "is_one_line")]
+        lines: u8,
         #[serde(default, skip_serializing_if = "is_false")]
-        multiline: bool,
+        blur: bool,
     },
     /// One of several, as chips: reports `select` with the option's id.
+    /// A `dropdown` one shows the chosen option (or the first) on a button
+    /// that opens the options as a menu, for a choice of many.
     Choice {
         options: Vec<Choose>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        dropdown: bool,
     },
     Badge(Badge),
     /// A status dot in a tone; its `label` prop names the state it shows.
@@ -250,6 +267,12 @@ pub struct Entry {
     /// In a list that selects, whether this one can be checked.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub selectable: bool,
+    /// Whether the row opens: clicking it reports `toggle` with the state it
+    /// switches to, a chevron at its end shows which, and its children draw
+    /// under it at full width, as a host's form under its row. `None` is a
+    /// plain row, its children in its middle column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -315,6 +338,8 @@ pub enum TextStyle {
     /// A figure, right-aligned in a column of its own.
     Number,
     Heading,
+    /// A form field's name over it: small capitals, quiet.
+    Label,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -631,6 +656,15 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+/// A field one line tall, the default, leaves `lines` out of the wire.
+fn is_one_line(n: &u8) -> bool {
+    *n <= 1
+}
+
+fn one_line() -> u8 {
+    1
+}
+
 fn is_true(b: &bool) -> bool {
     *b
 }
@@ -882,19 +916,33 @@ impl Checker {
                 self.size(&format!("{at}.w"), Some(*w));
                 self.size(&format!("{at}.h"), Some(*h));
             }
-            Kind::Button { label, .. } => {
+            Kind::Button { label, pick, .. } => {
                 self.named(n, at, "button");
                 self.text(at, "label", label);
+                if let Some(p) = pick {
+                    self.text(at, "pick", p);
+                }
             }
-            Kind::Field { value, .. } => {
+            Kind::Field {
+                value, lines, blur, ..
+            } => {
                 self.named(n, at, "field");
                 self.text(at, "value", value);
+                if *lines > MAX_FIELD_LINES {
+                    self.err(
+                        &format!("{at}.lines"),
+                        format_args!("{lines}; a field is {MAX_FIELD_LINES} lines at most"),
+                    );
+                }
+                if *blur && *lines > 1 {
+                    self.err(&format!("{at}.blur"), "submits a one-line field only");
+                }
             }
             Kind::Toggle { label, .. } => {
                 self.named(n, at, "toggle");
                 self.text(at, "label", label);
             }
-            Kind::Choice { options } => {
+            Kind::Choice { options, .. } => {
                 self.named(n, at, "choice");
                 for (i, o) in options.iter().enumerate() {
                     if o.id.is_empty() {

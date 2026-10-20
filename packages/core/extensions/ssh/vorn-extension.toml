@@ -17,3 +17,4 @@ title = "SSH & Hosts"
 description = "Configure remote hosts and SSH keys for running agents on remote machines"
 icon = "server"
 tree = true
+after = "agents"

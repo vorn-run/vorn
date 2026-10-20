@@ -178,6 +178,7 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("remote.storeKey", Permission::Remote),
     ("remote.importKey", Permission::Remote),
     ("remote.deleteKey", Permission::Remote),
+    ("remote.vault", Permission::Remote),
 ];
 
 /// The core methods open only to the extensions Vorn ships: they write the
@@ -222,6 +223,7 @@ pub const BUILTIN_ONLY: &[&str] = &[
     "remote.storeKey",
     "remote.importKey",
     "remote.deleteKey",
+    "remote.vault",
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call needs it.

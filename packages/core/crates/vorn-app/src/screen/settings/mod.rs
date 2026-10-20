@@ -176,6 +176,8 @@ fn sidebar(s: &Screen<'_>) -> El {
         .scroll_y()
         .px(12.0)
         .pt(4.0);
+    // A built-in's page that left the app keeps its place after the page it names.
+    let pages: Vec<_> = s.st.points.at(crate::points::kind::SETTINGS).collect();
     for (title, cats) in SECTIONS {
         list = list.child(
             div().px(12.0).pt(20.0).pb(6.0).child(
@@ -189,11 +191,17 @@ fn sidebar(s: &Screen<'_>) -> El {
         let mut items = div().col().gap(2.0);
         for cat in cats.iter().filter(|c| c.shown()) {
             items = items.child(nav_item(s, *cat, c(look::GRAY_400)));
+            for p in pages.iter().filter(|p| p.placed_after() == Some(*cat)) {
+                items = items.child(ext_item(s, p));
+            }
         }
         list = list.child(items);
     }
     // Connections, the Connectors built-in's page, leads the extensions' pages.
-    let mut pages: Vec<_> = s.st.points.at(crate::points::kind::SETTINGS).collect();
+    let mut pages: Vec<_> = pages
+        .into_iter()
+        .filter(|p| p.placed_after().is_none_or(|c| !c.shown()))
+        .collect();
     pages.sort_by_key(|p| p.key() != CONNECTIONS_PAGE);
     let pages = pages.into_iter().map(|p| ext_item(s, p));
     list = list

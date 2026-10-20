@@ -294,6 +294,8 @@ pub enum Pick {
     Folder(String),
     /// An existing workflow file.
     Workflow(String),
+    /// Any existing file, titled; an extension's tree asked for it.
+    File(String),
     /// Where to write a file, offering `at`.
     Save { title: String, at: PathBuf },
 }
@@ -351,7 +353,9 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
             Pick::Save { .. } => {
                 "POSIX path of (choose file name with prompt (item 1 of argv) default name (item 2 of argv) default location (POSIX file (item 3 of argv)))"
             }
-            Pick::Workflow(_) => "POSIX path of (choose file with prompt (item 1 of argv))",
+            Pick::Workflow(_) | Pick::File(_) => {
+                "POSIX path of (choose file with prompt (item 1 of argv))"
+            }
         };
         let mut c = vorn_spawn::command("osascript");
         c.args(["-e", "on run argv", "-e", script, "-e", "end run"]);
@@ -362,6 +366,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
             Pick::Folder(_) => (WINDOWS_FOLDER, ""),
             Pick::Save { .. } => (WINDOWS_SAVE, WORKFLOW_FILTER),
             Pick::Workflow(_) => (WINDOWS_OPEN, WORKFLOW_FILTER),
+            Pick::File(_) => (WINDOWS_OPEN, ANY_FILTER),
         };
         let args = pick_args(&what);
         let mut c = vorn_spawn::command("powershell");
@@ -387,7 +392,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
                     .arg(at);
                 k.arg("--getsavefilename").arg(at);
             }
-            Pick::Workflow(_) => {
+            Pick::Workflow(_) | Pick::File(_) => {
                 k.args(["--getopenfilename", "."]);
             }
         }
@@ -408,7 +413,7 @@ fn run_picker(what: Pick) -> Option<PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn pick_args(what: &Pick) -> Vec<String> {
     match what {
-        Pick::Folder(t) | Pick::Workflow(t) => vec![t.clone()],
+        Pick::Folder(t) | Pick::Workflow(t) | Pick::File(t) => vec![t.clone()],
         Pick::Save { title, at } => {
             let name = at.file_name().unwrap_or_default().to_string_lossy();
             let dir = at.parent().unwrap_or(at).to_string_lossy();
@@ -419,6 +424,9 @@ fn pick_args(what: &Pick) -> Vec<String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 const WORKFLOW_FILTER: &str = "Vorn workflow (*.json)|*.json|All files (*.*)|*.*";
+
+#[cfg(not(target_arch = "wasm32"))]
+const ANY_FILTER: &str = "All files (*.*)|*.*";
 
 #[cfg(not(target_arch = "wasm32"))]
 /// The system's open dialog; its title and filter come from the environment so they are never read as script.

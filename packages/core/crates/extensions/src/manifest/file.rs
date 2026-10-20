@@ -552,6 +552,8 @@ struct RawPoint {
     rows: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     deny: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    after: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1428,6 +1430,7 @@ impl RawContributes {
                     ("raise", &p.raise),
                     ("rows", &p.rows),
                     ("deny", &p.deny),
+                    ("after", &p.after),
                 ] {
                     opt(&mut m, k, v.as_ref());
                 }
@@ -1764,6 +1767,7 @@ impl From<&Manifest> for Raw {
                         raise: p.raise.clone(),
                         rows: p.rows.clone(),
                         deny: p.deny.clone(),
+                        after: p.after.clone(),
                     }));
                 }
             }
@@ -2174,6 +2178,35 @@ tree = true
             .starts_with("vorn-extension.toml:9: contributes.launchers[0].tree: draws in a place that shows one"));
         assert!(parse(&text.replace("contributes.settings", "contributes.views")).is_ok());
         assert!(err("tree = true", "").contains("give it tree = true"));
+    }
+
+    #[test]
+    fn a_settings_page_names_the_app_page_it_follows() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@0.9"
+
+[[contributes.settings]]
+id = "page"
+title = "Page"
+tree = true
+after = "agents"
+"#;
+        let m = parse(text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        let page = &c.points(super::super::Place::Settings)[0];
+        assert_eq!(page.after.as_deref(), Some("agents"));
+        assert_eq!(
+            serde_json::to_value(c).unwrap()["settings"][0]["after"],
+            "agents"
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert!(err("\"agents\"", "\"ssh\"").contains("after: is one of appearance"));
+        assert!(err("contributes.settings", "contributes.views")
+            .contains("after: belongs to a settings page"));
     }
 
     #[test]

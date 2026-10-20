@@ -63,10 +63,17 @@ impl TreeBind for TreeBinder<'_> {
                 }
                 id
             }
-            Ev::Field { node, value } => {
+            Ev::Field { node, value, blur } => {
                 let id = self.base().child("field").child(&node);
                 self.acts
-                    .text(id, self.act(PointAct::TreeField { key, node }), value);
+                    .text(id, self.act(PointAct::TreeField { key, node, blur }), value);
+                id
+            }
+            Ev::Pick { event, title } => {
+                let id = event_id(self.base(), &event);
+                let node = event.id;
+                self.acts
+                    .bind(id, self.act(PointAct::TreePick { key, node, title }));
                 id
             }
             Ev::Check {

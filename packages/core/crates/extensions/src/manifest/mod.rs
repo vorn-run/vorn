@@ -595,7 +595,26 @@ pub struct Point {
     /// For attention: the method denying an item calls, with its `id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deny: Option<String>,
+    /// For a built-in's settings page: the app's own page it follows in the
+    /// sidebar, one of [`SETTINGS_PAGES`], so a page that left the app for
+    /// a built-in keeps its place. Another extension's page stays under
+    /// Extensions whatever it says.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
 }
+
+/// The app's own settings pages a settings contribution can follow.
+pub const SETTINGS_PAGES: [&str; 9] = [
+    "appearance",
+    "general",
+    "updates",
+    "notifications",
+    "experimental",
+    "agents",
+    "mcp",
+    "keys",
+    "network",
+];
 
 /// The id, title and where-it-shows every contribution carries.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1658,6 +1677,7 @@ fn read_point(
     let raise = opt("raise");
     let rows = opt("rows");
     let deny = opt("deny");
+    let after = opt("after");
     if icon.as_deref().is_some_and(|i| !icon_name(i)) {
         return Err(("icon", "is not an icon name such as trash-2".into()));
     }
@@ -1748,9 +1768,19 @@ fn read_point(
     if place != Place::Attention && deny.is_some() {
         return Err(("deny", "belongs to attention".into()));
     }
+    match after.as_deref() {
+        Some(_) if place != Place::Settings => {
+            return Err(("after", "belongs to a settings page".into()));
+        }
+        Some(a) if !SETTINGS_PAGES.contains(&a) => {
+            return Err(("after", format!("is one of {}", SETTINGS_PAGES.join(", "))));
+        }
+        _ => {}
+    }
     Ok(Point {
         rows,
         deny,
+        after,
         base,
         tree,
         icon,

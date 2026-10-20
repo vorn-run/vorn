@@ -294,16 +294,22 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     }
     out.extend(extensions(st));
     for p in st.points.at(crate::points::kind::SETTINGS) {
-        out.push(
-            Entry::new(
-                Cat::Actions,
-                format!("{} Settings", p.title),
-                p.icon.clone().map_or(Glyph::Icon("settings"), Glyph::Named),
-                Act::Point(crate::points::PointAct::Settings(p.key())),
-            )
-            .sub(&p.extension_name)
-            .keys(&["settings", "extension", &p.extension_name]),
-        );
+        let icon = p.icon.clone().map_or(Glyph::Icon("settings"), Glyph::Named);
+        let open = Act::Point(crate::points::PointAct::Settings(p.key()));
+        // A built-in's page that left the app keeps the entry it had there:
+        // its bare title, found by the words of its description.
+        let e = if p.placed_after().is_some() {
+            let about = p.description.as_deref().unwrap_or_default().to_lowercase();
+            let words: Vec<&str> = about.split_whitespace().collect();
+            Entry::new(Cat::Actions, &p.title, icon, open)
+                .keys(&["settings", &p.extension_name])
+                .keys(&words)
+        } else {
+            Entry::new(Cat::Actions, format!("{} Settings", p.title), icon, open)
+                .sub(&p.extension_name)
+                .keys(&["settings", "extension", &p.extension_name])
+        };
+        out.push(e);
     }
     // The web client already runs in the browser.
     if cfg!(target_arch = "wasm32") {

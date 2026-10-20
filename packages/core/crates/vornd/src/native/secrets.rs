@@ -41,6 +41,9 @@ pub struct Secrets {
     /// Vault writes, one at a time in the order they were made, off the
     /// thread that heard them.
     writes: OnceLock<Mutex<mpsc::Sender<Job>>>,
+    /// Set once [`Secrets::settle`] wanted the OS keychain and found none,
+    /// so secrets fell back to a file: what the SSH page warns about.
+    no_keychain: OnceLock<bool>,
 }
 
 impl std::fmt::Debug for Secrets {
@@ -51,6 +54,11 @@ impl std::fmt::Debug for Secrets {
     }
 }
 
+/// Whether settling on `backing` means the OS keychain `use_os` asked for is missing.
+fn keychain_missing(use_os: bool, backing: &vorn_vault::Backing) -> bool {
+    use_os && !matches!(backing, vorn_vault::Backing::Os)
+}
+
 impl Secrets {
     /// No vault until [`Secrets::settle`] names the data directory.
     pub fn new() -> Secrets {
@@ -58,6 +66,7 @@ impl Secrets {
             known: Mutex::default(),
             keychain: OnceLock::new(),
             writes: OnceLock::new(),
+            no_keychain: OnceLock::new(),
         }
     }
 
@@ -83,7 +92,15 @@ impl Secrets {
         }
         let (keychain, backing) = vorn_vault::open(use_os, Some(&dir.join("vornd")));
         debug!(?backing, "connection secrets are kept");
+        let _ = self.no_keychain.set(keychain_missing(use_os, &backing));
         let _ = self.keychain.set(keychain);
+    }
+
+    /// Whether the OS keychain was wanted and is not there, so secrets are
+    /// not encrypted by it. Told not to use it (`VORND_KEYCHAIN=0`, tests),
+    /// nothing is missing.
+    pub fn keychain_missing(&self) -> bool {
+        self.no_keychain.get().copied().unwrap_or(false)
     }
 
     /// `fields` are the connection's secrets now.
@@ -310,6 +327,17 @@ mod tests {
             later.lookup("c1"),
             Known::Fields(fields(json!({ "token": "t" })))
         );
+        // Told not to use it, the keychain is not missing.
+        assert!(!later.keychain_missing());
+    }
+
+    #[test]
+    fn the_keychain_is_missing_only_when_wanted_and_not_found() {
+        let file = vorn_vault::Backing::File("v".into());
+        assert!(keychain_missing(true, &file));
+        assert!(keychain_missing(true, &vorn_vault::Backing::Memory));
+        assert!(!keychain_missing(true, &vorn_vault::Backing::Os));
+        assert!(!keychain_missing(false, &file));
     }
 
     /// Everything logged, into one buffer.
