@@ -218,7 +218,7 @@ pub fn placeholders(out: &mut Vec<u8>, id: u32, at: (u32, u32), cols: u32, rows:
     out.extend_from_slice(b"\x1b[39m");
 }
 
-/// The most rows (and columns) placeholder cells can number.
+/// The most rows placeholder cells can number; columns count on from the first.
 pub const MAX_PLACEHOLDER_ROWS: u32 = DIACRITICS.len() as u32;
 
 /// The character placeholder cells hold.

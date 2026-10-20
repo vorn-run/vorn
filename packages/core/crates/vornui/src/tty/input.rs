@@ -141,12 +141,14 @@ impl Parser {
     }
 
     /// What is left once no more bytes come: a lone ESC is the Escape key,
-    /// and ESC with `[` or `O` the Alt chords that start like a sequence.
+    /// and ESC with `[`, `O`, `]`, `P` or `_` the Alt chords that start like a sequence.
     pub fn flush(&mut self, out: &mut Vec<Parsed>) {
         let key = match self.buf.as_slice() {
             [0x1b] => Some(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-            [0x1b, b'['] => Some(KeyEvent::new(KeyCode::Char('['), KeyModifiers::ALT)),
-            [0x1b, b'O'] => Some(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::ALT)),
+            [0x1b, c @ (b'[' | b'O' | b']' | b'P' | b'_')] => Some(KeyEvent::new(
+                KeyCode::Char(char::from(*c)),
+                KeyModifiers::ALT,
+            )),
             _ => None,
         };
         if let Some(k) = key {
@@ -398,7 +400,24 @@ fn kitty_key(nums: &[&str]) -> Option<Parsed> {
         13 | 57414 => KeyCode::Enter,
         9 => KeyCode::Tab,
         127 => KeyCode::Backspace,
-        // The keypad, media and modifier keys alone.
+        n @ 57399..=57408 => KeyCode::Char(char::from_digit(n - 57399, 10)?),
+        57409 => KeyCode::Char('.'),
+        57410 => KeyCode::Char('/'),
+        57411 => KeyCode::Char('*'),
+        57412 => KeyCode::Char('-'),
+        57413 => KeyCode::Char('+'),
+        57415 => KeyCode::Char('='),
+        57417 => KeyCode::Left,
+        57418 => KeyCode::Right,
+        57419 => KeyCode::Up,
+        57420 => KeyCode::Down,
+        57421 => KeyCode::PageUp,
+        57422 => KeyCode::PageDown,
+        57423 => KeyCode::Home,
+        57424 => KeyCode::End,
+        57425 => KeyCode::Insert,
+        57426 => KeyCode::Delete,
+        // Media and modifier keys alone.
         57344..=63743 => return None,
         _ => {
             let c = match shifted {
@@ -453,6 +472,38 @@ mod tests {
                 key(KeyCode::Char('c'), KeyModifiers::CONTROL),
                 key(KeyCode::Char('\\'), KeyModifiers::CONTROL),
                 key(KeyCode::Backspace, KeyModifiers::NONE),
+            ]
+        );
+    }
+
+    #[test]
+    fn alt_chords_that_start_a_string_do_not_hold_later_keys() {
+        assert_eq!(
+            parse(b"\x1b]"),
+            vec![key(KeyCode::Char(']'), KeyModifiers::ALT)]
+        );
+        let mut p = Parser::default();
+        let mut out = Vec::new();
+        p.feed(b"\x1b_", &mut out);
+        p.flush(&mut out);
+        p.feed(b"a", &mut out);
+        assert_eq!(
+            out,
+            vec![
+                key(KeyCode::Char('_'), KeyModifiers::ALT),
+                key(KeyCode::Char('a'), KeyModifiers::NONE),
+            ]
+        );
+    }
+
+    #[test]
+    fn keypad_keys_read_as_their_characters_and_moves() {
+        assert_eq!(
+            parse(b"\x1b[57400u\x1b[57413u\x1b[57419u\x1b[57441u"),
+            vec![
+                key(KeyCode::Char('1'), KeyModifiers::NONE),
+                key(KeyCode::Char('+'), KeyModifiers::NONE),
+                key(KeyCode::Up, KeyModifiers::NONE),
             ]
         );
     }

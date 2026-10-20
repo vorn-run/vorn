@@ -382,7 +382,7 @@ impl Presenter {
 
     fn cells_of(&self, r: Rect) -> (u32, u32) {
         (
-            ((r[2] - r[0]) / self.cell.0).min(kitty::MAX_PLACEHOLDER_ROWS),
+            (r[2] - r[0]) / self.cell.0,
             ((r[3] - r[1]) / self.cell.1).min(kitty::MAX_PLACEHOLDER_ROWS),
         )
     }
