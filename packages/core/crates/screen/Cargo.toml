@@ -24,3 +24,7 @@ harness = false
 [[bench]]
 name = "corpora"
 harness = false
+
+[[bench]]
+name = "scan"
+harness = false

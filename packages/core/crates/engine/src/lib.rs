@@ -29,7 +29,7 @@ pub use pool::{Pool, Sink};
 pub use program::{ProgramRecord, Programs};
 pub use session::{
     Agents, Base, Brief, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State,
-    Summary, Viewed, HEAL_AFTER, PIPED_SIZE,
+    Summary, Viewed, PIPED_SIZE,
 };
 pub use snapshot::VtSnapshot;
 pub use term::{Fidelity, Rejected, FORMAT};

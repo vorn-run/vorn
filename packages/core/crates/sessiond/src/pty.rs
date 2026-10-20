@@ -60,25 +60,7 @@ pub fn spawn(program: &Program, cols: u16, rows: u16) -> io::Result<(Master, lib
     // and what it starts hold it, and the master reads EOF once they all
     // closed it.
     drop(slave);
-    #[cfg(target_os = "macos")]
-    claimed(&master, pid);
     Ok((Master { fd: master }, pid))
-}
-
-/// Wait, briefly, until `pid` holds the terminal as its controlling one.
-/// macOS returns from posix_spawn before the new session claims it (a few
-/// ms later); a sessiond that died in between would leave the program
-/// without the hangup that ends it.
-#[cfg(target_os = "macos")]
-fn claimed(master: &OwnedFd, pid: libc::pid_t) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    // SAFETY: tcgetpgrp on a master this module owns.
-    while unsafe { libc::tcgetpgrp(master.as_raw_fd()) } != pid {
-        if std::time::Instant::now() >= deadline {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_micros(250));
-    }
 }
 
 /// Open a PTY pair, both ends close-on-exec from the start, so a program

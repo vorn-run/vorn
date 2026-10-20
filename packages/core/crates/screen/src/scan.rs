@@ -1,9 +1,5 @@
-//! What vornd reads beside Ghostty by exact byte strings: OSC 5522 reports, OSC 133 marks,
-//! scrollback clears and whole-screen repaints.
-
-use std::sync::LazyLock;
-
-use memchr::memmem::Finder;
+//! What vornd reads beside Ghostty by exact byte strings: OSC 5522 reports, OSC 133 marks
+//! and scrollback clears, in one pass over each feed's `ESC`s.
 
 /// Starts vorn's own reports: `OSC 5522 ; cwd ; <path> ST` and the like.
 const PRIVATE: &[u8] = b"\x1b]5522;";
@@ -11,21 +7,8 @@ const PRIVATE: &[u8] = b"\x1b]5522;";
 const MARK: &[u8] = b"\x1b]133;";
 /// ED 3, DECSED 3 and RIS, as programs write them.
 const CLEARS: [&[u8]; 3] = [b"\x1b[3J", b"\x1b[?3J", b"\x1bc"];
-/// ED 2 and the alternate screen's switches: a program starting its screen over.
-const REPAINTS: [&[u8]; 5] = [
-    b"\x1b[2J",
-    b"\x1b[?1049h",
-    b"\x1b[?1049l",
-    b"\x1b[?1047h",
-    b"\x1b[?47h",
-];
 /// The longest pattern, which bounds the bytes held between feeds.
 const LONGEST: usize = PRIVATE.len();
-/// Built once: on a feed of a few hundred bytes building a searcher costs more than searching.
-static FINDERS: LazyLock<([Finder<'static>; 3], Finder<'static>)> =
-    LazyLock::new(|| (CLEARS.map(Finder::new), Finder::new(b"\x1b]")));
-static REPAINT_FINDERS: LazyLock<[Finder<'static>; 5]> =
-    LazyLock::new(|| REPAINTS.map(Finder::new));
 /// How much of one OSC payload is kept; the rest is dropped.
 const MAX_OSC_CAPTURE: usize = 16 * 1024;
 
@@ -85,17 +68,11 @@ pub(crate) struct Scan {
     pub(crate) clears: u64,
     /// OSC 133 marks seen.
     pub(crate) marks: u64,
-    /// [`REPAINTS`] seen within one feed; one split across two is missed,
-    /// which costs a reader only a redundant redraw request.
-    pub(crate) repaints: u64,
 }
 
 impl Scan {
     /// Scans a feed, calling `report` with each OSC 5522 and OSC 133 payload.
     pub(crate) fn feed(&mut self, bytes: &[u8], mut report: impl FnMut(Osc, &[u8])) {
-        for finder in &*REPAINT_FINDERS {
-            self.repaints += finder.find_iter(bytes).count() as u64;
-        }
         let mut from = 0;
         if let Some((kind, payload)) = self.osc.take() {
             match self.payload(bytes, 0, kind, payload, &mut report) {
@@ -123,33 +100,25 @@ impl Scan {
                 Seen::Other => {}
             }
         }
-        let rest = &bytes[from..];
-        let (clears, osc_start) = &*FINDERS;
-        for finder in clears {
-            self.clears += finder.find_iter(rest).count() as u64;
-        }
         let mut at = from;
-        while let Some(n) = osc_start.find(&bytes[at..]) {
-            let start = at + n;
-            let Seen::Osc(kind) = seen(&bytes[start..]) else {
-                at = start + 2;
-                continue;
-            };
-            match self.payload(
-                bytes,
-                start + kind.pattern().len(),
-                kind,
-                Vec::new(),
-                &mut report,
-            ) {
-                Some(end) => at = end,
-                None => return,
-            }
-        }
-        let near = bytes.len().saturating_sub(LONGEST - 1).max(from);
-        if let Some(esc) = memchr::memrchr(0x1b, &bytes[near..]).map(|n| near + n) {
-            if matches!(seen(&bytes[esc..]), Seen::Prefix) {
-                self.tail.extend_from_slice(&bytes[esc..]);
+        while let Some(n) = memchr::memchr(0x1b, &bytes[at..]) {
+            let esc = at + n;
+            at = esc + 1;
+            match seen(&bytes[esc..]) {
+                Seen::Clear => self.clears += 1,
+                Seen::Osc(kind) => {
+                    let begin = esc + kind.pattern().len();
+                    match self.payload(bytes, begin, kind, Vec::new(), &mut report) {
+                        Some(end) => at = end,
+                        None => return,
+                    }
+                }
+                // Only the feed's last bytes can be too short to tell.
+                Seen::Prefix => {
+                    self.tail.extend_from_slice(&bytes[esc..]);
+                    return;
+                }
+                Seen::Other => {}
             }
         }
     }
