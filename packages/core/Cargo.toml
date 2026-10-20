@@ -60,7 +60,7 @@ exclude = ["vendor"]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.
 [workspace.package]
-version = "0.8.0-beta.17"
+version = "0.8.0-beta.18"
 
 # Terminal snapshots (encode, decode and the parser continuation) are in no published release yet.
 [workspace.dependencies]
