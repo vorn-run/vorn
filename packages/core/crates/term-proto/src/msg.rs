@@ -28,8 +28,8 @@ use std::fmt;
 use crate::cbor::{self, CborError, Fields, Value, Writer};
 use crate::position::Cursor;
 use crate::screen::{
-    Color, ColorsDelta, CursorState, CursorStyle, Delta, LinkDef, MouseMode, Row, Screen, Snapshot,
-    StyleDef, TermDelta, TermState, Underline,
+    Color, ColorsDelta, CursorState, CursorStyle, Delta, Image, LinkDef, MouseMode, Placement,
+    Placements, Row, Screen, Snapshot, StyleDef, TermDelta, TermState, Underline, Virtual,
 };
 
 /// The protocol major this build speaks; a peer must speak the same one.
@@ -52,10 +52,10 @@ pub mod caps {
     pub const GRID: u64 = 1 << 0;
     /// `History` carries table definitions (keys 7 and 8).
     pub const HISTORY_TABLES: u64 = 1 << 1;
-    /// Reserved for Kitty graphics placements.
+    /// Kitty graphics: `Image` messages and placements in snapshots and deltas.
     pub const IMAGES: u64 = 1 << 63;
     /// What this build implements.
-    pub const ALL: u64 = GRID | HISTORY_TABLES;
+    pub const ALL: u64 = GRID | HISTORY_TABLES | IMAGES;
 }
 
 /// Message kinds. Client to vornd below 0x20, vornd to client from 0x21.
@@ -93,6 +93,7 @@ pub mod kind {
     pub const EVENT: u8 = 0x2f;
     pub const RESYNC: u8 = 0x30;
     pub const ERROR: u8 = 0x31;
+    pub const IMAGE: u8 = 0x32;
 
     /// Kinds with this bit set may be ignored by a reader that does not
     /// know them.
@@ -655,13 +656,13 @@ pub enum ServerMsg {
     Welcome(Welcome),
     Attached(Attached),
     /// `{1 sid, 2 state_gen, 3 rev, 4 resume, 5 table_gen, 6 row_fmt,
-    /// 7 term, 8 styles, 9 links, 10 rows, 11 history}`
+    /// 7 term, 8 styles, 9 links, 10 rows, 11 history, 12 placements}`
     Snapshot {
         sid: u32,
         snap: Box<Snapshot>,
     },
     /// `{1 sid, 2 state_gen, 3 table_gen, 4 base_rev, 5 rev, 6 resume,
-    /// 7 scrolled, 8 term, 9 styles, 10 links, 11 rows}`
+    /// 7 scrolled, 8 term, 9 styles, 10 links, 11 rows, 12 placements}`
     Delta {
         sid: u32,
         delta: Box<Delta>,
@@ -740,6 +741,12 @@ pub enum ServerMsg {
     Error {
         code: u16,
         message: String,
+    },
+    /// `{1 sid, 2 id, 3 gen, 4 width, 5 height, 6 rgba}`: an image a placement shows, before
+    /// the frame that places it.
+    Image {
+        sid: u32,
+        image: Box<Image>,
     },
 }
 
@@ -867,6 +874,14 @@ impl Dec {
                 let n = v.as_i64().ok_or(self.missing(key))?;
                 i32::try_from(n).map(Some).map_err(|_| self.invalid(key))
             }
+        }
+    }
+
+    /// A signed number that may be left out when it is zero.
+    fn int64(&mut self, key: u64) -> Result<i64, MsgError> {
+        match self.f.take(key) {
+            None => Ok(0),
+            Some(v) => v.as_i64().ok_or(self.missing(key)),
         }
     }
 
@@ -1083,6 +1098,88 @@ fn get_row(mut d: Dec) -> Result<Row, MsgError> {
         line: d.num_or_zero(2)?,
         flags: d.num_or_zero(3)?,
         cells: d.bytes(4)?,
+    })
+}
+
+/// `{1 cell_w, 2 cell_h, 3 list, 4 virtuals}`
+fn put_placements(w: &mut Writer<'_>, p: &Placements) {
+    w.map();
+    w.key(1).uint(u64::from(p.cell_w));
+    w.key(2).uint(u64::from(p.cell_h));
+    put_list(w, 3, &p.list, put_placement);
+    put_list(w, 4, &p.virtuals, put_virtual);
+    w.end();
+}
+
+fn get_placements(mut d: Dec) -> Result<Placements, MsgError> {
+    Ok(Placements {
+        cell_w: d.num_or_zero(1)?,
+        cell_h: d.num_or_zero(2)?,
+        list: get_list(&mut d, 3, get_placement)?,
+        virtuals: get_list(&mut d, 4, get_virtual)?,
+    })
+}
+
+/// `{1 image, 2 gen, 3 line, 4 col, 5 x_off, 6 y_off, 7 width, 8 height, 9 src_x, 10 src_y,
+/// 11 src_w, 12 src_h, 13 z}`
+fn put_placement(w: &mut Writer<'_>, p: &Placement) {
+    w.map();
+    w.key(1).uint(u64::from(p.image));
+    w.key(2).uint(p.gen);
+    w.key(3).int(p.line);
+    w.key(4).int(i64::from(p.col));
+    for (k, v) in [(5, p.x_off), (6, p.y_off), (7, p.width), (8, p.height)]
+        .into_iter()
+        .chain((9..).zip(p.src))
+    {
+        if v != 0 {
+            w.key(k).uint(u64::from(v));
+        }
+    }
+    if p.z != 0 {
+        w.key(13).int(i64::from(p.z));
+    }
+    w.end();
+}
+
+fn get_placement(mut d: Dec) -> Result<Placement, MsgError> {
+    Ok(Placement {
+        image: d.num(1)?,
+        gen: d.num_or_zero(2)?,
+        line: d.int64(3)?,
+        col: d.opt_int(4)?.unwrap_or(0),
+        x_off: d.num_or_zero(5)?,
+        y_off: d.num_or_zero(6)?,
+        width: d.num_or_zero(7)?,
+        height: d.num_or_zero(8)?,
+        src: [
+            d.num_or_zero(9)?,
+            d.num_or_zero(10)?,
+            d.num_or_zero(11)?,
+            d.num_or_zero(12)?,
+        ],
+        z: d.opt_int(13)?.unwrap_or(0),
+    })
+}
+
+/// `{1 image, 2 gen, 3 placement, 4 cols, 5 rows}`
+fn put_virtual(w: &mut Writer<'_>, v: &Virtual) {
+    w.map();
+    w.key(1).uint(u64::from(v.image));
+    w.key(2).uint(v.gen);
+    w.key(3).uint(u64::from(v.placement));
+    w.key(4).uint(u64::from(v.cols));
+    w.key(5).uint(u64::from(v.rows));
+    w.end();
+}
+
+fn get_virtual(mut d: Dec) -> Result<Virtual, MsgError> {
+    Ok(Virtual {
+        image: d.num(1)?,
+        gen: d.num_or_zero(2)?,
+        placement: d.num_or_zero(3)?,
+        cols: d.num_or_zero(4)?,
+        rows: d.num_or_zero(5)?,
     })
 }
 
@@ -1830,6 +1927,7 @@ impl ServerMsg {
             ServerMsg::Resized { .. } => kind::RESIZED,
             ServerMsg::Resync { .. } => kind::RESYNC,
             ServerMsg::Error { .. } => kind::ERROR,
+            ServerMsg::Image { .. } => kind::IMAGE,
         }
     }
 
@@ -1849,7 +1947,8 @@ impl ServerMsg {
             | ServerMsg::SearchHits { sid, .. }
             | ServerMsg::Event { sid, .. }
             | ServerMsg::Resized { sid, .. }
-            | ServerMsg::Resync { sid, .. } => Some(*sid),
+            | ServerMsg::Resync { sid, .. }
+            | ServerMsg::Image { sid, .. } => Some(*sid),
         }
     }
 
@@ -1889,6 +1988,10 @@ impl ServerMsg {
                     put_list(w, 9, &snap.links, put_link);
                     put_list(w, 10, &snap.rows, put_row);
                     put_list(w, 11, &snap.history, put_row);
+                    if let Some(p) = &snap.placements {
+                        w.key(12);
+                        put_placements(w, p);
+                    }
                 }
                 ServerMsg::Delta { sid, delta } => {
                     w.key(1).uint(u64::from(*sid));
@@ -1908,6 +2011,18 @@ impl ServerMsg {
                     put_list(w, 9, &delta.styles, put_style);
                     put_list(w, 10, &delta.links, put_link);
                     put_list(w, 11, &delta.rows, put_row);
+                    if let Some(p) = &delta.placements {
+                        w.key(12);
+                        put_placements(w, p);
+                    }
+                }
+                ServerMsg::Image { sid, image } => {
+                    w.key(1).uint(u64::from(*sid));
+                    w.key(2).uint(u64::from(image.id));
+                    w.key(3).uint(image.gen);
+                    w.key(4).uint(u64::from(image.width));
+                    w.key(5).uint(u64::from(image.height));
+                    w.key(6).bytes(&image.rgba);
                 }
                 ServerMsg::ResetTables { sid, table_gen } => {
                     w.key(1).uint(u64::from(*sid));
@@ -2061,7 +2176,7 @@ impl ServerMsg {
     pub fn decode(k: u8, payload: &[u8]) -> Result<Option<ServerMsg>, MsgError> {
         match k {
             kind::BYTES | kind::VT_SNAPSHOT => return Ok(None),
-            kind::WELCOME..=kind::ERROR => {}
+            kind::WELCOME..=kind::IMAGE => {}
             _ if k & kind::OPTIONAL != 0 => return Ok(None),
             _ => return Err(MsgError::UnknownKind(k)),
         }
@@ -2097,6 +2212,7 @@ impl ServerMsg {
                     links: get_list(&mut d, 9, get_link)?,
                     rows: get_list(&mut d, 10, get_row)?,
                     history: get_list(&mut d, 11, get_row)?,
+                    placements: d.map(12)?.map(get_placements).transpose()?,
                 };
                 ServerMsg::Snapshot {
                     sid,
@@ -2116,6 +2232,7 @@ impl ServerMsg {
                     styles: get_list(&mut d, 9, get_style)?,
                     links: get_list(&mut d, 10, get_link)?,
                     rows: get_list(&mut d, 11, get_row)?,
+                    placements: d.map(12)?.map(get_placements).transpose()?,
                 };
                 ServerMsg::Delta {
                     sid,
@@ -2235,6 +2352,25 @@ impl ServerMsg {
                 code: d.num_or_zero(1)?,
                 message: d.text(2)?,
             },
+            kind::IMAGE => {
+                let image = Image {
+                    id: d.num(2)?,
+                    gen: d.num_or_zero(3)?,
+                    width: d.num(4)?,
+                    height: d.num(5)?,
+                    rgba: d.bytes(6)?,
+                };
+                let len = (image.width as usize)
+                    .checked_mul(image.height as usize)
+                    .and_then(|n| n.checked_mul(4));
+                if len != Some(image.rgba.len()) {
+                    return Err(d.invalid(6));
+                }
+                ServerMsg::Image {
+                    sid: d.num(1)?,
+                    image: Box::new(image),
+                }
+            }
             _ => return Err(MsgError::UnknownKind(k)),
         };
         Ok(Some(msg))
@@ -2444,6 +2580,62 @@ mod tests {
         round_client(ClientMsg::Unhandled(kind::SET_DEFAULTS));
     }
 
+    fn placements() -> Placements {
+        Placements {
+            cell_w: 9,
+            cell_h: 18,
+            list: vec![
+                Placement {
+                    image: 7,
+                    gen: 3,
+                    line: 1003,
+                    col: 4,
+                    x_off: 2,
+                    y_off: 5,
+                    width: 90,
+                    height: 36,
+                    src: [1, 2, 30, 40],
+                    z: i32::MIN,
+                },
+                Placement {
+                    line: -2,
+                    col: -1,
+                    ..Placement::default()
+                },
+            ],
+            virtuals: vec![Virtual {
+                image: 1 << 31,
+                gen: 2,
+                placement: 5,
+                cols: 10,
+                rows: 4,
+            }],
+        }
+    }
+
+    #[test]
+    fn an_image_whose_pixels_do_not_match_its_size_is_refused() {
+        let mut out = Vec::new();
+        ServerMsg::Image {
+            sid: 1,
+            image: Box::new(Image {
+                id: 1,
+                gen: 1,
+                width: 2,
+                height: 2,
+                rgba: vec![0; 15],
+            }),
+        }
+        .encode(&mut out);
+        let mut r = FrameReader::new();
+        r.push(&out);
+        let (k, payload) = r.next_frame().unwrap().unwrap();
+        assert!(matches!(
+            ServerMsg::decode(k, payload),
+            Err(MsgError::Invalid { field: 6, .. })
+        ));
+    }
+
     #[test]
     fn every_server_message_round_trips() {
         round_server(ServerMsg::Welcome(Welcome {
@@ -2497,6 +2689,7 @@ mod tests {
                 links: vec![LinkDef::default(), link.clone()],
                 rows: vec![row.clone(), Row::default()],
                 history: vec![row.clone()],
+                placements: Some(placements()),
             }),
         });
         round_server(ServerMsg::Delta {
@@ -2517,6 +2710,17 @@ mod tests {
                 styles: vec![style],
                 links: vec![link.clone()],
                 rows: vec![row.clone()],
+                placements: Some(Placements::default()),
+            }),
+        });
+        round_server(ServerMsg::Image {
+            sid: 1,
+            image: Box::new(Image {
+                id: 7,
+                gen: 1 << 40,
+                width: 2,
+                height: 1,
+                rgba: vec![1, 2, 3, 4, 5, 6, 7, 8],
             }),
         });
         round_server(ServerMsg::Delta {

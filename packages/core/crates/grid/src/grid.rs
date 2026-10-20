@@ -25,8 +25,8 @@ use libghostty_vt::terminal::{Mode, Point, PointCoordinate, Terminal};
 use vorn_screen::Emulator;
 use vorn_term_proto::row::{RowWriter, ROW_FMT};
 use vorn_term_proto::screen::{
-    flags, row_flags, Color, ColorsDelta, CursorState, CursorStyle, Delta, MouseMode, Row, Screen,
-    Snapshot, TermDelta, TermState,
+    flags, row_flags, Color, ColorsDelta, CursorState, CursorStyle, Delta, MouseMode, Placement,
+    Placements, Row, Screen, Snapshot, TermDelta, TermState, Virtual,
 };
 use vorn_term_proto::Cursor;
 
@@ -74,6 +74,7 @@ struct Revs {
     sb_epoch: u64,
     history_lines: u64,
     top_line: u64,
+    placements: u64,
 }
 
 /// What an attachment holds: the frame it was last sent and its table
@@ -129,6 +130,10 @@ pub struct Grid {
     scratch: Vec<u8>,
     text: String,
     uri: Vec<u8>,
+    /// Kitty image placements on the active screen, as frames carry them.
+    placements: Placements,
+    placed: Vec<vorn_screen::Placed>,
+    virtuals: Vec<vorn_screen::Virtual>,
 }
 
 impl std::fmt::Debug for Grid {
@@ -184,6 +189,9 @@ impl Grid {
             scratch: Vec::new(),
             text: String::new(),
             uri: Vec::new(),
+            placements: Placements::default(),
+            placed: Vec::new(),
+            virtuals: Vec::new(),
         })
     }
 
@@ -526,6 +534,7 @@ impl Grid {
                 .map(|(i, c)| (i as u8, rgb(*c)))
                 .collect();
         }
+        changed |= self.update_placements(em, screen, top_line, next);
 
         self.resume = resume;
         self.rendered = true;
@@ -543,6 +552,60 @@ impl Grid {
         Ok(changed)
     }
 
+    /// Reads the image placements and answers whether they changed. Scrolls and resizes move
+    /// placements without touching the storage, so every update with images reads them again; a
+    /// terminal with images off, or a screen whose storage was never written, reads nothing.
+    fn update_placements(&mut self, em: &Emulator, screen: Screen, top: u64, next: u64) -> bool {
+        if !em.images() || em.images_gen() == 0 {
+            if self.placements.is_empty() {
+                return false;
+            }
+            self.placements = Placements::default();
+            self.revs.placements = next;
+            return true;
+        }
+        em.placements(&mut self.placed, &mut self.virtuals);
+        let (cell_w, cell_h) = em.cell_px();
+        let top = i64::try_from(top).unwrap_or(i64::MAX);
+        let line = |row: i32| match screen {
+            Screen::Primary => top.saturating_add(i64::from(row)),
+            Screen::Alternate => i64::from(row),
+        };
+        let list = self.placed.iter().map(|p| Placement {
+            image: p.image,
+            gen: p.gen,
+            line: line(p.row),
+            col: p.col,
+            x_off: p.x_off,
+            y_off: p.y_off,
+            width: p.width,
+            height: p.height,
+            src: p.src,
+            z: p.z,
+        });
+        let virtuals = self.virtuals.iter().map(|v| Virtual {
+            image: v.image,
+            gen: v.gen,
+            placement: v.placement,
+            cols: v.cols,
+            rows: v.rows,
+        });
+        let same = (self.placements.cell_w, self.placements.cell_h) == (cell_w, cell_h)
+            && self.placements.list.iter().copied().eq(list.clone())
+            && self.placements.virtuals.iter().copied().eq(virtuals.clone());
+        if same {
+            return false;
+        }
+        self.placements = Placements {
+            cell_w,
+            cell_h,
+            list: list.collect(),
+            virtuals: virtuals.collect(),
+        };
+        self.revs.placements = next;
+        true
+    }
+
     /// The whole grid, with complete tables and `history` above it.
     pub fn snapshot(&self, history: Vec<Row>) -> Snapshot {
         Snapshot {
@@ -556,6 +619,7 @@ impl Grid {
             links: self.tables.links().to_vec(),
             rows: self.rows_since(None),
             history,
+            placements: (!self.placements.is_empty()).then(|| self.placements.clone()),
         }
     }
 
@@ -602,7 +666,13 @@ impl Grid {
             styles: self.tables.styles()[held.style_mark as usize..].to_vec(),
             links: self.tables.links()[held.link_mark as usize..].to_vec(),
             rows: self.rows_since((!reshaped).then_some(base)),
+            placements: (self.revs.placements > base).then(|| self.placements.clone()),
         })
+    }
+
+    /// The placements frames carry, empty without images.
+    pub fn placements(&self) -> &Placements {
+        &self.placements
     }
 
     /// What a client holds once it has applied a frame cut now.
