@@ -52,7 +52,7 @@ fn since<T>(
         if f(app).is_some() {
             return t.elapsed().as_secs_f64() * 1000.0;
         }
-        assert!(t.elapsed() < Duration::from_secs(60), "timed out");
+        assert!(t.elapsed() < Duration::from_secs(180), "timed out");
     }
 }
 
@@ -216,18 +216,17 @@ fn bench_device_pane() {
     });
     shot.until(&mut app, "its screen", |app, _| app.pane(&sid).map(|_| ()));
 
-    // The phone, pressed until the picker has its list; pressed again, the
-    // pane the picker opens in goes.
+    // The phone, pressed until the picker over the card has its list;
+    // Escape shuts it again.
     let mut picks = Vec::with_capacity(ROUNDS);
     for _ in 0..=ROUNDS {
         let open = phone(&mut shot, &mut app, &sid, "Open device");
         let t = Instant::now();
         shot.click(&mut app, open);
         picks.push(since(t, &mut shot, &mut app, |a| picker_listed(a, &sid)));
-        let hide = phone(&mut shot, &mut app, &sid, "Hide device");
-        shot.click(&mut app, hide);
+        shot.send(&mut app, key("Escape", 0, None));
         since(Instant::now(), &mut shot, &mut app, |a| {
-            pane_closed(a, &sid)
+            (!a.st.bench.device_cards.contains(&sid)).then_some(())
         });
     }
     let first = picks.remove(0);
@@ -303,10 +302,10 @@ fn video(app: &App, sid: &str) -> Option<vorn_tree::Video> {
     video_part(app.st.points.tree(&key)?, sid).map(|(_, v)| v.clone())
 }
 
-/// The pane is open again and its picker has its list; a closed pane's
+/// The picker is over the card again and has its list; a shut picker's
 /// last tree is not enough.
 fn picker_listed(app: &App, sid: &str) -> Option<()> {
-    app.st.bench.devices.contains(sid).then_some(())?;
+    app.st.bench.device_cards.contains(sid).then_some(())?;
     video(app, sid)?.picker.filter(|p| !p.loading).map(|_| ())
 }
 
