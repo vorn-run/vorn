@@ -10,6 +10,7 @@
 
 pub mod checkpoint;
 pub mod emulator;
+pub mod images;
 mod scan;
 
 pub use checkpoint::{Checkpoint, Uncut};
@@ -17,6 +18,7 @@ pub use emulator::{
     BlockedKind, ClipboardTarget, Counters, Effect, Emulator, Mark, ProgramReport, ProgramState,
     ProgressState, Theme,
 };
+pub use images::{Picture, Placed, Virtual};
 
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
