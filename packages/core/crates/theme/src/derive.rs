@@ -140,6 +140,7 @@ impl Deriver<'_> {
             FocusRing => self.ink(0.45),
             ScrollThumb => self.ink(0.08),
             ScrollThumbHover => self.ink(0.2),
+            SliderTrack => self.gray(if dark { 0.94 } else { 0.15 }),
             Shadow => Rgba8::BLACK,
             Gray100 => self.gray(0.94),
             Gray200 => self.gray(0.88),

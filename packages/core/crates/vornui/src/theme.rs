@@ -38,6 +38,8 @@ pub mod color {
     pub const WHITE: Color = t(Token::InkBright);
     /// Scrims and shadows.
     pub const SHADOW: Color = t(Token::Shadow);
+    /// The groove a slider runs in.
+    pub const SLIDER_TRACK: Color = t(Token::SliderTrack);
 
     /// Tailwind v4's steps in use, as each theme maps them.
     pub const GRAY_100: Color = t(Token::Gray100);

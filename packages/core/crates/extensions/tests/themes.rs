@@ -85,3 +85,24 @@ fn a_theme_installs_from_git_and_is_listed() {
     assert_eq!(listed[0]["theme"]["terminal"]["background"], "#111111");
     assert_eq!(installs.store().list().len(), 1);
 }
+
+#[test]
+fn an_extension_cannot_take_a_bundled_themes_id() {
+    let repo = tempfile::tempdir().unwrap();
+    if !git(repo.path(), &["init", "--quiet", "--initial-branch=main"]) {
+        eprintln!("skipped: needs git on PATH");
+        return;
+    }
+    let manifest = MANIFEST.replace("acme.dusk", "vorn-dark");
+    fs::write(repo.path().join("vorn-extension.toml"), manifest).unwrap();
+    assert!(git(repo.path(), &["add", "-A"]));
+    assert!(git(repo.path(), &["commit", "--quiet", "-m", "release"]));
+
+    let store = tempfile::tempdir().unwrap();
+    let installs = Installs::new(PackStore::new(store.path()), "git", env());
+    let url = format!("file://{}", repo.path().display());
+    let err = installs.inspect_git(&url, None).unwrap_err();
+    assert!(err.contains("\"vorn-dark\""), "{err}");
+    assert!(installs.inspect_link(repo.path()).is_err());
+    assert!(installs.store().list().is_empty());
+}

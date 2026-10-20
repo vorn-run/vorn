@@ -196,7 +196,8 @@ pub fn materials() -> Materials {
 }
 
 /// Whether the platform asks for less transparency:
-/// `VORNUI_REDUCE_TRANSPARENCY=1`, or macOS's Reduce transparency.
+/// `VORNUI_REDUCE_TRANSPARENCY=1`, macOS's Reduce transparency, or Windows'
+/// Transparency effects switched off.
 pub fn system_reduced_transparency() -> bool {
     if let Some(v) = std::env::var_os("VORNUI_REDUCE_TRANSPARENCY") {
         return v != "0" && !v.is_empty();
@@ -209,7 +210,38 @@ fn platform_reduced_transparency() -> bool {
     crate::macos::reduce_transparency()
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows' Transparency effects switch, read from the registry.
+#[cfg(windows)]
+fn platform_reduced_transparency() -> bool {
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let name = wide("EnableTransparency");
+    let mut value = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: the strings are NUL-terminated and `value` holds the DWORD `size` says.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &raw mut size,
+        )
+    };
+    transparency_switch_reduces((status == 0).then_some(value))
+}
+
+/// `EnableTransparency` as read: 0 turns transparency effects off; a
+/// missing value leaves them on, as Windows does.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn transparency_switch_reduces(enable_transparency: Option<u32>) -> bool {
+    enable_transparency == Some(0)
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 fn platform_reduced_transparency() -> bool {
     false
 }
@@ -217,6 +249,19 @@ fn platform_reduced_transparency() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_transparency_off_reads_as_reduced() {
+        assert!(transparency_switch_reduces(Some(0)));
+        assert!(!transparency_switch_reduces(Some(1)));
+        assert!(!transparency_switch_reduces(None));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_registry_read_answers_without_failing() {
+        let _ = platform_reduced_transparency();
+    }
 
     #[test]
     fn installing_recolours_tokens_and_counts() {

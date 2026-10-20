@@ -113,6 +113,13 @@ pub(crate) fn is_software(a: &wgpu::Adapter) -> bool {
 pub fn instance_desc() -> wgpu::InstanceDescriptor {
     let mut d = wgpu::InstanceDescriptor::new_without_display_handle();
     d.backends = wgpu::Backends::PRIMARY;
+    // Only a DirectComposition swapchain blends with the window, so Mica can
+    // show through; an HWND one, and Vulkan's win32 surface, are opaque.
+    #[cfg(windows)]
+    {
+        d.backends = wgpu::Backends::DX12;
+        d.backend_options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
+    }
     d
 }
 

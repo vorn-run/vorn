@@ -112,8 +112,9 @@ impl Prefs {
     }
 
     /// The theme a window draws: `preview` (a tile under the pointer) or
-    /// the chosen one, found among `installed` then Vorn's, falling back to
-    /// Vorn's own for the scheme when the id is gone.
+    /// the chosen one, found among Vorn's then `installed` (so an extension
+    /// can never replace a bundled theme), falling back to Vorn's own for
+    /// the scheme when the id is gone.
     pub fn resolve(
         &self,
         system_dark: bool,
@@ -127,9 +128,9 @@ impl Prefs {
         } else {
             vorn_light()
         };
-        let base = installed
+        let base = bundled()
             .iter()
-            .chain(bundled())
+            .chain(installed)
             .find(|t| t.id == id)
             .unwrap_or(fallback)
             .clone();
@@ -218,6 +219,14 @@ mod tests {
             prefs.resolve(true, true, &[], None).materials,
             Materials::Solid
         );
+    }
+
+    #[test]
+    fn an_installed_theme_never_replaces_a_bundled_one() {
+        let mut impostor = find_bundled("nord").unwrap().clone();
+        impostor.id = VORN_DARK.into();
+        let r = Prefs::default().resolve(true, false, &[impostor], None);
+        assert_eq!(&r.theme, find_bundled(VORN_DARK).unwrap());
     }
 
     #[test]

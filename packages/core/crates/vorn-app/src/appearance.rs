@@ -1,7 +1,6 @@
 //! Settings › Appearance applied: the stored choices, the system's light or
 //! dark and its transparency setting, and the themes extensions bring,
-//! resolved to the palette this thread draws with. Behind Experimental:
-//! with it off every window keeps Vorn Dark, solid.
+//! resolved to the palette this thread draws with.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -16,12 +15,11 @@ pub const CHROME: &str = "interfaceStyle";
 pub const CONTRAST: &str = "contrastCorrection";
 pub const MATERIALS: &str = "materials";
 
-/// The appearance settings stored in `defaults`; the defaults when
-/// Experimental is off or a value is missing or unknown.
+/// The appearance settings stored in `defaults`; the default for any value
+/// missing or unknown.
 pub fn prefs(defaults: Option<&Value>) -> Prefs {
     let mut p = Prefs::default();
-    let Some(d) = defaults.filter(|d| d.get("experimental").and_then(Value::as_bool) == Some(true))
-    else {
+    let Some(d) = defaults else {
         return p;
     };
     let text = |k: &str| d.get(k).and_then(Value::as_str);
@@ -127,28 +125,19 @@ mod tests {
     use serde_json::json;
     use vorn_theme::Token;
 
-    fn on(extra: Value) -> Value {
-        let mut d = json!({ "experimental": true });
-        d.as_object_mut()
-            .unwrap()
-            .extend(extra.as_object().unwrap().clone());
-        d
-    }
-
     #[test]
-    fn appearance_waits_behind_experimental() {
-        let d = json!({ "colorScheme": "light", "experimental": false });
-        assert_eq!(prefs(Some(&d)), Prefs::default());
-        let d = on(json!({ "colorScheme": "light", "darkTheme": "nord", "materials": "native" }));
+    fn stored_choices_are_read_whatever_experimental_says() {
+        let d = json!({ "colorScheme": "light", "darkTheme": "nord", "materials": "native", "experimental": false });
         let p = prefs(Some(&d));
         assert_eq!(p.scheme, Scheme::Light);
         assert_eq!(p.dark, "nord");
         assert_eq!(p.materials, Materials::Native);
+        assert_eq!(prefs(None), Prefs::default());
     }
 
     #[test]
     fn unknown_values_keep_the_default() {
-        let d = on(json!({ "colorScheme": "sepia", "interfaceStyle": 3 }));
+        let d = json!({ "colorScheme": "sepia", "interfaceStyle": 3 });
         assert_eq!(prefs(Some(&d)), Prefs::default());
     }
 
@@ -169,7 +158,7 @@ mod tests {
     #[test]
     fn changing_a_setting_installs_a_new_palette_once() {
         let mut a = Appearance::default();
-        let d = on(json!({ "darkTheme": "dracula", "interfaceStyle": "tinted" }));
+        let d = json!({ "darkTheme": "dracula", "interfaceStyle": "tinted" });
         assert!(a.apply(Some(&d), true, false, None));
         assert!(!a.apply(Some(&d), true, false, None));
         let dracula = vorn_theme::find_bundled("dracula").unwrap();
@@ -185,7 +174,7 @@ mod tests {
     #[test]
     fn reduce_transparency_keeps_materials_solid() {
         let mut a = Appearance::default();
-        let d = on(json!({ "materials": "native" }));
+        let d = json!({ "materials": "native" });
         a.apply(Some(&d), true, true, None);
         assert_eq!(palette::materials(), Materials::Solid);
         a.apply(Some(&d), true, false, None);

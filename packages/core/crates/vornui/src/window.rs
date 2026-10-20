@@ -708,7 +708,7 @@ impl<A: App> Live<A> {
                 if self.material.is_some() {
                     os_material(&self.window, None);
                 }
-                config.alpha_mode = caps.alpha_modes[0];
+                config.alpha_mode = opaque(&caps);
                 false
             }
         };
@@ -806,6 +806,17 @@ impl<A: App> Live<A> {
     }
 }
 
+/// Opaque where offered: a DirectComposition swapchain lists `Auto` first,
+/// which leaves its alpha unspecified.
+fn opaque(caps: &wgpu::SurfaceCapabilities) -> wgpu::CompositeAlphaMode {
+    let o = wgpu::CompositeAlphaMode::Opaque;
+    if caps.alpha_modes.contains(&o) {
+        o
+    } else {
+        caps.alpha_modes[0]
+    }
+}
+
 /// Picks the surface's format and mode for `gpu` and configures it at `px`.
 pub(crate) fn configure(
     gpu: &Gpu,
@@ -835,7 +846,7 @@ pub(crate) fn configure(
     ]
     .into_iter()
     .find(|m| transparent && caps.alpha_modes.contains(m))
-    .unwrap_or(caps.alpha_modes[0]);
+    .unwrap_or_else(|| opaque(&caps));
     // Copying from the frame is what backdrop blur reads; without it blurs
     // are skipped.
     let usage =

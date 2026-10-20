@@ -70,6 +70,8 @@ tokens! {
     FocusRing = "focus-ring",
     ScrollThumb = "scroll-thumb",
     ScrollThumbHover = "scroll-thumb-hover",
+    /// The groove a slider runs in.
+    SliderTrack = "slider-track",
     /// What shadows and scrims are made of.
     Shadow = "shadow",
     Gray100 = "gray-100",
@@ -151,6 +153,7 @@ impl Token {
                 | FocusRing
                 | ScrollThumb
                 | ScrollThumbHover
+                | SliderTrack
                 | Shadow
                 | Gray100
                 | Gray200

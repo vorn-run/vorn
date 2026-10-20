@@ -2,7 +2,7 @@
 
 A theme is an extension whose manifest has a `[theme]` section. The section is data: the colours of Vorn's interface and the terminal's palette. A theme needs no program, and it installs from git like any extension.
 
-Themes are under Settings › Experimental while they are tried. With it on, Settings › Appearance picks the colour scheme (System, Light or Dark), a light theme and a dark theme from preview tiles, the interface style, contrast correction and materials.
+Settings › Appearance picks the colour scheme (System, Light or Dark), a light theme and a dark theme from preview tiles, the interface style, contrast correction and materials.
 
 ## The manifest
 
@@ -42,7 +42,7 @@ Colours are `#rrggbb`, or `#rrggbbaa` for the tokens drawn over others (lines, s
 - Text: `ink`, `ink-bright`, `ink-secondary`, `ink-faint`, `ink-ghost`
 - Lines: `line-faint`, `line-soft`, `line-base`, `line-strong`, `line-hover`
 - Meaning: `accent`, `accent-strong`, `danger`, `status-slate`, `status-blue`, `status-sage`, `diff-add`, `diff-remove`
-- Controls: `selection`, `focus-ring`, `scroll-thumb`, `scroll-thumb-hover`, `shadow`
+- Controls: `selection`, `focus-ring`, `scroll-thumb`, `scroll-thumb-hover`, `slider-track`, `shadow`
 - The scales: `gray-100` to `gray-900`, and `red`, `orange`, `amber`, `yellow`, `green`, `emerald`, `cyan`, `sky`, `blue`, `violet`, `purple` and `pink` steps
 - Code: `syntax-text`, `syntax-comment`, `syntax-string`, `syntax-number`, `syntax-keyword`, `syntax-storage`, `syntax-constant`, `syntax-function`, `syntax-variable`, `syntax-property`, `syntax-type`, `syntax-punct`, `syntax-list`
 

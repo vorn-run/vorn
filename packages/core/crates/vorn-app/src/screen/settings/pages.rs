@@ -86,7 +86,7 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
                 .absolute(0.0, 4.0)
                 .size(w, 8.0)
                 .rounded(4.0)
-                .bg(c(look::GRAY_200)),
+                .bg(c(look::SLIDER_TRACK)),
         )
         .child(
             div()
@@ -205,10 +205,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
         ],
         12.0,
     );
-    let mut rows_col = div().col().gap(4.0);
-    if flag(s, "experimental", false) {
-        rows_col = rows_col.child(colour_rows(s));
-    }
+    let mut rows_col = div().col().gap(4.0).child(colour_rows(s));
     if let Some(d) = s.term_drawing {
         rows_col = rows_col.child(drawing_row(s, d));
     }
@@ -518,7 +515,7 @@ pub(super) fn experimental(s: &Screen<'_>) -> El {
             "experimental",
             flag(s, "experimental", false),
             "Try Experimental Features",
-            "Images in terminals: pictures a program draws with the kitty graphics protocol show in its card, on every device. Themes: Appearance picks a light and a dark theme, contrast correction and materials.",
+            "Images in terminals: pictures a program draws with the kitty graphics protocol show in its card, on every device.",
             None,
         ))
 }

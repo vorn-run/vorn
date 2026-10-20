@@ -98,6 +98,7 @@ mod tests {
         assert_eq!(t.get(Token::SurfaceOverlay), rgb(0x1c1c20));
         assert_eq!(t.get(Token::Accent), rgb(0xc9972a));
         assert_eq!(t.get(Token::Gray400), rgb(0x99a1af));
+        assert_eq!(t.get(Token::SliderTrack), rgb(0xefefef));
         assert_eq!(t.get(Token::InkSecondary), Rgba8::WHITE.with_alpha(0.55));
         assert_eq!(t.terminal.background, rgb(0x141416));
         assert_eq!(t.terminal.ansi[1], rgb(0xef4444));
