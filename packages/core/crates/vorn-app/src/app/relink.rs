@@ -51,7 +51,7 @@ impl Default for Relinking {
 
 /// What the dialing thread hands back.
 enum Dialed {
-    Linked(Relinked),
+    Linked(Box<Relinked>),
     Refused(String),
 }
 
@@ -80,7 +80,7 @@ impl App {
                     if r.grid.is_some() {
                         linked.1 = now;
                     }
-                    self.relinked(r);
+                    self.relinked(*r);
                 }
                 Ok(Dialed::Refused(why)) => self.refused(why),
                 Err(TryRecvError::Empty) => {}
@@ -181,7 +181,7 @@ fn dial(dir: &Path, rpc: bool, grid: bool, wake: &Wake, alive: &Weak<Grid>) -> O
     while alive.strong_count() > 0 {
         if let Ok(ep) = Endpoint::find(dir) {
             match open(ep, rpc, grid, wake) {
-                Ok(r) => return Some(Dialed::Linked(r)),
+                Ok(r) => return Some(Dialed::Linked(Box::new(r))),
                 Err(RpcError::Rejected) => {
                     return Some(Dialed::Refused(RpcError::Rejected.to_string()))
                 }
