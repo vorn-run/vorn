@@ -737,10 +737,13 @@ pub enum Permission {
     /// Drives the devices the client shows: lists, starts and stops
     /// simulators and acts on their apps.
     Video,
+    /// Reads and writes the remote hosts and the SSH keys Vorn keeps, and
+    /// tests logging in to a host.
+    Remote,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 26] = [
+    pub const ALL: [Permission; 27] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -767,6 +770,7 @@ impl Permission {
         Permission::InboxWrite,
         Permission::Web,
         Permission::Video,
+        Permission::Remote,
     ];
 
     pub fn name(self) -> &'static str {
@@ -797,6 +801,7 @@ impl Permission {
             Permission::InboxWrite => "inbox.write",
             Permission::Web => "web",
             Permission::Video => "video",
+            Permission::Remote => "remote",
         }
     }
 

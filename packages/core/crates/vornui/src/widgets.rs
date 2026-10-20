@@ -686,6 +686,31 @@ pub fn text_input(ui: &Ui, id: Id, name: &str, placeholder: &str) -> El {
         .role(Role::TextInput, name)
 }
 
+/// [`text_input`] of several lines, `lines` tall: Return starts a new line
+/// and Cmd+Return (Ctrl+Return off macOS) reports `Event::Submit`.
+pub fn text_area_input(ui: &Ui, id: Id, name: &str, placeholder: &str, lines: u8) -> El {
+    let hot = if ui.focused(id) { 1.0 } else { ui.hover(id) };
+    let style = TextStyle {
+        line_height: 18.0,
+        ..TextStyle::ui(12.0)
+    };
+    let mut look = edit_look(style, color::GRAY_300, placeholder, true);
+    if let Content::Edit(l) = &mut look {
+        l.textarea = true;
+    }
+    div()
+        .id(id)
+        .sense(Sense::TEXT)
+        .px(6.0)
+        .py(4.0)
+        .h(f32::from(lines) * 18.0 + 8.0)
+        .rounded(radius::SM)
+        .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
+        .bg(tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04)))
+        .content(look)
+        .role(Role::MultilineTextInput, name)
+}
+
 /// The prompt composer (`PromptLauncher`): a three-row textarea, `text-sm`
 /// on the raised surface in a `rounded-xl` outline, with `bar` (pickers,
 /// buttons) pinned along its bottom over a faint rule. Enter reports

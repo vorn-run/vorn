@@ -39,7 +39,7 @@ pub enum Then {
     OpenTasks,
     NewSession,
     Palette,
-    /// Settings at a category (`notifications`, `ssh`, ...).
+    /// Settings at a category (`notifications`, ...) or an extension's page.
     Settings(&'static str),
 }
 
@@ -166,10 +166,15 @@ pub fn mcp_to_show<'a>(agents: &'a Agents, installed: Option<&[String]>) -> Vec<
     }
 }
 
-/// `EXPLORE_ITEMS`: the last step's links into Settings.
+/// `EXPLORE_ITEMS`: the last step's links into Settings, each a category
+/// or an extension's page (`ext/settings/id`, shown while it contributes it).
 pub const EXPLORE: [(&str, &str, &str); 4] = [
     ("bell", "Enable notifications & sounds", "notifications"),
-    ("monitor", "Set up remote hosts (SSH)", "ssh"),
+    (
+        "monitor",
+        "Set up remote hosts (SSH)",
+        crate::settings::SSH_PAGE,
+    ),
     ("palette", "Customize appearance", "appearance"),
     ("settings", "Configure agent commands", "agents"),
 ];

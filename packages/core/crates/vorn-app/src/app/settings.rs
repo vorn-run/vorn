@@ -8,21 +8,15 @@ use serde_json::{json, Value};
 use super::{list, App, Call, MOD};
 use crate::act::Act;
 use crate::client::RpcError;
-use crate::screen::settings::{
-    host_id, key_field_id, rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER,
-};
+use crate::screen::settings::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
 use crate::settings::{
-    self, split_args, AgentField, Category, ConnKey, HostField, KeyField, KeyRowState, SetAct,
-    Shell, SshKey, TestResult, CONNECTIONS_PAGE,
+    self, split_args, AgentField, Category, ConnKey, KeyRowState, SetAct, Shell, CONNECTIONS_PAGE,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 
 /// A settings call whose answer changes the page.
 pub(super) enum SetCall {
     Shells,
-    SshKeys,
-    KeySaved,
-    Test(String),
     ConnKeys,
     Preflight(String),
     Rotated(String),
@@ -36,37 +30,6 @@ impl App {
         match call {
             SetCall::Shells => {
                 st.shells = Some(list(answer).iter().filter_map(Shell::from_value).collect());
-            }
-            SetCall::SshKeys => {
-                if let Ok(v) = answer {
-                    st.ssh.keys = v
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(SshKey::from_value)
-                        .collect();
-                }
-            }
-            SetCall::KeySaved => match answer {
-                Ok(_) => self.load_ssh_keys(),
-                Err(e) => self.st.toast(e.to_string(), true),
-            },
-            SetCall::Test(id) => {
-                let r = match answer {
-                    Ok(v) => TestResult::Done {
-                        ok: v.get("success").and_then(Value::as_bool) == Some(true),
-                        message: v
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .to_owned(),
-                    },
-                    Err(e) => TestResult::Done {
-                        ok: false,
-                        message: e.to_string(),
-                    },
-                };
-                st.ssh.tests.insert(id, r);
             }
             SetCall::ConnKeys => {
                 st.keys = Some(
@@ -129,14 +92,6 @@ impl App {
         }
     }
 
-    fn load_ssh_keys(&mut self) {
-        self.call(
-            Call::Set(SetCall::SshKeys),
-            "credential:listKeys",
-            Value::Null,
-        );
-    }
-
     /// Opens the page on `cat` and asks for what that panel shows.
     pub(super) fn open_settings(&mut self, cat: Category) {
         let s = &mut self.st.settings;
@@ -156,7 +111,6 @@ impl App {
                     self.st.settings.cli = Some(crate::cli_link::state());
                 }
             }
-            Category::Ssh => self.load_ssh_keys(),
             Category::Keys => {
                 self.call(
                     Call::Set(SetCall::ConnKeys),
@@ -257,22 +211,6 @@ impl App {
         let mut cmd = settings::command_of(&config, &a);
         f(&mut cmd);
         config["agentCommands"][key] = cmd;
-        self.save_config(config, Call::Quiet);
-    }
-
-    fn write_host(&mut self, id: &str, f: impl FnOnce(&mut Value)) {
-        let mut config = self.store.config.clone();
-        let Some(h) = config
-            .get_mut("remoteHosts")
-            .and_then(Value::as_array_mut)
-            .and_then(|l| {
-                l.iter_mut()
-                    .find(|h| h.get("id").and_then(Value::as_str) == Some(id))
-            })
-        else {
-            return;
-        };
-        f(h);
         self.save_config(config, Call::Quiet);
     }
 
@@ -401,144 +339,7 @@ impl App {
                 ui.clipboard().set(&text);
                 self.st.settings.copied = Some((text, web_time::Instant::now()));
             }
-            SetAct::AgentText(..) | SetAct::HostText(..) | SetAct::KeyText(_) => {}
-            SetAct::AddHost => {
-                let id = new_id();
-                let mut config = self.store.config.clone();
-                if !config.get("remoteHosts").is_some_and(Value::is_array) {
-                    config["remoteHosts"] = json!([]);
-                }
-                if let Some(l) = config["remoteHosts"].as_array_mut() {
-                    l.push(json!({ "id": id, "label": "New Host", "hostname": "", "user": "", "port": 22, "authMethod": "agent" }));
-                }
-                self.st.settings.ssh.hosts_open.insert(id);
-                self.save_config(config, Call::Quiet);
-            }
-            SetAct::ToggleHost(id) => {
-                let o = &mut self.st.settings.ssh.hosts_open;
-                if !o.remove(&id) {
-                    o.insert(id);
-                }
-            }
-            SetAct::Auth(id, method) => {
-                self.write_host(&id, |h| {
-                    h["authMethod"] = json!(method);
-                    if let Some(o) = h.as_object_mut() {
-                        if method != "key-file" {
-                            o.remove("sshKeyPath");
-                        }
-                        if method != "key-stored" {
-                            o.remove("credentialId");
-                        }
-                        if method != "password" {
-                            o.remove("encryptedPassword");
-                        }
-                    }
-                });
-                if method != "password" {
-                    ui.set_edit_text(host_id(&id, HostField::Password), "");
-                }
-            }
-            SetAct::PickKey(host, key) => {
-                self.write_host(&host, |h| h["credentialId"] = json!(key))
-            }
-            SetAct::Test(id) => {
-                let host = self
-                    .store
-                    .config
-                    .get("remoteHosts")
-                    .and_then(Value::as_array)
-                    .and_then(|l| {
-                        l.iter()
-                            .find(|h| h.get("id").and_then(Value::as_str) == Some(id.as_str()))
-                    })
-                    .cloned();
-                let Some(host) = host else { return };
-                let s = |k: &str| host.get(k).and_then(Value::as_str).unwrap_or("").is_empty();
-                if s("hostname") || s("user") {
-                    self.st.settings.ssh.tests.insert(
-                        id,
-                        TestResult::Done {
-                            ok: false,
-                            message: "Hostname and username are required".into(),
-                        },
-                    );
-                    return;
-                }
-                self.st
-                    .settings
-                    .ssh
-                    .tests
-                    .insert(id.clone(), TestResult::Testing);
-                self.call(Call::Set(SetCall::Test(id)), "ssh:testConnection", host);
-            }
-            SetAct::AskDelete(id) => self.st.settings.ssh.confirm = Some(id),
-            SetAct::CancelDelete => self.st.settings.ssh.confirm = None,
-            SetAct::DeleteHost(id) => {
-                let mut config = self.store.config.clone();
-                if let Some(l) = config.get_mut("remoteHosts").and_then(Value::as_array_mut) {
-                    l.retain(|h| h.get("id").and_then(Value::as_str) != Some(id.as_str()));
-                }
-                self.st.settings.ssh.confirm = None;
-                self.save_config(config, Call::Quiet);
-            }
-            SetAct::ToggleKey(id) => {
-                let o = &mut self.st.settings.ssh.keys_open;
-                if !o.remove(&id) {
-                    o.insert(id);
-                }
-            }
-            SetAct::DeleteKey(id) => {
-                self.st.settings.ssh.confirm = None;
-                self.call(
-                    Call::Set(SetCall::KeySaved),
-                    "credential:deleteKey",
-                    json!(id),
-                );
-            }
-            SetAct::PasteKey => {
-                self.st.settings.ssh.adding = true;
-                ui.set_focus(Some(key_field_id(KeyField::Label)));
-            }
-            SetAct::CancelKey => {
-                self.st.settings.ssh.adding = false;
-                for f in [
-                    KeyField::Label,
-                    KeyField::Private,
-                    KeyField::Public,
-                    KeyField::Certificate,
-                ] {
-                    ui.set_edit_text(key_field_id(f), "");
-                }
-            }
-            SetAct::SaveKey => {
-                let t = |ui: &Ui, f| ui.edit_text(key_field_id(f)).trim().to_owned();
-                let private = t(ui, KeyField::Private);
-                if private.is_empty() {
-                    return;
-                }
-                let label = t(ui, KeyField::Label);
-                let mut params = json!({
-                    "label": if label.is_empty() { "Untitled Key".to_owned() } else { label },
-                    "privateKey": private,
-                });
-                for (f, k) in [
-                    (KeyField::Public, "publicKey"),
-                    (KeyField::Certificate, "certificate"),
-                ] {
-                    let v = t(ui, f);
-                    if !v.is_empty() {
-                        params[k] = json!(v);
-                    }
-                }
-                self.call(Call::Set(SetCall::KeySaved), "credential:storeKey", params);
-                self.run_set(ui, SetAct::CancelKey);
-            }
-            SetAct::ImportKey => {
-                self.st.settings.ssh.importing = true;
-                ui.set_edit_text(key_field_id(KeyField::Import), "");
-                ui.set_focus(Some(key_field_id(KeyField::Import)));
-            }
+            SetAct::AgentText(..) => {}
             SetAct::TestKey(id) => {
                 let row = self.st.settings.key_rows.entry(id.clone()).or_default();
                 row.testing = true;
@@ -626,8 +427,8 @@ impl App {
                     return false;
                 };
                 let text = ui.edit_text(id).to_owned();
-                match a {
-                    SetAct::AgentText(agent, f) => match f {
+                if let SetAct::AgentText(agent, f) = a {
+                    match f {
                         AgentField::Command => {
                             self.write_agent(&agent, |c| c["command"] = json!(text))
                         }
@@ -643,47 +444,13 @@ impl App {
                                 .insert((agent.clone(), f), text.clone());
                             self.write_agent(&agent, |c| c[k] = json!(split_args(&text)));
                         }
-                    },
-                    SetAct::HostText(host, f) => {
-                        let (key, value) = match f {
-                            HostField::Label => ("label", json!(text)),
-                            HostField::Hostname => ("hostname", json!(text)),
-                            HostField::User => ("user", json!(text)),
-                            HostField::Port => (
-                                "port",
-                                json!(text
-                                    .trim()
-                                    .parse::<i64>()
-                                    .ok()
-                                    .filter(|p| *p != 0)
-                                    .unwrap_or(22)),
-                            ),
-                            HostField::KeyPath => ("sshKeyPath", json!(text)),
-                            HostField::Options => ("sshOptions", json!(text)),
-                            HostField::Password => return true,
-                        };
-                        self.write_host(&host, |h| h[key] = value);
                     }
-                    _ => {}
                 }
                 true
             }
             UiEvent::Submit(id) => {
                 if id == SHELL_PATH {
                     self.commit_shell(ui);
-                    return true;
-                }
-                if id == key_field_id(KeyField::Import) {
-                    let path = ui.edit_text(id).trim().to_owned();
-                    self.st.settings.ssh.importing = false;
-                    ui.set_focus(None);
-                    if !path.is_empty() {
-                        self.import_key(&path);
-                    }
-                    return true;
-                }
-                if let Some((host, _)) = self.password_field(id) {
-                    self.commit_password(ui, &host);
                     return true;
                 }
                 if let Some(k) = self
@@ -713,28 +480,6 @@ impl App {
         }
     }
 
-    fn password_field(&self, id: Id) -> Option<(String, ())> {
-        self.store
-            .config
-            .get("remoteHosts")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|h| h.get("id").and_then(Value::as_str))
-            .find(|h| host_id(h, HostField::Password) == id)
-            .map(|h| (h.to_owned(), ()))
-    }
-
-    fn commit_password(&mut self, ui: &mut Ui, host: &str) {
-        let id = host_id(host, HostField::Password);
-        let pw = ui.edit_text(id).to_owned();
-        if pw.is_empty() {
-            return;
-        }
-        ui.set_edit_text(id, "");
-        self.write_host(host, |h| h["password"] = json!(pw));
-    }
-
     fn commit_shell(&mut self, ui: &mut Ui) {
         let next = ui.edit_text(SHELL_PATH).trim().to_owned();
         self.st.settings.shell_editing = false;
@@ -751,30 +496,10 @@ impl App {
         }
     }
 
-    /// `CREDENTIAL_IMPORT_KEY_FILE`: the key and the `.pub` beside it.
-    fn import_key(&mut self, path: &str) {
-        let expanded = crate::system::expand_home(path);
-        let private = match std::fs::read_to_string(&expanded) {
-            Ok(t) => t,
-            Err(e) => return self.st.toast(format!("{path}: {e}"), true),
-        };
-        let public = std::fs::read_to_string(format!("{}.pub", expanded.display()))
-            .ok()
-            .map(|p| p.trim().to_owned());
-        let label = crate::state::basename(path).to_owned();
-        let mut params = json!({ "label": label, "privateKey": private });
-        if let Some(p) = public {
-            params["publicKey"] = json!(p);
-        }
-        self.call(Call::Set(SetCall::KeySaved), "credential:storeKey", params);
-    }
-
     /// A field lost focus: what `onBlur` does there.
     pub(super) fn settings_blur(&mut self, ui: &mut Ui, id: Id) {
         if id == SHELL_PATH && self.st.settings.shell_editing {
             self.commit_shell(ui);
-        } else if let Some((host, _)) = self.password_field(id) {
-            self.commit_password(ui, &host);
         } else if let Some(Act::Set(SetAct::AgentText(agent, f))) = self.acts.text_of(id) {
             self.st.settings.args.remove(&(agent, f));
         }
@@ -810,7 +535,7 @@ impl App {
     }
 }
 
-/// A fresh id for a host, as `crypto.randomUUID` gives one.
+/// A fresh id, as `crypto.randomUUID` gives one.
 pub(super) fn new_id() -> String {
     let n = web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)

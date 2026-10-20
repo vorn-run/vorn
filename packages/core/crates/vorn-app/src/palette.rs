@@ -588,23 +588,6 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
                 .map(|a| a.key.as_str())
                 .collect::<Vec<_>>(),
         ),
-        Entry::new(
-            Cat::Actions,
-            "SSH & Hosts",
-            Glyph::Icon("server"),
-            Act::Set(crate::settings::SetAct::Open(
-                crate::settings::Category::Ssh,
-            )),
-        )
-        .keys(&[
-            "ssh",
-            "remote",
-            "host",
-            "server",
-            "key",
-            "credential",
-            "vault",
-        ]),
     ]
 }
 

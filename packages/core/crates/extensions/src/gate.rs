@@ -171,6 +171,13 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("signin.completed", Permission::BrowserSession),
     ("web.call", Permission::Web),
     ("video.call", Permission::Video),
+    ("remote.hosts", Permission::Remote),
+    ("remote.saveHosts", Permission::Remote),
+    ("remote.test", Permission::Remote),
+    ("remote.keys", Permission::Remote),
+    ("remote.storeKey", Permission::Remote),
+    ("remote.importKey", Permission::Remote),
+    ("remote.deleteKey", Permission::Remote),
 ];
 
 /// The core methods open only to the extensions Vorn ships: they write the
@@ -183,6 +190,8 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 /// `web.call` drives the client's web views, which are named by session and
 /// shared, so only the Browser that Vorn ships drives them; `video.call`
 /// drives the machine's simulators the same way, for the Device it ships.
+/// The `remote.*` methods hold the hosts every remote session runs on and
+/// the keys those sessions log in with, which only the SSH built-in edits.
 pub const BUILTIN_ONLY: &[&str] = &[
     "task.importItems",
     "task.changed",
@@ -206,6 +215,13 @@ pub const BUILTIN_ONLY: &[&str] = &[
     "signin.completed",
     "web.call",
     "video.call",
+    "remote.hosts",
+    "remote.saveHosts",
+    "remote.test",
+    "remote.keys",
+    "remote.storeKey",
+    "remote.importKey",
+    "remote.deleteKey",
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call needs it.

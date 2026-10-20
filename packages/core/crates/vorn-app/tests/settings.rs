@@ -11,8 +11,8 @@ use support::{key, seed_acme, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::points::PointAct;
-use vorn_app::screen::settings::{host_id, key_field_id, CONTENT};
-use vorn_app::settings::{AgentField, Category, HostField, KeyField, SetAct};
+use vorn_app::screen::settings::CONTENT;
+use vorn_app::settings::{AgentField, Category, SetAct};
 use vorn_app::state::MenuKind;
 use vorn_app::App;
 
@@ -24,6 +24,11 @@ fn entry_titled(tree: &vorn_tree::Node, title: &str) -> Option<String> {
         }
     }
     tree.children.iter().find_map(|c| entry_titled(c, title))
+}
+
+/// Whether `tree` has a node `id`, an entry's children included.
+fn has_node(tree: &vorn_tree::Node, id: &str) -> bool {
+    tree.id.as_deref() == Some(id) || tree.children.iter().any(|c| has_node(c, id))
 }
 
 fn control(place: &str, act: Act) -> vorn_app::ui::Id {
@@ -309,48 +314,63 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         });
     }
 
-    open(&mut shot, &mut app, Category::Ssh);
-    shot.save(&mut app, "set-ssh");
+    // SSH & Hosts is the SSH built-in's page, drawn as a tree.
+    let page = vorn_app::settings::SSH_PAGE;
+    shot.until(&mut app, "the SSH page", |a, _| {
+        a.st.points.get(page).map(|_| ())
+    });
     shot.click(
         &mut app,
         control(
-            "ssh-host-row",
-            Act::Set(SetAct::ToggleHost("host-1".into())),
+            "settings-nav-ext",
+            Act::Point(PointAct::Settings(page.to_owned())),
         ),
     );
+    shot.until(&mut app, "the hosts", |a, _| {
+        entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "Build box")
+    });
+    shot.save(&mut app, "set-ssh");
+    let base = vorn_app::ui::Id::new(page).child("tree");
+    let button = |node: &str| base.child(node).child("");
+    shot.hover(&mut app, base.child("entry").child("host:host-1"));
+    shot.click(&mut app, button("toggle-host:host-1"));
+    let user = base.child("live").child("user:host-1");
+    shot.until(&mut app, "the host's form", |a, _| {
+        let tree = a.st.points.trees.get(page)?.as_ref().ok()?;
+        has_node(tree, "user:host-1").then_some(())
+    });
     shot.save(&mut app, "set-ssh-host");
-    shot.click(&mut app, host_id("host-1", HostField::User));
+    shot.click(&mut app, user);
     shot.send(&mut app, key("KeyA", MOD(), None));
     shot.type_text(&mut app, "deploy");
     saved(&mut app, "the host's user", |c| {
         c.pointer("/remoteHosts/0/user") == Some(&json!("deploy"))
     });
-    shot.click(
-        &mut app,
-        control(
-            "ssh-auth",
-            Act::Set(SetAct::Auth("host-1".into(), "key-file".into())),
-        ),
-    );
+    shot.click(&mut app, base.child("auth:host-1").child("key-file"));
     saved(&mut app, "the key-file method", |c| {
         c.pointer("/remoteHosts/0/authMethod") == Some(&json!("key-file"))
     });
-    shot.click(&mut app, control("ssh-paste", Act::Set(SetAct::PasteKey)));
-    shot.save(&mut app, "set-ssh-paste");
-    shot.click(&mut app, key_field_id(KeyField::Label));
-    shot.type_text(&mut app, "Work");
-    shot.click(&mut app, key_field_id(KeyField::Private));
-    shot.type_text(&mut app, "PRIVATE");
-    shot.click(&mut app, control("ssh-key-save", Act::Set(SetAct::SaveKey)));
-    shot.until(&mut app, "the stored key", |a, _| {
-        a.st.settings
-            .ssh
-            .keys
-            .iter()
-            .find(|k| k.label == "Work")
-            .map(|_| ())
+    shot.reveal(&mut app, CONTENT, button("paste"));
+    shot.click(&mut app, button("paste"));
+    let label = base.child("live").child("new-key:label");
+    shot.until(&mut app, "the paste form", |a, _| {
+        let tree = a.st.points.trees.get(page)?.as_ref().ok()?;
+        has_node(tree, "new-key:label").then_some(())
     });
-    shot.click(&mut app, control("ssh-add-host", Act::Set(SetAct::AddHost)));
+    shot.save(&mut app, "set-ssh-paste");
+    shot.reveal(&mut app, CONTENT, label);
+    shot.click(&mut app, label);
+    shot.type_text(&mut app, "Work");
+    let private = base.child("live").child("new-key:private");
+    shot.click(&mut app, private);
+    shot.type_text(&mut app, "PRIVATE");
+    shot.reveal(&mut app, CONTENT, button("save-key"));
+    shot.click(&mut app, button("save-key"));
+    shot.until(&mut app, "the stored key", |a, _| {
+        entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "Work")
+    });
+    shot.reveal(&mut app, CONTENT, button("add-host"));
+    shot.click(&mut app, button("add-host"));
     saved(&mut app, "a second host", |c| {
         c["remoteHosts"].as_array().map_or(0, Vec::len) == 2
     });
@@ -383,4 +403,62 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     assert!(!app.st.settings.open, "Escape closes the page");
     shot.send(&mut app, key("Comma", MOD(), None));
     assert!(app.st.settings.open, "Mod+Comma opens it again");
+}
+
+/// Off, SSH takes its page, its palette entry and the project dialog's
+/// host picker with it; the hosts stay in the config.
+#[test]
+fn switching_ssh_off_removes_its_surfaces() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = support::connect(&v);
+    seed_acme(&mut app, &v);
+    let mut shot = Shot::new();
+    let page = vorn_app::settings::SSH_PAGE;
+    let in_palette = |app: &App| {
+        vorn_app::palette::commands(&app.store, &app.st, "Cmd", "Alt")
+            .iter()
+            .any(|e| e.label == "SSH & Hosts Settings")
+    };
+    shot.until(&mut app, "the SSH page", |a, _| {
+        a.st.points.get(page).map(|_| ())
+    });
+    assert!(in_palette(&app));
+    shot.click(&mut app, control("sidebar", Act::AddProject));
+    assert!(
+        shot.labelled(&mut app, "Button", "Build box").is_some(),
+        "the host picker offers the remote host"
+    );
+    app.st.dialog = None;
+
+    app.rpc()
+        .call(
+            "extension:setBuiltin",
+            json!({ "id": "vorn.ssh", "on": false }),
+        )
+        .expect("switched off");
+    shot.until(&mut app, "the SSH page gone", |a, _| {
+        a.st.points.get(page).is_none().then_some(())
+    });
+    assert!(!in_palette(&app));
+    shot.click(&mut app, control("sidebar", Act::AddProject));
+    assert!(
+        shot.labelled(&mut app, "Button", "Build box").is_none(),
+        "no host picker"
+    );
+    let off = app
+        .rpc()
+        .call(
+            "ssh:testConnection",
+            json!({ "hostname": "h", "user": "u" }),
+        )
+        .expect_err("refused");
+    assert!(
+        off.to_string()
+            .contains("SSH is off. Turn it on in Settings"),
+        "{off}"
+    );
+    let config = app.rpc().call("config:load", Value::Null).expect("config");
+    assert_eq!(config["remoteHosts"][0]["id"], "host-1", "the hosts stay");
 }

@@ -118,6 +118,8 @@ pub const LAZY_HEIGHT: f32 = 480.0;
 const BLOCKS: [&str; 3] = ["█", "▓", "▒"];
 const METER_CELLS: usize = 40;
 const ENTRY_METER_CELLS: usize = 8;
+/// How many lines tall a multiline field is: a pasted key's few lines show.
+const FIELD_LINES: u8 = 4;
 
 /// The colour token `t` stands for, in token set [`vorn_tree::TOKENS`].
 pub fn token(t: Token) -> Rgba {
@@ -277,6 +279,7 @@ impl Cx<'_> {
                 placeholder,
                 secret,
                 live,
+                multiline,
             } => {
                 let node = n.id.clone().unwrap_or_default();
                 let name = n.props.label.as_deref().unwrap_or(placeholder);
@@ -286,9 +289,12 @@ impl Cx<'_> {
                 } else {
                     Ev::Field { node, value }
                 });
-                let input = widgets::text_input(self.ui, id, name, placeholder)
-                    .grow()
-                    .min_w0();
+                let input = if *multiline {
+                    widgets::text_area_input(self.ui, id, name, placeholder, FIELD_LINES).shrink0()
+                } else {
+                    widgets::text_input(self.ui, id, name, placeholder).grow()
+                };
+                let input = input.min_w0();
                 let input = if *secret { input.secure() } else { input };
                 self.sem(input, || Sem::Field(name.to_owned()))
             }

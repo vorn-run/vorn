@@ -77,6 +77,7 @@ pub fn field(id: impl Into<String>, value: impl Into<String>) -> Node {
         placeholder: String::new(),
         secret: false,
         live: false,
+        multiline: false,
     })
     .id(id)
 }
@@ -514,6 +515,14 @@ impl Node {
     pub fn secret(mut self) -> Node {
         if let Kind::Field { secret, .. } = &mut self.kind {
             *secret = true;
+        }
+        self
+    }
+
+    /// A field of several lines, for text such as a pasted key.
+    pub fn multiline(mut self) -> Node {
+        if let Kind::Field { multiline, .. } = &mut self.kind {
+            *multiline = true;
         }
         self
     }

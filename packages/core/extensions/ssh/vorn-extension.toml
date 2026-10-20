@@ -1,0 +1,19 @@
+id = "vorn.ssh"
+name = "SSH"
+version = "0.9.0"
+api = "vorn:extension@0.9"
+publisher = "Vorn"
+description = "Remote hosts to run sessions on over SSH, and the SSH keys they log in with: the SSH & Hosts settings page, the host choice when adding a project, and testing a host. Off, those are gone; sessions and projects already on a remote host keep working."
+
+[declares]
+uses = ["remote"]
+
+[service]
+component = "ssh.wasm"
+
+[[contributes.settings]]
+id = "hosts"
+title = "SSH & Hosts"
+description = "Configure remote hosts and SSH keys for running agents on remote machines"
+icon = "server"
+tree = true

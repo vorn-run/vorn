@@ -126,6 +126,7 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
             ("vorn.files", "cards"),
             ("vorn.browser", "panes"),
             ("vorn.device", "panes"),
+            ("vorn.ssh", "settings"),
             ("vorn.blocks", "shell"),
             ("vorn.worktrees", "sidebar"),
             ("vorn.worktrees", "settings"),

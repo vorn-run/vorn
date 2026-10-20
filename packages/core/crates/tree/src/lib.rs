@@ -79,7 +79,9 @@ pub enum Kind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         confirm: Option<String>,
     },
-    /// A one-line field: reports `submit` with what it holds on Return and, when `live`, `change` as it is typed.
+    /// A field: reports `submit` with what it holds on Return and, when `live`, `change` as it is typed.
+    /// A `multiline` one holds several lines, as a pasted key: Return starts
+    /// a line there, and Cmd+Return (Ctrl+Return off macOS) submits.
     Field {
         #[serde(default)]
         value: String,
@@ -89,6 +91,8 @@ pub enum Kind {
         secret: bool,
         #[serde(default, skip_serializing_if = "is_false")]
         live: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        multiline: bool,
     },
     /// One of several, as chips: reports `select` with the option's id.
     Choice {

@@ -146,6 +146,8 @@ pub enum Route {
     Browser,
     /// The Device extension's `device:*` calls.
     Device,
+    /// The SSH extension's `ssh:*` calls.
+    Ssh,
     TaskList,
     Projects,
     SessionLog,
@@ -167,6 +169,7 @@ const ROUTES: &[(&[&str], Route)] = &[
     (extensions::builtin::tasks::METHODS, Route::Tasks),
     (extensions::builtin::browser::METHODS, Route::Browser),
     (extensions::builtin::device::METHODS, Route::Device),
+    (extensions::builtin::ssh::METHODS, Route::Ssh),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),
@@ -732,6 +735,9 @@ impl Native {
             }
             Some(Route::Device) => {
                 return extensions::builtin::device::answer(self, &method, params).await;
+            }
+            Some(Route::Ssh) => {
+                return extensions::builtin::ssh::answer(self, &method, params).await;
             }
             Some(Route::TaskList) => return task_list::answer(self, &method, params).await,
             Some(Route::Projects) => return projects::answer(self, &method, params).await,
@@ -1346,6 +1352,7 @@ mod tests {
         assert_eq!(route("extension:install"), Some(Route::Extensions));
         assert_eq!(route("browser:readPage"), Some(Route::Browser));
         assert_eq!(route("device:list"), Some(Route::Device));
+        assert_eq!(route("ssh:testConnection"), Some(Route::Ssh));
         for method in ["web:read", "video:list"] {
             assert_eq!(route(method), None, "only a built-in's call asks the app");
         }

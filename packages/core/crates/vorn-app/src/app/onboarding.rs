@@ -49,6 +49,11 @@ impl App {
                             Act::Set(crate::settings::SetAct::Open(cat)),
                             Src::default(),
                         ),
+                        None if self.st.points.get(id).is_some() => self.run(
+                            ui,
+                            Act::Point(crate::points::PointAct::Settings(id.to_owned())),
+                            Src::default(),
+                        ),
                         None => self.run(ui, Act::Settings, Src::default()),
                     },
                 }

@@ -18,7 +18,6 @@ pub enum Category {
     /// One switch for the native work still being tried.
     Experimental,
     Agents,
-    Ssh,
     Mcp,
     /// The Extensions manager (its route keeps the old `connectors`).
     Connectors,
@@ -40,7 +39,6 @@ impl Category {
             "notifications" => Category::Notifications,
             "experimental" => Category::Experimental,
             "agents" => Category::Agents,
-            "ssh" => Category::Ssh,
             "mcp" => Category::Mcp,
             "connectors" | "extensions" | "plugins" => Category::Connectors,
             "connections" => Category::Connections,
@@ -59,7 +57,6 @@ impl Category {
             Category::Notifications => "Notifications",
             Category::Experimental => "Experimental",
             Category::Agents => "Coding Agents",
-            Category::Ssh => "SSH & Hosts",
             Category::Mcp => "Skills & MCP",
             Category::Connectors => "Extensions",
             Category::Connections => "Connections",
@@ -98,7 +95,6 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
         "CONNECTIONS",
         &[
             Category::Agents,
-            Category::Ssh,
             Category::Mcp,
             Category::Keys,
             Category::Network,
@@ -112,6 +108,10 @@ pub const EXTENSIONS: [Category; 1] = [Category::Connectors];
 /// The Connectors built-in's settings page, which every "Settings ›
 /// Connections" opens; first of the extensions' pages in the nav.
 pub const CONNECTIONS_PAGE: &str = "vorn.connectors/settings/connections";
+
+/// The SSH built-in's page, the remote hosts and keys: in the nav, the
+/// palette and the guide only while SSH is on, as each settings page is.
+pub const SSH_PAGE: &str = "vorn.ssh/settings/hosts";
 
 /// What a settings control does.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -146,23 +146,6 @@ pub enum SetAct {
     CopyInstall(String),
     /// Typing in an agent's command, arguments or headless arguments.
     AgentText(String, AgentField),
-    // SSH and hosts.
-    AddHost,
-    ToggleHost(String),
-    HostText(String, HostField),
-    Auth(String, String),
-    PickKey(String, String),
-    Test(String),
-    AskDelete(String),
-    CancelDelete,
-    DeleteHost(String),
-    ToggleKey(String),
-    DeleteKey(String),
-    PasteKey,
-    SaveKey,
-    CancelKey,
-    ImportKey,
-    KeyText(KeyField),
     // Skills and MCP.
     Copy(String),
     // Keys.
@@ -180,29 +163,6 @@ pub enum AgentField {
     Command,
     Args,
     Headless,
-}
-
-/// Which of a host's fields a text act edits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HostField {
-    Label,
-    Hostname,
-    Port,
-    User,
-    Password,
-    KeyPath,
-    Options,
-}
-
-/// The paste-a-key form's fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum KeyField {
-    Label,
-    Private,
-    Public,
-    Certificate,
-    /// The path Import Key reads.
-    Import,
 }
 
 /// One of `shell:listInstalled`'s shells.
@@ -428,93 +388,6 @@ pub fn describe_server(server: &str, app: &str, adopted: bool) -> (String, &'sta
     )
 }
 
-/// One of `credential:listKeys`'s stored SSH keys (`SSHKeyMeta`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SshKey {
-    pub id: String,
-    pub label: String,
-    pub key_type: Option<String>,
-    pub public: Option<String>,
-}
-
-impl SshKey {
-    pub fn from_value(v: &Value) -> Option<SshKey> {
-        let s = |k: &str| {
-            v.get(k)
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-        };
-        Some(SshKey {
-            id: s("id")?,
-            label: s("label").unwrap_or_default(),
-            key_type: s("keyType"),
-            public: s("publicKey"),
-        })
-    }
-}
-
-/// A long public key with its middle cut out.
-pub fn truncate_key(key: &str) -> String {
-    let n = key.chars().count();
-    if n <= 60 {
-        return key.to_owned();
-    }
-    let head: String = key.chars().take(30).collect();
-    let tail: String = key.chars().skip(n - 25).collect();
-    format!("{head}...{tail}")
-}
-
-/// A host's subtitle: `user@host:port`, or what is there of it.
-pub fn host_subtitle(host: &Value) -> String {
-    let s = |k: &str| host.get(k).and_then(Value::as_str).unwrap_or("");
-    let port = host
-        .get("port")
-        .and_then(Value::as_f64)
-        .map_or(22, |p| p as i64);
-    let (user, name) = (s("user"), s("hostname"));
-    if !user.is_empty() && !name.is_empty() {
-        let port = if port == 22 {
-            String::new()
-        } else {
-            format!(":{port}")
-        };
-        format!("{user}@{name}{port}")
-    } else if !name.is_empty() {
-        name.to_owned()
-    } else {
-        "Not configured".to_owned()
-    }
-}
-
-/// `AUTH_METHODS`.
-pub const AUTH_METHODS: [(&str, &str); 4] = [
-    ("agent", "SSH Agent"),
-    ("password", "Password"),
-    ("key-stored", "Stored Key"),
-    ("key-file", "Key File"),
-];
-
-/// What a host's connection test said: still testing, or ok and why.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TestResult {
-    Testing,
-    Done { ok: bool, message: String },
-}
-
-/// The SSH page's state.
-#[derive(Debug, Default)]
-pub struct SshPage {
-    pub keys: Vec<SshKey>,
-    pub hosts_open: HashSet<String>,
-    pub keys_open: HashSet<String>,
-    pub tests: HashMap<String, TestResult>,
-    pub confirm: Option<String>,
-    pub adding: bool,
-    /// Import Key's typed path, while it is asked for.
-    pub importing: bool,
-}
-
 /// One of `connection:listKeys`'s entries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnKey {
@@ -721,7 +594,6 @@ pub struct Settings {
     pub copied: Option<(String, web_time::Instant)>,
     /// Typed arguments not yet committed, by (agent, field).
     pub args: HashMap<(String, AgentField), String>,
-    pub ssh: SshPage,
     pub keys: Option<Vec<ConnKey>>,
     pub key_rows: HashMap<String, KeyRowState>,
     pub core_version: Option<String>,
@@ -731,15 +603,12 @@ pub struct Settings {
     pub confirm_end: Option<String>,
     /// The Card Row Height slider (`rowHeight`), pixels.
     pub row_height: f32,
-    /// The safe-storage check, which the keychain answers here.
-    pub safe_storage: bool,
 }
 
 impl Settings {
     pub fn new() -> Settings {
         Settings {
             row_height: 208.0,
-            safe_storage: true,
             ..Settings::default()
         }
     }
@@ -944,17 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn hosts_keys_and_holders_say_what_they_hold() {
-        assert_eq!(
-            host_subtitle(&json!({ "user": "ci", "hostname": "h", "port": 2222.0 })),
-            "ci@h:2222"
-        );
-        assert_eq!(
-            host_subtitle(&json!({ "hostname": "", "port": 22 })),
-            "Not configured"
-        );
-        let long = "x".repeat(80);
-        assert_eq!(truncate_key(&long).len(), 58);
+    fn keys_and_holders_say_what_they_hold() {
         let f = KeyFieldInfo {
             key: "k".into(),
             label: "K".into(),

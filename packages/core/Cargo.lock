@@ -7208,6 +7208,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-ext-ssh"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-ext-tasks"
 version = "0.0.0"
 dependencies = [
