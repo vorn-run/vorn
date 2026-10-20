@@ -33,15 +33,16 @@ pub const METHODS: &[&str] = &[
     "browser:screenshot",
 ];
 
-/// The component, built for wasm32-wasip2 by vornd's build script; nothing
-/// runs until the first pane opens or an agent calls.
+/// The component, built for wasm32-wasip2 by vornd's build script. It is
+/// started in the background as vornd starts, so the first pane waits for nothing.
 pub fn component() -> Component {
     Component {
         manifest: include_str!("../../../../../../extensions/browser/vorn-extension.toml"),
         events: &[],
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/browser.wasm")),
         on_by_default: true,
-        start: None,
+        start: Some("start"),
+        stop: None,
     }
 }
 

@@ -391,6 +391,13 @@ impl World for Wired {
                     format!("{m} is open only to the extensions Vorn ships"),
                 ));
             }
+            // What runs is read once vornd knows it, as a client's reads are.
+            if matches!(m, "sessions.list" | "sessions.get") {
+                if let Some(registry) = native.registry.get().cloned() {
+                    let settle = move || registry.settle(crate::native::SETTLE_LIMIT);
+                    let _ = tokio::task::spawn_blocking(settle).await;
+                }
+            }
             match m {
                 "sessions.list" => {
                     let sessions = native

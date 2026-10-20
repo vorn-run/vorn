@@ -46,15 +46,18 @@ pub const METHODS: &[&str] = &[
     "device:logs",
 ];
 
-/// The component, built for wasm32-wasip2 by vornd's build script; nothing
-/// runs until the first pane opens or an agent calls.
+/// The component, built for wasm32-wasip2 by vornd's build script. It is
+/// started in the background as vornd starts, which checks the claims kept
+/// from before and keeps the first pane from waiting. A session that ends
+/// lets its simulator go, and switched off it lets every one go.
 pub fn component() -> Component {
     Component {
         manifest: include_str!("../../../../../../extensions/device/vorn-extension.toml"),
-        events: &[],
+        events: &[vorn_extensions::events::SESSION_EXITED],
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/device.wasm")),
         on_by_default: true,
-        start: None,
+        start: Some("start"),
+        stop: Some("stop"),
     }
 }
 

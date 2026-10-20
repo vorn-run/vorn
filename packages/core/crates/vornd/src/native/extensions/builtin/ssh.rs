@@ -32,6 +32,7 @@ pub fn component() -> Component {
         wasm: include_bytes!(concat!(env!("OUT_DIR"), "/ssh.wasm")),
         on_by_default: true,
         start: None,
+        stop: None,
     }
 }
 
