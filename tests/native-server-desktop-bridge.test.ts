@@ -1,7 +1,8 @@
 /**
  * The desktop bridge on a real server and its vornd: main claims its socket
- * with `bridge:identify`, an agent's `browser:*` and `device:*` calls reach
- * main through vornd and come back, and none of them reaches the server.
+ * with `bridge:identify`, once; an agent's `browser:*` and `device:*` calls
+ * are answered by the Browser and Device built-ins, which refuse them while
+ * switched off, and none of them reaches the server or is relayed to main.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
  * a Unix.
@@ -42,10 +43,7 @@ async function openMain(port: number): Promise<{ ws: WebSocket; asked: Frame[] }
     const frame = JSON.parse(String(raw)) as Frame
     if (!frame.method || frame.id === undefined) return
     asked.push(frame)
-    const answer =
-      frame.method === 'browser:tabs'
-        ? { result: [{ id: 't1', params: frame.params }] }
-        : { error: { code: -32000, message: `no ${frame.method}` } }
+    const answer = { error: { code: -32000, message: `no ${frame.method}` } }
     ws.send(JSON.stringify({ jsonrpc: '2.0', id: frame.id, ...answer }))
   })
   await new Promise((resolve, reject) => {
@@ -92,13 +90,6 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
     removeRealServerDirs()
   }, 120_000)
 
-  it('answers no browser call before main claims its socket', async () => {
-    const frame = await agent.call('browser:tabs', { sessionId: 's' })
-    expect(frame.error).toMatchObject({
-      message: 'Vorn app is not running (no main process connected)'
-    })
-  })
-
   it('lets main claim its socket once', async () => {
     expect((await identify(main.ws)).result).toEqual({ ok: true })
     const other = await openMain(server.vornd)
@@ -106,29 +97,38 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
     other.ws.close()
   })
 
-  it("relays an agent's calls to main and its answers back", async () => {
-    expect(await agent.result('browser:tabs', { sessionId: 's' })).toEqual([
-      { id: 't1', params: { sessionId: 's' } }
-    ])
-    const frame = await agent.call('device:list')
-    expect(frame.error).toMatchObject({ message: 'no device:list' })
-    expect(main.asked.map((f) => [typeof f.id, f.method])).toEqual([
-      ['string', 'browser:tabs'],
-      ['string', 'device:list']
-    ])
+  it("answers an agent's browser and device calls in the built-ins, not in main", async () => {
+    for (const method of ['browser:tabs', 'device:list']) {
+      const frame = await agent.call(method, { sessionId: 's' })
+      expect(frame.error).toMatchObject({ message: 'No session s in this app.' })
+    }
+    expect(main.asked.map((f) => f.method)).not.toContain('browser:tabs')
+    expect(main.asked.map((f) => f.method)).not.toContain('device:list')
   })
 
-  it('fails the calls once main has gone', async () => {
+  it('refuses them while the built-ins are off', async () => {
+    for (const [id, method, name] of [
+      ['vorn.browser', 'browser:tabs', 'Browser'],
+      ['vorn.device', 'device:claim', 'Device']
+    ]) {
+      await agent.result('extension:setBuiltin', { id, on: false })
+      const frame = await agent.call(method, { sessionId: 's' })
+      expect(frame.error).toMatchObject({
+        message: `${name} is off. Turn it on in Settings \u2192 Extensions.`
+      })
+      await agent.result('extension:setBuiltin', { id, on: true })
+    }
+  })
+
+  it('frees the bridge once main has gone', async () => {
     const closed = new Promise((resolve) => main.ws.once('close', resolve))
     main.ws.close()
     await closed
-    const notRunning = 'Vorn app is not running (no main process connected)'
-    let message: string | undefined
+    const next = await openMain(server.vornd)
     await until('main to be let go', async () => {
-      const frame = await agent.call('browser:tabs', { sessionId: 's' })
-      message = (frame.error as { message?: string } | undefined)?.message
-      return message === notRunning
+      const claimed = (await identify(next.ws)).result as { ok?: boolean } | undefined
+      return claimed?.ok === true
     })
-    expect(message).toBe(notRunning)
+    next.ws.close()
   })
 })
