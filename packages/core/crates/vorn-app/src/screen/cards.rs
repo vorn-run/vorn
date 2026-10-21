@@ -198,21 +198,29 @@ fn title(s: &Screen<'_>, session: &Session, size: f32, dim: f32) -> El {
     }
     let title_id = Id::new("title").child(sid);
     s.acts.double(title_id, Act::Expand(sid.to_owned()));
-    let hot =
-        s.ui.hovered(title_id) || s.ui.hovered(Acts::id("card", &Act::Rename(sid.to_owned())));
-    let mut row = div().row().items_center().gap(4.0).min_w0().child(
-        div()
-            .id(title_id)
-            .sense(Sense::DOUBLE | Sense::HOVER)
-            .min_w0()
-            .child(
-                text(name.as_str(), size, fade(look::GRAY_300, 1.0, dim))
-                    .weight(500)
-                    .line_height(18.0)
-                    .truncate()
-                    .role(Role::Label, name.as_str()),
-            ),
-    );
+    // The row, not the title, keeps the pencil shown while the pointer moves onto it.
+    let row_id = Id::new("title-row").child(sid);
+    let hot = s.ui.hovered(row_id);
+    let mut row = div()
+        .id(row_id)
+        .sense(Sense::HOVER)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .min_w0()
+        .child(
+            div()
+                .id(title_id)
+                .sense(Sense::DOUBLE | Sense::HOVER)
+                .min_w0()
+                .child(
+                    text(name.as_str(), size, fade(look::GRAY_300, 1.0, dim))
+                        .weight(500)
+                        .line_height(18.0)
+                        .truncate()
+                        .role(Role::Label, name.as_str()),
+                ),
+        );
     if hot {
         let id = s.acts.on("card", Act::Rename(sid.to_owned()));
         row = row.child(
