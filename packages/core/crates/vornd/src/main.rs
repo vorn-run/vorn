@@ -48,7 +48,10 @@ const USAGE: &str = "usage: vornd --data-dir DIR [--port N] [--host IP] [--web D
                found)
   --debug-spawn
                answer vornd:spawn from clients too, which starts a session in the
-               session holder; for tests";
+               session holder; for tests
+
+  $VORN_EXTENSION_IDLE_MS and $VORN_EXTENSION_CAP set how long an idle
+  extension service runs and how many run at once, for benches";
 
 #[derive(Debug)]
 struct Args {

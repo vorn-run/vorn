@@ -219,14 +219,17 @@ jobs:
           if-no-files-found: warn
 
       # The many-pane bench at a small N, so it keeps running; its numbers on a
-      # shared runner are not a baseline.
+      # shared runner are not a baseline. The second run links one extension of
+      # each language and waits out a short idle time.
       - name: Many-pane bench
         if: ${{ runner.os == 'Linux' && !inputs.crates }}
         working-directory: packages/core
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: |
-          cargo build --profile ci --locked -p vornd -p vorn-sessiond -p vorn-app --example many_panes
+          cargo build --profile ci --locked -p vornd -p vorn-sessiond -p vorn-cli --bins
+          cargo build --profile ci --locked -p vorn-app --example many_panes
           target/ci/examples/many_panes --panes 4 --cases mixed,hidden --seconds 2
+          target/ci/examples/many_panes --panes 4 --cases agent --seconds 3 --extensions 4 --ext-period 1 --ext-idle-ms 2000 --idle-wait 20
 
       # How fast the app opens, nightly on macOS. A shared runner's numbers are
       # reported, not held to the budgets.

@@ -335,8 +335,9 @@ impl Builtins {
         Ok(())
     }
 
-    /// Each built-in, as Settings lists it.
+    /// Each built-in, as Settings lists it, saying whether a service of it runs.
     pub fn list(&self) -> Value {
+        let running = self.router.lifecycle().running();
         Value::Array(
             self.entries
                 .iter()
@@ -351,6 +352,7 @@ impl Builtins {
                         "declares": m.declares,
                         "service": m.service,
                         "on": self.is_on(e.id()),
+                        "running": running.iter().any(|k| k.extension == e.id()),
                     })
                 })
                 .collect(),

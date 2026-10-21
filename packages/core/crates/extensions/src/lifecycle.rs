@@ -66,8 +66,10 @@ impl ServiceKey {
 
 /// How long services live and how many run at once.
 ///
-/// The defaults are placeholders until the 20-extension load test sets them:
-/// five idle minutes, eight services.
+/// The defaults come from the 20-extension load test
+/// (docs/extension-load-test.md). Twenty busy extensions peak at 21 running
+/// services with the built-ins, so a cap of 24 never evicts. One idle minute
+/// frees every program's memory, and the next call costs at most ~130 ms (Node).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Policy {
     /// Stopped after this long with no call in flight.
@@ -81,10 +83,30 @@ pub struct Policy {
 impl Default for Policy {
     fn default() -> Policy {
         Policy {
-            idle: Duration::from_secs(300),
-            cap: 8,
+            idle: Duration::from_secs(60),
+            cap: 24,
             max_crashes: 5,
             crash_window: Duration::from_secs(60),
+        }
+    }
+}
+
+impl Policy {
+    /// This policy with the idle time and cap a bench gives vornd
+    /// (`VORN_EXTENSION_IDLE_MS`, `VORN_EXTENSION_CAP`); a value that is not
+    /// a positive number leaves the policy's own.
+    #[must_use]
+    pub fn overridden(self, idle_ms: Option<&str>, cap: Option<&str>) -> Policy {
+        let positive = |v: Option<&str>| {
+            v.and_then(|v| v.trim().parse::<u64>().ok())
+                .filter(|&n| n > 0)
+        };
+        Policy {
+            idle: positive(idle_ms).map_or(self.idle, Duration::from_millis),
+            cap: positive(cap)
+                .and_then(|n| usize::try_from(n).ok())
+                .unwrap_or(self.cap),
+            ..self
         }
     }
 }
@@ -582,5 +604,23 @@ mod tests {
             .unwrap_err();
         assert!(err.starts_with("a crashed 2 times in 60 s"), "{err}");
         l.stop_all().await;
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn a_bench_overrides_the_idle_time_and_cap_with_positive_numbers_only() {
+        let base = Policy::default();
+        let both = base.overridden(Some("2500"), Some(" 3 "));
+        assert_eq!(
+            (both.idle, both.cap, both.max_crashes),
+            (Duration::from_millis(2500), 3, base.max_crashes)
+        );
+        for bad in [None, Some(""), Some("0"), Some("-4"), Some("soon")] {
+            assert_eq!(base.overridden(bad, bad), base, "{bad:?}");
+        }
     }
 }
