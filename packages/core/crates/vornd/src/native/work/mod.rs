@@ -526,6 +526,10 @@ impl Work {
                 }
             }
             "workflow:run" => {
+                let id = text(params, "workflowId").unwrap_or_default();
+                if let Some(why) = self.files.refuses(&id) {
+                    return Answer::Error(why);
+                }
                 let Some(workflow) = self.workflow_named(params, "workflowId").await else {
                     return Answer::Result(Value::Null);
                 };
@@ -543,6 +547,9 @@ impl Work {
                 else {
                     return Answer::Result(Value::Null);
                 };
+                if let Some(why) = self.files.refuses(&run.workflow_id) {
+                    return Answer::Error(why);
+                }
                 let Some(workflow) = self
                     .workflow_row(&run.workflow_id)
                     .await
@@ -601,8 +608,9 @@ impl Work {
             "workflow:files" => Answer::Result(self.files.listed()),
             "workflow:trust" => {
                 let id = text(params, "id").unwrap_or_default();
-                if !self.files.trust(&id) {
-                    return Answer::Error(format!("Workflow {id} is not from a project's file"));
+                let hash = text(params, "hash").unwrap_or_default();
+                if let Err(why) = self.files.trust(&id, &hash) {
+                    return Answer::Error(why);
                 }
                 let w = id.clone();
                 let on = self
@@ -1513,7 +1521,12 @@ scriptContent = "echo built"
         assert_eq!(entry["trusted"], false);
         assert_eq!(
             entry["runs"],
-            json!(["Trigger: manual", "script: echo built"])
+            json!([
+                "Trigger: manual",
+                "make (script)",
+                "  scriptType: bash",
+                "  scriptContent: echo built"
+            ])
         );
         // The file keeps its own setting; only Vorn holds it off.
         assert_eq!(std::fs::read_to_string(&file).unwrap(), BUILD);
@@ -1533,10 +1546,11 @@ scriptContent = "echo built"
             )
             .await
         ));
-        assert!(refused(
-            work.call("workflow:runManual", &json!({ "workflowId": "build" }))
-                .await
-        ));
+        for method in ["workflow:runManual", "workflow:run"] {
+            assert!(refused(
+                work.call(method, &json!({ "workflowId": "build" })).await
+            ));
+        }
         let workflow = Workflow::from_json(&row(&work, "build").await).unwrap();
         assert!(work
             .engine
@@ -1557,8 +1571,16 @@ scriptContent = "echo built"
         assert!(edited.contains("Build it") && edited.contains("enabled = true"));
         assert_eq!(row(&work, "build").await["enabled"], false);
 
+        // Turning on takes the content the user was shown, and only that.
+        let shown = file_entry(&work, "build")["hash"].clone();
+        assert!(shown.is_string());
         assert!(matches!(
-            work.call("workflow:trust", &json!({ "id": "build" })).await,
+            work.call("workflow:trust", &json!({ "id": "build", "hash": "other" })).await,
+            Answer::Error(e) if e.contains("changed since it was shown")
+        ));
+        assert_eq!(file_entry(&work, "build")["trusted"], false);
+        assert!(matches!(
+            work.call("workflow:trust", &json!({ "id": "build", "hash": shown })).await,
             Answer::Result(_)
         ));
         assert_eq!(row(&work, "build").await["enabled"], true);
@@ -1577,14 +1599,21 @@ scriptContent = "echo built"
         assert!(work.files.refuses("build").is_none());
 
         // Edited outside Vorn, it is off again until turned on again.
-        let changed = std::fs::read_to_string(&file)
-            .unwrap()
-            .replace("echo built", "echo changed and longer");
-        std::fs::write(&file, changed).unwrap();
+        let trusted = std::fs::read_to_string(&file).unwrap();
+        let changed = trusted.replace("echo built", "echo changed and longer");
+        std::fs::write(&file, &changed).unwrap();
         work.look_at_files().await;
         assert_eq!(row(&work, "build").await["enabled"], false);
         assert_eq!(file_entry(&work, "build")["trusted"], false);
         assert!(work.files.refuses("build").is_some());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+
+        // Edited back as it was turned on, it is on with the file's own setting.
+        std::fs::write(&file, &trusted).unwrap();
+        work.look_at_files().await;
+        assert_eq!(file_entry(&work, "build")["trusted"], true);
+        assert_eq!(row(&work, "build").await["enabled"], true);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), trusted);
 
         // A workflow made in Vorn is not held off.
         let mine = conditional("mine", json!({ "triggerType": "manual" }));
@@ -1597,8 +1626,44 @@ scriptContent = "echo built"
             Answer::Result(v) if v["ok"] == true
         ));
         assert!(matches!(
-            work.call("workflow:trust", &json!({ "id": "mine" })).await,
+            work.call("workflow:trust", &json!({ "id": "mine", "hash": "" })).await,
             Answer::Error(_)
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_file_with_a_setting_its_step_does_not_have_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let project = dir.path().join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("odd.toml");
+        let odd = BUILD
+            .replace("id = \"build\"", "id = \"odd\"")
+            .replace("scriptContent", "command");
+        std::fs::write(&file, odd).unwrap();
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+        work.look_at_files().await;
+        let listed = work.files.listed();
+        let errors = listed["errors"].to_string();
+        assert!(
+            errors.contains("command is not a setting of a script step"),
+            "{listed}"
+        );
+        assert!(matches!(
+            work.call("workflow:get", &json!({ "id": "odd" })).await,
+            Answer::Result(Value::Null)
         ));
     }
 
@@ -1622,16 +1687,32 @@ scriptContent = "echo built"
         let mine = conditional("mine", json!({ "triggerType": "manual" }));
         work.call("workflow:create", &json!({ "workflow": mine }))
             .await;
-        assert!(matches!(
-            work.call(
+        // A link where the file would go, even to nothing, is left alone.
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let elsewhere = dir.path().join("elsewhere.toml");
+        let link = folder.join(vorn_workflow_file::file_name("mine"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let saved = work
+            .call(
                 "workflow:saveToFile",
-                &json!({ "id": "mine", "projectName": "p" })
+                &json!({ "id": "mine", "projectName": "p" }),
             )
-            .await,
-            Answer::Result(_)
-        ));
+            .await;
+        let Answer::Result(saved) = saved else {
+            panic!("{saved:?}");
+        };
+        #[cfg(unix)]
+        {
+            assert!(!elsewhere.exists());
+            assert_ne!(saved["path"], json!(link));
+        }
         work.look_at_files().await;
         assert_eq!(file_entry(&work, "mine")["trusted"], true);
+        assert!(file_entry(&work, "mine")["runs"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()));
         assert_eq!(row(&work, "mine").await["enabled"], true);
     }
 

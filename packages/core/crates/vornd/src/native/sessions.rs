@@ -1305,8 +1305,9 @@ fn prepare_remote(
         options: host.ssh_options.as_deref().filter(|o| !o.is_empty()),
     };
     let marker = login::marker(id);
+    let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
     let remote = Remote {
-        line: login::ssh_line(&target, &marker, Platform::HOST)
+        line: login::ssh_line(&target, &marker, Quoting::local(Platform::HOST, &shell))
             .map_err(|e| Answer::Error(e.to_string()))?,
         command: login::remote_command(&req.project_path, &launch_line),
         marker,
@@ -1315,7 +1316,6 @@ fn prepare_remote(
             .flatten(),
         key,
     };
-    let shell = launch_shell::default_shell(settings.shell.as_deref(), Platform::HOST, var);
     let mut argv = vec![shell];
     argv.extend(
         launch_shell::default_shell_args(Platform::HOST)

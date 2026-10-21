@@ -1,7 +1,8 @@
 //! The extra ssh options a host may carry, read against an allowlist: `-o
 //! Key=Value` for the keys in [`KEYS`], a few switches and `-J`. Anything
-//! else is refused by name, as is a user or host name that ssh would read as
-//! an option. What passes is safe to type into a shell unquoted.
+//! else is refused by name, as is a user or host name, jump hop or key path
+//! that ssh would read as an option. What passes holds no character a POSIX
+//! shell treats specially.
 
 use std::fmt;
 
@@ -84,9 +85,21 @@ fn plain(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || "_-./:=@+,%~".contains(c))
 }
 
-/// A jump host list (`ProxyJump`, `-J`): no hop that ssh would read as an option.
+/// A jump host list (`ProxyJump`, `-J`): every hop a `[ssh://][user@]host[:port]`
+/// whose user and host ssh reads as names, never as options.
 fn jumps(value: &str) -> bool {
-    plain(value) && value.split(',').all(|hop| !hop.starts_with('-'))
+    plain(value) && value.split(',').all(hop)
+}
+
+/// One jump hop: neither its user nor its host starts with `-` or is missing.
+fn hop(hop: &str) -> bool {
+    let rest = hop.strip_prefix("ssh://").unwrap_or(hop);
+    let (user, host) = match rest.rsplit_once('@') {
+        Some((user, host)) => (Some(user), host),
+        None => (None, rest),
+    };
+    let user_ok = user.is_none_or(|u| !u.is_empty() && !u.starts_with('-'));
+    user_ok && !host.is_empty() && !host.starts_with(['-', ':'])
 }
 
 /// `-o` with `setting`, `Key=Value`, when the key is allowed and the value plain.
@@ -159,6 +172,24 @@ pub fn check_destination(user: &str, hostname: &str) -> Result<(), Refused> {
     Ok(())
 }
 
+/// Whether `path`, a key file for `-i`, is one ssh reads as a path: not
+/// empty and not starting with `-`.
+pub fn check_key_path(path: &str) -> Result<(), Refused> {
+    if path.is_empty() || path.starts_with('-') {
+        return Err(Refused(format!("ssh key path {path:?} is not allowed")));
+    }
+    Ok(())
+}
+
+/// `port` as the word passed to `-p`: a whole number from 1 to 65535.
+pub fn port(port: f64) -> Result<u16, Refused> {
+    if port.fract() == 0.0 && (1.0..=65535.0).contains(&port) {
+        // In range and whole, so the cast is exact.
+        return Ok(port as u16);
+    }
+    Err(Refused(format!("port {port} is not allowed")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,6 +207,10 @@ mod tests {
             "-o ServerAliveInterval=30 -o ProxyJump=me@hop:22,hop2 -A -4C -J jump"
         );
         assert_eq!(parse("").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse("-J ssh://me@hop:2222,me@hop2").unwrap(),
+            ["-J", "ssh://me@hop:2222,me@hop2"]
+        );
         assert_eq!(
             parse("-o identityfile=~/.ssh/id_ed25519").unwrap(),
             ["-o", "identityfile=~/.ssh/id_ed25519"]
@@ -217,6 +252,13 @@ mod tests {
             "-o ProxyJump=-oProxyCommand=x",
             "-J -oProxyCommand=x",
             "-J hop,-x",
+            "-J me@-oProxyCommand=x",
+            "-o ProxyJump=ssh://-oProxyCommand=x",
+            "-J ssh://me@-x:22",
+            "-J @box",
+            "-J -me@box",
+            "-J box,,hop",
+            "-J ssh://:22",
             "-o SendEnv=A;B",
             "-o ControlPath=$(x)",
             "-o LogLevel=",
@@ -245,6 +287,22 @@ mod tests {
         );
         for (user, host) in [("me", ""), ("me", "a b"), ("a;b", "box"), ("me", "box`x`")] {
             assert!(check_destination(user, host).is_err(), "{user}@{host}");
+        }
+    }
+
+    #[test]
+    fn refuses_a_key_path_or_port_ssh_would_misread() {
+        assert!(check_key_path("~/.ssh/id_ed25519").is_ok());
+        assert!(check_key_path("/k/my key").is_ok());
+        assert_eq!(
+            check_key_path("-oProxyCommand=x").unwrap_err().to_string(),
+            "ssh key path \"-oProxyCommand=x\" is not allowed"
+        );
+        assert!(check_key_path("").is_err());
+        assert_eq!(port(22.0), Ok(22));
+        assert_eq!(port(65535.0), Ok(65535));
+        for bad in [0.0, -1.0, 22.5, 65536.0, f64::NAN, f64::INFINITY] {
+            assert!(port(bad).is_err(), "{bad}");
         }
     }
 }

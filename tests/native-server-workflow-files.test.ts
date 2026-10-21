@@ -82,6 +82,14 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       }>('workflow:files')
       return listed.files.find((f) => f.workflowId === workflowId)?.trusted
     }
+    // Turns a file on as `workflow:files` lists it now.
+    const turnOn = async (id: string): Promise<unknown> => {
+      const listed = await client.result<{
+        files: Array<{ workflowId: string; hash: string }>
+      }>('workflow:files')
+      const hash = listed.files.find((f) => f.workflowId === id)?.hash
+      return client.result('workflow:trust', { id, hash })
+    }
 
     beforeAll(async () => {
       served = await startServed({ credential: CREDENTIAL, sessiond: true })
@@ -114,12 +122,16 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       // Read from the project, it is off and runs nothing until turned on.
       expect(wf.enabled).toBe(false)
       expect(await trusted('file-review')).toBe(false)
-      expect(await client.result('workflow:run', { workflowId: 'file-review' })).toBeNull()
+      for (const method of ['workflow:run', 'workflow:runManual']) {
+        await expect(client.result(method, { workflowId: 'file-review' })).rejects.toThrow(
+          'off until you turn it on'
+        )
+      }
       await expect(
-        client.result('workflow:runManual', { workflowId: 'file-review' })
-      ).rejects.toThrow('off until you turn it on')
+        client.result('workflow:trust', { id: 'file-review', hash: 'stale' })
+      ).rejects.toThrow('changed since it was shown')
       expect(await client.result('workflowRun:list', { workflowId: 'file-review' })).toEqual([])
-      expect(await client.result('workflow:trust', { id: 'file-review' })).toEqual({ ok: true })
+      expect(await turnOn('file-review')).toEqual({ ok: true })
       expect(await trusted('file-review')).toBe(true)
       expect((await workflow('file-review'))!.enabled).toBe(true)
       await client.result('workflow:run', { workflowId: 'file-review' })
@@ -140,8 +152,10 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect(fs.readFileSync(file, 'utf-8')).toBe(edited)
       // Edited outside Vorn, it is off again until turned on as it is now.
       expect(await trusted('file-review')).toBe(false)
-      expect(await client.result('workflow:run', { workflowId: 'file-review' })).toBeNull()
-      await client.result('workflow:trust', { id: 'file-review' })
+      await expect(client.result('workflow:run', { workflowId: 'file-review' })).rejects.toThrow(
+        'off until you turn it on'
+      )
+      await turnOn('file-review')
       await client.result('workflow:run', { workflowId: 'file-review' })
       const runs = await finished('file-review', 2)
       expect(output(runs[0], 'say')).toBe('said edited\n')

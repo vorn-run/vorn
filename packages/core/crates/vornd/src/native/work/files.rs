@@ -59,6 +59,17 @@ impl State {
         matches!((self.trusted.get(file), self.hashes.get(file)), (Some(t), Some(h)) if t == h)
     }
 
+    /// `file` does not read, for `errors`: nothing of it shows or turns on
+    /// until it reads again.
+    fn refuse(&mut self, file: &Path, at: Option<Stamp>, errors: Vec<String>) {
+        if let Some(at) = at {
+            self.stamps.insert(file.to_owned(), at);
+        }
+        self.hashes.remove(file);
+        self.runs.remove(file);
+        self.errors.insert(file.to_owned(), errors);
+    }
+
     fn forget(&mut self, file: &Path) {
         self.stamps.remove(file);
         self.errors.remove(file);
@@ -115,39 +126,125 @@ fn enabled_as(mut wf: Value, from: &Value) -> Value {
     wf
 }
 
-/// One line per thing a workflow does when it runs: its trigger, and each
-/// step with the command, script or prompt it runs.
-pub fn runs(wf: &Value) -> Vec<String> {
-    let first = |v: Option<&Value>| {
-        v.and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(str::to_owned)
-    };
-    wf.get("nodes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .map(|node| {
-            let kind = node.get("type").and_then(Value::as_str).unwrap_or("step");
-            let config = node.get("config").unwrap_or(&Value::Null);
-            let label = first(node.get("label")).unwrap_or_else(|| kind.to_owned());
-            if kind == "trigger" {
-                let on = first(config.get("triggerType")).unwrap_or_else(|| "manual".into());
-                return format!("Trigger: {on}");
+/// The settings shown for each node type Vorn knows: everything in its
+/// config that decides what it runs or sends.
+const SHOWN: &[(&str, &[&str])] = &[
+    // A trigger shows every setting; these are the ones its types take.
+    ("trigger", &["method", "connectionId"]),
+    ("condition", &[]),
+    ("approval", &[]),
+    ("loop", &[]),
+    (
+        "launchAgent",
+        &["agentType", "prompt", "args", "model", "remoteHostId"],
+    ),
+    (
+        "script",
+        &["scriptType", "scriptContent", "args", "cwd", "secretsFrom"],
+    ),
+    ("command", &["command", "cwd"]),
+    (
+        "httpRequest",
+        &["method", "url", "headers", "body", "profileConnectionId"],
+    ),
+    ("callConnectorAction", &["action", "connectionId", "args"]),
+];
+
+/// Config keys that run or send something for some node type: a known type
+/// that does not show one refuses its file.
+const RUNS_OR_SENDS: &[&str] = &[
+    "agentType",
+    "prompt",
+    "args",
+    "model",
+    "remoteHostId",
+    "scriptType",
+    "scriptContent",
+    "script",
+    "command",
+    "cmd",
+    "exec",
+    "shell",
+    "cwd",
+    "env",
+    "secretsFrom",
+    "method",
+    "url",
+    "headers",
+    "body",
+    "profileConnectionId",
+    "action",
+    "connectionId",
+];
+
+/// A setting's value as the list shows it: text as it is, the rest as JSON.
+fn shown_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// What a workflow does when it runs, one line per node and one per setting
+/// that decides what it runs or sends, for the user to read before turning
+/// it on. Refuses a node of a known type that holds such a setting the type
+/// does not have.
+pub fn runs(wf: &Value) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for node in wf.get("nodes").and_then(Value::as_array).into_iter().flatten() {
+        let kind = node.get("type").and_then(Value::as_str).unwrap_or("step");
+        let config = node.get("config").and_then(Value::as_object);
+        let label = node
+            .get("label")
+            .and_then(Value::as_str)
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|l| !l.is_empty())
+            .or_else(|| node.get("id").and_then(Value::as_str).map(str::to_owned))
+            .unwrap_or_else(|| kind.to_owned());
+        let setting = |key: &str| config.and_then(|c| c.get(key)).filter(|v| !v.is_null());
+        match SHOWN.iter().find(|(k, _)| *k == kind) {
+            Some((_, shown)) => {
+                if let Some(key) = config
+                    .into_iter()
+                    .flat_map(|c| c.keys())
+                    .find(|k| RUNS_OR_SENDS.contains(&k.as_str()) && !shown.contains(&k.as_str()))
+                {
+                    return Err(format!("{label}: {key} is not a setting of a {kind} step"));
+                }
+                if kind == "trigger" {
+                    let on = setting("triggerType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("manual");
+                    out.push(format!("Trigger: {on}"));
+                    for (key, v) in config.into_iter().flatten() {
+                        if key != "triggerType" && !v.is_null() {
+                            out.push(format!("  {key}: {}", shown_value(v)));
+                        }
+                    }
+                    continue;
+                }
+                if shown.is_empty() {
+                    continue;
+                }
+                out.push(format!("{label} ({kind})"));
+                for key in *shown {
+                    if let Some(v) = setting(key) {
+                        out.push(format!("  {key}: {}", shown_value(v)));
+                    }
+                }
             }
-            let agent = first(config.get("agentType"));
-            let what = first(config.get("scriptContent"))
-                .or_else(|| first(config.get("command")))
-                .or_else(|| first(config.get("prompt")));
-            match (agent, what) {
-                (Some(agent), Some(what)) => format!("{label} ({agent}): {what}"),
-                (Some(agent), None) => format!("{label} ({agent})"),
-                (None, Some(what)) => format!("{label}: {what}"),
-                (None, None) => format!("{label} ({kind})"),
+            // An extension's step: the action is its type, and every setting an input.
+            None => {
+                out.push(format!("{label} ({kind})"));
+                for (key, v) in config.into_iter().flatten() {
+                    if !v.is_null() {
+                        out.push(format!("  {key}: {}", shown_value(v)));
+                    }
+                }
             }
-        })
-        .collect()
+        }
+    }
+    Ok(out)
 }
 
 fn stamp(path: &Path) -> Option<Stamp> {
@@ -236,18 +333,22 @@ impl Files {
         })
     }
 
-    /// Turns on workflow `id`'s file as it is now; whether it came from one.
-    pub fn trust(&self, id: &str) -> bool {
+    /// Turns on workflow `id`'s file as the user saw it: `hash` is the
+    /// content listed to them, and a file that changed since is refused.
+    pub fn trust(&self, id: &str, hash: &str) -> Result<(), String> {
         let mut s = self.lock();
         let Some(file) = s.by_id.get(id).cloned() else {
-            return false;
+            return Err(format!("Workflow {id} is not from a project's file"));
         };
-        let Some(hash) = s.hashes.get(&file).cloned() else {
-            return false;
-        };
-        s.trusted.insert(file, hash);
+        if s.hashes.get(&file).map(String::as_str) != Some(hash) {
+            return Err(format!(
+                "{} changed since it was shown; look at it again before turning it on",
+                file.display()
+            ));
+        }
+        s.trusted.insert(file, hash.to_owned());
         self.keep(&s);
-        true
+        Ok(())
     }
 
     /// Every file, whether it is on and what it runs, and what is wrong
@@ -262,6 +363,7 @@ impl Files {
                     "workflowId": id,
                     "path": path,
                     "trusted": s.trusts(path),
+                    "hash": s.hashes.get(path),
                     "runs": s.runs.get(path).cloned().unwrap_or_default(),
                 })
             })
@@ -405,7 +507,11 @@ impl Work {
             return false;
         };
         let hash = digest(&text);
-        let trusted = self.files.lock().trusted.get(file) == Some(&hash);
+        // `was`: the stored workflow holds its file's setting, not an off of Vorn's.
+        let (trusted, was) = {
+            let s = self.files.lock();
+            (s.trusted.get(file) == Some(&hash), s.trusts(file))
+        };
         let conns = connections(self).await;
         let bindings = Bindings {
             connections: &conns,
@@ -417,10 +523,8 @@ impl Work {
                 let lines = shown(file, &errors);
                 warn!(file = %file.display(), errors = %lines.join("; "), "a workflow file does not read");
                 let mut s = self.files.lock();
-                if let Some(at) = at {
-                    s.stamps.insert(file.to_owned(), at);
-                }
-                s.errors.insert(file.to_owned(), lines);
+                s.refuse(file, at, lines);
+                self.files.keep(&s);
                 return false;
             }
         };
@@ -462,16 +566,15 @@ impl Work {
         };
         if let Some(other) = taken {
             let mut s = self.files.lock();
-            s.errors.insert(
-                file.to_owned(),
+            s.refuse(
+                file,
+                at,
                 vec![format!(
                     "{}: its id {id} is the workflow of {other} already",
                     file.display(),
                 )],
             );
-            if let Some(at) = at {
-                s.stamps.insert(file.to_owned(), at);
-            }
+            self.files.keep(&s);
             return false;
         }
         // An edit in the editor not yet in the file meets the file's edit.
@@ -488,7 +591,7 @@ impl Work {
                     .filter(Value::is_object)
                     .map(as_file)
                     .map(|ours| {
-                        if trusted {
+                        if trusted && was {
                             ours
                         } else {
                             enabled_as(ours, &base)
@@ -501,6 +604,25 @@ impl Work {
             }
             None => theirs.clone(),
         };
+        let ran = match runs(&met) {
+            Ok(ran) => ran,
+            Err(why) => {
+                warn!(file = %file.display(), %why, "a workflow file does not read");
+                let mut s = self.files.lock();
+                s.refuse(file, at, vec![format!("{}: {why}", file.display())]);
+                self.files.keep(&s);
+                return false;
+            }
+        };
+        // Known as this file's before it is stored, so it is held off from the first moment.
+        {
+            let mut s = self.files.lock();
+            s.by_id.insert(id.clone(), file.to_owned());
+            s.hashes.insert(file.to_owned(), hash.clone());
+            s.runs.insert(file.to_owned(), ran.clone());
+            s.errors.remove(file);
+            self.files.keep(&s);
+        }
         let mut stored = met.clone();
         if !trusted {
             stored["enabled"] = json!(false);
@@ -522,7 +644,6 @@ impl Work {
                 hash = digest(&text);
             }
         }
-        let ran = runs(&met);
         // The base is the row as stored, defaults and all, so a plain edit of the file meets nothing.
         let base = row
             .filter(Value::is_object)
@@ -540,7 +661,6 @@ impl Work {
             for other in &renamed {
                 s.by_id.remove(other);
             }
-            s.by_id.insert(id.clone(), file.to_owned());
             s.base.insert(file.to_owned(), base);
             if trusted {
                 s.trusted.insert(file.to_owned(), hash.clone());
@@ -636,14 +756,22 @@ impl Work {
         }
         let hash = digest(&text);
         let mut s = self.files.lock();
-        if let Some(at) = stamp(&file) {
-            s.stamps.insert(file.clone(), at);
+        match runs(&next) {
+            Ok(ran) => {
+                if let Some(at) = stamp(&file) {
+                    s.stamps.insert(file.clone(), at);
+                }
+                if trusted {
+                    s.trusted.insert(file.clone(), hash.clone());
+                }
+                s.hashes.insert(file.clone(), hash);
+                s.runs.insert(file.clone(), ran);
+            }
+            Err(why) => {
+                let shown = format!("{}: {why}", file.display());
+                s.refuse(&file, stamp(&file), vec![shown]);
+            }
         }
-        if trusted {
-            s.trusted.insert(file.clone(), hash.clone());
-        }
-        s.hashes.insert(file.clone(), hash);
-        s.runs.insert(file.clone(), runs(&next));
         s.base.insert(file, next);
         self.files.keep(&s);
     }
@@ -686,7 +814,8 @@ impl Work {
         let stem = base.trim_end_matches(&ext).to_owned();
         let mut file = dir.join(&base);
         let mut n = 2;
-        while file.exists() {
+        // A link, even one to nothing, is taken too: it is never written through.
+        while std::fs::symlink_metadata(&file).is_ok() {
             file = dir.join(format!("{stem}-{n}{ext}"));
             n += 1;
         }
@@ -698,8 +827,15 @@ impl Work {
         let text = vorn_workflow_file::write(&as_file(row), &bindings);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("Could not make {}: {e}", dir.display()))?;
-        std::fs::write(&file, &text)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
             .map_err(|e| format!("Could not write {}: {e}", file.display()))?;
+        let read = vorn_workflow_file::read(&text, &bindings)
+            .ok()
+            .map(|r| vorn_work::js_numbers(r.workflow));
         let mut s = self.files.lock();
         s.by_id.insert(id.to_owned(), file.clone());
         // Made in Vorn, so it stays on as it is.
@@ -709,12 +845,9 @@ impl Work {
         if let Some(at) = stamp(&file) {
             s.stamps.insert(file.clone(), at);
         }
-        if let Ok(read) = vorn_workflow_file::read(
-            &std::fs::read_to_string(&file).unwrap_or_default(),
-            &bindings,
-        ) {
-            let read = vorn_work::js_numbers(read.workflow);
-            s.runs.insert(file.clone(), runs(&read));
+        if let Some(read) = read {
+            s.runs
+                .insert(file.clone(), runs(&read).unwrap_or_default());
             s.base.insert(file.clone(), read);
         }
         self.files.keep(&s);
@@ -824,4 +957,98 @@ fn upsert(s: &mut vorn_store::Store, wf: &Value) -> Option<bool> {
     }
     s.call("dbUpdateWorkflow", json!([id, updates])).ok()?;
     Some(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn one(kind: &str, config: Value) -> Result<Vec<String>, String> {
+        runs(&json!({ "nodes": [
+            { "id": "s", "type": kind, "label": "Do\nit", "config": config }
+        ] }))
+    }
+
+    #[test]
+    fn lists_everything_a_step_runs_or_sends() {
+        assert_eq!(
+            one(
+                "launchAgent",
+                json!({ "agentType": "claude", "prompt": "fix it", "args": ["--x"],
+                        "model": "m", "remoteHostId": "box", "projectName": "p" })
+            )
+            .unwrap(),
+            [
+                "Do it (launchAgent)",
+                "  agentType: claude",
+                "  prompt: fix it",
+                "  args: [\"--x\"]",
+                "  model: m",
+                "  remoteHostId: box",
+            ]
+        );
+        assert_eq!(
+            one(
+                "script",
+                json!({ "scriptType": "bash", "scriptContent": "a\nb", "args": ["1"],
+                        "cwd": "/w", "secretsFrom": "c1" })
+            )
+            .unwrap()[2..],
+            [
+                "  scriptContent: a\nb",
+                "  args: [\"1\"]",
+                "  cwd: /w",
+                "  secretsFrom: c1",
+            ]
+        );
+        assert_eq!(
+            one("command", json!({ "command": "make", "cwd": "/w" })).unwrap()[1..],
+            ["  command: make", "  cwd: /w"]
+        );
+        assert_eq!(
+            one(
+                "httpRequest",
+                json!({ "method": "POST", "url": "https://x", "headers": { "a": "b" },
+                        "body": "{}", "profileConnectionId": "c" })
+            )
+            .unwrap()[1..],
+            [
+                "  method: POST",
+                "  url: https://x",
+                "  headers: {\"a\":\"b\"}",
+                "  body: {}",
+                "  profileConnectionId: c",
+            ]
+        );
+        assert_eq!(
+            one(
+                "callConnectorAction",
+                json!({ "connectionId": "c", "action": "send", "args": { "to": "x" } })
+            )
+            .unwrap()[1..],
+            ["  action: send", "  connectionId: c", "  args: {\"to\":\"x\"}"]
+        );
+        // An extension's step shows its type as the action and every input.
+        assert_eq!(
+            one("some.ext/step", json!({ "anything": "goes" })).unwrap(),
+            ["Do it (some.ext/step)", "  anything: goes"]
+        );
+        assert_eq!(
+            one("trigger", json!({ "triggerType": "webhook", "method": "POST" })).unwrap(),
+            ["Trigger: webhook", "  method: POST"]
+        );
+    }
+
+    #[test]
+    fn refuses_a_setting_that_runs_or_sends_where_its_step_has_none() {
+        for (kind, config) in [
+            ("launchAgent", json!({ "command": "x" })),
+            ("script", json!({ "prompt": "x" })),
+            ("httpRequest", json!({ "scriptContent": "x" })),
+            ("condition", json!({ "url": "x" })),
+        ] {
+            let why = one(kind, config).unwrap_err();
+            assert!(why.contains(&format!("of a {kind} step")), "{why}");
+        }
+    }
 }

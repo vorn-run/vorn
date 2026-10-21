@@ -563,9 +563,6 @@ fn missed(s: &Screen<'_>) -> Option<El> {
     ))
 }
 
-/// The most lines of what a workflow runs the turn-on ask shows.
-const RUNS_SHOWN: usize = 16;
-
 /// What a workflow from a project's file runs, read before it is turned on.
 fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
     let file = s.st.wf.files.get(id)?;
@@ -597,31 +594,45 @@ fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
             .wrapping()
             .min_w0(),
         );
-    let lines: Vec<&str> = file.runs.iter().flat_map(|r| r.lines()).collect();
+    // Every line, wrapped and scrolled: what turns on is exactly what is read here.
     let mut list = div()
+        .id(Id::new("wf-turn-on-runs"))
         .col()
         .gap(2.0)
         .p(12.0)
+        .max_h(s.size.1 * 0.5)
+        .scroll_y()
         .rounded(4.0)
         .border(1.0, white(0.08))
         .bg(c(look::SURFACE_SUNKEN));
-    for line in lines.iter().take(RUNS_SHOWN) {
-        list = list.child(
-            text(*line, 12.0, c(look::GRAY_300))
-                .mono()
-                .line_height(16.0)
-                .truncate(),
-        );
+    let line = |t: &str, ink| {
+        text(if t.is_empty() { " " } else { t }, 12.0, c(ink))
+            .mono()
+            .line_height(16.0)
+            .wrapping()
+            .min_w0()
+    };
+    if file.hash.is_none() {
+        list = list.child(line(
+            "The file changed. Vorn is reading it again.",
+            look::GRAY_500,
+        ));
     }
-    if lines.len() > RUNS_SHOWN {
-        list = list.child(
-            text(
-                format!("and {} more lines in the file", lines.len() - RUNS_SHOWN),
-                12.0,
-                c(look::GRAY_500),
-            )
-            .line_height(16.0),
-        );
+    for run in &file.runs {
+        match run.strip_prefix("  ") {
+            Some(setting) => {
+                let mut setting = setting.split('\n');
+                let mut rows = div().col().pl(12.0).min_w0();
+                if let Some(first) = setting.next() {
+                    rows = rows.child(line(first, look::GRAY_400));
+                }
+                for more in setting {
+                    rows = rows.child(div().pl(12.0).min_w0().child(line(more, look::GRAY_400)));
+                }
+                list = list.child(rows);
+            }
+            None => list = list.child(line(run, look::GRAY_200)),
+        }
     }
     let button = |place: &str, a: Act, label: &str, strong: bool| {
         let bid = s.acts.on(place, a);
@@ -653,7 +664,7 @@ fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
                 .silent(),
             )
     };
-    let foot = div()
+    let mut foot = div()
         .row()
         .justify_end()
         .gap(12.0)
@@ -664,13 +675,16 @@ fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
             Act::CloseDialog,
             "Cancel",
             false,
-        ))
-        .child(button(
+        ));
+    // Turning on approves the content listed, by its hash.
+    if let Some(hash) = &file.hash {
+        foot = foot.child(button(
             "wf-turn-on-ok",
-            act(WfAct::ConfirmTurnOn(id.to_owned())),
+            act(WfAct::ConfirmTurnOn(id.to_owned(), hash.clone())),
             "Turn on",
             true,
         ));
+    }
     Some(frame(
         s,
         480.0,

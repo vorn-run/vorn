@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use super::{Platform, Quoting};
+use super::Quoting;
 use crate::js;
 
 /// How the host is logged in to (`AuthMethod`).
@@ -55,32 +55,41 @@ pub struct Target<'a> {
     pub options: Option<&'a str>,
 }
 
-/// The marker the remote shell prints once it is up, for session `id`.
+/// The marker the remote shell prints once it is up, for session `id`: only
+/// letters, digits, `-` and `_`, so it stays one word in any shell.
 pub fn marker(id: &str) -> String {
-    let short: String = id.chars().take(8).collect();
+    let short: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .take(8)
+        .collect();
     format!("__VORN_READY_{short}__")
 }
 
-/// The line typed into the local shell to log in: ssh with a terminal, the
-/// port, the key, the person's options, `--` and the host, running `echo
-/// marker` and then a login shell there. Refused when the options or the
-/// host are not ones `vorn_remote::options` allows, which also keeps every
-/// word of them safe to type unquoted.
+/// The line typed into the local shell, which reads words as `quoting`
+/// says, to log in: ssh with a terminal, the port, the key, the person's
+/// options, `--` and the host, running `echo marker` and then a login shell
+/// there. Refused when the port, key path, options or host are not ones
+/// `vorn_remote::options` allows; every word that is not fixed text is
+/// quoted for the shell.
 pub fn ssh_line(
     target: &Target<'_>,
     marker: &str,
-    local: Platform,
+    quoting: Quoting,
 ) -> Result<String, vorn_remote::Refused> {
-    vorn_remote::options::check_destination(target.user, target.hostname)?;
+    use vorn_remote::options;
+    options::check_destination(target.user, target.hostname)?;
+    let word = |w: &str| quoting.quote(w).into_owned();
     let mut parts: Vec<String> = vec!["ssh".into(), "-t".into()];
     if target.port != 22.0 {
         parts.push("-p".into());
-        parts.push(format!("{}", target.port));
+        parts.push(options::port(target.port)?.to_string());
     }
     match target.auth {
         Auth::KeyFile(Some(path)) | Auth::StoredKey(Some(path)) => {
+            options::check_key_path(path)?;
             parts.push("-i".into());
-            parts.push(path.to_owned());
+            parts.push(word(path));
         }
         Auth::Password => {
             parts.push("-o".into());
@@ -90,18 +99,18 @@ pub fn ssh_line(
         }
         Auth::Agent | Auth::KeyFile(None) | Auth::StoredKey(None) => {}
     }
-    if let Some(options) = target.options {
-        parts.extend(vorn_remote::options::parse(options)?);
+    if let Some(text) = target.options {
+        parts.extend(options::parse(text)?.iter().map(|w| word(w)));
     }
     parts.push("--".into());
-    parts.push(if target.user.is_empty() {
+    parts.push(word(&if target.user.is_empty() {
         target.hostname.to_owned()
     } else {
         format!("{}@{}", target.user, target.hostname)
-    });
-    let shown = match (local, marker.strip_prefix("__VORN_READY_")) {
+    }));
+    let shown = match (quoting, marker.strip_prefix("__VORN_READY_")) {
         // Adjacent quoted words are one word: ssh gets the marker whole.
-        (Platform::Posix, Some(rest)) => format!("__VORN_READY_'{rest}'"),
+        (Quoting::Posix, Some(rest)) => format!("__VORN_READY_'{rest}'"),
         _ => marker.to_owned(),
     };
     parts.push(format!("'echo {shown} && exec $SHELL -l'"));
@@ -273,22 +282,22 @@ mod tests {
         let m = marker("0123456789abcdef");
         assert_eq!(m, "__VORN_READY_01234567__");
         assert_eq!(
-            ssh_line(&target(Auth::Agent), &m, Platform::Posix).unwrap(),
+            ssh_line(&target(Auth::Agent), &m, Quoting::Posix).unwrap(),
             "ssh -t -- me@box.example 'echo __VORN_READY_'01234567__' && exec $SHELL -l'"
         );
-        assert!(!ssh_line(&target(Auth::Agent), &m, Platform::Posix)
+        assert!(!ssh_line(&target(Auth::Agent), &m, Quoting::Posix)
             .unwrap()
             .contains(&m));
         // Elsewhere the marker is typed whole.
         assert_eq!(
-            ssh_line(&target(Auth::Agent), &m, Platform::Windows).unwrap(),
+            ssh_line(&target(Auth::Agent), &m, Quoting::PowerShell).unwrap(),
             "ssh -t -- me@box.example 'echo __VORN_READY_01234567__ && exec $SHELL -l'"
         );
     }
 
     #[test]
     fn passes_the_port_key_and_options_for_each_way_of_logging_in() {
-        let line = |t: Target<'_>| ssh_line(&t, "M", Platform::Windows).unwrap();
+        let line = |t: Target<'_>| ssh_line(&t, "M", Quoting::PowerShell).unwrap();
         let with = Target {
             port: 2222.0,
             options: Some("  -o\tProxyJump=hop   -A "),
@@ -297,6 +306,22 @@ mod tests {
         assert_eq!(
             line(with),
             "ssh -t -p 2222 -i /k/id -o ProxyJump=hop -A -- me@box.example 'echo M && exec $SHELL -l'"
+        );
+        assert_eq!(
+            line(Target {
+                options: Some("-o HostKeyAlias=a%b%"),
+                ..target(Auth::KeyFile(Some("C:\\Users\\Jo Smith\\.ssh\\id")))
+            }),
+            "ssh -t -i 'C:\\Users\\Jo Smith\\.ssh\\id' -o 'HostKeyAlias=a%b%' -- me@box.example 'echo M && exec $SHELL -l'"
+        );
+        assert_eq!(
+            ssh_line(
+                &target(Auth::KeyFile(Some("~/.ssh/it's"))),
+                "M",
+                Quoting::Posix
+            )
+            .unwrap(),
+            "ssh -t -i '~/.ssh/it'\\''s' -- me@box.example 'echo M && exec $SHELL -l'"
         );
         assert_eq!(
             line(target(Auth::StoredKey(Some("/tmp/vorn-key-1")))),
@@ -317,7 +342,7 @@ mod tests {
 
     #[test]
     fn refuses_options_or_a_host_it_would_not_type() {
-        let refused = |t: Target<'_>| ssh_line(&t, "M", Platform::Posix).unwrap_err().to_string();
+        let refused = |t: Target<'_>| ssh_line(&t, "M", Quoting::Posix).unwrap_err().to_string();
         assert_eq!(
             refused(Target {
                 options: Some("-o ProxyCommand=sh;x"),
@@ -339,6 +364,29 @@ mod tests {
             }),
             "user name \"-l\" is not allowed"
         );
+        assert_eq!(
+            refused(target(Auth::KeyFile(Some("-oProxyCommand=x")))),
+            "ssh key path \"-oProxyCommand=x\" is not allowed"
+        );
+        assert_eq!(
+            refused(Target {
+                port: 22.5,
+                ..target(Auth::Agent)
+            }),
+            "port 22.5 is not allowed"
+        );
+        assert_eq!(
+            refused(Target {
+                options: Some("-J me@-oProxyCommand=x"),
+                ..target(Auth::Agent)
+            }),
+            "ssh option -J has a value that is not allowed"
+        );
+    }
+
+    #[test]
+    fn keeps_only_plain_characters_of_the_id_in_the_marker() {
+        assert_eq!(marker("a'b;c$d-e_f"), "__VORN_READY_abcd-e_f__");
     }
 
     #[test]
@@ -398,7 +446,7 @@ mod tests {
         let echo = ssh_line(
             &target(Auth::Password),
             &marker("abcdefgh-1"),
-            Platform::Posix,
+            Quoting::Posix,
         )
         .unwrap();
         assert_eq!(login.feed(&echo, t), []);

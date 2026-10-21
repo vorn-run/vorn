@@ -12,6 +12,10 @@ pub mod options;
 
 pub use options::Refused;
 
+/// Programs that log in to another machine from a terminal. A session
+/// running one of them, at any depth, is not treated as local.
+pub const CLIENTS: &[&str] = &["ssh", "mosh", "mosh-client", "et", "autossh", "telnet"];
+
 /// A remote host as the configuration keeps it (`RemoteHost`).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -58,9 +62,10 @@ pub fn args(
         ]);
     }
     if host.port != 22.0 {
-        args.extend(["-p".to_owned(), format!("{}", host.port)]);
+        args.extend(["-p".to_owned(), options::port(host.port)?.to_string()]);
     }
     if let Some(key) = host.ssh_key_path.as_deref().filter(|k| !k.is_empty()) {
+        options::check_key_path(key)?;
         args.extend(["-i".to_owned(), key.to_owned()]);
     }
     if let Some(text) = &host.ssh_options {

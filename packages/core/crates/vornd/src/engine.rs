@@ -57,7 +57,7 @@ use vorn_term_proto::{Cursor, Entry, Record};
 use crate::holder::{Conn, Writer};
 use crate::journal::{Journal, Kind};
 use crate::names::Names;
-use crate::registry::{SessionRegistry, Stamp};
+use crate::registry::{Placed, SessionRegistry, Stamp};
 use crate::size::{Sizes, Who};
 use crate::streams::{Action, Snap, Streams};
 
@@ -283,9 +283,10 @@ impl Engine {
                 .agent_type(id)
                 .map(|t| rules_of.get(&t).and_then(|a| a.screen_rules()))
         }));
-        // Only a session whose program runs here may load images from files.
+        // Only a session whose program runs here, with no remote login
+        // anywhere under it, may load images from files.
         let placed = Arc::clone(&registry);
-        let local = Local(Arc::new(move |id: &str| placed.local(id)));
+        let local = Local(Arc::new(move |id: &str| local_session(placed.placed(id))));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
@@ -929,6 +930,17 @@ async fn until(at: Option<std::time::Instant>) {
     match at {
         Some(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
         None => std::future::pending().await,
+    }
+}
+
+/// Whether a session placed so may load kitty images from files: one
+/// running here whose process tree has no remote login program in it.
+/// `None`, refused for now, while that cannot be told.
+fn local_session(placed: Option<Placed>) -> Option<bool> {
+    match placed? {
+        Placed::Remote => Some(false),
+        Placed::Here(0) => None,
+        Placed::Here(pid) => vorn_spawn::tree::runs_any(pid, vorn_remote::CLIENTS).map(|r| !r),
     }
 }
 
@@ -1924,6 +1936,41 @@ mod tests {
 
     use super::*;
     use crate::registry::{AgentStatus, HookStatus};
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_with_a_remote_login_anywhere_under_it_is_not_local() {
+        let dir = std::env::temp_dir().join(format!("vd-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A program by a remote login's name that only waits.
+        let ssh = dir.join("ssh");
+        std::fs::copy("/bin/sleep", &ssh).unwrap();
+        let sh = |script: String| {
+            vorn_spawn::command("/bin/sh")
+                .args(["-c", &script])
+                .spawn()
+                .unwrap()
+        };
+        let mut plain = sh("sleep 5; true".into());
+        let mut nested = sh(format!("/bin/sh -c '{} 5; true'; true", ssh.display()));
+        let settled = |pid: u32, want: bool| {
+            (0..100).any(|_| {
+                std::thread::sleep(Duration::from_millis(20));
+                local_session(Some(Placed::Here(pid))) == Some(want)
+            })
+        };
+        assert!(settled(plain.id(), true));
+        assert!(settled(nested.id(), false));
+        assert_eq!(local_session(Some(Placed::Remote)), Some(false));
+        // Not started, or not known: refused for now.
+        assert_eq!(local_session(Some(Placed::Here(0))), None);
+        assert_eq!(local_session(None), None);
+        for child in [&mut plain, &mut nested] {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn agent(id: &str) -> Value {
         json!({

@@ -2342,6 +2342,15 @@ fn reports_itself(row: &Row<TerminalSession>) -> bool {
     row.record.program_status.as_ref().is_some_and(|p| p.native)
 }
 
+/// Where a session's program runs: see [`SessionRegistry::placed`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Placed {
+    /// Logged in to a remote host.
+    Remote,
+    /// On this machine, as this pid (0 until it has started).
+    Here(u32),
+}
+
 /// The registry as vornd shares it, with each change told to subscribers.
 #[derive(Debug)]
 pub struct SessionRegistry {
@@ -2410,14 +2419,19 @@ impl SessionRegistry {
             .or_else(|| r.headless_record(id).map(|h| h.agent_type.clone()))
     }
 
-    /// Whether session `id`'s program runs on this machine: every session
-    /// but a terminal logged in to a remote host. `None` until the copy can
-    /// be answered from.
-    pub fn local(&self, id: &str) -> Option<bool> {
-        self.read(|r| {
-            r.terminal(id)
-                .is_none_or(|(t, _)| t.remote_host_id.as_deref().is_none_or(str::is_empty))
+    /// Where session `id`'s program runs: a terminal logged in to a remote
+    /// host is [`Placed::Remote`]; any other terminal or headless agent runs
+    /// here as its pid, 0 until it has started. `None` for an id the
+    /// registry does not hold, or until the copy can be answered from.
+    pub fn placed(&self, id: &str) -> Option<Placed> {
+        self.read(|r| match r.terminal(id) {
+            Some((t, _)) if t.remote_host_id.as_deref().is_some_and(|h| !h.is_empty()) => {
+                Some(Placed::Remote)
+            }
+            Some((t, _)) => Some(Placed::Here(t.pid)),
+            None => r.headless_record(id).map(|h| Placed::Here(h.pid)),
         })
+        .flatten()
     }
 
     /// Marks the registry as in use, which the health check then reports on.

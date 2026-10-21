@@ -53,8 +53,8 @@ pub(super) enum WfCall {
     SavedToFile(String),
     /// `workflow:files`.
     Files,
-    /// `workflow:trust`, with the workflow's name.
-    TurnedOn(String),
+    /// `workflow:trust`, with the workflow's id and name.
+    TurnedOn(String, String),
 }
 
 impl App {
@@ -66,12 +66,20 @@ impl App {
                     self.st.wf.files = wf::FromFile::listed(&v);
                 }
             }
-            WfCall::TurnedOn(name) => match answer {
+            WfCall::TurnedOn(id, name) => match answer {
                 Ok(_) => {
                     self.st.toast(format!("Turned on \"{name}\""), false);
                     self.wf_files();
                 }
-                Err(e) => self.st.toast(e.to_string(), true),
+                Err(e) => {
+                    self.st.toast(e.to_string(), true);
+                    // The file changed since it was shown: show it again as it is now.
+                    if let Some(file) = self.st.wf.files.get_mut(&id) {
+                        file.hash = None;
+                        self.st.dialog = Some(Dialog::TurnOn(id));
+                    }
+                    self.wf_files();
+                }
             },
             WfCall::SavedToFile(name) => match answer {
                 Ok(v) => {
@@ -806,16 +814,16 @@ impl App {
                 self.st.dialog = Some(Dialog::TurnOn(id));
             }
             WfAct::TurnOn(_) => {}
-            WfAct::ConfirmTurnOn(id) => {
+            WfAct::ConfirmTurnOn(id, hash) => {
                 self.st.dialog = None;
                 let name = self
                     .workflow(&id)
                     .and_then(|w| s(&w, "name").map(str::to_owned))
                     .unwrap_or_default();
                 self.call(
-                    Call::Workflow(WfCall::TurnedOn(name)),
+                    Call::Workflow(WfCall::TurnedOn(id.clone(), name)),
                     "workflow:trust",
-                    json!({ "id": id }),
+                    json!({ "id": id, "hash": hash }),
                 );
             }
             WfAct::Run(id) => self.start_run(ui, &id, None, None),

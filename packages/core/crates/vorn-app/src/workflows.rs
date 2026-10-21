@@ -192,8 +192,12 @@ pub struct FromFile {
     pub path: String,
     /// Turned on as the file is now; vornd runs nothing of it otherwise.
     pub trusted: bool,
-    /// Its trigger and each step, one line each.
+    /// Its trigger and each step, then each setting that decides what the
+    /// step runs or sends, indented by two spaces.
     pub runs: Vec<String>,
+    /// The content `runs` was read from: what turning it on approves.
+    /// `None` while the file does not read.
+    pub hash: Option<String>,
 }
 
 impl FromFile {
@@ -215,6 +219,7 @@ impl FromFile {
                         path: s(f, "path").unwrap_or("").to_owned(),
                         trusted: f.get("trusted").and_then(Value::as_bool) == Some(true),
                         runs: runs.filter_map(Value::as_str).map(str::to_owned).collect(),
+                        hash: s(f, "hash").map(str::to_owned),
                     },
                 ))
             })
@@ -1973,8 +1978,8 @@ pub enum WfAct {
     SaveToFile(String),
     /// What a workflow from a project's file runs, asked before it is turned on.
     TurnOn(String),
-    /// The ask answered: the file turned on as it is.
-    ConfirmTurnOn(String),
+    /// The ask answered: the file turned on as listed, by id and content hash.
+    ConfirmTurnOn(String, String),
     Import,
     Delete(String),
     /// The editor's controls.
@@ -2054,7 +2059,7 @@ mod tests {
     fn only_a_file_workflow_not_turned_on_is_held_off() {
         let listed = json!({ "files": [
             { "workflowId": "a", "path": "/p/.vorn/workflows/a.json", "trusted": false,
-              "runs": ["Trigger: manual", "Build: make"] },
+              "hash": "h1", "runs": ["Trigger: manual", "Build: make"] },
             { "workflowId": "b", "path": "/p/.vorn/workflows/b.json", "trusted": true, "runs": [] },
             { "path": "/p/.vorn/workflows/broken.json" },
         ]});
@@ -2064,6 +2069,7 @@ mod tests {
         };
         let a = w.held_off("a").expect("a is held off");
         assert_eq!(a.runs, ["Trigger: manual", "Build: make"]);
+        assert_eq!(a.hash.as_deref(), Some("h1"));
         assert!(w.held_off("b").is_none());
         assert!(w.held_off("made-in-vorn").is_none());
         assert_eq!(w.files.len(), 2);
