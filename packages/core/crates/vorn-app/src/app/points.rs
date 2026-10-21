@@ -39,6 +39,12 @@ pub(super) enum PointCall {
         id: String,
         was: bool,
     },
+    /// A preference was set; it goes back to `was` if vornd refuses.
+    SetPreference {
+        id: String,
+        key: String,
+        was: Value,
+    },
 }
 
 /// A window point's process and the lines it writes.
@@ -196,7 +202,43 @@ impl App {
                     json!({ "id": id, "on": on }),
                 );
             }
+            PointAct::Preference { id, key, value } => {
+                let Ok(value) = serde_json::from_str::<Value>(&value) else {
+                    return;
+                };
+                let was = self.preference(&id, &key);
+                self.show_preference(&id, &key, &value);
+                self.call(
+                    Call::Point(PointCall::SetPreference {
+                        id: id.clone(),
+                        key: key.clone(),
+                        was,
+                    }),
+                    "extension:setPreference",
+                    json!({ "id": id, "key": key, "value": value }),
+                );
+            }
         }
+    }
+
+    /// What preference `key` of extension `id` holds now, as its page shows it.
+    fn preference(&self, id: &str, key: &str) -> Value {
+        let lists = [&self.st.points.builtins, &self.st.plugins.packs];
+        lists
+            .into_iter()
+            .flatten()
+            .filter(|e| e.get("id").and_then(Value::as_str) == Some(id))
+            .filter_map(|e| e.get("preferences").and_then(Value::as_array))
+            .flatten()
+            .find(|p| p.get("id").and_then(Value::as_str) == Some(key))
+            .and_then(|p| p.get("value").cloned())
+            .unwrap_or(Value::Null)
+    }
+
+    fn show_preference(&mut self, id: &str, key: &str, value: &Value) {
+        self.st.points.set_preference(id, key, value);
+        crate::points::set_preference(&mut self.st.plugins.packs, id, key, value);
+        self.st.plugins.rebuild();
     }
 
     /// A tree field that submits on blur lost focus: what it holds is told
@@ -295,6 +337,12 @@ impl App {
                     pts.set_builtin(&id, was);
                     pts.off_note = None;
                     pts.switch_error = Some((id, e.to_string()));
+                }
+            }
+            PointCall::SetPreference { id, key, was } => {
+                if let Err(e) = answer {
+                    self.show_preference(&id, &key, &was);
+                    self.st.toast(e.to_string(), true);
                 }
             }
             PointCall::Builtins => match answer {

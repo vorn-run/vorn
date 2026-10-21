@@ -373,6 +373,7 @@ impl Builtins {
                         "declares": m.declares,
                         "service": m.service,
                         "on": self.is_on(e.id()),
+                        "preferences": self.router.listed_preferences(m),
                         "running": running.iter().any(|k| k.extension == e.id()),
                     })
                 })

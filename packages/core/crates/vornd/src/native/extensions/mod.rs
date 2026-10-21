@@ -738,6 +738,7 @@ impl Extensions {
                 value["running"] = json!(running.iter().any(|k| k.extension == pack.id));
                 value["sandboxed"] = json!(self.router.sandboxed(&pack.id));
                 value["sandboxAvailable"] = json!(vorn_extensions::sandbox::available());
+                value["preferences"] = json!(self.router.listed_preferences(&pack.manifest));
                 value
             })
             .collect();

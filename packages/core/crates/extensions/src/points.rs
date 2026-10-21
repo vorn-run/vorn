@@ -112,4 +112,38 @@ tree = true
         assert_eq!(listed[0]["appearance"], "dark");
         assert_eq!(listed[0]["theme"]["ui"]["accent"], "#b58900");
     }
+
+    #[test]
+    fn a_point_gated_on_a_preference_follows_it() {
+        let m = parse(
+            r#"id = "board"
+name = "Board"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[service]
+command = ["node", "index.js"]
+
+[[contributes.panes]]
+id = "pane"
+title = "Pane"
+tree = true
+when = { setting = ["pane"] }
+
+[[contributes.preferences]]
+id = "pane"
+title = "Pane beside cards"
+type = "bool"
+default = true
+"#,
+        )
+        .unwrap();
+        let with = |on: bool| {
+            let mut settings = Map::new();
+            settings.insert("pane".into(), Value::Bool(on));
+            listed(&m, &settings).len()
+        };
+        assert_eq!(with(true), 1);
+        assert_eq!(with(false), 0);
+    }
 }

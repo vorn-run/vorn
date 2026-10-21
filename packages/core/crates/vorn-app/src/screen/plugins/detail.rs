@@ -49,6 +49,8 @@ struct Page<'a> {
     hosts: Vec<String>,
     service: Option<&'a Value>,
     switch: Option<El>,
+    /// The extension's id and the preferences it declares, each with its value.
+    preferences: (&'a str, Option<&'a Value>),
 }
 
 fn strings(v: Option<&Value>) -> Vec<String> {
@@ -92,6 +94,16 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
                 .mt(16.0)
                 .wrapping(),
         );
+    }
+    let (id, prefs) = page.preferences;
+    let rows: Vec<El> = prefs
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|p| preference(s, id, p))
+        .collect();
+    if !rows.is_empty() {
+        col = col.child(section("Settings", rows));
     }
     let n = places(page.contributes);
     let groups = place_groups(page.contributes);
@@ -173,6 +185,7 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
             hosts: strings(b.pointer("/declares/network")),
             service: b.get("service"),
             switch: Some(crate::ui::widgets::toggle(s.ui, switch, name, on, busy).shrink0()),
+            preferences: (id, b.get("preferences")),
         },
     );
     col.child_if(super::installed::off_note(s, b).map(|e| e.mt(16.0)))
@@ -390,6 +403,7 @@ fn extension(s: &Screen<'_>, l: &Listing) -> El {
             hosts: strings(manifest.and_then(|m| m.pointer("/declares/network"))),
             service: manifest.and_then(|m| m.get("service")),
             switch: None,
+            preferences: (&l.id, pack.and_then(|p| p.get("preferences"))),
         },
     );
     let status = describe(&state);
@@ -608,6 +622,63 @@ fn format_day(iso: &str) -> String {
 pub(super) fn origin_label(origin: &str) -> &str {
     let host = origin.split_once("://").map_or(origin, |(_, rest)| rest);
     host.split('/').next().unwrap_or(host)
+}
+
+/// One preference: its title and description beside a switch, or a segmented choice.
+fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
+    let key = sv(p, "id")?;
+    let title = sv(p, "title").unwrap_or(key);
+    let value = p.get("value");
+    let act = |v: Value| {
+        Act::Point(PointAct::Preference {
+            id: ext.to_owned(),
+            key: key.to_owned(),
+            value: v.to_string(),
+        })
+    };
+    let place = format!("ext-pref-{ext}-{key}");
+    let control = match sv(p, "type") {
+        Some("bool") => {
+            let on = value.and_then(Value::as_bool) == Some(true);
+            let id = s.acts.on(&place, act(Value::Bool(!on)));
+            crate::ui::widgets::toggle(s.ui, id, title, on, false).shrink0()
+        }
+        Some("choice") => {
+            let chosen = value.and_then(Value::as_str);
+            let opts = p
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|o| Some((sv(o, "id")?, sv(o, "title").unwrap_or_default())))
+                .map(|(id, label)| crate::screen::settings::Seg {
+                    label,
+                    icon: None,
+                    act: act(Value::from(id)),
+                    on: chosen == Some(id),
+                    disabled: false,
+                })
+                .collect();
+            crate::screen::settings::segmented(s, &place, opts, 10.0)
+        }
+        _ => return None,
+    };
+    let mut words = div().col().grow().min_w0().child(
+        text(title, 12.5, k::GRAY_300)
+            .line_height(18.75)
+            .role(Role::Label, title),
+    );
+    if let Some(d) = sv(p, "description").filter(|d| !d.is_empty()) {
+        words = words.child(quiet(d).mt(2.0));
+    }
+    Some(
+        div()
+            .row()
+            .items_center()
+            .gap(12.0)
+            .child(words)
+            .child(control),
+    )
 }
 
 fn section(label: &str, children: Vec<El>) -> El {

@@ -2644,4 +2644,71 @@ call = "refresh"
             "vorn-extension.toml:5: vorn: runs on vorn:extension >=1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
         );
     }
+
+    const PREFERENCES: &str = r#"id = "example.board"
+name = "Board"
+version = "0.1.0"
+api = "vorn:extension@1.0"
+
+[service]
+command = ["node", "main.js"]
+
+[[contributes.panes]]
+id = "board"
+title = "Board"
+tree = true
+when = { setting = ["pane"] }
+
+[[contributes.preferences]]
+id = "pane"
+title = "Board pane beside cards"
+description = "Lists the board in a pane beside each card."
+type = "bool"
+default = true
+
+[[contributes.preferences]]
+id = "sort"
+title = "Sort by"
+type = "choice"
+default = "age"
+options = [{ id = "age", title = "Age" }, { id = "name", title = "Name" }]
+"#;
+
+    #[test]
+    fn reads_typed_preferences_and_a_pane_gated_on_one() {
+        use crate::manifest::PreferenceKind;
+        let m = parse(PREFERENCES).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        let prefs = c.preferences();
+        assert_eq!(prefs.len(), 2);
+        assert_eq!(prefs[0].base.title, "Board pane beside cards");
+        assert_eq!(prefs[0].kind, PreferenceKind::Bool { default: true });
+        assert_eq!(prefs[1].default_value(), "age");
+        assert!(prefs[1].accepts(&Value::from("name")));
+        assert!(!prefs[1].accepts(&Value::from("size")));
+        assert!(!prefs[0].accepts(&Value::from("yes")));
+        assert_eq!(c.panes()[0].base.when.as_ref().unwrap().setting, ["pane"]);
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+    }
+
+    #[test]
+    fn a_bad_preference_is_named_by_field() {
+        let err = |from: &str, to: &str| {
+            parse(&PREFERENCES.replacen(from, to, 1))
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(err("default = true", "default = \"on\"")
+            .contains("contributes.preferences[0].default"));
+        assert!(
+            err("type = \"choice\"", "type = \"text\"").contains("contributes.preferences[1].type")
+        );
+        assert!(err("default = \"age\"", "default = \"size\"")
+            .contains("contributes.preferences[1].default"));
+        assert!(err("id = \"sort\"", "id = \"pane\"").contains("contributes.preferences[1].id"));
+        assert!(err("setting = [\"pane\"]", "setting = [\"sort\"]")
+            .contains("contributes.panes[0].when.setting"));
+        assert!(err("setting = [\"pane\"]", "setting = [\"none\"]")
+            .contains("contributes.panes[0].when.setting"));
+    }
 }

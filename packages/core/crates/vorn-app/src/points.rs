@@ -202,6 +202,18 @@ pub fn apply(rows: &mut Vec<Row>, op: &Value) {
     }
 }
 
+/// Sets preference `key` of the extension `id` in `list` (built-ins or packs) to `value`.
+pub fn set_preference(list: &mut [Value], id: &str, key: &str, value: &Value) {
+    let prefs = list
+        .iter_mut()
+        .filter(|e| e.get("id").and_then(Value::as_str) == Some(id))
+        .filter_map(|e| e.get_mut("preferences").and_then(Value::as_array_mut))
+        .flatten();
+    for p in prefs.filter(|p| p.get("id").and_then(Value::as_str) == Some(key)) {
+        p["value"] = value.clone();
+    }
+}
+
 /// What the screens' extension controls do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PointAct {
@@ -233,6 +245,12 @@ pub enum PointAct {
     Builtin {
         id: String,
         on: bool,
+    },
+    /// Sets extension `id`'s preference `key` to `value`, written as JSON.
+    Preference {
+        id: String,
+        key: String,
+        value: String,
     },
     /// Tells tree point `key`'s extension `event` happened.
     Tree {
@@ -328,6 +346,11 @@ impl Points {
     }
 
     /// Shows built-in `id` as on or off, ahead of vornd's answer.
+    /// Shows extension `id`'s preference `key` as `value` on the built-ins' pages.
+    pub fn set_preference(&mut self, id: &str, key: &str, value: &Value) {
+        set_preference(&mut self.builtins, id, key, value);
+    }
+
     pub fn set_builtin(&mut self, id: &str, on: bool) {
         for b in &mut self.builtins {
             if b.get("id").and_then(Value::as_str) == Some(id) {
