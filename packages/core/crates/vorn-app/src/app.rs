@@ -935,6 +935,9 @@ impl App {
                     if method == "layout:opened" {
                         self.layout_opened(&params);
                     }
+                    if method == "workflow:changed" {
+                        self.wf_files();
+                    }
                     let before = self.store.workspace().to_owned();
                     // A read running may predate these rows, and rows may predate the app's
                     // own writes: either way the list is read again once both have landed.
@@ -1101,6 +1104,7 @@ impl App {
                     self.config_stale = true;
                 } else if let Ok(config) = answer {
                     self.config_changed(config);
+                    self.wf_files();
                 }
             }
             Call::Toast(text) => match answer {

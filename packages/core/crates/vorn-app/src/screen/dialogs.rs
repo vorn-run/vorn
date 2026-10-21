@@ -541,7 +541,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Ask => super::side::ask(s),
         Dialog::Paste => paste(s)?,
         Dialog::Output => super::tasks::output(s),
-        Dialog::RunPrompt | Dialog::Missed => super::workflows::dialog(s)?,
+        Dialog::RunPrompt | Dialog::Missed | Dialog::TurnOn(_) => super::workflows::dialog(s)?,
         Dialog::GateReview => super::gates::review(s)?,
         Dialog::Palette => super::palette::palette(s),
         Dialog::Welcome => super::onboarding::modal(s)?,

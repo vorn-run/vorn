@@ -16,6 +16,7 @@ pub fn dialog(s: &Screen<'_>) -> Option<El> {
     Some(match s.st.dialog.as_ref()? {
         Dialog::RunPrompt => prompt(s, s.st.wf.prompt.as_ref()?),
         Dialog::Missed => missed(s)?,
+        Dialog::TurnOn(id) => turn_on(s, id)?,
         _ => return None,
     })
 }
@@ -559,5 +560,123 @@ fn missed(s: &Screen<'_>) -> Option<El> {
             .child(rule())
             .child(foot),
         false,
+    ))
+}
+
+/// The most lines of what a workflow runs the turn-on ask shows.
+const RUNS_SHOWN: usize = 16;
+
+/// What a workflow from a project's file runs, read before it is turned on.
+fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
+    let file = s.st.wf.files.get(id)?;
+    let name = super::workflow(s, id)
+        .and_then(|w| sv(w, "name"))
+        .unwrap_or(id);
+    let title = format!("Turn on \u{201c}{name}\u{201d}?");
+    let head = div()
+        .col()
+        .gap(4.0)
+        .px(20.0)
+        .py(16.0)
+        .child(
+            text(title.clone(), 16.0, c(look::WHITE))
+                .weight(500)
+                .line_height(24.0)
+                .role(Role::Heading, &title),
+        )
+        .child(
+            text(
+                format!(
+                    "It comes from {}. Once on, it runs what is listed below. If the file changes outside Vorn, it turns off again.",
+                    file.path
+                ),
+                13.0,
+                c(look::GRAY_400),
+            )
+            .line_height(18.0)
+            .wrapping()
+            .min_w0(),
+        );
+    let lines: Vec<&str> = file.runs.iter().flat_map(|r| r.lines()).collect();
+    let mut list = div()
+        .col()
+        .gap(2.0)
+        .p(12.0)
+        .rounded(4.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_SUNKEN));
+    for line in lines.iter().take(RUNS_SHOWN) {
+        list = list.child(
+            text(*line, 12.0, c(look::GRAY_300))
+                .mono()
+                .line_height(16.0)
+                .truncate(),
+        );
+    }
+    if lines.len() > RUNS_SHOWN {
+        list = list.child(
+            text(
+                format!("and {} more lines in the file", lines.len() - RUNS_SHOWN),
+                12.0,
+                c(look::GRAY_500),
+            )
+            .line_height(16.0),
+        );
+    }
+    let button = |place: &str, a: Act, label: &str, strong: bool| {
+        let bid = s.acts.on(place, a);
+        let hot = s.ui.hover(bid);
+        div()
+            .id(bid)
+            .on(Action::Click)
+            .px(16.0)
+            .py(8.0)
+            .rounded(4.0)
+            .bg(if strong {
+                white(0.10).mix(white(0.15), hot)
+            } else {
+                white(0.04).mix(white(0.08), hot)
+            })
+            .role(Role::Button, label)
+            .child(
+                text(
+                    label,
+                    14.0,
+                    if strong {
+                        c(look::WHITE)
+                    } else {
+                        c(look::GRAY_400).mix(c(look::GRAY_200), hot)
+                    },
+                )
+                .weight(500)
+                .line_height(20.0)
+                .silent(),
+            )
+    };
+    let foot = div()
+        .row()
+        .justify_end()
+        .gap(12.0)
+        .px(20.0)
+        .py(12.0)
+        .child(button("wf-turn-on-cancel", Act::CloseDialog, "Cancel", false))
+        .child(button(
+            "wf-turn-on-ok",
+            act(WfAct::ConfirmTurnOn(id.to_owned())),
+            "Turn on",
+            true,
+        ));
+    Some(frame(
+        s,
+        480.0,
+        &title,
+        div()
+            .col()
+            .child(head)
+            .child(rule())
+            .child(div().p(16.0).child(list))
+            .child(rule())
+            .child(foot),
+        true,
     ))
 }

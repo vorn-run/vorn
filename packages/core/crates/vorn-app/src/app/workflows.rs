@@ -51,12 +51,28 @@ pub(super) enum WfCall {
     Seed(String),
     /// `workflow:saveToFile`, with the workflow's name.
     SavedToFile(String),
+    /// `workflow:files`.
+    Files,
+    /// `workflow:trust`, with the workflow's name.
+    TurnedOn(String),
 }
 
 impl App {
     pub(super) fn wf_answered(&mut self, call: WfCall, answer: Result<Value, RpcError>) {
         match call {
             WfCall::Runs => self.st.wf.runs = list(answer),
+            WfCall::Files => {
+                if let Ok(v) = answer {
+                    self.st.wf.files = wf::FromFile::listed(&v);
+                }
+            }
+            WfCall::TurnedOn(name) => match answer {
+                Ok(_) => {
+                    self.st.toast(format!("Turned on \"{name}\""), false);
+                    self.wf_files();
+                }
+                Err(e) => self.st.toast(e.to_string(), true),
+            },
             WfCall::SavedToFile(name) => match answer {
                 Ok(v) => {
                     let path = s(&v, "path").unwrap_or("");
@@ -185,7 +201,13 @@ impl App {
             .cloned()
     }
 
+    /// Reads again which workflows come from a project's file and which are on.
+    pub(super) fn wf_files(&mut self) {
+        self.call(Call::Workflow(WfCall::Files), "workflow:files", Value::Null);
+    }
+
     pub(super) fn wf_refresh(&mut self) {
+        self.wf_files();
         let params = json!({ "workspaceId": self.workspace(), "limit": 50 });
         self.call(Call::Workflow(WfCall::Runs), "workflowRun:listAll", params);
         self.call(
@@ -778,6 +800,24 @@ impl App {
                 };
                 self.open_editor(ui, draft, Panel::StartFrom);
             }
+            WfAct::Run(id) | WfAct::ToggleSchedule(id) | WfAct::TurnOn(id)
+                if self.st.wf.held_off(&id).is_some() =>
+            {
+                self.st.dialog = Some(Dialog::TurnOn(id));
+            }
+            WfAct::TurnOn(_) => {}
+            WfAct::ConfirmTurnOn(id) => {
+                self.st.dialog = None;
+                let name = self
+                    .workflow(&id)
+                    .and_then(|w| s(&w, "name").map(str::to_owned))
+                    .unwrap_or_default();
+                self.call(
+                    Call::Workflow(WfCall::TurnedOn(name)),
+                    "workflow:trust",
+                    json!({ "id": id }),
+                );
+            }
             WfAct::Run(id) => self.start_run(ui, &id, None, None),
             WfAct::ToggleSchedule(id) => {
                 self.change_workflows(None, |list| {
@@ -841,6 +881,17 @@ impl App {
                 self.persist(Some(text.to_owned()));
             }
             WfAct::RunDraft => {
+                let held = self
+                    .st
+                    .wf
+                    .editor
+                    .as_ref()
+                    .map(|d| d.id().to_owned())
+                    .filter(|id| self.st.wf.held_off(id).is_some());
+                if let Some(id) = held {
+                    self.st.dialog = Some(Dialog::TurnOn(id));
+                    return;
+                }
                 let ready = self
                     .st
                     .wf
