@@ -69,8 +69,7 @@ impl NodeRss {
 
 /// The connector's process: this one's child running the bundle.
 pub fn pid() -> Option<u32> {
-    // spawn-visible: ps, run by the bench only.
-    let out = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid=,command="]).output().ok()?;
+    let out = vorn_spawn::command("ps").args(["-A", "-o", "pid=,ppid=,command="]).output().ok()?;
     let me = std::process::id();
     String::from_utf8_lossy(&out.stdout).lines().find_map(|l| {
         let mut parts = l.split_whitespace();

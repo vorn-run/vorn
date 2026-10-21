@@ -67,7 +67,7 @@ impl Transcript {
 }
 
 /// A request for a Bash command with a rule to keep, and one that asks a question.
-fn asks() -> [Value; 2] {
+pub fn asks() -> [Value; 2] {
     [
         json!({
             "requestId": "r1", "terminalId": "s1", "toolName": "Bash",

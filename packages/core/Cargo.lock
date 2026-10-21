@@ -7080,6 +7080,7 @@ dependencies = [
  "vorn-extension-sdk",
  "vorn-extensions",
  "vorn-guest-build",
+ "vorn-spawn",
 ]
 
 [[package]]
