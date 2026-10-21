@@ -25,8 +25,8 @@ use tracing::info;
 use crate::gate::{enforced, CORE_METHODS};
 use crate::manifest::{file, Manifest, Permission};
 use crate::pack::{
-    directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack, PackStore,
-    CURRENT_FILE,
+    check_id, directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack,
+    PackStore, CURRENT_FILE,
 };
 
 /// Long enough to read a sheet, short enough that walking away costs nothing.
@@ -704,9 +704,7 @@ fn linkable(folder: &Path) -> Result<(PathBuf, Manifest), String> {
         .canonicalize()
         .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
     let manifest = read_dir_manifest(&folder)?;
-    if !is_safe_id(&manifest.id) {
-        return Err(format!("\"{}\" is not an extension id", manifest.id));
-    }
+    check_id(&manifest.id)?;
     Ok((folder, manifest))
 }
 
@@ -716,9 +714,7 @@ fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
     }
     crate::pack::relabel_dir(dir)?;
     let manifest = read_dir_manifest(dir)?;
-    if !is_safe_id(&manifest.id) {
-        return Err(format!("\"{}\" is not an extension id", manifest.id));
-    }
+    check_id(&manifest.id)?;
     Ok(manifest)
 }
 
@@ -1083,6 +1079,13 @@ migrations = "migrations"
         let (copied, linked) = both(api, "api = \"vorn:extension@0.9\"");
         assert_eq!(copied, Ok(()));
         assert!(linked.unwrap_err().contains("built for vorn:extension@0.9"));
+        // An id Vorn's own workflows start with is no extension's.
+        for id in crate::pack::RESERVED_IDS {
+            let reserved =
+                format!("\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:");
+            let id_line = format!("id = \"{id}\"");
+            assert_eq!(attempt("id = \"test.marker\"", &id_line), Err(reserved));
+        }
     }
 
     #[test]

@@ -503,3 +503,23 @@ fn renamed_workflows_take_their_cursor_and_inbox_along() {
         0
     );
 }
+
+#[test]
+fn an_old_workflow_whose_new_id_is_taken_is_deleted_not_kept_polling() {
+    let mut store = store();
+    for id in ["connector:c1:issues", "vorn.connectors:c1:issues"] {
+        call(&mut store, "dbInsertWorkflow", json!([workflow(id)]));
+    }
+
+    let moved = store
+        .rename_workflows("connector:", "vorn.connectors:")
+        .unwrap();
+    assert_eq!(moved, 0);
+    let get = |store: &mut Store, id: &str| call(store, "dbGetWorkflow", json!([id]));
+    assert!(get(&mut store, "connector:c1:issues").is_null());
+    assert_eq!(
+        get(&mut store, "vorn.connectors:c1:issues")["name"],
+        "vorn.connectors:c1:issues",
+        "the one already moved stays as it is"
+    );
+}

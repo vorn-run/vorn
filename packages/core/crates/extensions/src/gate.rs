@@ -39,10 +39,13 @@ impl Caller {
         }
     }
 
-    /// Whether workflow `id` is in its namespace: `<extension id>:`.
+    /// Whether workflow `id` is in its namespace: `<extension id>:`. A
+    /// reserved id owns nothing, so Vorn's own workflows stay Vorn's.
     pub fn owns(&self, id: &str) -> bool {
-        id.strip_prefix(self.extension.as_str())
-            .is_some_and(|rest| rest.starts_with(':'))
+        !crate::pack::RESERVED_IDS.contains(&self.extension.as_str())
+            && id
+                .strip_prefix(self.extension.as_str())
+                .is_some_and(|rest| rest.starts_with(':'))
     }
 
     fn namespace(&self) -> String {
@@ -577,6 +580,13 @@ header = "Authorization: Bearer {token}"
         use serde_json::json;
         let x = caller();
         assert!(x.owns("x:a") && !x.owns("xy:a") && !x.owns("x") && !x.owns("import:a"));
+        for reserved in crate::pack::RESERVED_IDS {
+            let posing = Caller {
+                extension: reserved.into(),
+                ..x.clone()
+            };
+            assert!(!posing.owns(&format!("{reserved}:a")), "{reserved}");
+        }
         assert_eq!(admit_own(&x, "workflow.unseed", "x:conn:"), Ok(()));
         let foreign = admit_own(&x, "workflow.unseed", "import:").unwrap_err();
         assert_eq!(

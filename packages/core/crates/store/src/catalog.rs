@@ -291,7 +291,8 @@ impl Store {
     /// Moves every workflow whose id starts with `from` to the same id
     /// starting with `to`, with what each table keeps by `workflow_id` (its
     /// runs, schedule, cursor and inbox); answers how many moved. One whose
-    /// new id is taken stays where it is.
+    /// new id is taken is a stale copy and is deleted, as
+    /// [`Store::db_delete_workflow`] would, so it no longer runs.
     pub fn rename_workflows(&mut self, from: &str, to: &str) -> Result<usize> {
         let tx = self.write_transaction()?;
         let ids: Vec<String> = {
@@ -326,6 +327,7 @@ impl Store {
                 |r| r.get(0),
             )?;
             if taken {
+                tx.execute("DELETE FROM workflows WHERE id = ?", [&old])?;
                 continue;
             }
             // The new row first, so what points at the old one can follow it.

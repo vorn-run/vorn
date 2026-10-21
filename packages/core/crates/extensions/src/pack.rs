@@ -174,6 +174,24 @@ pub fn is_safe_id(id: &str) -> bool {
         && !id.contains("..")
 }
 
+/// Ids Vorn's own workflow ids start with (`import:`, `connector:`,
+/// `system:`): an extension of that id would own them.
+pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
+
+/// Refuses an id an extension may not have: unsafe as a directory, or
+/// reserved for Vorn's own workflows.
+pub fn check_id(id: &str) -> Result<(), String> {
+    if !is_safe_id(id) {
+        return Err(format!("\"{id}\" is not an extension id"));
+    }
+    if RESERVED_IDS.contains(&id) {
+        return Err(format!(
+            "\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:"
+        ));
+    }
+    Ok(())
+}
+
 /// A version names a directory too, so it is held to the same rule.
 pub fn is_safe_version(version: &str) -> bool {
     let b = version.as_bytes();
@@ -215,17 +233,36 @@ pub fn read_dir_manifest(dir: &Path) -> Result<Manifest, String> {
 /// unpacked package and vornd on every installed one at start, the one
 /// rewrite for both.
 pub fn relabel_dir(dir: &Path) -> Result<bool, String> {
+    use std::io::Write;
     let toml = dir.join(file::FILE);
+    let refused = |e: &dyn std::fmt::Display| format!("cannot relabel {}: {e}", toml.display());
+    match fs::symlink_metadata(&toml) {
+        Ok(m) if m.file_type().is_symlink() => return Err(refused(&"it is a symbolic link")),
+        Ok(_) => {}
+        Err(_) => return Ok(false),
+    }
     let Ok(text) = fs::read_to_string(&toml) else {
         return Ok(false);
     };
     let Some(next) = crate::compat::relabel(&text) else {
         return Ok(false);
     };
-    let tmp = dir.join(format!("{}.tmp", file::FILE));
-    fs::write(&tmp, next)
-        .and_then(|()| fs::rename(&tmp, &toml))
-        .map_err(|e| format!("cannot relabel {}: {e}", toml.display()))?;
+    // create_new refuses any path already there, a symbolic link included,
+    // so a folder from a repository cannot aim the write elsewhere.
+    let tmp = dir.join(format!(".{}.{}.tmp", file::FILE, std::process::id()));
+    let mut out = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| refused(&e))?;
+    let written = out
+        .write_all(next.as_bytes())
+        .and_then(|()| out.sync_all())
+        .and_then(|()| fs::rename(&tmp, &toml));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(refused(&e));
+    }
     Ok(true)
 }
 
@@ -492,6 +529,50 @@ mod tests {
             "a linked folder is the person's own"
         );
         assert_eq!(store.relabel_installed().0, Vec::<PathBuf>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relabelling_follows_no_symbolic_link() {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("rc");
+        fs::write(&target, "mine\n").unwrap();
+        let old = "api = \"vorn:extension@0.9\"\n";
+
+        // A temp file the repository planted as a link is never written through.
+        let repo = tempfile::tempdir().unwrap();
+        fs::write(repo.path().join(file::FILE), old).unwrap();
+        let planted = format!(".{}.{}.tmp", file::FILE, std::process::id());
+        symlink(&target, repo.path().join(&planted)).unwrap();
+        symlink(&target, repo.path().join(format!("{}.tmp", file::FILE))).unwrap();
+        assert!(relabel_dir(repo.path()).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "mine\n");
+        assert_eq!(
+            fs::read_to_string(repo.path().join(file::FILE)).unwrap(),
+            old
+        );
+
+        // Nor is a manifest that is itself a link.
+        let repo = tempfile::tempdir().unwrap();
+        fs::write(&target, old).unwrap();
+        symlink(&target, repo.path().join(file::FILE)).unwrap();
+        let refused = relabel_dir(repo.path()).unwrap_err();
+        assert!(refused.ends_with("it is a symbolic link"), "{refused}");
+        assert_eq!(fs::read_to_string(&target).unwrap(), old);
+    }
+
+    #[test]
+    fn ids_vorn_names_its_own_workflows_by_are_reserved() {
+        for id in RESERVED_IDS {
+            let refused = check_id(id).unwrap_err();
+            assert_eq!(
+                refused,
+                format!("\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:")
+            );
+        }
+        assert!(check_id("importer").is_ok() && check_id("vorn.connectors").is_ok());
+        assert!(check_id("a/b").is_err());
     }
 
     #[test]
