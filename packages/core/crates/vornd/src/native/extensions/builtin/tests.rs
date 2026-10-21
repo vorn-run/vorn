@@ -263,11 +263,18 @@ async fn offers_an_idle_worktree_and_forgets_it_when_kept() {
 #[tokio::test]
 async fn lists_every_worktree_for_settings() {
     let s = setup();
+    let running = |s: &Setup| {
+        s.builtins.list().as_array().unwrap().iter().any(|b| {
+            b["id"] == "vorn.worktrees" && b["running"] == true
+        })
+    };
+    assert!(!running(&s), "nothing has called it yet");
     s.builtins
         .call("vorn.worktrees", "scan", Value::Null)
         .await
         .unwrap()
         .unwrap();
+    assert!(running(&s), "its call started its component");
     // The main checkout is not one to clean up, so only the worktrees are listed, largest first.
     let rows = s.router.rows("vorn.worktrees", "worktrees");
     assert_eq!(rows.len(), 2);

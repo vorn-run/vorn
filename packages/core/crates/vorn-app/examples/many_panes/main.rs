@@ -5,6 +5,8 @@
 //! many_panes [--panes 8,16] [--cases mixed,agent,hidden] [--seconds 5]
 //!            [--size 1600x1000] [--scale 1] [--out results.json]
 //!            [--agent-rate 32768] [--log-rate 262144]
+//!            [--extensions 0,20] [--reps 1] [--ext-period 2]
+//!            [--idle-wait 0] [--ext-idle-ms MS] [--ext-cap N]
 //! many_panes feed agent|log|redraw|echo [--rate B/s]
 //! ```
 //!
@@ -34,10 +36,25 @@
 //! cent of one core; the programs in the panes are the workload, not counted.
 //! **Memory** is the resident size of the app and of vornd with its holders
 //! at the end of the run.
+//!
+//! **Extensions**: with `--extensions N` (up to 20) each case first links N
+//! test extensions (`extensions.rs`): Node, Python and Bash programs and
+//! Rust Wasm components, services and one-shots. While the panes stream, a
+//! connection of its own calls each one every `--ext-period` seconds, and
+//! the report adds the calls' round trips, the most services seen running,
+//! service restarts and cap stops from vornd's log, and the extension
+//! programs' memory. `--idle-wait S` then stops calling and waits up to S
+//! seconds for every service to stop as idle, and records the memory left
+//! and a cold and a warm call to each service. `--ext-idle-ms` and
+//! `--ext-cap` give vornd another idle time and cap; `--reps` repeats every
+//! case, and the report gives the median and range of the repetitions.
 
 #[cfg(unix)]
-#[path = "../tests/support/mod.rs"]
+#[path = "../../tests/support/mod.rs"]
 mod support;
+
+#[cfg(unix)]
+mod extensions;
 
 #[cfg(not(unix))]
 fn main() {
@@ -331,8 +348,10 @@ mod feed {
 
 #[cfg(unix)]
 mod bench {
+    use std::collections::BTreeMap;
     use std::fmt::Write as _;
     use std::path::Path;
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use serde_json::{json, Value};
@@ -340,6 +359,7 @@ mod bench {
     use vorn_app::ui::{Offscreen, RenderMode, Ui};
     use vorn_app::{ui_config, App};
 
+    use super::extensions;
     use super::flag;
     use super::support::{connect, wait_for, TestVornd};
 
@@ -397,6 +417,12 @@ mod bench {
         out: Option<String>,
         agent_rate: usize,
         log_rate: usize,
+        extensions: Vec<usize>,
+        reps: usize,
+        ext_period: Duration,
+        idle_wait: Duration,
+        ext_idle_ms: Option<u64>,
+        ext_cap: Option<usize>,
     }
 
     impl Opts {
@@ -432,6 +458,21 @@ mod bench {
                 ),
                 Some(None) => return Err("--size is WxH".into()),
             };
+            let extensions = list("extensions", "0")
+                .iter()
+                .map(|n| match n.parse::<usize>() {
+                    Ok(n) if n <= extensions::MAX => Ok(n),
+                    _ => Err(format!("bad --extensions {n:?} (0 to {})", extensions::MAX)),
+                })
+                .collect::<Result<_, _>>()?;
+            let secs = |key: &str, default: f64| -> Result<Duration, String> {
+                Duration::try_from_secs_f64(num(key, default)?).map_err(|_| format!("bad --{key}"))
+            };
+            let whole = |key: &str| -> Result<Option<u64>, String> {
+                flag(args, key)
+                    .map(|v| v.parse().map_err(|_| format!("bad --{key} {v:?}")))
+                    .transpose()
+            };
             Ok(Opts {
                 panes,
                 cases,
@@ -441,6 +482,12 @@ mod bench {
                 out: flag(args, "out").map(str::to_owned),
                 agent_rate: num("agent-rate", 32.0 * 1024.0)? as usize,
                 log_rate: num("log-rate", 256.0 * 1024.0)? as usize,
+                extensions,
+                reps: whole("reps")?.unwrap_or(1).max(1) as usize,
+                ext_period: secs("ext-period", 2.0)?,
+                idle_wait: secs("idle-wait", 0.0)?,
+                ext_idle_ms: whole("ext-idle-ms")?,
+                ext_cap: whole("ext-cap")?.map(|n| n as usize),
             })
         }
     }
@@ -454,10 +501,22 @@ mod bench {
         std::env::set_var("HOME", &home);
         std::env::set_var("VORN_HOME", &home);
         std::env::remove_var("VORN_DATA_DIR");
+        // vornd inherits these; unset, it runs its defaults.
+        match opts.ext_idle_ms {
+            Some(ms) => std::env::set_var("VORN_EXTENSION_IDLE_MS", ms.to_string()),
+            None => std::env::remove_var("VORN_EXTENSION_IDLE_MS"),
+        }
+        match opts.ext_cap {
+            Some(n) => std::env::set_var("VORN_EXTENSION_CAP", n.to_string()),
+            None => std::env::remove_var("VORN_EXTENSION_CAP"),
+        }
         let result = run_all(&opts);
         let _ = std::fs::remove_dir_all(&home);
         let results = result?;
         print!("{}", table(&results));
+        if opts.reps > 1 || opts.extensions.len() > 1 {
+            print!("{}", summary(&results));
+        }
         if let Some(out) = &opts.out {
             let doc = json!({ "machine": machine(), "results": results });
             let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
@@ -468,19 +527,32 @@ mod bench {
 
     fn run_all(opts: &Opts) -> Result<Vec<Value>, String> {
         let mut results = Vec::new();
-        for &n in &opts.panes {
-            for &case in &opts.cases {
-                eprintln!("many_panes: {n} panes, {}", case.name());
-                results.push(run_case(opts, n, case)?);
+        // Repetitions go round every case, so drift over the run spreads evenly.
+        for rep in 1..=opts.reps {
+            for &n in &opts.panes {
+                for &case in &opts.cases {
+                    for &exts in &opts.extensions {
+                        eprintln!(
+                            "many_panes: {n} panes, {}, {exts} extensions, run {rep}/{}",
+                            case.name(),
+                            opts.reps
+                        );
+                        let mut r = run_case(opts, n, case, exts)?;
+                        r["rep"] = json!(rep);
+                        results.push(r);
+                    }
+                }
             }
         }
         Ok(results)
     }
 
-    fn run_case(opts: &Opts, n: usize, case: Case) -> Result<Value, String> {
+    fn run_case(opts: &Opts, n: usize, case: Case, n_ext: usize) -> Result<Value, String> {
         let v = TestVornd::start()
             .ok_or("build vornd and vorn-sessiond into this profile's target directory first")?;
         let mut app = connect(&v);
+        let exts = Arc::new(extensions::generate(&v.home.join("bench-ext"), n_ext)?);
+        extensions::link(app.rpc(), &exts)?;
         let ids: Vec<String> = (0..n)
             .map(|_| {
                 let info = app
@@ -556,6 +628,7 @@ mod bench {
         };
         let revs_before = revs(&app);
         let pids = v.pids();
+        let driver = extensions::Driver::start(&v.home, Arc::clone(&exts), opts.ext_period)?;
         let cpu_app = self_cpu();
         let cpu_daemons = procs_cpu(&pids);
         let started = Instant::now();
@@ -624,6 +697,7 @@ mod bench {
             probe_at = t1 + PROBE_GAP + phase;
         }
         let wall = started.elapsed().as_secs_f64();
+        let calls = driver.finish();
         let app_cpu = (self_cpu() - cpu_app) / wall * 100.0;
         let daemon_cpu = (procs_cpu(&pids) - cpu_daemons) / wall * 100.0;
         let streaming = revs(&app)
@@ -638,9 +712,17 @@ mod bench {
         let over = frames.iter().filter(|&&f| f > ms(FRAME)).count();
         let mem_app = procs_rss(&[std::process::id()]);
         let mem_daemons = procs_rss(&pids);
+        let programs = extensions::programs_rss(pids[0], &pids[1..]);
+        let busy_log = extensions::read_log(&v.log());
+        let idle = if opts.idle_wait.is_zero() {
+            Value::Null
+        } else {
+            idle(opts, &mut app, &mut ui, &target, size, &v, &exts)?
+        };
         Ok(json!({
             "case": case.name(),
             "panes": n,
+            "extensions": n_ext,
             "shown": shown,
             "streaming": streaming,
             "renderer": ui.renderer_name(),
@@ -661,8 +743,108 @@ mod bench {
                 "daemons": round(daemon_cpu),
                 "per_pane": round((app_cpu + daemon_cpu) / n as f64),
             },
-            "rss_mb": { "app": round(mem_app), "daemons": round(mem_daemons) },
+            "rss_mb": {
+                "app": round(mem_app),
+                "daemons": round(mem_daemons),
+                "programs": round(programs.values().map(|p| p.1).sum()),
+                "programs_by_lang": programs_json(&programs),
+            },
+            "ext_calls": {
+                "count": calls.ms.len(),
+                "p50": pct(&calls.ms, 50.0),
+                "p99": pct(&calls.ms, 99.0),
+                "errors": calls.errors.len(),
+                "first_error": calls.errors.first(),
+            },
+            "running_peak": { "bench": calls.peak_bench, "builtin": calls.peak_builtin },
+            "lifecycle": lifecycle_json(&busy_log),
+            "idle": idle,
         }))
+    }
+
+    /// The quiet after the busy window: no more calls while the panes go on
+    /// streaming, until every service has stopped as idle or `--idle-wait`
+    /// is up; then the memory left, and a cold and a warm call to each
+    /// service, which is what stopping it costs the next use.
+    #[allow(clippy::too_many_arguments)]
+    fn idle(
+        opts: &Opts,
+        app: &mut App,
+        ui: &mut Ui,
+        target: &Offscreen,
+        size: (f32, f32),
+        v: &TestVornd,
+        exts: &[extensions::Ext],
+    ) -> Result<Value, String> {
+        const POLL: Duration = Duration::from_millis(500);
+        let quiet = Instant::now();
+        let mut polled = quiet;
+        let mut left = extensions::running(app.rpc())?;
+        while left != (0, 0) && quiet.elapsed() < opts.idle_wait {
+            draw(app, ui, target, size);
+            std::thread::sleep(FRAME);
+            if polled.elapsed() >= POLL {
+                polled = Instant::now();
+                left = extensions::running(app.rpc())?;
+            }
+        }
+        let waited = quiet.elapsed().as_secs_f64();
+        let pids = v.pids();
+        let programs = extensions::programs_rss(pids[0], &pids[1..]);
+        let daemons = procs_rss(&pids);
+        let lifecycle = extensions::read_log(&v.log());
+        let mut cold: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+        let mut warm: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+        for ext in exts.iter().filter(|e| e.service) {
+            let lang = ext.lang.name();
+            cold.entry(lang)
+                .or_default()
+                .push(extensions::call(app.rpc(), ext)?);
+            warm.entry(lang)
+                .or_default()
+                .push(extensions::call(app.rpc(), ext)?);
+        }
+        let by_lang = |m: &BTreeMap<&str, Vec<f64>>| -> Value {
+            m.iter()
+                .map(|(lang, ms)| (lang.to_string(), json!(pct(ms, 50.0))))
+                .collect::<serde_json::Map<_, _>>()
+                .into()
+        };
+        Ok(json!({
+            "seconds": round(waited),
+            "all_stopped": left == (0, 0),
+            "running": { "bench": left.0, "builtin": left.1 },
+            "rss_mb": {
+                "daemons": round(daemons),
+                "programs": round(programs.values().map(|p| p.1).sum()),
+            },
+            "lifecycle": lifecycle_json(&lifecycle),
+            "cold_call_ms": by_lang(&cold),
+            "warm_call_ms": by_lang(&warm),
+        }))
+    }
+
+    fn programs_json(programs: &BTreeMap<&str, (usize, f64)>) -> Value {
+        programs
+            .iter()
+            .map(|(lang, (count, mb))| {
+                (
+                    lang.to_string(),
+                    json!({ "processes": count, "mb": round(*mb) }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into()
+    }
+
+    fn lifecycle_json(l: &extensions::Lifecycle) -> Value {
+        json!({
+            "starts": l.starts,
+            "restarts": l.restarts,
+            "cap_stops": l.evictions,
+            "crashes": l.crashes,
+            "idle_stops": l.idle_stops,
+        })
     }
 
     /// The window's size `t` into a two-second drag to 60% by 70% and back.
@@ -805,15 +987,16 @@ mod bench {
     /// The results as a Markdown table.
     fn table(results: &[Value]) -> String {
         let mut s = String::from(
-            "| Case | Panes | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99 | CPU app | CPU vornd | CPU per pane | RSS app | RSS vornd |\n\
-             | ---- | ----: | ----: | --------: | --------: | -----------: | -----------------: | --: | ------: | --------: | -----------: | ------: | --------: |\n",
+            "| Case | Panes | Ext | Shown | Frame p50 | Frame p99 | Over 16.7 ms | Input to pixel p50 | p99 | CPU app | CPU vornd | CPU per pane | RSS app | RSS vornd |\n\
+             | ---- | ----: | --: | ----: | --------: | --------: | -----------: | -----------------: | --: | ------: | --------: | -----------: | ------: | --------: |\n",
         );
         for r in results {
             let _ = writeln!(
                 s,
-                "| {} | {} | {} | {} ms | {} ms | {}% | {} ms | {} ms | {}% | {}% | {}% | {} MB | {} MB |",
+                "| {} | {} | {} | {} | {} ms | {} ms | {}% | {} ms | {} ms | {}% | {}% | {}% | {} MB | {} MB |",
                 r["case"].as_str().unwrap_or_default(),
                 r["panes"],
+                r["extensions"],
                 r["shown"],
                 r["frame_ms"]["p50"],
                 r["frame_ms"]["p99"],
@@ -834,6 +1017,106 @@ mod bench {
                 r["renderer"].as_str().unwrap_or_default(),
                 r["size"].as_str().unwrap_or_default()
             );
+        }
+        s
+    }
+
+    /// The measures the summary gives, as JSON pointers into a result.
+    const MEASURES: [(&str, &str); 12] = [
+        ("Frame p50 ms", "/frame_ms/p50"),
+        ("Frame p99 ms", "/frame_ms/p99"),
+        ("Input p50 ms", "/input_to_pixel_ms/p50"),
+        ("Input p99 ms", "/input_to_pixel_ms/p99"),
+        ("Call p50 ms", "/ext_calls/p50"),
+        ("RSS vornd MB", "/rss_mb/daemons"),
+        ("RSS programs MB", "/rss_mb/programs"),
+        ("Running peak", "/running_peak/bench"),
+        ("Restarts", "/lifecycle/restarts"),
+        ("Cap stops", "/lifecycle/cap_stops"),
+        ("Idle RSS vornd MB", "/idle/rss_mb/daemons"),
+        ("Idle RSS programs MB", "/idle/rss_mb/programs"),
+    ];
+    /// The measures that must not move with extensions installed.
+    const HELD: [&str; 4] = [
+        "/frame_ms/p50",
+        "/frame_ms/p99",
+        "/input_to_pixel_ms/p50",
+        "/input_to_pixel_ms/p99",
+    ];
+
+    /// The repetitions of each case, panes and extensions as the median and
+    /// range of each measure, then whether each held measure with extensions
+    /// is within noise of the same case without: its median no further from
+    /// the baseline's than the wider of the two ranges.
+    fn summary(results: &[Value]) -> String {
+        let mut groups: BTreeMap<(String, u64, u64), Vec<&Value>> = BTreeMap::new();
+        for r in results {
+            let key = (
+                r["case"].as_str().unwrap_or_default().to_owned(),
+                r["panes"].as_u64().unwrap_or_default(),
+                r["extensions"].as_u64().unwrap_or_default(),
+            );
+            groups.entry(key).or_default().push(r);
+        }
+        let stats = |runs: &[&Value], at: &str| -> Option<(f64, f64, f64)> {
+            let mut v: Vec<f64> = runs
+                .iter()
+                .filter_map(|r| r.pointer(at)?.as_f64())
+                .collect();
+            v.sort_by(f64::total_cmp);
+            let (first, last) = (*v.first()?, *v.last()?);
+            let mid = v.len() / 2;
+            let median = if v.len() % 2 == 1 {
+                v[mid]
+            } else {
+                (v[mid - 1] + v[mid]) / 2.0
+            };
+            Some((round(median), first, last))
+        };
+        let mut s = String::from("\nMedian (min–max) over the repetitions:\n\n| Case | Panes | Ext | Runs |");
+        for (label, _) in MEASURES {
+            let _ = write!(s, " {label} |");
+        }
+        s += "\n| ---- | ----: | --: | ---: |";
+        s += &" ---: |".repeat(MEASURES.len());
+        s += "\n";
+        for ((case, panes, ext), runs) in &groups {
+            let _ = write!(s, "| {case} | {panes} | {ext} | {} |", runs.len());
+            for (_, at) in MEASURES {
+                match stats(runs, at) {
+                    Some((m, lo, hi)) => {
+                        let _ = write!(s, " {m} ({lo}–{hi}) |");
+                    }
+                    None => s += " – |",
+                }
+            }
+            s += "\n";
+        }
+        s += "\n";
+        for ((case, panes, ext), runs) in groups.iter().filter(|(k, _)| k.2 > 0) {
+            let Some(base) = groups.get(&(case.clone(), *panes, 0)) else {
+                continue;
+            };
+            for at in HELD {
+                let (Some((m, lo, hi)), Some((m0, lo0, hi0))) = (stats(runs, at), stats(base, at))
+                else {
+                    continue;
+                };
+                let noise = (hi - lo).max(hi0 - lo0);
+                let delta = round(m - m0);
+                let verdict = if delta.abs() <= noise {
+                    "within noise"
+                } else if delta < 0.0 {
+                    "better"
+                } else {
+                    "OUTSIDE NOISE"
+                };
+                let _ = writeln!(
+                    s,
+                    "{case}, {panes} panes, {ext} extensions, {at}: {m} vs {m0} ms, Δ {delta:+}, noise {}: {verdict}",
+                    round(noise)
+                );
+            }
         }
         s
     }

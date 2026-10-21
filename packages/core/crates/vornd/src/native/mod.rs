@@ -380,7 +380,12 @@ impl Native {
             polls: Arc::default(),
             extensions: OnceLock::new(),
             main: Arc::default(),
-            lifecycle: vorn_extensions::lifecycle::Lifecycle::new(Default::default()),
+            lifecycle: vorn_extensions::lifecycle::Lifecycle::new(
+                vorn_extensions::lifecycle::Policy::default().overridden(
+                    std::env::var("VORN_EXTENSION_IDLE_MS").ok().as_deref(),
+                    std::env::var("VORN_EXTENSION_CAP").ok().as_deref(),
+                ),
+            ),
             events: vorn_extensions::events::Bus::new(),
         })
     }
