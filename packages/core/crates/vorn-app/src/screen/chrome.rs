@@ -135,7 +135,8 @@ fn pills(s: &Screen<'_>) -> El {
             }
         })
         .collect();
-    let on = buttons.iter().position(|b| b.on).unwrap_or(0);
+    // A view whose button is hidden leaves no pill chosen.
+    let on = buttons.iter().position(|b| b.on).unwrap_or(usize::MAX);
     widgets::pills(s.ui, VIEWS, "Main view", &items, on)
 }
 

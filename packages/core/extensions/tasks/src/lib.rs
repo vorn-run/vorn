@@ -157,7 +157,10 @@ impl Tasks {
         let Some(session) = scope else {
             return Ok(pane::unknown());
         };
-        let found = host.call("sessions.get", json!({ "sessionId": session }))?;
+        // An ended session is not found; its card still shows the notice.
+        let Ok(found) = host.call("sessions.get", json!({ "sessionId": session })) else {
+            return Ok(pane::unknown());
+        };
         let Some(project) = found.get("projectName").and_then(Value::as_str) else {
             return Ok(pane::unknown());
         };

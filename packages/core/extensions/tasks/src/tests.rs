@@ -116,10 +116,11 @@ impl Host for Vorn {
                 Ok(json!({ "tasks": tasks, "next": (n == limit).then_some(offset + n) }))
             }
             "project.list" => self.store.call("dbListProjects", json!([])).map_err(err),
-            "sessions.get" => Ok(match args["sessionId"].as_str() {
-                Some("s-app") => json!({ "id": "s-app", "projectName": "app" }),
-                _ => Value::Null,
-            }),
+            "sessions.get" => match args["sessionId"].as_str() {
+                Some("s-app") => Ok(json!({ "id": "s-app", "projectName": "app" })),
+                Some("s-loose") => Ok(json!({ "id": "s-loose" })),
+                _ => Err(err("Session not found")),
+            },
             "agents.list" => Ok(json!([{ "id": "claude" }, { "id": "codex" }])),
             CHANGED => {
                 self.changed.push(args);
@@ -792,8 +793,10 @@ fn the_pane_beside_a_card_lists_only_its_projects_tasks() {
             ("Done".to_owned(), vec!["a2".to_owned()]),
         ]
     );
-    let unknown = pane_at(&mut t, &mut v, "s-gone");
-    assert!(matches!(unknown.kind, tree::Kind::Notice { .. }));
+    for session in ["s-gone", "s-loose"] {
+        let unknown = pane_at(&mut t, &mut v, session);
+        assert!(matches!(unknown.kind, tree::Kind::Notice { .. }));
+    }
 }
 
 #[test]
