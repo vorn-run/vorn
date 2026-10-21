@@ -3,7 +3,7 @@
 id = "vorn-light"
 name = "Vorn Light"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "Vorn's own light theme."
 

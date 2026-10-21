@@ -3,7 +3,7 @@
 id = "dracula"
 name = "Dracula"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "A dark palette by the Dracula Theme authors."
 

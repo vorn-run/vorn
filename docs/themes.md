@@ -10,7 +10,7 @@ Settings › Appearance picks the colour scheme (System, Light or Dark), a light
 id = "acme.dusk"
 name = "Acme Dusk"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "A warm dark theme."
 
 [theme]

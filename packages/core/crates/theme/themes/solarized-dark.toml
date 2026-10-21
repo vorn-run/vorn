@@ -3,7 +3,7 @@
 id = "solarized-dark"
 name = "Solarized Dark"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "Solarized's dark palette, by Ethan Schoonover."
 

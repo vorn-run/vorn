@@ -2040,7 +2040,7 @@ header = "Authorization: Bearer {token}"
     const THEME: &str = r##"id = "acme.dusk"
 name = "Acme Dusk"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [theme]
 appearance = "dark"
