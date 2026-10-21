@@ -272,16 +272,16 @@ fn a_shells_commands_show_as_blocks_with_history_and_completions() {
     wait(&mut shot, &mut app, "ListItem", "echo vorn-42");
     shot.type_line(&mut app, "false");
     wait(&mut shot, &mut app, "ListItem", "false");
-    shot.type_line(&mut app, "sleep 2");
-    wait(&mut shot, &mut app, "Status", "Running sleep 2");
+    shot.type_line(&mut app, "sleep 6");
+    wait(&mut shot, &mut app, "Status", "Running sleep 6");
     std::thread::sleep(Duration::from_millis(400));
     both(
         &mut shot,
         &mut app,
         "blocks-running",
-        &["sleep 2", "to interrupt"],
+        &["sleep 6", "to interrupt"],
     );
-    wait(&mut shot, &mut app, "ListItem", "sleep 2");
+    wait(&mut shot, &mut app, "ListItem", "sleep 6");
     wait_for("the composer back", || {
         app.pump();
         shot.labelled(&mut app, "TextInput", "Type a command")
@@ -290,14 +290,14 @@ fn a_shells_commands_show_as_blocks_with_history_and_completions() {
         &mut shot,
         &mut app,
         "blocks",
-        &["echo vorn-42", "vorn-42", "exit 1", "sleep 2"],
+        &["echo vorn-42", "vorn-42", "exit 1", "sleep 6"],
     );
 
     // ↑ opens the commands run before, newest first.
     let field = wait(&mut shot, &mut app, "TextInput", "Type a command");
     shot.click(&mut app, field);
     shot.send(&mut app, key("ArrowUp", 0, None));
-    wait(&mut shot, &mut app, "ListBoxOption", "sleep 2");
+    wait(&mut shot, &mut app, "ListBoxOption", "sleep 6");
     both(&mut shot, &mut app, "blocks-history", &["echo vorn-42"]);
     shot.send(&mut app, key("Escape", 0, None));
 
@@ -313,7 +313,10 @@ fn a_shells_commands_show_as_blocks_with_history_and_completions() {
     shot.ui.set_edit_text(field, "");
     shot.type_text(&mut app, "ech");
     shot.send(&mut app, key("ArrowRight", 0, None));
-    assert_eq!(shot.ui.edit_text(field), "echo vorn-42");
+    // → before Shell blocks answered "ech" takes the ghost once the answer comes.
+    shot.until(&mut app, "the ghost taken", |_, ui| {
+        (ui.edit_text(field) == "echo vorn-42").then_some(())
+    });
     // Tab takes the common start of the completions.
     shot.ui.set_edit_text(field, "");
     shot.type_text(&mut app, "git st");
