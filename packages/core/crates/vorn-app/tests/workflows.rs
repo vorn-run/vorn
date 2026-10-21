@@ -64,6 +64,7 @@ fn workflows_view(v: &TestVornd) -> (App, Shot) {
     let mut app = connect(v);
     add_project(&mut app, v, "web", json!({}));
     let mut shot = Shot::new();
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     // The view is Workflows' tree around the canvas, once its component answers.

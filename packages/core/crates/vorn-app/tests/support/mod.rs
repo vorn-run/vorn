@@ -256,6 +256,16 @@ impl Drop for TestVornd {
     }
 }
 
+/// Waits for the built-ins' top-bar views, whose keys come with them.
+pub fn views_listed(shot: &mut Shot, app: &mut App) {
+    shot.until(app, "the built-ins' views", |app, _| {
+        let p = &app.st.points;
+        (p.find("vorn.tasks", "views", "board").is_some()
+            && p.find("vorn.workflows", "views", "workflows").is_some())
+        .then_some(())
+    });
+}
+
 /// Polls `f` until it answers, or fails the test with `what`.
 #[track_caller]
 pub fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {

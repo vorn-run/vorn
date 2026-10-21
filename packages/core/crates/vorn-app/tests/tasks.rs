@@ -63,6 +63,7 @@ fn tasks_view(v: &TestVornd) -> (App, Shot) {
     let mut app = connect(v);
     add_project(&mut app, v, "web", json!({}));
     let mut shot = Shot::new();
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
     board_drawn(&mut shot, &mut app);
@@ -397,6 +398,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     let dir = add_project(&mut app, &v, "web", json!({}));
     repo(&dir);
     let mut shot = Shot::new();
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyT", MOD(), None));
     board_drawn(&mut shot, &mut app);
     let id = create(&mut shot, &mut app, "Add two");
@@ -761,7 +763,7 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
     shot.save(&mut app, "task-badge");
     support::every_size(&mut app, "task-badge", &["Badge me"]);
 
-    // Switched off, the board says so, the tasks stay, and writes are refused.
+    // Switched off, the board closes back to Sessions, the tasks stay, and writes are refused.
     app.rpc()
         .call(
             "extension:setBuiltin",
@@ -775,8 +777,7 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
         (app.st.points.loaded && app.st.points.find("vorn.tasks", "views", "board").is_none())
             .then_some(())
     });
-    let off = cells_text(&mut app);
-    assert!(off.contains("Tasks is off"), "{off}");
+    assert_eq!(app.st.view, MainView::Sessions);
     let refused = app
         .rpc()
         .call("task:setStatus", json!({ "id": id, "status": "done" }));

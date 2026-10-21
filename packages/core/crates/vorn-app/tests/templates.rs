@@ -216,7 +216,7 @@ fn every_template_kind_draws_on_every_surface() {
     let labels = app.menu_labels(&shot.ui);
     assert!(labels.iter().any(|l| l == "Reset Turn Count"), "{labels:?}");
     choose(&mut shot, &mut app, "Turns");
-    let all_pane = point("panes", "all");
+    let all_pane = vorn_app::points::scoped(&point("panes", "all"), &sid);
     shot.until(&mut app, "the tree pane", |a, _| {
         a.st.ext.panes.get(&sid)?;
         tree_says(a, &all_pane, "At work: 0 of 1").then_some(())
