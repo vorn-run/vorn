@@ -37,3 +37,4 @@ packages/core/vorn.exe
 packages/core/conpty.dll
 packages/core/x64/
 packages/core/arm64/
+.extensions/

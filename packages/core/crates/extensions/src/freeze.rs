@@ -9,6 +9,10 @@
 //! reason, and every place a core or host crate names a built-in is listed
 //! there too, so what is left to move out is a list, kept honest by
 //! [`check`] in the core's tests.
+//!
+//! The extensions that moved to their own repository and come back as the
+//! shipped set (`shipped.toml`) are held to the same rules there by
+//! [`check_extensions`], and no core or host crate may name them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -25,6 +29,10 @@ use crate::manifest::{file, Permission};
 pub const FILE: &str = "freeze.toml";
 /// Where the built-ins live, relative to the workspace.
 const BUILTINS: &str = "extensions";
+/// The shipped set's lock, beside `freeze.toml`.
+const SHIPPED: &str = "shipped.toml";
+/// The SDK's package, the one Vorn crate an extension elsewhere builds on.
+const SDK_PACKAGE: &str = "vorn-extension-sdk";
 /// The one Vorn crate a built-in builds on.
 const SDK: &str = "crates/extension-sdk";
 /// What a core crate may hold, and nothing else.
@@ -83,6 +91,20 @@ struct Exceptions {
     dependencies: BTreeMap<String, String>,
     #[serde(default)]
     hooks: BTreeMap<String, String>,
+}
+
+/// The shipped set's lock: each extension's id, folder in its repository and version.
+#[derive(Debug, Default, Deserialize)]
+struct Lock {
+    #[serde(default)]
+    extension: Vec<Locked>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Locked {
+    id: String,
+    path: String,
+    version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,17 +208,29 @@ fn builtin_dirs(root: &Path) -> Vec<String> {
 
 fn check_builtin(report: &mut Report, root: &Path, dir: &str, freeze: &Freeze) {
     let folder = root.join(dir);
+    check_manifest(report, &folder);
+    check_dependencies(report, root, dir, freeze);
+    check_sources(report, &folder);
+}
+
+/// Its manifest reads as an installed extension's; answers it, if it does.
+fn check_manifest(report: &mut Report, folder: &Path) -> Option<crate::manifest::Manifest> {
     let manifest = folder.join(file::FILE);
     match read(&manifest) {
-        Ok(text) => {
-            if let Err(e) = file::parse(&text) {
+        Ok(text) => match file::parse(&text) {
+            Ok(parsed) => return Some(parsed),
+            Err(e) => {
                 let message = format!("does not read as an installed extension's: {}", e.field);
                 report.at(&manifest, e.line, format!("{message}: {}", e.message));
             }
-        }
+        },
         Err(why) => report.at(&manifest, 1, why),
     }
-    check_dependencies(report, root, dir, freeze);
+    None
+}
+
+/// Its Rust uses none of the SDK's hidden modules and names only public bridge names.
+fn check_sources(report: &mut Report, folder: &Path) {
     for source in rust_files(&folder.join("src")) {
         let Ok(text) = fs::read_to_string(&source) else {
             continue;
@@ -263,6 +297,78 @@ fn check_dependencies(report: &mut Report, root: &Path, dir: &str, freeze: &Free
                 &path,
                 line,
                 format!("depends on {target}; a built-in builds on {SDK} alone (or list \"{key}\" in {FILE})"),
+            );
+        }
+    }
+}
+
+// ---- the extensions elsewhere ----
+
+/// Checks the shipped set's extensions in their repository's checkout at
+/// `checkout`, against the public API as [`check`] holds the built-ins: each
+/// folder `root`'s `shipped.toml` names has a manifest that reads as an
+/// installed one's, with the id and version the lock pins; its Rust builds on
+/// the SDK alone of Vorn's crates, uses none of its hidden modules and names
+/// only public bridge methods, events and permissions.
+pub fn check_extensions(root: &Path, checkout: &Path) -> Result<(), Vec<Finding>> {
+    let mut report = Report {
+        root: checkout.to_path_buf(),
+        found: Vec::new(),
+    };
+    let lock_path = root.join(SHIPPED);
+    let lock: Lock = match read(&lock_path)
+        .and_then(|t| toml::from_str(&t).map_err(|e| format!("does not read: {}", e.message())))
+    {
+        Ok(lock) => lock,
+        Err(why) => {
+            report.at(&lock_path, 1, why);
+            return Err(report.found);
+        }
+    };
+    for locked in &lock.extension {
+        let folder = checkout.join(&locked.path);
+        if let Some(manifest) = check_manifest(&mut report, &folder) {
+            if manifest.id != locked.id || manifest.version != locked.version {
+                report.at(
+                    &folder.join(file::FILE),
+                    1,
+                    format!(
+                        "is {}@{}, and {SHIPPED} pins {}@{}",
+                        manifest.id, manifest.version, locked.id, locked.version
+                    ),
+                );
+            }
+        }
+        check_vorn_dependencies(&mut report, &folder);
+        check_sources(&mut report, &folder);
+    }
+    if report.found.is_empty() {
+        Ok(())
+    } else {
+        Err(report.found)
+    }
+}
+
+/// Of Vorn's crates, an extension elsewhere depends on the SDK alone.
+fn check_vorn_dependencies(report: &mut Report, folder: &Path) {
+    let path = folder.join("Cargo.toml");
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    let cargo: CargoToml = match toml::from_str(&text) {
+        Ok(c) => c,
+        Err(e) => return report.at(&path, 1, format!("does not read: {}", e.message())),
+    };
+    let tables = [&cargo.dependencies, &cargo.build_dependencies]
+        .into_iter()
+        .chain(cargo.target.values().map(|t| &t.dependencies));
+    for name in tables.flat_map(BTreeMap::keys) {
+        if name.starts_with("vorn-") && name != SDK_PACKAGE {
+            let line = line_of(&text, name).unwrap_or(1);
+            report.at(
+                &path,
+                line,
+                format!("depends on {name}; an extension builds on {SDK_PACKAGE} alone"),
             );
         }
     }
@@ -483,7 +589,7 @@ fn check_hooks(
     }
 }
 
-/// The ids of the built-ins and the exception crates' packages.
+/// The ids of the built-ins, the exception crates' packages and the shipped set.
 fn builtin_ids(root: &Path, freeze: &Freeze, builtins: &[String]) -> BTreeSet<String> {
     let mut manifests: Vec<PathBuf> = builtins
         .iter()
@@ -494,11 +600,16 @@ fn builtin_ids(root: &Path, freeze: &Freeze, builtins: &[String]) -> BTreeSet<St
         let toml = root.join(module).with_extension("toml");
         manifests.push(toml);
     }
+    let shipped = fs::read_to_string(root.join(SHIPPED))
+        .ok()
+        .and_then(|t| toml::from_str::<Lock>(&t).ok())
+        .unwrap_or_default();
     manifests
         .iter()
         .filter_map(|m| fs::read_to_string(m).ok())
         .filter_map(|t| toml::from_str::<toml::Table>(&t).ok())
         .filter_map(|t| t.get("id").and_then(toml::Value::as_str).map(str::to_owned))
+        .chain(shipped.extension.into_iter().map(|e| e.id))
         .collect()
 }
 

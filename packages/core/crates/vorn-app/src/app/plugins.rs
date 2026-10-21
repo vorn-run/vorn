@@ -475,12 +475,17 @@ impl App {
             p.progress.remove(&id);
             return;
         };
-        let mut source = json!({ "kind": "git", "url": s(catalog, "git") });
-        for key in ["path", "branch"] {
-            if let Some(v) = s(catalog, key).filter(|v| !v.is_empty()) {
-                source[key] = json!(v);
+        let source = if crate::plugins::released_pack(catalog) {
+            json!({ "kind": "catalog", "id": id })
+        } else {
+            let mut source = json!({ "kind": "git", "url": s(catalog, "git") });
+            for key in ["path", "branch"] {
+                if let Some(v) = s(catalog, key).filter(|v| !v.is_empty()) {
+                    source[key] = json!(v);
+                }
             }
-        }
+            source
+        };
         p.progress.insert(id, Progress::phase("checking"));
         self.call(
             Call::Plug(PlugCall::Inspect {

@@ -374,7 +374,7 @@ impl Extensions {
     /// Tells the agents' registry which installed packages adapt an agent.
     fn sync_adapters(&self) {
         if let Some(adapters) = self.around.adapters() {
-            adapters.set_installed(crate::adapters::read_installed(&self.router.store()));
+            adapters.set_installed(crate::adapters::read_installed(self.router.store()));
         }
     }
 

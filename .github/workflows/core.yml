@@ -30,6 +30,7 @@ on:
       - 'package.json'
       - 'yarn.lock'
       - '.github/workflows/core.yml'
+      - '.github/actions/shipped/**'
   pull_request:
     branches: [main]
     paths: *paths
@@ -117,6 +118,9 @@ jobs:
       - name: Rust toolchain
         working-directory: packages/core
         run: rustup toolchain install
+
+      # The extension packs vornd ships, from shipped.toml.
+      - uses: ./.github/actions/shipped
 
       # target/ holds the Ghostty checkout and Zig's caches as well as cargo's,
       # which is most of a cold build. v2 holds the ci profile's dependencies

@@ -3,7 +3,7 @@
 # and sha256; vornd's build embeds `<id>-<version>.vorn.tgz` from
 # $VORN_SHIPPED_DIR (else packages/core/shipped/), and scripts/shipped.mjs
 # builds them from the vorn-run/extensions checkout at `rev`.
-rev = "59f0ec7"
+rev = "59f0ec78c57177db561264de1ab9b7e1d9b7c934"
 
 [[extension]]
 id = "vorn.worktrees"

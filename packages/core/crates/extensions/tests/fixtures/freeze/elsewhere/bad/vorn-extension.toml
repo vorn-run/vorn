@@ -1,0 +1,4 @@
+id = "vorn.bad"
+name = "Bad"
+version = "1.0.0"
+api = "vorn:extension@1.0"

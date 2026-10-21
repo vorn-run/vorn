@@ -12,6 +12,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/server-linux-arm64.yml'
+      - '.github/actions/shipped/**'
+      - 'packages/core/shipped.toml'
 
 jobs:
   server:
@@ -60,6 +62,9 @@ jobs:
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
           rustup toolchain install
+
+      # The extension packs vornd ships, from shipped.toml.
+      - uses: ./.github/actions/shipped
 
       - uses: actions/cache@v6
         with:

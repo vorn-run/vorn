@@ -142,9 +142,10 @@ impl Daemon {
     /// Installs the shipped set ([`crate::shipped`]) through the same path as
     /// any package, offline, before the extension host reads the packages:
     /// on a first launch, and whenever this build carries a newer version.
-    pub async fn install_shipped(&self) {
+    /// Says which it installed or updated, for [`Daemon::prepare_shipped`].
+    pub async fn install_shipped(&self) -> Vec<String> {
         let Some(dir) = self.native.database().and_then(std::path::Path::parent) else {
-            return;
+            return Vec::new();
         };
         let packages = dir.join("connectors");
         let installs = self.native.installs(dir);
@@ -154,14 +155,33 @@ impl Daemon {
         })
         .await
         else {
-            return;
+            return Vec::new();
         };
         if synced.installed.is_empty() && synced.updated.is_empty() {
-            return;
+            return Vec::new();
         }
         debug!(installed = ?synced.installed, updated = ?synced.updated, "the shipped set");
-        let adapters = std::sync::Arc::clone(self.native.adapters());
+        let adapters = Arc::clone(self.native.adapters());
         let _ = tokio::task::spawn_blocking(move || adapters.load_installed(&packages)).await;
+        [synced.installed, synced.updated].concat()
+    }
+
+    /// Compiles the components of the shipped packs just installed, in the
+    /// background, as an install from Settings does, so no first use waits.
+    pub fn prepare_shipped(&self, ids: Vec<String>) {
+        let Some(router) = self.native.extensions().map(|e| Arc::clone(e.router())) else {
+            return;
+        };
+        if ids.is_empty() {
+            return;
+        }
+        tokio::spawn(async move {
+            for id in ids {
+                if let Err(err) = router.prepare_installed(&id).await {
+                    warn!("[extensions] {err}");
+                }
+            }
+        });
     }
 
     /// Starts the work model ([`crate::native::work`]) once vornd has a

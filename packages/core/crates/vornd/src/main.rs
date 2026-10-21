@@ -407,7 +407,7 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
     }
     daemon.set_database(db);
     daemon.relabel_installed().await;
-    daemon.install_shipped().await;
+    let shipped = daemon.install_shipped().await;
     daemon.set_desktop_token(credential.clone());
     let serving =
         match vornd::serve::Serving::start(config, held, daemon.native(), credential).await {
@@ -429,6 +429,7 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
     daemon.start_work();
     daemon.start_hooks().await;
     daemon.start_extensions().await;
+    daemon.prepare_shipped(shipped);
     serving.publish();
     let native = Arc::downgrade(daemon.native());
     tokio::spawn(Arc::clone(&serving).follow_config(native.clone()));
