@@ -221,7 +221,7 @@ impl Builtins {
                 };
                 let api = Arc::new(Api {
                     manifest: Arc::clone(&manifest),
-                    caller: Caller::of(&manifest),
+                    caller: Caller::builtin(&manifest),
                     router: Arc::clone(&router),
                 });
                 Some(Entry {

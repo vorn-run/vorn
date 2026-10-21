@@ -27,22 +27,35 @@ pub struct Caller {
     /// Declares `process.run`: a workflow it seeds may run commands and
     /// agents, and it may run workflows not its own.
     pub runs_commands: bool,
+    /// One Vorn ships, the only kind that may have a reserved id
+    /// ([`crate::pack::is_reserved`]) and own that namespace.
+    pub builtin: bool,
 }
 
 impl Caller {
-    /// The extension `manifest` describes, about no project.
+    /// The installed or linked extension `manifest` describes, about no project.
     pub fn of(manifest: &Manifest) -> Caller {
         Caller {
             extension: manifest.id.clone(),
             project: None,
             runs_commands: declares(manifest, Permission::ProcessRun),
+            builtin: false,
         }
     }
 
-    /// Whether workflow `id` is in its namespace: `<extension id>:`. A
-    /// reserved id owns nothing, so Vorn's own workflows stay Vorn's.
+    /// The built-in `manifest` describes, which Vorn itself ships.
+    pub fn builtin(manifest: &Manifest) -> Caller {
+        Caller {
+            builtin: true,
+            ..Caller::of(manifest)
+        }
+    }
+
+    /// Whether workflow `id` is in its namespace: `<extension id>:`. An
+    /// installed extension with a reserved id owns nothing, so Vorn's own
+    /// workflows and its built-ins' stay theirs.
     pub fn owns(&self, id: &str) -> bool {
-        !crate::pack::RESERVED_IDS.contains(&self.extension.as_str())
+        (self.builtin || !crate::pack::is_reserved(&self.extension))
             && id
                 .strip_prefix(self.extension.as_str())
                 .is_some_and(|rest| rest.starts_with(':'))
@@ -580,13 +593,25 @@ header = "Authorization: Bearer {token}"
         use serde_json::json;
         let x = caller();
         assert!(x.owns("x:a") && !x.owns("xy:a") && !x.owns("x") && !x.owns("import:a"));
-        for reserved in crate::pack::RESERVED_IDS {
+        for reserved in crate::pack::RESERVED_IDS
+            .into_iter()
+            .chain(["vorn.connectors"])
+        {
             let posing = Caller {
                 extension: reserved.into(),
                 ..x.clone()
             };
-            assert!(!posing.owns(&format!("{reserved}:a")), "{reserved}");
+            let theirs = format!("{reserved}:c1:issues");
+            assert!(!posing.owns(&theirs), "{reserved}");
+            assert!(admit_own(&posing, "workflow.unseed", &theirs).is_err());
+            assert!(admit_run(&posing, &theirs).is_err());
         }
+        let shipped = Caller {
+            extension: "vorn.connectors".into(),
+            builtin: true,
+            ..x.clone()
+        };
+        assert!(shipped.owns("vorn.connectors:c1:issues"));
         assert_eq!(admit_own(&x, "workflow.unseed", "x:conn:"), Ok(()));
         let foreign = admit_own(&x, "workflow.unseed", "import:").unwrap_err();
         assert_eq!(

@@ -265,7 +265,7 @@ impl Host for VorndHost {
         let world = crate::native::extensions::world::Wired {
             native: self.native.clone(),
         };
-        let caller = Caller::of(&manifest);
+        let caller = Caller::builtin(&manifest);
         world
             .call(&caller, method, args)
             .await

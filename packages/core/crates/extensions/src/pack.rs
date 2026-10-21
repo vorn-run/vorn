@@ -178,13 +178,28 @@ pub fn is_safe_id(id: &str) -> bool {
 /// `system:`): an extension of that id would own them.
 pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
 
+/// The namespace of the extensions Vorn ships: one installed under such an
+/// id would own its workflows (`vorn.connectors:` and the rest).
+pub const SHIPPED_NAMESPACE: &str = "vorn.";
+
+/// Whether `id` is Vorn's: no installed or linked extension may have it.
+pub fn is_reserved(id: &str) -> bool {
+    // The one place to admit a shipped package, by pinned checksum, once built-ins install like any other.
+    RESERVED_IDS.contains(&id) || id.starts_with(SHIPPED_NAMESPACE)
+}
+
 /// Refuses an id an extension may not have: unsafe as a directory, or
-/// reserved for Vorn's own workflows.
+/// reserved for Vorn's own extensions and workflows.
 pub fn check_id(id: &str) -> Result<(), String> {
     if !is_safe_id(id) {
         return Err(format!("\"{id}\" is not an extension id"));
     }
-    if RESERVED_IDS.contains(&id) {
+    if id.starts_with(SHIPPED_NAMESPACE) {
+        return Err(format!(
+            "\"{id}\" is reserved: ids starting with {SHIPPED_NAMESPACE} are the extensions Vorn ships"
+        ));
+    }
+    if is_reserved(id) {
         return Err(format!(
             "\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:"
         ));
@@ -571,7 +586,15 @@ mod tests {
                 format!("\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:")
             );
         }
-        assert!(check_id("importer").is_ok() && check_id("vorn.connectors").is_ok());
+        for id in ["vorn.connectors", "vorn.workflows", "vorn.anything"] {
+            assert_eq!(
+                check_id(id).unwrap_err(),
+                format!(
+                    "\"{id}\" is reserved: ids starting with vorn. are the extensions Vorn ships"
+                )
+            );
+        }
+        assert!(check_id("importer").is_ok() && check_id("vornish.x").is_ok());
         assert!(check_id("a/b").is_err());
     }
 

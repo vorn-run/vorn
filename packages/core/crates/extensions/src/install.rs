@@ -1086,6 +1086,12 @@ migrations = "migrations"
             let id_line = format!("id = \"{id}\"");
             assert_eq!(attempt("id = \"test.marker\"", &id_line), Err(reserved));
         }
+        // Nor is one in the namespace of the extensions Vorn ships.
+        let shipped = "\"vorn.connectors\" is reserved: ids starting with vorn. are the extensions Vorn ships";
+        assert_eq!(
+            attempt("id = \"test.marker\"", "id = \"vorn.connectors\""),
+            Err(shipped.to_owned())
+        );
     }
 
     #[test]
