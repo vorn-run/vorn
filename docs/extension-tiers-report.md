@@ -19,7 +19,7 @@ through a linked pack in a temp store, against a scripted core
 (`world::Bench`). The scripted core holds:
 
 - 32 sessions;
-- 20 worktrees over 3 projects;
+- 20 worktrees over 2 projects;
 - a local HTTP server that serves the feeds under `https://feeds.bench/`.
 
 **Behaviour.** `cargo test -p vorn-bench-ext-tiers --test tiers` runs one
@@ -162,9 +162,11 @@ Compiling a component once, on install: Widget 262 ms, Worktree cleanup
 - **The program tier reorders publishes.** vornd answers each program
   message on its own task, so a program's publish can land after a later
   call, or after the call's own answer. A render right after a click can
-  therefore draw the rows from before the click. The equality test waits for
-  the publish counter to settle, so this ordering does not affect its result.
-  A component's publishes are applied in order, inside the call.
+  therefore draw the rows from before the click. Before each step, the
+  equality test asks the program how many row-changing publishes it has sent
+  and waits until vornd has applied that many, so this ordering does not
+  affect its result. A component's publishes are applied in order, inside the
+  call.
 - **What a component cannot do yet.**
   - A component cannot be a connector, so the Rust RSS has no trigger, saved
     config or `saveFeeds`; its poll takes the feeds and cursor as arguments.

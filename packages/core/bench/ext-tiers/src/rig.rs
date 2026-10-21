@@ -4,8 +4,9 @@
 //! and lifecycle vornd runs; only `[service]` differs.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use vorn_extensions::api::types::CallCtx;
@@ -17,6 +18,7 @@ use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
 use vorn_extensions::router::{Router, RouterSettings};
 
+use crate::program::FLUSHED;
 use crate::world::Bench;
 
 /// An extension the bench measures: its manifest, its bench id, and its component's file name.
@@ -135,6 +137,8 @@ pub struct Rig {
     pub world: Arc<Bench>,
     pub ext: Ext,
     pub tier: Tier,
+    /// Publishes the program has said it sent, summed over every [`FLUSHED`].
+    flushed: AtomicU64,
     _root: tempfile::TempDir,
 }
 
@@ -186,6 +190,7 @@ impl Rig {
             world,
             ext,
             tier,
+            flushed: AtomicU64::new(0),
             _root: root,
         })
     }
@@ -212,16 +217,32 @@ impl Rig {
         let _ = self.call(BARRIER, Value::Null).await;
     }
 
-    /// Waits until nothing more is published for a few milliseconds. A
-    /// program's publishes are applied on tasks of their own, so they can
-    /// land after the answer to the call that made them.
+    /// Waits until Vorn has applied every publish the extension has sent. A
+    /// component's land inside the call that made them; a program's are each
+    /// applied on a task of their own, so it is asked how many it has sent
+    /// that change rows ([`FLUSHED`]) and the world is waited on to have seen
+    /// as many.
     pub async fn quiet(&self) {
-        loop {
-            let before = self.world.published();
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            if self.world.published() == before {
-                return;
-            }
+        if !matches!(self.tier, Tier::Program(_)) {
+            return;
+        }
+        let sent = match self.call(FLUSHED, Value::Null).await {
+            Ok(n) => n.as_u64().unwrap_or(0),
+            Err(e) => panic!(
+                "{} did not say what it published: {}",
+                self.ext.name, e.message
+            ),
+        };
+        let want = self.flushed.fetch_add(sent, Ordering::SeqCst) + sent;
+        let t = Instant::now();
+        while self.world.published() < want {
+            assert!(
+                t.elapsed() < Duration::from_secs(10),
+                "{} sent {want} publishes; Vorn applied {}",
+                self.ext.name,
+                self.world.published()
+            );
+            tokio::time::sleep(Duration::from_millis(1)).await;
         }
     }
 

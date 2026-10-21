@@ -6,7 +6,7 @@
 //! answer; what Vorn sends in the meantime waits its turn, as the component
 //! sees it too.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufWriter, Write};
 
 use vorn_extension_sdk::serde_json::{self, json, Value};
@@ -17,6 +17,12 @@ use vorn_extension_sdk::{
 /// The JSON-RPC error an `ext-error` travels as.
 const EXT_ERROR: i64 = -32000;
 const METHOD_NOT_FOUND: i64 = -32601;
+
+/// Answered by this host, not the extension: how many publishes that change
+/// rows it has sent since it was last asked. Vorn applies each publish on a
+/// task of its own, so one may land after the answer to the call that made
+/// it; the bench waits until Vorn has applied this many before it reads.
+pub const FLUSHED: &str = "bench.flushed";
 
 /// Serves `E` on this process's stdin and stdout until stdin closes.
 pub fn serve<E: Extension>() {
@@ -32,6 +38,8 @@ pub fn serve_on<E: Extension>(input: impl BufRead, out: impl Write) {
         out,
         waiting: VecDeque::new(),
         asked: 0,
+        ids: HashMap::new(),
+        unflushed: 0,
     };
     let mut ext: Option<E> = None;
     while let Some(message) = io.next() {
@@ -62,7 +70,11 @@ pub fn serve_on<E: Extension>(input: impl BufRead, out: impl Write) {
                         project: params["ctx"]["project"].as_str().map(str::to_owned),
                     };
                     let method = params["method"].as_str().unwrap_or_default();
-                    dispatch(ext, &mut io, method, params["args"].clone(), &ctx)
+                    if method == FLUSHED {
+                        Ok(json!(std::mem::take(&mut io.unflushed)))
+                    } else {
+                        dispatch(ext, &mut io, method, params["args"].clone(), &ctx)
+                    }
                 }
                 None => Err(Error::new("start", "guest.handle before guest.init")),
             },
@@ -102,6 +114,10 @@ struct Stdio<R, W> {
     /// What Vorn sent while a call to it waited for its answer.
     waiting: VecDeque<Value>,
     asked: u64,
+    /// The row ids Vorn holds for each collection, to know which publishes change rows.
+    ids: HashMap<String, HashSet<String>>,
+    /// Publishes that change rows, sent since [`FLUSHED`] was last answered.
+    unflushed: u64,
 }
 
 impl<R: BufRead, W: Write> Stdio<R, W> {
@@ -158,6 +174,27 @@ impl<R: BufRead, W: Write> Stdio<R, W> {
     }
 }
 
+/// Applies `ops` to `ids` as Vorn applies them to its rows, answering whether
+/// any changed something: Vorn tells its world only of a publish that did.
+/// (Vorn also drops an upsert past 10 000 rows; the bench stays far below.)
+fn changes(ids: &mut HashSet<String>, ops: &[Op]) -> bool {
+    let mut changed = false;
+    for op in ops {
+        changed |= match op {
+            Op::Upsert(row) => row["id"].as_str().is_some_and(|id| {
+                ids.insert(id.to_owned());
+                true
+            }),
+            Op::Delete(id) => ids.remove(id),
+            Op::Clear => {
+                ids.clear();
+                true
+            }
+        };
+    }
+    changed
+}
+
 fn op(op: Op) -> Value {
     match op {
         Op::Upsert(row) => json!({ "upsert": row }),
@@ -172,6 +209,9 @@ impl<R: BufRead, W: Write> Host for Stdio<R, W> {
     }
 
     fn publish(&mut self, collection: &str, ops: Vec<Op>) {
+        if changes(self.ids.entry(collection.to_owned()).or_default(), &ops) {
+            self.unflushed += 1;
+        }
         let ops: Vec<Value> = ops.into_iter().map(op).collect();
         self.notify(
             "host.publish",
@@ -248,5 +288,31 @@ mod tests {
         assert_eq!(lines[1]["method"], "host.call");
         assert_eq!(lines[2], json!({ "jsonrpc": "2.0", "id": 2, "result": 8 }));
         assert_eq!(lines[3]["error"]["data"]["code"], "unknown-action");
+    }
+
+    #[test]
+    fn counts_only_the_publishes_that_change_rows() {
+        let mut ids = HashSet::new();
+        let row = |id: &str| Op::Upsert(json!({ "id": id }));
+        assert!(changes(&mut ids, &[row("a")]));
+        assert!(
+            changes(&mut ids, &[row("a")]),
+            "an upsert of a held row is still told"
+        );
+        assert!(!changes(&mut ids, &[Op::Delete("b".into())]));
+        assert!(!changes(
+            &mut ids,
+            &[Op::Upsert(json!({ "name": "no id" }))]
+        ));
+        assert!(changes(
+            &mut ids,
+            &[Op::Delete("b".into()), Op::Delete("a".into())]
+        ));
+        assert!(!changes(&mut ids, &[Op::Delete("a".into())]));
+        assert!(
+            changes(&mut ids, &[Op::Clear]),
+            "a clear is told even when empty"
+        );
+        assert!(!changes(&mut ids, &[]));
     }
 }
