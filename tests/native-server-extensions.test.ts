@@ -130,7 +130,9 @@ describe.skipIf(!runnable)('extensions through vornd', () => {
 
   it('lists the installed packs and activates them on the session', async () => {
     const list = await through.result<Array<{ id: string }>>('extension:list')
-    expect(list.map((p) => p.id)).toEqual(['demo', 'other'])
+    // Beside the shipped set, which is installed on first launch.
+    const mine = list.map((p) => p.id).filter((id) => !id.startsWith('vorn.'))
+    expect(mine).toEqual(['demo', 'other'])
     const states = await through.result<Array<{ extensionId: string; footers: string[] }>>(
       'extension:activation',
       { sessionId: session.id }

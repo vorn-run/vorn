@@ -444,7 +444,7 @@
         "content": [
           {
             "type": "text",
-            "text": "Error: agent \"nobody\" is not on in Vorn. Agents that are on: claude, copilot, codex, opencode, gemini."
+            "text": "Error: agent \"nobody\" is not on in Vorn. Agents that are on: claude, codex, copilot, gemini, opencode."
           }
         ],
         "isError": true
