@@ -82,9 +82,10 @@ impl MainView {
     }
 }
 
-/// The top-bar point `view` shows; `None` for Sessions, or one switched off.
+/// The view point `view` shows, with a button or not; `None` for Sessions,
+/// or one switched off.
 pub fn view_point<'a>(points: &'a Points, view: MainView, ext: Option<&str>) -> Option<&'a Point> {
-    points.top_bar().into_iter().find(|p| {
+    points.views().into_iter().find(|p| {
         MainView::of(p) == view && (view != MainView::Extension || ext == Some(p.key().as_str()))
     })
 }

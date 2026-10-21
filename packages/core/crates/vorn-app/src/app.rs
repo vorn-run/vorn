@@ -3003,7 +3003,7 @@ impl App {
         let view = self
             .st
             .points
-            .top_bar()
+            .views()
             .into_iter()
             .find(|p| {
                 p.key
@@ -3719,7 +3719,7 @@ mod tests {
             shortcut("KeyS", MOD()),
             Some(Shortcut::View(MainView::Sessions))
         );
-        // Tasks' and Workflows' keys come from their manifests, with their buttons.
+        // Tasks' and Workflows' keys come from their manifests, with their views.
         assert_eq!(shortcut("KeyT", MOD()), None);
         assert_eq!(shortcut("KeyW", MOD() | mods::SHIFT), None);
         assert_eq!(shortcut("Digit3", MOD()), Some(Shortcut::Jump(2)));

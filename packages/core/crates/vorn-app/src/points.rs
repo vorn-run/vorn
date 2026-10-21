@@ -113,6 +113,8 @@ pub struct Point {
     pub after: Option<String>,
     /// Shipped with Vorn, so it comes before what installed extensions add.
     pub builtin: bool,
+    /// A view's top bar button shows: its extension's setting can hide it.
+    pub button: bool,
 }
 
 impl Point {
@@ -143,6 +145,7 @@ impl Point {
             tree: v.get("tree").and_then(Value::as_bool) == Some(true),
             after: text("after"),
             builtin: v.get("builtin").and_then(Value::as_bool) == Some(true),
+            button: v.get("button").and_then(Value::as_bool) != Some(false),
         })
     }
 
@@ -348,11 +351,19 @@ impl Points {
         self.all.iter().filter(move |p| p.kind == kind)
     }
 
-    /// The top bar's extension buttons after Sessions: built-ins first, each
-    /// group in the order vornd lists them.
-    pub fn top_bar(&self) -> Vec<&Point> {
+    /// Every extension view: built-ins first, each group in the order vornd
+    /// lists them.
+    pub fn views(&self) -> Vec<&Point> {
         let mut views: Vec<&Point> = self.at(kind::VIEWS).collect();
         views.sort_by_key(|p| !p.builtin);
+        views
+    }
+
+    /// The top bar's extension buttons after Sessions: the views whose
+    /// button their extension's setting shows.
+    pub fn top_bar(&self) -> Vec<&Point> {
+        let mut views = self.views();
+        views.retain(|p| p.button);
         views
     }
 

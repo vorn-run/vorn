@@ -325,6 +325,12 @@ on: switching the extension off, or removing it, takes the button and its key
 away at once, and switching it on brings them back, without a restart. A
 `when` rule applies to it as to any contribution.
 
+`button = { setting = ["top_bar"] }` lets the user hide the button alone,
+through one of the extension's `bool` preferences (below): the button shows
+while any of them is on. Hidden, the view still opens from its key and from
+the command palette, which lists every view as "Open <title> View". Tasks
+and Workflows each offer "Show in the top bar", on by default, this way.
+
 ## Preferences
 
 An extension declares its own settings under `[[contributes.preferences]]`.
@@ -333,9 +339,9 @@ Each has an `id` unique in the manifest, a `title`, an optional
 
 ```toml
 [[contributes.preferences]]
-id = "pane"
-title = "Board pane beside cards"
-description = "Lists the board in a pane beside each card."
+id = "top_bar"
+title = "Show in the top bar"
+description = "Shows the Board button in the top bar."
 type = "bool"
 default = true
 
@@ -356,9 +362,10 @@ one changes, its trees are asked for again and its contributions listed
 again, as when any of its collections changes.
 
 A contribution shows only while the `bool` preferences it names are on:
-`when = { setting = ["pane"] }` (any of them, if it names several). Settings
+`when = { setting = ["compact"] }` (any of them, if it names several). Settings
 are not activation rules, so `[activates]` has no `setting`; a `when.setting`
-that names no `bool` preference is refused at install with its field.
+or `button.setting` that names no `bool` preference is refused at install
+with its field.
 
 ## The new API
 

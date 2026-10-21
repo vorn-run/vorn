@@ -620,6 +620,11 @@ pub struct Point {
     /// one of [`SETTINGS_PAGES`]; without it the page stays under Extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
+    /// For a top bar view: the on-off preferences its button shows under,
+    /// any of them; without the button the view still opens from its key
+    /// and the command palette.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub button: Option<Activation>,
 }
 
 /// The app's own settings pages a settings contribution can follow.
@@ -1903,6 +1908,20 @@ fn read_point(
     if place != Place::Attention && deny.is_some() {
         return Err(("deny", "belongs to attention".into()));
     }
+    let button = activation(raw.get("button"));
+    if raw.contains_key("button") && place != Place::Views {
+        return Err(("button", "belongs to a top bar view".into()));
+    }
+    if button.as_ref().is_some_and(|b| {
+        b.setting.is_empty()
+            || *b
+                != Activation {
+                    setting: b.setting.clone(),
+                    ..Activation::default()
+                }
+    }) {
+        return Err(("button", "names only settings: { setting = [...] }".into()));
+    }
     match after.as_deref() {
         Some(_) if place != Place::Settings => {
             return Err(("after", "belongs to a settings page".into()));
@@ -1916,6 +1935,7 @@ fn read_point(
         rows,
         deny,
         after,
+        button,
         base,
         tree,
         icon,

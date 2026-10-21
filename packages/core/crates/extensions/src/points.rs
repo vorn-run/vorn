@@ -11,7 +11,8 @@ use crate::manifest::{Manifest, PaneDraws, Place};
 /// `{extension, kind, id, title, ..., tree?}`; a pane only when it is a tree,
 /// and its `[theme]` as kind `themes` with the section as written, so every
 /// client reads it with `vorn_theme` as vornd checked it. One whose
-/// `when.setting` names only preferences that are off in `settings` is left out.
+/// `when.setting` names only preferences that are off in `settings` is left out;
+/// a view whose `button.setting` does is listed with `button: false`.
 pub fn listed(manifest: &Manifest, settings: &Map<String, Value>) -> Vec<Value> {
     let mut out = Vec::new();
     if let Some(theme) = manifest.theme() {
@@ -44,7 +45,10 @@ pub fn listed(manifest: &Manifest, settings: &Map<String, Value>) -> Vec<Value> 
             .iter()
             .filter(|p| settings_hold(p.base.when.as_ref(), settings))
         {
-            let v = serde_json::to_value(point).unwrap_or_else(|_| json!({}));
+            let mut v = serde_json::to_value(point).unwrap_or_else(|_| json!({}));
+            if point.button.is_some() {
+                v["button"] = json!(settings_hold(point.button.as_ref(), settings));
+            }
             out.push(entry(place, v));
         }
     }
@@ -145,5 +149,72 @@ default = true
         };
         assert_eq!(with(true), 1);
         assert_eq!(with(false), 0);
+    }
+
+    #[test]
+    fn a_views_button_follows_its_preference_and_the_view_stays() {
+        let m = parse(
+            r#"id = "board"
+name = "Board"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[service]
+command = ["node", "index.js"]
+
+[[contributes.views]]
+id = "board"
+title = "Board"
+tree = true
+button = { setting = ["top_bar"] }
+
+[[contributes.preferences]]
+id = "top_bar"
+title = "Show in the top bar"
+type = "bool"
+default = true
+"#,
+        )
+        .unwrap();
+        let with = |on: bool| {
+            let settings = Map::from_iter([("top_bar".to_owned(), Value::Bool(on))]);
+            listed(&m, &settings)
+        };
+        assert_eq!(with(true)[0]["button"], true);
+        let off = with(false);
+        assert_eq!(off.len(), 1, "the view stays");
+        assert_eq!(off[0]["button"], false);
+    }
+
+    #[test]
+    fn a_button_belongs_to_a_view_and_names_a_preference() {
+        let manifest = |point: &str, gate: &str| {
+            format!(
+                r#"id = "board"
+name = "Board"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[service]
+command = ["node", "index.js"]
+
+[[contributes.{point}]]
+id = "board"
+title = "Board"
+tree = true
+button = {gate}
+
+[[contributes.preferences]]
+id = "top_bar"
+title = "Show in the top bar"
+type = "bool"
+default = true
+"#
+            )
+        };
+        assert!(parse(&manifest("views", r#"{ setting = ["top_bar"] }"#)).is_ok());
+        assert!(parse(&manifest("sidebar", r#"{ setting = ["top_bar"] }"#)).is_err());
+        assert!(parse(&manifest("views", r#"{ setting = ["nope"] }"#)).is_err());
+        assert!(parse(&manifest("views", r#"{ platform = ["macos"] }"#)).is_err());
     }
 }

@@ -1,5 +1,6 @@
 //! The top bar's buttons as extensions contribute them, on a vornd with its
-//! own HOME: Tasks' button and key follow its switch, and an installed
+//! own HOME: Tasks' button and key follow its switch, Tasks' and Workflows'
+//! "Show in the top bar" settings hide only their buttons, and an installed
 //! extension's button comes after the built-ins', opens its view and goes
 //! when it is removed.
 
@@ -56,6 +57,54 @@ fn the_tasks_button_follows_its_switch() {
     });
     shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
+}
+
+fn set_top_bar(app: &mut App, id: &str, on: bool) {
+    app.rpc()
+        .call(
+            "extension:setPreference",
+            json!({ "id": id, "key": "top_bar", "value": on }),
+        )
+        .expect("set");
+}
+
+#[test]
+fn the_top_bar_setting_hides_a_button_and_its_view_stays_reachable() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.until(&mut app, "the built-ins' buttons", |app, _| {
+        (titles(app) == ["Tasks", "Workflows"]).then_some(())
+    });
+
+    set_top_bar(&mut app, TASKS, false);
+    shot.until(&mut app, "the Tasks button hidden", |app, _| {
+        (titles(app) == ["Workflows"]).then_some(())
+    });
+    set_top_bar(&mut app, "vorn.workflows", false);
+    shot.until(&mut app, "a short top bar", |app, _| {
+        titles(app).is_empty().then_some(())
+    });
+    shot.save(&mut app, "top-bar-short");
+
+    // Still on: the keys and the palette open both views.
+    let palette = vorn_app::palette::commands(&app.store, &app.st, "\u{2318}", "\u{2325}");
+    for label in ["Open Tasks View", "Open Workflows View"] {
+        assert!(palette.iter().any(|e| e.label == label), "{label}");
+    }
+    shot.send(&mut app, key("KeyT", MOD(), None));
+    assert_eq!(app.st.view, MainView::Tasks);
+    shot.frame(&mut app);
+    assert_eq!(app.st.view, MainView::Tasks, "the view stays open");
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
+    assert_eq!(app.st.view, MainView::Workflows);
+
+    set_top_bar(&mut app, TASKS, true);
+    shot.until(&mut app, "the Tasks button back", |app, _| {
+        (titles(app) == ["Tasks"]).then_some(())
+    });
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! The Tasks pane beside a card, on a vornd with its own HOME: the card menu
 //! offers it, it lists only the card's project's tasks, follows a task moved
-//! elsewhere, and its setting turned off takes it and its menu row away.
+//! elsewhere, stays while the top bar hides Tasks' button, and Tasks turned
+//! off takes it and its menu row away.
 
 #![cfg(unix)]
 
@@ -28,7 +29,7 @@ fn open_menu(shot: &mut Shot, app: &mut App, id: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_tasks_pane_lists_the_cards_project_and_follows_its_setting() {
+fn the_tasks_pane_lists_the_cards_project_while_tasks_is_on() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -94,12 +95,24 @@ fn the_tasks_pane_lists_the_cards_project_and_follows_its_setting() {
         tree_says(app, &tree, "In Review").then_some(())
     });
 
+    // Hiding Tasks' button keeps the pane in the card menu.
     app.rpc()
         .call(
             "extension:setPreference",
-            json!({ "id": TASKS, "key": "pane", "value": false }),
+            json!({ "id": TASKS, "key": "top_bar", "value": false }),
         )
-        .expect("setting off");
+        .expect("button hidden");
+    shot.until(&mut app, "the button hidden", |app, _| {
+        (!app.st.points.top_bar().iter().any(|p| p.extension == TASKS)).then_some(())
+    });
+    let labels = open_menu(&mut shot, &mut app, &id);
+    assert!(labels.iter().any(|l| l == "Tasks"), "{labels:?}");
+    shot.send(&mut app, key("Escape", 0, None));
+
+    app.rpc()
+        .call("extension:setBuiltin", json!({ "id": TASKS, "on": false }))
+        .expect("Tasks off");
+    app.st.points.stale = true;
     shot.until(&mut app, "the pane gone", |app, _| {
         let listed = app.st.points.find(TASKS, kind::PANES, "tasks").is_some();
         (!listed && !app.st.ext.panes.contains_key(&id)).then_some(())

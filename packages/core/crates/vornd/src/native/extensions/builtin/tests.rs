@@ -726,17 +726,38 @@ fn the_old_workflow_editor_switch_folds_into_workflows_once() {
 }
 
 #[test]
-fn the_tasks_pane_is_offered_only_while_its_setting_is_on() {
-    let m = tasks::manifest();
-    let pane = |on: bool| {
-        let settings = serde_json::Map::from_iter([("pane".to_owned(), json!(on))]);
-        vorn_extensions::points::listed(&m, &settings)
-            .iter()
-            .any(|p| p["kind"] == "panes" && p["id"] == "tasks")
-    };
-    assert!(pane(true));
-    assert!(!pane(false));
+fn tasks_and_workflows_buttons_follow_their_top_bar_setting() {
+    let workflows = vorn_extensions::manifest::file::parse_builtin(wasm::workflows().manifest())
+        .expect("the Workflows manifest");
     let s = setup();
-    let defaults = s.router.preferences(&m);
-    assert_eq!(defaults.get("pane"), Some(&json!(true)), "on by default");
+    for (m, view) in [(tasks::manifest(), "board"), (workflows, "workflows")] {
+        let listed = |on: bool| {
+            let settings = serde_json::Map::from_iter([("top_bar".to_owned(), json!(on))]);
+            vorn_extensions::points::listed(&m, &settings)
+        };
+        let button = |list: &[Value]| {
+            let v = list
+                .iter()
+                .find(|p| p["kind"] == "views" && p["id"] == view);
+            v.map(|v| v["button"].clone())
+        };
+        assert_eq!(button(&listed(true)), Some(json!(true)), "{view}");
+        assert_eq!(
+            button(&listed(false)),
+            Some(json!(false)),
+            "{view} stays a view"
+        );
+        let defaults = s.router.preferences(&m);
+        assert_eq!(
+            defaults.get("top_bar"),
+            Some(&json!(true)),
+            "{view} on by default"
+        );
+    }
+    // The Tasks pane is in the card menu whatever the top bar shows.
+    let m = tasks::manifest();
+    let off = serde_json::Map::from_iter([("top_bar".to_owned(), json!(false))]);
+    assert!(vorn_extensions::points::listed(&m, &off)
+        .iter()
+        .any(|p| p["kind"] == "panes" && p["id"] == "tasks"));
 }

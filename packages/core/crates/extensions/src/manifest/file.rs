@@ -593,6 +593,8 @@ struct RawPoint {
     deny: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     after: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    button: Option<RawActivation>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1473,6 +1475,11 @@ impl RawContributes {
                 if p.tree {
                     m.insert("tree".into(), json!(true));
                 }
+                if let Some(button) = &p.button {
+                    let value = button.to_json();
+                    check_activation(at, &format!("{field}.button"), button, &value)?;
+                    m.insert("button".into(), value);
+                }
                 let value = Value::Object(m);
                 if let Some(problem) = super::point_problem(place, &value) {
                     return Err(at(&format!("{field}{}", problem.0), problem.1));
@@ -1683,13 +1690,15 @@ impl RawContributes {
                 other => other,
             };
             for (i, item) in list.as_array().into_iter().flatten().enumerate() {
-                let named = item["when"]["setting"].as_array().into_iter().flatten();
-                for name in named.filter_map(Value::as_str) {
-                    if !switches.contains(&name) {
-                        return Err(at(
-                            &format!("contributes.{toml_key}[{i}].when.setting"),
-                            format!("`{name}` is not an on-off preference under [[contributes.preferences]]"),
-                        ));
+                for gate in ["when", "button"] {
+                    let named = item[gate]["setting"].as_array().into_iter().flatten();
+                    for name in named.filter_map(Value::as_str) {
+                        if !switches.contains(&name) {
+                            return Err(at(
+                                &format!("contributes.{toml_key}[{i}].{gate}.setting"),
+                                format!("`{name}` is not an on-off preference under [[contributes.preferences]]"),
+                            ));
+                        }
                     }
                 }
             }
@@ -1921,6 +1930,7 @@ impl From<&Manifest> for Raw {
                         rows: p.rows.clone(),
                         deny: p.deny.clone(),
                         after: p.after.clone(),
+                        button: p.button.as_ref().map(when),
                     }));
                 }
             }

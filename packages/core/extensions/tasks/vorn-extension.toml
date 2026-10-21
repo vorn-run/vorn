@@ -15,20 +15,21 @@ events = ["agent.conversation"]
 [[contributes.views]]
 id = "board"
 title = "Tasks"
+description = "The board of each project's tasks: a queue of todos for you and your agents."
 icon = "list-todo"
 key = "Mod+T"
 tree = true
+button = { setting = ["top_bar"] }
 
 [[contributes.panes]]
 id = "tasks"
 title = "Tasks"
 tree = true
-when = { setting = ["pane"] }
 
 [[contributes.preferences]]
-id = "pane"
-title = "Tasks pane beside cards"
-description = "Offers a pane in each card's menu that lists the tasks of the card's project."
+id = "top_bar"
+title = "Show in the top bar"
+description = "Shows the Tasks button in the top bar. Off, Tasks still opens from its key, the command palette and a card's pane menu."
 type = "bool"
 default = true
 

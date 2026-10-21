@@ -15,9 +15,18 @@ events = ["workflow.changed", "workflow.gates"]
 [[contributes.views]]
 id = "workflows"
 title = "Workflows"
+description = "Workflows, their runs, and the editor where each step is a card on a canvas."
 icon = "workflow"
 key = "Mod+Shift+W"
 tree = true
+button = { setting = ["top_bar"] }
+
+[[contributes.preferences]]
+id = "top_bar"
+title = "Show in the top bar"
+description = "Shows the Workflows button in the top bar. Off, Workflows still opens from its key and the command palette."
+type = "bool"
+default = true
 
 [[contributes.menus]]
 id = "run"

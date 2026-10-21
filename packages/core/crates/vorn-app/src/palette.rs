@@ -275,6 +275,23 @@ fn extensions(st: &State) -> Vec<Entry> {
 /// the ⌘ digits, which jump to a card.
 pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     let mut out = actions(store, m);
+    // Every view, so one whose button its setting hides is still reached.
+    for p in st.points.views() {
+        let about = p.description.as_deref().unwrap_or_default().to_lowercase();
+        let words: Vec<&str> = about.split_whitespace().collect();
+        let mut e = Entry::new(
+            Cat::Actions,
+            format!("Open {} View", p.title),
+            p.icon.clone().map_or(Glyph::Icon("puzzle"), Glyph::Named),
+            MainView::act(p),
+        )
+        .keys(&["view", &p.extension_name])
+        .keys(&words);
+        if let Some(k) = &p.key {
+            e = e.shortcut(k.replace("Mod+", m).replace('+', ""));
+        }
+        out.push(e);
+    }
     for p in st.points.at(crate::points::kind::COMMANDS) {
         let mut e = Entry::new(
             Cat::Actions,
@@ -540,13 +557,6 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
             Act::Workflow(WfAct::New),
         )
         .keys(&["new workflow", "create workflow", "schedule"]),
-        Entry::new(
-            Cat::Actions,
-            "Open Tasks View",
-            Glyph::Icon("list-todo"),
-            Act::View(MainView::Tasks),
-        )
-        .keys(&["task", "kanban", "queue", "todo", "board"]),
         Entry::new(
             Cat::Actions,
             "Create Task",
