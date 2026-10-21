@@ -137,7 +137,8 @@ describe.skipIf(!runnable)('extensions through vornd', () => {
       'extension:activation',
       { sessionId: session.id }
     )
-    expect(states.map((s) => [s.extensionId, s.footers])).toEqual([
+    const activated = states.filter((s) => !s.extensionId.startsWith('vorn.'))
+    expect(activated.map((s) => [s.extensionId, s.footers])).toEqual([
       ['demo', ['who']],
       ['other', ['who']]
     ])
