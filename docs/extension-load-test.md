@@ -67,6 +67,7 @@ Each cell is the median over the repetitions, with the range in brackets.
 
 Below the working set, the least recently used service is stopped and
 restarted on every call:
+
 - Calls cost a cold start: 26 ms instead of 1 ms.
 - Frame p50 rises 0.5 ms, outside noise.
 
