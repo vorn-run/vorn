@@ -18,10 +18,9 @@
 //! terminal, and becomes the program with `POSIX_SPAWN_SETEXEC`; an exec
 //! that fails sends its errno back over a close-on-exec pipe.
 //!
-//! On macOS a program is also responsible for itself: the system would
-//! otherwise attribute it to the app that started sessiond, so a program
-//! that opens a window would show in the Dock as that app, and quitting it
-//! there would end the session.
+//! On macOS a program counts as the app that started sessiond, as any
+//! terminal's do: it asks for privacy permissions in Vorn's name and uses
+//! the ones granted to Vorn ([`vorn_spawn::attribution`]).
 //!
 //! On Linux a child still gets a descriptor table as large as sessiond's,
 //! closed or not: at ten thousand sessions that is half a megabyte of kernel
@@ -399,20 +398,7 @@ impl Attr {
         // `as _`: the flags are a c_short; every bit used fits.
         #[allow(clippy::cast_possible_truncation)]
         // SAFETY: an initialised attribute object.
-        check(unsafe { libc::posix_spawnattr_setflags(&mut self.0, flags as _) })?;
-        #[cfg(target_os = "macos")]
-        self.disclaim();
-        Ok(())
-    }
-
-    /// Make the program responsible for itself, when this macOS can. A
-    /// refusal is not an error: the program then starts as before.
-    #[cfg(target_os = "macos")]
-    fn disclaim(&mut self) {
-        if let Some(f) = setdisclaim() {
-            // SAFETY: an initialised attribute object.
-            unsafe { f(&mut self.0, 1) };
-        }
+        check(unsafe { libc::posix_spawnattr_setflags(&mut self.0, flags as _) })
     }
 }
 
@@ -478,22 +464,6 @@ fn addchdir() -> Option<AddChdir> {
         let p = symbol(c"posix_spawn_file_actions_addchdir_np")?;
         // SAFETY: the symbol is that function, whose signature is fixed.
         Some(unsafe { std::mem::transmute::<*mut libc::c_void, AddChdir>(p) })
-    })
-}
-
-#[cfg(target_os = "macos")]
-type SetDisclaim = unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
-
-/// `responsibility_spawnattrs_setdisclaim`, private to libSystem, so looked
-/// up at run time and done without when a macOS lacks it.
-#[cfg(target_os = "macos")]
-fn setdisclaim() -> Option<SetDisclaim> {
-    static F: OnceLock<Option<SetDisclaim>> = OnceLock::new();
-    *F.get_or_init(|| {
-        let p = symbol(c"responsibility_spawnattrs_setdisclaim")?;
-        // SAFETY: the symbol is that function, with this signature in every
-        // macOS that has it.
-        Some(unsafe { std::mem::transmute::<*mut libc::c_void, SetDisclaim>(p) })
     })
 }
 

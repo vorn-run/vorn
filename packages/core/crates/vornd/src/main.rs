@@ -25,7 +25,7 @@ use vornd::protocol::VORND_PROTOCOL;
 use vornd::serve::ServeConfig;
 use vornd::Daemon;
 
-const USAGE: &str = "usage: vornd --data-dir DIR [--port N] [--host IP] [--web DIR] [--idle-exit] [--sessiond PATH] [--log-file PATH] [--exit-with-stdin] [--debug-spawn]
+const USAGE: &str = "usage: vornd --data-dir DIR [--port N] [--host IP] [--web DIR] [--idle-exit] [--sessiond PATH] [--log-file PATH] [--exit-with-stdin] [--for-app] [--debug-spawn]
 
   --data-dir   serve as the Vorn server from this data directory, $VORN_HOME:
                its database, the port and credential it publishes, and the
@@ -46,6 +46,9 @@ const USAGE: &str = "usage: vornd --data-dir DIR [--port N] [--host IP] [--web D
   --sessiond   the vorn-sessiond binary this build ships: keep one running under
                the data directory (its run/ directory is where running ones are
                found)
+  --for-app    started by the Vorn app, which may restart it; on macOS it then
+               keeps its session holder counting as that app, for privacy
+               permissions
   --debug-spawn
                answer vornd:spawn from clients too, which starts a session in the
                session holder; for tests
@@ -72,6 +75,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut host = None;
     let mut web = None;
     let mut idle_exit = false;
+    let mut for_app = false;
     while let Some(flag) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
         match flag.as_str() {
@@ -96,6 +100,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             }
             "--web" => web = Some(PathBuf::from(value("--web")?)),
             "--idle-exit" => idle_exit = true,
+            "--for-app" => for_app = true,
             "-h" | "--help" => return Err(String::new()),
             other => return Err(format!("unknown argument `{other}`")),
         }
@@ -110,6 +115,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     let holder = sessiond.map(|bundled| HolderConfig {
         home: data_dir.clone(),
         bundled,
+        for_app,
     });
     let serve = ServeConfig {
         data_dir,
@@ -124,6 +130,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             .filter(|c| c == "dev" || c == "packaged")
             .unwrap_or_else(|| "packaged".to_owned()),
         app_version: std::env::var("VORN_APP_VERSION").unwrap_or_else(|_| "unknown".to_owned()),
+        for_app,
     };
     Ok(Args {
         serve,

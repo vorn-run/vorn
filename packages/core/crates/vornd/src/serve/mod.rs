@@ -53,6 +53,8 @@ pub struct ServeConfig {
     /// Which build: `dev` or `packaged`, said in the greeting.
     pub build_channel: String,
     pub app_version: String,
+    /// `--for-app`: the Vorn app started it, and may restart it.
+    pub for_app: bool,
 }
 
 /// Why vornd cannot serve.
@@ -251,6 +253,7 @@ impl Serving {
                 "dataDir": self.data_dir().to_string_lossy(),
                 "pid": std::process::id(),
                 "buildChannel": self.config.build_channel,
+                "startedByApp": self.config.for_app,
                 "sessions": sessions,
             },
         })

@@ -289,17 +289,6 @@ async fn an_idle_session_costs_under_8_mib() {
     launch::kill(i.pid).unwrap();
 }
 
-/// The pid macOS holds responsible for `pid`: the app a program counts as,
-/// whose Dock icon and privacy permissions it shares.
-#[cfg(target_os = "macos")]
-fn responsible_for(pid: u32) -> u32 {
-    type Get = unsafe extern "C" fn(libc::pid_t) -> libc::pid_t;
-    let f = macos_symbol(c"responsibility_get_pid_responsible_for_pid");
-    // SAFETY: the symbol is that function, which takes and returns a pid.
-    let r = unsafe { std::mem::transmute::<*mut libc::c_void, Get>(f)(pid as libc::pid_t) };
-    r as u32
-}
-
 #[cfg(target_os = "macos")]
 fn macos_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
     // SAFETY: dlsym with a NUL-terminated name.
@@ -308,8 +297,8 @@ fn macos_symbol(name: &std::ffi::CStr) -> *mut libc::c_void {
     p
 }
 
-/// Start sessiond responsible for itself, as an app is: what it starts then
-/// counts as sessiond unless it disclaims too.
+/// Start sessiond responsible for itself, standing in for the app: what it
+/// starts then counts as sessiond.
 #[cfg(target_os = "macos")]
 fn start_responsible(home: &Path) -> Instance {
     use std::ffi::CString;
@@ -376,23 +365,21 @@ fn start_responsible(home: &Path) -> Instance {
     }
 }
 
-/// A program in a terminal or run headless is responsible for itself, not
-/// for the app that started sessiond, so it never shows in the Dock as that
-/// app; sessiond keeps the app's.
+/// A program in a terminal or run headless counts as the app that started
+/// sessiond, so it asks for privacy permissions in that app's name and uses
+/// the ones granted to it.
 #[cfg(target_os = "macos")]
 #[tokio::test]
-async fn programs_are_responsible_for_themselves() {
+async fn programs_count_as_the_app_that_started_sessiond() {
+    use vorn_spawn::attribution::{counts_as_another_app, responsible_for};
     let home = tempfile::tempdir().unwrap();
     let i = start_responsible(home.path());
-    // Ends sessiond, and with it the programs, even when an assert fails.
-    struct Kill(u32);
-    impl Drop for Kill {
-        fn drop(&mut self) {
-            let _ = launch::kill(self.0);
-        }
-    }
     let _kill = Kill(i.pid);
-    assert_eq!(responsible_for(i.pid), i.pid);
+    assert_eq!(responsible_for(i.pid), Some(i.pid));
+    assert!(
+        counts_as_another_app(i.pid),
+        "it does not count as this test"
+    );
     let mut v = V::hello(&i).await;
     for io in [
         Io::Pty { cols: 80, rows: 24 },
@@ -401,9 +388,75 @@ async fn programs_are_responsible_for_themselves() {
         let ToVornd::Spawned(s) = v.spawn(LONG, io).await else {
             panic!("spawn failed");
         };
-        assert_eq!(responsible_for(s.pid), s.pid, "{}", s.session);
+        assert_eq!(responsible_for(s.pid), Some(i.pid), "{}", s.session);
     }
-    assert_eq!(responsible_for(i.pid), i.pid, "sessiond keeps its own");
+}
+
+/// Ends sessiond, and with it its programs, even when an assert fails.
+#[cfg(unix)]
+struct Kill(u32);
+
+#[cfg(unix)]
+impl Drop for Kill {
+    fn drop(&mut self) {
+        let _ = launch::kill(self.0);
+    }
+}
+
+/// A program force-quit inside a terminal ends alone: the shell it ran from
+/// carries on, and so does the session.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_program_killed_in_a_terminal_leaves_its_session() {
+    let home = tempfile::tempdir().unwrap();
+    let i = start(home.path());
+    let _kill = Kill(i.pid);
+    let mut v = V::hello(&i).await;
+    let script = "sleep 100 & c=$!; echo child=$c; wait $c; echo after=$?; sleep 100";
+    let ToVornd::Spawned(s) = v
+        .spawn(&["sh", "-c", script], Io::Pty { cols: 80, rows: 24 })
+        .await
+    else {
+        panic!("spawn failed");
+    };
+    v.send(ToSessiond::Attach(Attach {
+        session: s.session.clone(),
+        from: AttachFrom::SessionStart,
+    }))
+    .await;
+    let mut out = String::new();
+    let mut killed = false;
+    while !out.contains("after=") {
+        let e = match v.recv().await {
+            Some(ToVornd::Entries(e)) => e,
+            Some(_) => continue,
+            None => panic!("sessiond closed the connection: {out}"),
+        };
+        for x in e.entries {
+            match x.rec {
+                vorn_term_proto::Record::Data { bytes, .. } => {
+                    out.push_str(&String::from_utf8_lossy(&bytes));
+                }
+                vorn_term_proto::Record::Exit { .. } => panic!("the session ended: {out}"),
+                _ => {}
+            }
+        }
+        if !killed {
+            let child = out
+                .split("child=")
+                .nth(1)
+                .and_then(|r| r.split_whitespace().next())
+                .and_then(|p| p.parse::<libc::pid_t>().ok());
+            if let Some(child) = child {
+                // SAFETY: kill(2) on the program this test's session started.
+                assert_eq!(unsafe { libc::kill(child, libc::SIGKILL) }, 0);
+                killed = true;
+            }
+        }
+    }
+    assert!(out.contains("after=137"), "{out}");
+    assert!(launch::alive(s.pid), "the shell carries on");
+    assert!(launch::alive(i.pid), "and so does sessiond");
 }
 
 /// A sessiond started straight from the binary, with `env`, reaped on drop.

@@ -65,6 +65,36 @@ describe('native packages', () => {
     expect(plist).toContain('<string>0.8.0-beta.9</string>')
   })
 
+  it('names Vorn and why in every privacy prompt', () => {
+    const plist = infoPlist(version)
+    const asks = 'A program running in Vorn wants to'
+    for (const key of [
+      'NSAppleEventsUsageDescription',
+      'NSCameraUsageDescription',
+      'NSMicrophoneUsageDescription',
+      'NSAudioCaptureUsageDescription',
+      'NSContactsUsageDescription',
+      'NSCalendarsUsageDescription',
+      'NSCalendarsFullAccessUsageDescription',
+      'NSRemindersUsageDescription',
+      'NSRemindersFullAccessUsageDescription',
+      'NSPhotoLibraryUsageDescription',
+      'NSLocationUsageDescription',
+      'NSLocationWhenInUseUsageDescription',
+      'NSLocalNetworkUsageDescription',
+      'NSBluetoothAlwaysUsageDescription',
+      'NSSpeechRecognitionUsageDescription',
+      'NSMotionUsageDescription',
+      'NSSystemAdministrationUsageDescription'
+    ]) {
+      const said = new RegExp(`<key>${key}</key>\\n\\t<string>${asks} [^<]+\\.</string>`)
+      expect(plist).toMatch(said)
+    }
+    expect(plist).toContain(
+      `<key>NSCameraUsageDescription</key>\n\t<string>${asks} use the camera.</string>`
+    )
+  })
+
   it('gives Windows a four-part version', () => {
     expect(windowsVersion('0.8.0-beta.9')).toBe('0.8.0.9')
     expect(windowsVersion('1.2.3')).toBe('1.2.3.0')

@@ -32,7 +32,12 @@ impl Drop for Served {
 }
 
 fn serve(data: &Path, home: &Path) -> Served {
+    serve_with(data, home, &[])
+}
+
+fn serve_with(data: &Path, home: &Path, args: &[&str]) -> Served {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vornd"))
+        .args(args)
         .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
         .env("VORN_TAILSCALE", "none")
         .args(["--data-dir"])
@@ -105,6 +110,18 @@ where
     ws.send(Message::text(frame.to_string())).await.unwrap();
 }
 
+/// A vornd the app started says so, so that only an app restarts it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn says_when_the_app_started_it() {
+    let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let served = serve_with(data.path(), home.path(), &["--for-app"]);
+    let mut desktop = open(served.port, Some(CREDENTIAL), "").await;
+    assert_eq!(next(&mut desktop).await.unwrap()["method"], "server:hello");
+    let identity = next(&mut desktop).await.unwrap();
+    assert_eq!(identity["method"], "server:identity");
+    assert_eq!(identity["params"]["startedByApp"], true);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serves_clients_with_nothing_behind_it() {
     let (data, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
@@ -130,6 +147,7 @@ async fn serves_clients_with_nothing_behind_it() {
     let identity = next(&mut desktop).await.unwrap();
     assert_eq!(identity["method"], "server:identity");
     assert_eq!(identity["params"]["pid"], json!(served.child.id()));
+    assert_eq!(identity["params"]["startedByApp"], false);
 
     // Without one, only `auth:authenticate` is taken.
     let mut phone = open(served.port, None, "").await;

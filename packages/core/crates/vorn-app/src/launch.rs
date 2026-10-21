@@ -121,8 +121,9 @@ impl Server {
         if let Some(web) = &self.web {
             command.arg("--web").arg(web);
         }
-        // An app's server stops once nothing has used it for a while.
-        command.arg("--idle-exit");
+        // An app's server stops once nothing has used it for a while, and
+        // says the app started it, so only an app ever restarts it.
+        command.args(["--idle-exit", "--for-app"]);
         command
             .env("VORN_BUILD_CHANNEL", self.channel())
             .env("VORN_APP_VERSION", env!("CARGO_PKG_VERSION"))
@@ -161,6 +162,10 @@ impl Server {
 pub struct Identity {
     pub app_version: String,
     pub build_channel: String,
+    pub pid: Option<u32>,
+    /// Whether the Vorn app started it (`--for-app`), rather than the CLI
+    /// or anything else.
+    pub started_by_app: bool,
 }
 
 impl Identity {
@@ -170,6 +175,8 @@ impl Identity {
         Identity {
             app_version: field("appVersion"),
             build_channel: field("buildChannel"),
+            pid: params["pid"].as_u64().and_then(|p| u32::try_from(p).ok()),
+            started_by_app: params["startedByApp"].as_bool() == Some(true),
         }
     }
 }
@@ -185,9 +192,24 @@ pub fn replaces(incumbent: &Identity, version: &str, channel: &str) -> bool {
         && incumbent.app_version != version
 }
 
-/// After an update: stops the running vornd for `dir` when it is an older
-/// packaged build, so the caller starts the one shipped with this app.
-/// Whether it stopped one.
+/// Whether a running vornd should be restarted because macOS counts it as
+/// another app (`elsewhere`), as once the app that started it has quit: the
+/// programs in its terminals would ask for privacy permissions in their own
+/// names rather than Vorn's. Only one a Vorn app of this very `version`
+/// started, and only between packaged builds: a vornd from the CLI, a dev
+/// build or another install is adopted as it is.
+pub fn reattributes(incumbent: &Identity, version: &str, channel: &str, elsewhere: bool) -> bool {
+    incumbent.started_by_app
+        && incumbent.app_version != "unknown"
+        && incumbent.app_version == version
+        && incumbent.build_channel == "packaged"
+        && channel == "packaged"
+        && elsewhere
+}
+
+/// Stops the running vornd for `dir` when it is an older packaged build, or
+/// one macOS counts as another app, so the caller starts the one shipped
+/// with this app. Whether it stopped one.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn retire_older(dir: &Path, server: &Server) -> bool {
     let Ok(ep) = Endpoint::find(dir) else {
@@ -207,13 +229,23 @@ pub fn retire_older(dir: &Path, server: &Server) -> bool {
             Err(_) => return false,
         }
     };
-    if !replaces(&identity, env!("CARGO_PKG_VERSION"), server.channel()) {
+    if replaces(&identity, env!("CARGO_PKG_VERSION"), server.channel()) {
+        eprintln!(
+            "vorn-app: the running vornd is {}; replacing it with this build",
+            identity.app_version
+        );
+    } else if reattributes(
+        &identity,
+        env!("CARGO_PKG_VERSION"),
+        server.channel(),
+        identity
+            .pid
+            .is_some_and(vorn_spawn::attribution::counts_as_another_app),
+    ) {
+        eprintln!("vorn-app: the running vornd counts as another app; restarting it");
+    } else {
         return false;
     }
-    eprintln!(
-        "vorn-app: the running vornd is {}; replacing it with this build",
-        identity.app_version
-    );
     let _ = rpc.call("server:shutdown", Value::Null);
     drop(rpc);
     // Gone once its port refuses a connection.
@@ -330,6 +362,8 @@ mod tests {
         let id = |v: &str, c: &str| Identity {
             app_version: v.into(),
             build_channel: c.into(),
+            pid: None,
+            started_by_app: false,
         };
         assert!(replaces(
             &id("0.8.0-beta.8", "packaged"),
@@ -363,6 +397,49 @@ mod tests {
     }
 
     #[test]
+    fn restarts_only_a_vornd_this_app_started_counting_as_another_app() {
+        let id = |c: &str| Identity {
+            app_version: "1.0.0".into(),
+            build_channel: c.into(),
+            pid: Some(7),
+            started_by_app: true,
+        };
+        assert!(reattributes(&id("packaged"), "1.0.0", "packaged", true));
+        assert!(!reattributes(&id("packaged"), "1.0.0", "packaged", false));
+        assert!(!reattributes(&id("dev"), "1.0.0", "packaged", true));
+        assert!(!reattributes(&id("packaged"), "1.0.0", "dev", true));
+        // Another install's, or one that does not say.
+        assert!(!reattributes(&id("packaged"), "1.0.1", "packaged", true));
+        let unknown = Identity {
+            app_version: "unknown".into(),
+            ..id("packaged")
+        };
+        assert!(!reattributes(&unknown, "unknown", "packaged", true));
+    }
+
+    /// A vornd the CLI started (`vorn server serve`) does not say the app
+    /// started it, so it is adopted however macOS counts it.
+    #[test]
+    fn a_vornd_from_the_cli_is_adopted_not_restarted() {
+        let cli = Identity::from(&serde_json::json!({
+            "pid": 7,
+            "appVersion": "1.0.0",
+            "buildChannel": "packaged",
+        }));
+        assert_eq!(cli.pid, Some(7));
+        assert!(!cli.started_by_app);
+        assert!(!reattributes(&cli, "1.0.0", "packaged", true));
+        assert!(!replaces(&cli, "1.0.0", "packaged"));
+        let app = Identity::from(&serde_json::json!({
+            "pid": 7,
+            "appVersion": "1.0.0",
+            "buildChannel": "packaged",
+            "startedByApp": true,
+        }));
+        assert!(reattributes(&app, "1.0.0", "packaged", true));
+    }
+
+    #[test]
     fn serves_the_data_directory_and_the_web_client() {
         let server = Server {
             vornd: PathBuf::from("/b/vornd"),
@@ -384,7 +461,8 @@ mod tests {
                 "/b/vorn-sessiond",
                 "--web",
                 "/b/web/dist",
-                "--idle-exit"
+                "--idle-exit",
+                "--for-app"
             ]
         );
         assert_eq!(command.get_current_dir(), Some(Path::new("/data")));

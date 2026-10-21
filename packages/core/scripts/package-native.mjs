@@ -94,6 +94,32 @@ function plistValue(v, depth) {
   return `${pad}<dict>\n${body}\n${pad}</dict>`
 }
 
+/**
+ * Why Vorn asks for each privacy permission. Programs in Vorn's terminals
+ * count as Vorn, so macOS asks for them in Vorn's name, with these words.
+ */
+export const usageDescriptions = Object.fromEntries(
+  Object.entries({
+    NSAppleEventsUsageDescription: 'control other apps',
+    NSCameraUsageDescription: 'use the camera',
+    NSMicrophoneUsageDescription: 'use the microphone',
+    NSAudioCaptureUsageDescription: 'record audio from other apps',
+    NSContactsUsageDescription: 'access your contacts',
+    NSCalendarsUsageDescription: 'access your calendars',
+    NSCalendarsFullAccessUsageDescription: 'access your calendars',
+    NSRemindersUsageDescription: 'access your reminders',
+    NSRemindersFullAccessUsageDescription: 'access your reminders',
+    NSPhotoLibraryUsageDescription: 'access your photos',
+    NSLocationUsageDescription: 'use your location',
+    NSLocationWhenInUseUsageDescription: 'use your location',
+    NSLocalNetworkUsageDescription: 'find and connect to devices on your local network',
+    NSBluetoothAlwaysUsageDescription: 'use Bluetooth',
+    NSSpeechRecognitionUsageDescription: 'use speech recognition',
+    NSMotionUsageDescription: 'use motion data',
+    NSSystemAdministrationUsageDescription: 'make changes to system settings'
+  }).map(([key, what]) => [key, `A program running in Vorn wants to ${what}.`])
+)
+
 /** The bundle's Info.plist. */
 export function infoPlist(version) {
   const entries = {
@@ -112,7 +138,8 @@ export function infoPlist(version) {
     LSMinimumSystemVersion: '12.0',
     NSHighResolutionCapable: true,
     NSPrincipalClass: 'NSApplication',
-    NSSupportsAutomaticGraphicsSwitching: true
+    NSSupportsAutomaticGraphicsSwitching: true,
+    ...usageDescriptions
   }
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
