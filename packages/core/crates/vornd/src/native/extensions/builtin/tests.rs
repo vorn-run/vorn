@@ -443,7 +443,26 @@ fn tasks_and_workflows_buttons_follow_their_top_bar_setting() {
 
 #[test]
 fn every_bundled_extension_s_id_is_kept_from_installs() {
-    let ids = bundled_ids();
+    let ids = bundled_ids().expect("every bundled manifest reads");
+    let s = setup();
+    // The registry vornd builds, given what a test can start of the started built-ins.
+    let registry = Builtins::new(
+        Arc::clone(&s.router),
+        s.dir.path().join("registry.json"),
+        vec![Arc::new(wasm::workflows())],
+    );
+    let mut registered: std::collections::BTreeSet<String> = registry
+        .list()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_owned())
+        .collect();
+    for started in Started::ALL {
+        registered.insert(file::parse_builtin(started.manifest()).unwrap().id);
+    }
+    assert_eq!(ids, registered);
+    assert_eq!(wasm::workflows().manifest, Started::Workflows.manifest());
     for id in [
         "vorn.files",
         "vorn.browser",

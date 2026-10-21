@@ -30,7 +30,6 @@ pub struct Component {
     pub stop: Option<&'static str>,
 }
 
-
 /// The Widget (`packages/core/extensions/widget`).
 pub fn widget() -> Component {
     use vorn_extensions::events::{

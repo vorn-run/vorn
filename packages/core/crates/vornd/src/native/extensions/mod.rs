@@ -1429,15 +1429,10 @@ impl Around for Wired {
         let Some(native) = self.native.upgrade() else {
             return Vec::new();
         };
-        let mut started: Vec<Arc<dyn builtin::Builtin>> = native
-            .connectors()
-            .map(builtin::connectors::entry)
+        builtin::Started::ALL
             .into_iter()
-            .collect();
-        started.extend(native.tasks().map(builtin::tasks::entry));
-        // Where Workflows' view always was in Settings: after Tasks.
-        started.push(Arc::new(builtin::wasm::workflows()));
-        started
+            .filter_map(|s| s.entry(&native))
+            .collect()
     }
 
     fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {

@@ -105,45 +105,27 @@ impl Record {
         }
     }
 
-    /// The record, each shipped extension's built-in switch carried over the
-    /// first time a set holding it starts: off becomes removed, and on
-    /// installs it even when the set does not by default (returned).
-    fn load(&self, set: &[Shipped<'_>]) -> (State, BTreeSet<String>) {
-        let mut state = self.read().unwrap_or_default();
-        let fresh: Vec<&str> = set
-            .iter()
-            .map(|s| s.id)
-            .filter(|id| !state.migrated.contains(*id))
-            .collect();
-        let mut on = BTreeSet::new();
-        if fresh.is_empty() {
-            return (state, on);
-        }
-        let mut switches: BTreeMap<String, bool> = fs::read(&self.switches)
+    /// The built-ins' switches, as the moved extensions had them.
+    fn switches(&self) -> BTreeMap<String, bool> {
+        fs::read(&self.switches)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// Keeps `state`, the switches of `settled` dropped from the built-ins'
+    /// file now that their extensions carry them.
+    fn settle(&self, state: &State, settled: &[&str]) {
+        let mut switches = self.switches();
         let before = switches.len();
-        for id in fresh {
-            match switches.remove(id) {
-                Some(false) => {
-                    state.declined.insert(id.to_owned());
-                }
-                Some(true) => {
-                    on.insert(id.to_owned());
-                }
-                None => {}
-            }
-            state.migrated.insert(id.to_owned());
-        }
+        switches.retain(|id, _| !settled.contains(&id.as_str()));
         if switches.len() != before {
             let text = serde_json::to_vec_pretty(&switches).unwrap_or_default();
             if let Err(err) = fs::write(&self.switches, text) {
                 warn!("[extensions] could not rewrite the built-ins' switches: {err}");
             }
         }
-        self.write(&state);
-        (state, on)
+        self.write(state);
     }
 }
 
@@ -151,25 +133,60 @@ impl Record {
 /// removed and not yet installed (on a first launch only those installed by
 /// default), and replaces an older shipped or catalog install. Runs nothing of
 /// any pack; a failure is logged and leaves the rest to install.
+///
+/// The first start holding an extension carries its built-in switch over:
+/// off becomes removed, and on installs it even when the set does not by
+/// default. Only once that start has done what the switch said is it kept as
+/// migrated, so an install that failed is tried again on the next start.
 pub fn sync(installs: &Installs, set: &[Shipped<'_>], record: &Record) -> Synced {
-    let (state, on) = record.load(set);
+    let mut state = record.read().unwrap_or_default();
+    let fresh = |id: &str, state: &State| !state.migrated.contains(id);
+    let switches = if set.iter().any(|s| fresh(s.id, &state)) {
+        record.switches()
+    } else {
+        BTreeMap::new()
+    };
+    let mut settled = Vec::new();
     let mut synced = Synced::default();
     for s in set {
-        if state.declined.contains(s.id) {
-            continue;
+        let fresh = fresh(s.id, &state);
+        let switch = fresh.then(|| switches.get(s.id).copied()).flatten();
+        if switch == Some(false) {
+            state.declined.insert(s.id.to_owned());
         }
         let update = match installs.store().describe(s.id) {
-            None if s.default || on.contains(s.id) => false,
-            None => continue,
-            Some(pack) if pack.linked || !replaceable(pack.source.as_ref()) => continue,
-            Some(pack) if !older(&pack.version, s.version) => continue,
-            Some(_) => true,
+            _ if state.declined.contains(s.id) => None,
+            None if s.default || switch == Some(true) => Some(false),
+            None => None,
+            Some(pack) if pack.linked || !replaceable(pack.source.as_ref()) => None,
+            Some(pack) if !older(&pack.version, s.version) => None,
+            Some(_) => Some(true),
         };
-        match install(installs, s) {
-            Ok(()) if update => synced.updated.push(s.id.to_owned()),
-            Ok(()) => synced.installed.push(s.id.to_owned()),
-            Err(err) => warn!("[extensions] {} {} did not install: {err}", s.id, s.version),
+        let done = match update.map(|update| (update, install(installs, s))) {
+            None => true,
+            Some((update, Ok(()))) => {
+                let to = if update {
+                    &mut synced.updated
+                } else {
+                    &mut synced.installed
+                };
+                to.push(s.id.to_owned());
+                true
+            }
+            Some((_, Err(err))) => {
+                warn!("[extensions] {} {} did not install: {err}", s.id, s.version);
+                false
+            }
+        };
+        if fresh && done {
+            settled.push(s.id);
         }
+    }
+    if !settled.is_empty() {
+        state
+            .migrated
+            .extend(settled.iter().map(|id| (*id).to_owned()));
+        record.settle(&state, &settled);
     }
     synced
 }
@@ -438,5 +455,25 @@ mod tests {
         let kept: BTreeMap<String, bool> =
             serde_json::from_slice(&fs::read(&switches).unwrap()).unwrap();
         assert_eq!(kept, BTreeMap::from([("vorn.files".to_owned(), false)]));
+    }
+
+    #[test]
+    fn a_switch_that_did_not_install_is_carried_over_again_next_start() {
+        let f = Fixture::new(&[("vorn.a", "1.0.0", false)]);
+        let switches = f.dir.path().join("builtins.json");
+        fs::write(&switches, r#"{"vorn.a": true}"#).unwrap();
+        let untrusting = Installs::new(
+            PackStore::new(f.dir.path().join("packages")),
+            PathBuf::from("git"),
+            Vec::new(),
+        );
+        assert_eq!(sync(&untrusting, &f.set(), &f.record), Synced::default());
+        assert_eq!(f.version("vorn.a"), None);
+        assert!(f.record.read().is_none_or(|s| s.migrated.is_empty()));
+        assert!(fs::read_to_string(&switches).unwrap().contains("vorn.a"));
+
+        assert_eq!(f.sync().installed, ["vorn.a"]);
+        assert!(f.record.read().unwrap().migrated.contains("vorn.a"));
+        assert!(!fs::read_to_string(&switches).unwrap().contains("vorn.a"));
     }
 }

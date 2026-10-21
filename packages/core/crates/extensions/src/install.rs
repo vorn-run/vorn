@@ -154,6 +154,9 @@ pub struct Installs {
     setting: Setting,
     trust: Trust,
     staged: Mutex<HashMap<String, Staged>>,
+    /// Held from an install's last check to its `current.json`, so two
+    /// installs at once cannot both claim one agent.
+    placing: Mutex<()>,
 }
 
 impl std::fmt::Debug for Installs {
@@ -260,6 +263,7 @@ impl Installs {
             setting,
             trust: Trust::default(),
             staged: Mutex::default(),
+            placing: Mutex::default(),
         }
     }
 
@@ -648,6 +652,15 @@ impl Installs {
                 ));
             }
         }
+        // The build ran the pack's own code: what it leaves is checked again.
+        if read_dir_manifest(&staged.dir)? != *m {
+            return Err(format!(
+                "{}'s build changed its manifest; nothing was installed",
+                m.name
+            ));
+        }
+        let _placing = lock(&self.placing);
+        self.admit(m, pin_of(&m.id, &m.version, Some(&staged.source)).as_ref())?;
         let home = self.store.root().join(&m.id);
         fs::create_dir_all(&home).map_err(|e| e.to_string())?;
         let current = read_current(&home);
@@ -662,6 +675,9 @@ impl Installs {
             .and_then(Value::as_str)
             .filter(|v| *v != m.version && is_safe_version(v))
             .map(str::to_owned);
+        let previous_source = previous
+            .as_ref()
+            .and_then(|_| current.as_ref()?.get("source").cloned());
         write_current(
             &home,
             &json!({
@@ -669,6 +685,7 @@ impl Installs {
                 "previousVersion": previous,
                 "installedAt": now_ms(),
                 "source": staged.source,
+                "previousSource": previous_source,
             }),
         )?;
         prune(&home, &[Some(m.version.as_str()), previous.as_deref()]);
@@ -697,13 +714,27 @@ impl Installs {
         if !home.join(previous).is_dir() {
             return Err(format!("{id} {previous} is no longer kept"));
         }
+        let manifest = read_dir_manifest(&home.join(previous))?;
+        if manifest.id != id || manifest.version != previous {
+            return Err(format!("{id} {previous} is not the version it was"));
+        }
+        let source = current.get("previousSource").filter(|s| !s.is_null());
+        let pin = pin_of(id, previous, source);
+        if self.trust.guards(id) && !pin.as_ref().is_some_and(|p| self.trust.vouches(p)) {
+            return Err(format!(
+                "{id} {previous} is not a pack this Vorn ships, and only those may use the id {id}; it stays at {version}"
+            ));
+        }
+        let _placing = lock(&self.placing);
+        self.admit(&manifest, pin.as_ref())?;
         write_current(
             &home,
             &json!({
                 "version": previous,
                 "previousVersion": version,
                 "installedAt": now_ms(),
-                "source": current.get("source").cloned().unwrap_or(Value::Null),
+                "source": source.cloned().unwrap_or(Value::Null),
+                "previousSource": current.get("source").cloned().unwrap_or(Value::Null),
             }),
         )?;
         info!("[extensions] rolled {id} back to {previous}");
@@ -719,6 +750,7 @@ impl Installs {
 
     /// Runs `folder` in place as its manifest's extension; edits are live.
     pub fn link(&self, folder: &Path) -> Result<InstalledPack, String> {
+        let _placing = lock(&self.placing);
         let (folder, manifest) = self.linkable(folder)?;
         let home = self.store.root().join(&manifest.id);
         if let Some(current) = read_current(&home) {
@@ -965,6 +997,16 @@ fn installable_id(id: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The pin a pack installed from `source` answers to: its archive's sha256, when it came as one.
+fn pin_of(id: &str, version: &str, source: Option<&Value>) -> Option<Pinned> {
+    let sha256 = source?.get("sha256")?.as_str()?;
+    Some(Pinned {
+        id: id.to_owned(),
+        version: version.to_owned(),
+        sha256: sha256.to_owned(),
+    })
 }
 
 fn read_current(home: &Path) -> Option<Value> {
@@ -1649,6 +1691,137 @@ migrations = "migrations"
             installs.store().ids(),
             ["acme.first", "acme.other", "vorn.agents.sample"]
         );
+    }
+
+    fn adapter_at(id: &str, agent: &str, version: &str) -> Vec<u8> {
+        let manifest = adapter_manifest(id, agent)
+            .replace("version = \"1.0.0\"", &format!("version = \"{version}\""));
+        tgz("t", &[(file::FILE, manifest.as_bytes())])
+    }
+
+    #[test]
+    fn an_agent_taken_after_the_sheet_is_refused_at_confirm() {
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let late = installs
+            .inspect_archive(
+                &adapter_at("acme.late", "sample-agent", "1.0.0"),
+                json!({}),
+                None,
+            )
+            .unwrap();
+        let first = installs
+            .inspect_archive(
+                &adapter_at("acme.first", "sample-agent", "1.0.0"),
+                json!({}),
+                None,
+            )
+            .unwrap();
+        installs.confirm(&first.token, "acme.first").unwrap();
+        let refused = installs.confirm(&late.token, "acme.late").unwrap_err();
+        assert!(
+            refused.contains("which acme.first already runs"),
+            "{refused}"
+        );
+        assert_eq!(installs.store().ids(), ["acme.first"]);
+        let left: Vec<_> = fs::read_dir(root.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".staging"))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn a_build_that_rewrites_its_manifest_installs_nothing() {
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = adapter_manifest("acme.builder", "own-agent").replace(
+            "[agent]",
+            "[build]\ncommand = [\"sh\", \"build.sh\"]\n\n[agent]",
+        );
+        fs::write(folder.path().join(file::FILE), manifest).unwrap();
+        fs::write(
+            folder.path().join("build.sh"),
+            "sed 's/own-agent/claude/' vorn-extension.toml > m && mv m vorn-extension.toml\n",
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let sheet = installs
+            .inspect_git(&folder.path().display().to_string(), None)
+            .unwrap();
+        let refused = installs.confirm(&sheet.token, "acme.builder").unwrap_err();
+        assert!(refused.contains("build changed its manifest"), "{refused}");
+        assert!(installs.store().ids().is_empty());
+    }
+
+    #[test]
+    fn a_rollback_to_an_agent_another_took_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let install = |bytes: &[u8], id: &str| {
+            let sheet = installs.inspect_archive(bytes, json!({}), None)?;
+            installs.confirm(&sheet.token, id)
+        };
+        install(&adapter_at("acme.a", "alpha", "1.0.0"), "acme.a").unwrap();
+        install(&adapter_at("acme.a", "beta", "2.0.0"), "acme.a").unwrap();
+        install(&adapter_at("acme.b", "alpha", "1.0.0"), "acme.b").unwrap();
+        let refused = installs.rollback("acme.a").unwrap_err();
+        assert!(refused.contains("which acme.b already runs"), "{refused}");
+        assert_eq!(
+            installs.store().describe("acme.a").unwrap().version,
+            "2.0.0"
+        );
+
+        installs.remove("acme.b").unwrap();
+        let back = installs.rollback("acme.a").unwrap();
+        assert_eq!(back.version, "1.0.0");
+    }
+
+    #[test]
+    fn a_rollback_of_vorns_own_goes_only_to_a_version_this_build_pins() {
+        let root = tempfile::tempdir().unwrap();
+        let pack = |version: &str| {
+            let manifest = shipped_manifest("vorn.sample").replace("1.2.0", version);
+            let bytes = tgz("p", &[(file::FILE, manifest.as_bytes())]);
+            let pin = Pinned {
+                id: "vorn.sample".into(),
+                version: version.into(),
+                sha256: sha256_hex(&bytes),
+            };
+            (bytes, pin)
+        };
+        let ((old, old_pin), (new, new_pin)) = (pack("1.0.0"), pack("1.1.0"));
+        let trusting = |pins: Vec<Pinned>| {
+            Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env()).trusting(
+                Trust {
+                    pins,
+                    ..Trust::default()
+                },
+            )
+        };
+        let both = trusting(vec![old_pin.clone(), new_pin.clone()]);
+        for (bytes, pin) in [(&old, &old_pin), (&new, &new_pin)] {
+            let sheet = both
+                .inspect_archive(bytes, json!({ "shipped": pin.version }), Some(pin))
+                .unwrap();
+            both.confirm(&sheet.token, "vorn.sample").unwrap();
+        }
+
+        let refused = trusting(vec![new_pin.clone()])
+            .rollback("vorn.sample")
+            .unwrap_err();
+        assert!(refused.contains("not a pack this Vorn ships"), "{refused}");
+        assert_eq!(
+            both.store().describe("vorn.sample").unwrap().version,
+            "1.1.0"
+        );
+
+        let back = both.rollback("vorn.sample").unwrap();
+        assert_eq!(back.version, "1.0.0");
+        assert_eq!(back.source.unwrap()["sha256"], old_pin.sha256.as_str());
+        let forward = both.rollback("vorn.sample").unwrap();
+        assert_eq!(forward.source.unwrap()["sha256"], new_pin.sha256.as_str());
     }
 
     #[test]
