@@ -31,7 +31,7 @@ Each cell is the median over the repetitions, with the range in brackets.
 
 | Measure                | 0 extensions (5 runs) | 20 extensions, cap 24 (3 runs) |
 | ---------------------- | --------------------: | -----------------------------: |
-| Frame p50, ms          |     8.27 (8.19–8.46)  |               8.41 (8.40–8.53) |
+| Frame p50, ms          |      8.27 (8.19–8.46) |               8.41 (8.40–8.53) |
 | Frame p99, ms          |   10.28 (10.03–10.49) |            10.65 (10.18–10.66) |
 | Input p50, ms          |   16.06 (15.90–16.15) |            15.93 (15.73–16.02) |
 | Input p99, ms          |   25.89 (25.34–26.18) |            52.17 (25.48–99.25) |
@@ -57,13 +57,13 @@ Each cell is the median over the repetitions, with the range in brackets.
 
 ### Service cap, 20 extensions
 
-| Cap      | Frame p50, ms     | Call p50, ms | Restarts | Cap stops |
-| -------- | ----------------: | -----------: | -------: | --------: |
-| 8 (old)  | 8.79 (8.71–8.83)  |         26.5 |      146 |       159 |
-| 12       | 8.71 (8.66–8.78)  |         26.5 |      142 |       151 |
-| 16       | 8.49 (8.43–8.50)  |         1.06 |        6 |        11 |
-| 20       | 8.49 (8.40–8.50)  |         1.06 |        0 |         1 |
-| 24       | 8.41 (8.40–8.53)  |         1.04 |        0 |         0 |
+| Cap     |    Frame p50, ms | Call p50, ms | Restarts | Cap stops |
+| ------- | ---------------: | -----------: | -------: | --------: |
+| 8 (old) | 8.79 (8.71–8.83) |         26.5 |      146 |       159 |
+| 12      | 8.71 (8.66–8.78) |         26.5 |      142 |       151 |
+| 16      | 8.49 (8.43–8.50) |         1.06 |        6 |        11 |
+| 20      | 8.49 (8.40–8.50) |         1.06 |        0 |         1 |
+| 24      | 8.41 (8.40–8.53) |         1.04 |        0 |         0 |
 
 Below the working set, the least recently used service is stopped and
 restarted on every call:
@@ -75,12 +75,12 @@ restarted on every call:
 The idle time is set to 60 s. After the busy run, the bench keeps drawing
 until every service has stopped (3 runs per side).
 
-| Measure                     |  0 extensions |        20 extensions |
-| --------------------------- | ------------: | -------------------: |
-| Time until all stopped, s   |             – | 65.4 (65.3–67.3)     |
-| Idle stops                  |             – |  21 (16 bench, 5 built-in) |
-| RSS programs after idle, MB |             0 |                    0 |
-| RSS vornd after idle, MB    | 371.6 (367.6–380.2) | 387.0 (378.5–389.6) |
+| Measure                     |        0 extensions |             20 extensions |
+| --------------------------- | ------------------: | ------------------------: |
+| Time until all stopped, s   |                   – |          65.4 (65.3–67.3) |
+| Idle stops                  |                   – | 21 (16 bench, 5 built-in) |
+| RSS programs after idle, MB |                   0 |                         0 |
+| RSS vornd after idle, MB    | 371.6 (367.6–380.2) |       387.0 (378.5–389.6) |
 
 Every extension program exits, so their 284 MB is returned. vornd keeps
 about 15 MB more than the baseline: the compiled Wasm components and the
@@ -93,7 +93,7 @@ allocator's retained pages.
 | Node        |         126.4 |          1.05 |                46.7 |
 | Python      |          34.0 |          0.90 |                10.9 |
 | Bash        |          11.4 |          0.48 |                 3.6 |
-| Rust (Wasm) |           3.0 |          0.25 |       (inside vornd) |
+| Rust (Wasm) |           3.0 |          0.25 |      (inside vornd) |
 
 ## The defaults
 
