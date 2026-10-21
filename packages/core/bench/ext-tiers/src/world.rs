@@ -62,6 +62,8 @@ pub struct Bench {
     worktrees: Mutex<Vec<Value>>,
     /// Every call, in order: `(method, args)`.
     log: Mutex<Vec<(String, Value)>>,
+    /// Whether calls and publishes are logged: on to compare tiers, off to measure them.
+    logging: bool,
     fixtures: Option<SocketAddr>,
     pub calls: AtomicU64,
     pub published: AtomicU64,
@@ -74,13 +76,19 @@ impl Bench {
             sessions: (0..TERMINALS).map(session).collect(),
             worktrees: Mutex::new((0..WORKTREES).map(worktree).collect()),
             log: Mutex::default(),
+            logging: false,
             fixtures,
             calls: AtomicU64::new(0),
             published: AtomicU64::new(0),
         }
     }
 
-    /// The calls made so far, and forgets them.
+    /// As [`Bench::new`], logging every call and publish.
+    pub fn logged(fixtures: Option<SocketAddr>) -> Bench {
+        Bench { logging: true, ..Bench::new(fixtures) }
+    }
+
+    /// The calls and publishes logged so far, and forgets them.
     pub fn take_log(&self) -> Vec<(String, Value)> {
         std::mem::take(&mut *guard(&self.log))
     }
@@ -115,7 +123,9 @@ impl World for Bench {
     fn call(&self, _: &Caller, method: &str, args: Value) -> Answer<Value> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let answer = self.answer(method, &args);
-        guard(&self.log).push((method.to_owned(), args));
+        if self.logging {
+            guard(&self.log).push((method.to_owned(), args));
+        }
         Box::pin(async move { answer })
     }
 
@@ -136,8 +146,11 @@ impl World for Bench {
         Box::pin(async { Ok(None) })
     }
 
-    fn published(&self, _: &Caller, _: &str, _: &[Value]) {
+    fn published(&self, _: &Caller, collection: &str, ops: &[Value]) {
         self.published.fetch_add(1, Ordering::SeqCst);
+        if self.logging {
+            guard(&self.log).push((format!("publish {collection}"), Value::Array(ops.to_vec())));
+        }
     }
 }
 

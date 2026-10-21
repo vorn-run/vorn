@@ -119,6 +119,9 @@ impl Ext {
     }
 }
 
+/// An action no extension has, called to know it is idle.
+pub const BARRIER: &str = "bench.barrier";
+
 pub fn ctx() -> CallCtx {
     CallCtx { caller: "client".into(), project: None }
 }
@@ -185,6 +188,27 @@ impl Rig {
     /// Waits until every event queued so far has been handed over.
     pub async fn settled(&self) {
         self.router.settled(self.ext.id).await;
+    }
+
+    /// Waits until the extension has handled every event queued so far.
+    /// A program is handed events as notifications, so a call it answers
+    /// after them is the only sign it is done; the call asks Vorn nothing.
+    pub async fn handled(&self) {
+        self.settled().await;
+        let _ = self.call(BARRIER, Value::Null).await;
+    }
+
+    /// Waits until nothing more is published for a few milliseconds. A
+    /// program's publishes are applied on tasks of their own, so they can
+    /// land after the answer to the call that made them.
+    pub async fn quiet(&self) {
+        loop {
+            let before = self.world.published();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if self.world.published() == before {
+                return;
+            }
+        }
     }
 
     pub fn rows(&self, collection: &str) -> Vec<Value> {
