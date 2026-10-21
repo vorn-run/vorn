@@ -704,7 +704,7 @@ fn linkable(folder: &Path) -> Result<(PathBuf, Manifest), String> {
         .canonicalize()
         .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
     let manifest = read_dir_manifest(&folder)?;
-    check_id(&manifest.id)?;
+    installable_id(&manifest.id)?;
     Ok((folder, manifest))
 }
 
@@ -714,8 +714,20 @@ fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
     }
     crate::pack::relabel_dir(dir)?;
     let manifest = read_dir_manifest(dir)?;
-    check_id(&manifest.id)?;
+    installable_id(&manifest.id)?;
     Ok(manifest)
+}
+
+/// Refuses what [`check_id`] refuses, and a theme Vorn ships, so no
+/// extension can take the place of a bundled theme.
+fn installable_id(id: &str) -> Result<(), String> {
+    check_id(id)?;
+    if vorn_theme::find_bundled(id).is_some() {
+        return Err(format!(
+            "\"{id}\" is the id of a theme Vorn ships; choose another id"
+        ));
+    }
+    Ok(())
 }
 
 fn read_current(home: &Path) -> Option<Value> {

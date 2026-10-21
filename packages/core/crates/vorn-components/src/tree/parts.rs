@@ -15,7 +15,7 @@ const INDENT: f32 = 16.0;
 const BASE_LEFT: f32 = 8.0;
 
 fn white(a: f32) -> Rgba {
-    Rgba::white(a)
+    vornui::theme::bright(a)
 }
 
 /// `s` cut to `max` characters with an ellipsis.
@@ -74,7 +74,7 @@ impl Cx<'_> {
                 0.10 * self.ui.hover(id).max(if t.on { 1.0 } else { 0.0 }),
             ))
             .role(Role::Button, t.label.as_str())
-            .child(self.icon(&t.icon, 14.0, color::INK));
+            .child(self.icon(&t.icon, 14.0, color::INK.rgba()));
         let b = self.sem(b, || Sem::Button {
             style: "plain",
             confirm: None,
@@ -118,7 +118,7 @@ impl Cx<'_> {
             let close_id = self.send(node, EventKind::Close, &tab.id);
             let hot = self.ui.hovered(id) || self.ui.hovered(close_id);
             let fg = if tab.active {
-                color::GRAY_200
+                color::GRAY_200.rgba()
             } else {
                 color::GRAY_500.mix(color::GRAY_300, self.ui.hover(id))
             };
@@ -218,7 +218,7 @@ impl Cx<'_> {
             .shrink0()
             .bg(white(0.10 * self.ui.hover(id)))
             .role(Role::Button, "All open tabs")
-            .child(crate::lucide("chevron-down", 14.0, 2.0, color::INK));
+            .child(crate::lucide("chevron-down", 14.0, 2.0, color::INK.rgba()));
         let b = widgets::tooltip(self.ui, b, id, "All open tabs", None);
         if !self.bind.menu_open(id) {
             return b;
@@ -276,9 +276,12 @@ impl Cx<'_> {
     pub(super) fn outline(&self, node: &str, o: &Outline) -> El {
         let col = div().col().min_w0().min_h(0.0);
         if o.loading {
-            return col
-                .center()
-                .child(crate::lucide("loader-circle", 20.0, 2.0, color::GRAY_500));
+            return col.center().child(crate::lucide(
+                "loader-circle",
+                20.0,
+                2.0,
+                color::GRAY_500.rgba(),
+            ));
         }
         if let Some(e) = &o.empty {
             return col.center().child(
@@ -344,7 +347,7 @@ impl Cx<'_> {
             .rounded(4.0)
             .frames(fid)
             .bg(white(if focus { 0.13 } else { 0.09 }))
-            .child(crate::lucide("search", 13.0, 2.0, color::GRAY_600))
+            .child(crate::lucide("search", 13.0, 2.0, color::GRAY_600.rgba()))
             .child(
                 div().grow().min_w0().child(
                     widgets::field(
@@ -401,7 +404,7 @@ impl Cx<'_> {
             LineKind::Folder { open, busy } => {
                 let id = self.send(node, EventKind::Select, &l.id);
                 let glyph = if busy {
-                    crate::lucide("loader-circle", 14.0, 2.0, color::GRAY_600)
+                    crate::lucide("loader-circle", 14.0, 2.0, color::GRAY_600.rgba())
                 } else {
                     crate::lucide(
                         if open {
@@ -411,7 +414,7 @@ impl Cx<'_> {
                         },
                         14.0,
                         2.0,
-                        color::GRAY_500,
+                        color::GRAY_500.rgba(),
                     )
                 };
                 div()
@@ -545,7 +548,7 @@ impl Cx<'_> {
             .id(did)
             .shrink0()
             .sense(Sense::DRAG)
-            .bg(white(0.06).mix(Rgba::hexa(0x2b7fff, 0.4), hot))
+            .bg(white(0.06).mix(color::BLUE_500.alpha(0.4), hot))
             .role(Role::Splitter, label)
             .vertical(true)
             .w(1.0)

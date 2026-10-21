@@ -97,7 +97,7 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
                 .silent(),
         );
         if let Some(p) = d.progress {
-            line = line.child(percent(p, color::GRAY_600));
+            line = line.child(percent(p, color::GRAY_600.rgba()));
         }
         names = names.child(line);
     }
@@ -117,7 +117,7 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
         .px(8.0)
         .py(4.0)
         .rounded(radius::MD)
-        .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), f32::from(hot && !r.active)))
+        .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.04), f32::from(hot && !r.active)))
         .ring(radius::MD)
         .role(Role::Button, r.name)
         .selected(r.active)
@@ -139,11 +139,13 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
     // the name truncates at the same width hovered or not.
     let shown = |id: Id| if hot || ui.focused(id) { 1.0 } else { 0.0 };
     if let Some(more) = ids.more {
-        row = row
-            .child(row_button(ui, more, "ellipsis", "More", color::GRAY_200).opacity(shown(more)));
+        row = row.child(
+            row_button(ui, more, "ellipsis", "More", color::GRAY_200.rgba()).opacity(shown(more)),
+        );
     }
     let row = row.child(
-        row_button(ui, ids.close, "x", "Close session", color::RED_400).opacity(shown(ids.close)),
+        row_button(ui, ids.close, "x", "Close session", color::RED_400.rgba())
+            .opacity(shown(ids.close)),
     );
     if r.steps.is_empty() {
         return row;
@@ -165,7 +167,7 @@ pub fn session_row(ui: &Ui, marks: &AgentMarks, ids: SessionRowIds, r: &SessionR
                     .silent(),
             );
         if let Some(p) = step.progress {
-            line = line.child(percent(p, color::GRAY_600));
+            line = line.child(percent(p, color::GRAY_600.rgba()));
         }
         steps = steps.child(line);
     }
@@ -182,7 +184,7 @@ fn row_button(ui: &Ui, id: Id, glyph: &str, label: &str, hot: Rgba) -> El {
         .p(2.0)
         .rounded(radius::SM)
         .shrink0()
-        .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.08), h))
+        .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.08), h))
         .ring(radius::SM)
         .role(Role::Button, label)
         .child(crate::lucide(glyph, 12.0, 2.0, color::GRAY_500.mix(hot, h)));

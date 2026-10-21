@@ -16,7 +16,7 @@ use vorn_protocol::TaskConfig;
 
 use super::{c, ico, white, Screen};
 use crate::act::Act;
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 use crate::screen::menus::Item;
 use crate::state::MenuKind;
 use crate::tasks::{self, Form, Mode, Source, Status, TaskAct, STATUSES};
@@ -64,7 +64,7 @@ pub use board::{card_id, column_id, column_scroll_id};
 const LINE_GUESS: f32 = 36.0;
 
 pub(super) fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 pub(super) fn primary() -> Rgba {
@@ -85,8 +85,10 @@ pub(super) fn tone(status: &str) -> Rgba {
 }
 
 /// `TASK_STATUS_DOT`: the status filter's dots.
-fn dot(status: &str) -> Rgb {
-    tasks::status(status).color.unwrap_or(0x5a5a5e)
+fn dot(status: &str) -> Color {
+    tasks::status(status)
+        .color
+        .unwrap_or(crate::ui::theme::color::INK_FAINT)
 }
 
 /// The task's assigned session is open.
@@ -146,7 +148,7 @@ pub(super) fn confirm_delete(s: &Screen<'_>, anchor: El, task: &str) -> El {
         let id = s.acts.on(place, act);
         let hot = s.ui.hover(id);
         let (fg, bg) = if danger {
-            (c(look::DANGER), Rgba::hexa(look::DANGER, 0.10 + 0.10 * hot))
+            (c(look::DANGER), look::DANGER.alpha(0.10 + 0.10 * hot))
         } else {
             (secondary().mix(primary(), hot), white(0.04 + 0.04 * hot))
         };
@@ -165,7 +167,7 @@ pub(super) fn confirm_delete(s: &Screen<'_>, anchor: El, task: &str) -> El {
                     .silent(),
             );
         if danger {
-            b = b.border(1.0, Rgba::hexa(look::DANGER, 0.20));
+            b = b.border(1.0, look::DANGER.alpha(0.20));
         }
         b
     };
@@ -634,7 +636,7 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
     let t = &s.st.tasks;
     let mut items = vec![Item::header("Status")];
     let mut all = Item::option("All", t.filter.is_none(), Act::Task(TaskAct::Filter(None)));
-    all.dot = Some(0x8b8a88);
+    all.dot = Some(crate::ui::theme::color::INK_SECONDARY);
     items.push(all);
     for st in &STATUSES {
         let mut it = Item::option(
@@ -653,14 +655,14 @@ pub(in crate::screen) fn options_items(s: &Screen<'_>) -> Vec<Item> {
             t.source == Source::All,
             Act::Task(TaskAct::Source(Source::All)),
         );
-        all.dot = Some(0x8b8a88);
+        all.dot = Some(crate::ui::theme::color::INK_SECONDARY);
         items.push(all);
         let mut local = Item::option(
             "Local Only",
             t.source == Source::Local,
             Act::Task(TaskAct::Source(Source::Local)),
         );
-        local.dot = Some(0x5a5a5e);
+        local.dot = Some(crate::ui::theme::color::INK_FAINT);
         items.push(local);
         for cid in connectors {
             let mut name = cid.clone();
@@ -757,7 +759,7 @@ pub(in crate::screen) fn status_items(s: &Screen<'_>, form: Form) -> Vec<Item> {
                 st.label,
                 Act::Task(TaskAct::SetStatus(form, st.key.to_owned())),
             )
-            .tint(st.color.unwrap_or(0x5a5a5e))
+            .tint(st.color.unwrap_or(crate::ui::theme::color::INK_FAINT))
             .disabled(stored && st.key == "in_progress" && current != "todo");
             it.checked = st.key == current;
             it

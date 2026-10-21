@@ -34,6 +34,12 @@ impl Rgba {
         Rgba([1.0, 1.0, 1.0, a])
     }
 
+    /// `0xRRGGBB`, its alpha dropped: for code that keeps colours as numbers.
+    pub fn to_hex(self) -> u32 {
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+        byte(self.0[0]) << 16 | byte(self.0[1]) << 8 | byte(self.0[2])
+    }
+
     /// The same color with its alpha multiplied by `a`.
     pub fn alpha(self, a: f32) -> Rgba {
         Rgba([self.0[0], self.0[1], self.0[2], self.0[3] * a])
@@ -41,7 +47,8 @@ impl Rgba {
 
     /// `self` at `t = 0`, `to` at `t = 1`, mixed premultiplied so a fade
     /// from transparent does not pass through black.
-    pub fn mix(self, to: Rgba, t: f32) -> Rgba {
+    pub fn mix(self, to: impl Into<Rgba>, t: f32) -> Rgba {
+        let to = to.into();
         let t = t.clamp(0.0, 1.0);
         let (a, b) = (self.0, to.0);
         let alpha = a[3] + (b[3] - a[3]) * t;

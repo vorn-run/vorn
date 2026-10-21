@@ -45,7 +45,7 @@ use vorn_app::ui::{
     RenderMode, Rgba, Ui, Waker, WindowApp, WindowOptions,
 };
 use vorn_app::update::Updater;
-use vorn_app::{look, ui_config, App};
+use vorn_app::{appearance, look, ui_config, App};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -369,7 +369,7 @@ fn paint_view(
     );
     let target = ui.offscreen(px);
     for _ in 0..2 {
-        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        ui.begin(look::SURFACE_BASE.rgba());
         let _ = ui.layout(div(), size);
         let r = Rect {
             x: 0.0,
@@ -506,7 +506,7 @@ impl Waiting {
 
     fn view(&self, ui: &Ui) -> El {
         let (w, h) = ui.viewport();
-        let ink = |a| Rgba::hexa(look::INK, a);
+        let ink = |a| look::INK.alpha(a);
         let body = div()
             .col()
             .center()
@@ -534,6 +534,7 @@ impl Waiting {
                         .on(vorn_app::ui::Action::Click)
                         .size(46.0, 32.0)
                         .center()
+                        // literal-colour: the system's close-button red on Windows.
                         .bg(Rgba::hexa(0xe81123, hot))
                         .role(vorn_app::ui::Role::Button, "Close")
                         .child(vorn_app::ui::icon(
@@ -546,7 +547,7 @@ impl Waiting {
         div()
             .size(w, h)
             .col()
-            .bg(Rgba::hex(look::SURFACE_BASE))
+            .bg(look::SURFACE_BASE.rgba())
             .child_if(bar)
             .child(body)
     }
@@ -695,7 +696,7 @@ impl WindowApp for Win {
     }
 
     fn background(&self) -> Rgba {
-        Rgba::hex(look::SURFACE_BASE)
+        look::SURFACE_BASE.rgba()
     }
 
     // Terminals take composed text.
@@ -754,6 +755,8 @@ fn window(args: &Args) -> Result<(), String> {
         }
     });
     let dir = args.data_dir()?;
+    let os_material = appearance::launch_materials(&appearance::launch_file(&dir))
+        != vorn_theme::Materials::Solid;
     let updater = Updater::start(Arc::clone(&wake));
     let cli = Some(vorn_app::cli_link::start(dir.clone(), Arc::clone(&wake)));
     // The window opens at once; connecting, and starting vornd, happen on a thread.
@@ -771,6 +774,7 @@ fn window(args: &Args) -> Result<(), String> {
         // title drawn; elsewhere the app, and the waiting screen, draw their own.
         decorations: cfg!(target_os = "macos"),
         inset_title: cfg!(target_os = "macos").then_some(look::TRAFFIC_LIGHTS),
+        os_material,
         ..WindowOptions::sized(look::WINDOW)
     };
     run_with("Vorn", opts, ui_config(1.0), move |_, wake| {

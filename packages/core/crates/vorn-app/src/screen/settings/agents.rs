@@ -6,7 +6,7 @@ use crate::act::Act;
 use crate::look;
 use crate::screen::{agent_icon, c, ico, white, Screen};
 use crate::settings::{args_text, command_of, modified, AgentField, SetAct};
-use crate::ui::{div, field, text, Action, El, Id, Rgba, Role, TextStyle};
+use crate::ui::{div, field, text, Action, El, Id, Role, TextStyle};
 
 /// The text field for an agent's `field`.
 pub fn agent_field_id(agent: &str, f: AgentField) -> Id {
@@ -24,7 +24,7 @@ fn input(s: &Screen<'_>, agent: &str, f: AgentField, value: String, placeholder:
         .px(10.0)
         .py(6.0)
         .rounded(6.0)
-        .bg(Rgba::hexa(0, 0.3))
+        .bg(crate::ui::theme::shadow(0.3))
         .border(1.0, if focus { white(0.15) } else { white(0.06) })
         .frames(id)
         .child(
@@ -60,14 +60,14 @@ fn installed_card(s: &Screen<'_>, a: &crate::settings::Agent) -> El {
         .gap(12.0)
         .px(16.0)
         .py(12.0)
-        .border_left(2.0, Rgba::hexa(a.color, 0x30 as f32 / 255.0))
+        .border_left(2.0, c(a.color).alpha(0x30 as f32 / 255.0))
         .child(
             div()
                 .size(36.0, 36.0)
                 .center()
                 .shrink0()
                 .rounded(8.0)
-                .bg(Rgba::hexa(a.color, a.bg_alpha))
+                .bg(c(a.color).alpha(a.bg_alpha))
                 .child(agent_icon(s, a.key.as_str(), 18.0)),
         )
         .child(
@@ -94,7 +94,7 @@ fn installed_card(s: &Screen<'_>, a: &crate::settings::Agent) -> El {
                                 .px(6.0)
                                 .py(2.0)
                                 .rounded(999.0)
-                                .bg(Rgba::hexa(a.color, 0x12 as f32 / 255.0))
+                                .bg(c(a.color).alpha(0x12 as f32 / 255.0))
                                 .child(ico("terminal", 8.0, 2.0, c(a.color)))
                                 .child(
                                     text("Ready", 10.0, c(a.color))
@@ -311,7 +311,7 @@ fn available_card(s: &Screen<'_>, a: &crate::settings::Agent) -> El {
                     .col()
                     .p(12.0)
                     .rounded(8.0)
-                    .bg(Rgba::hexa(0, 0.3))
+                    .bg(crate::ui::theme::shadow(0.3))
                     .border(1.0, white(0.06))
                     .child(
                         div()

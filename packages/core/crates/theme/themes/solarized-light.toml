@@ -1,0 +1,31 @@
+# Solarized, Copyright (c) 2011 Ethan Schoonover.
+# Licence: MIT (THIRD_PARTY_NOTICES.md).
+id = "solarized-light"
+name = "Solarized Light"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "Solarized's light palette, by Ethan Schoonover."
+
+[theme]
+appearance = "light"
+
+[theme.ui]
+surface-base = "#fdf6e3"
+surface-panel = "#f7f0dc"
+surface-sunken = "#eee8d5"
+surface-overlay = "#fffbf0"
+ink = "#586e75"
+ink-bright = "#073642"
+accent = "#b58900"
+danger = "#dc322f"
+
+[theme.terminal]
+foreground = "#657b83"
+background = "#fdf6e3"
+cursor = "#586e75"
+selection = "#eee8d5"
+ansi = [
+  "#073642", "#dc322f", "#859900", "#b58900", "#268bd2", "#d33682", "#2aa198", "#eee8d5",
+  "#002b36", "#cb4b16", "#586e75", "#657b83", "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
+]

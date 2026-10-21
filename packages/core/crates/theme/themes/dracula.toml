@@ -1,0 +1,31 @@
+# Dracula, Copyright (c) 2023 Dracula Theme.
+# Licence: MIT (THIRD_PARTY_NOTICES.md).
+id = "dracula"
+name = "Dracula"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "A dark palette by the Dracula Theme authors."
+
+[theme]
+appearance = "dark"
+
+[theme.ui]
+surface-base = "#282a36"
+surface-panel = "#21222c"
+surface-sunken = "#2f3241"
+surface-overlay = "#44475a"
+ink = "#f8f8f2"
+ink-bright = "#ffffff"
+accent = "#bd93f9"
+danger = "#ff5555"
+
+[theme.terminal]
+foreground = "#f8f8f2"
+background = "#282a36"
+cursor = "#f8f8f2"
+selection = "#44475a"
+ansi = [
+  "#21222c", "#ff5555", "#50fa7b", "#f1fa8c", "#bd93f9", "#ff79c6", "#8be9fd", "#f8f8f2",
+  "#6272a4", "#ff6e6e", "#69ff94", "#ffffa5", "#d6acff", "#ff92df", "#a4ffff", "#ffffff",
+]

@@ -12,7 +12,7 @@ use vorn_term_proto::screen::{
     attrs, row_flags, Color, CursorStyle, Image, MouseMode, Row, Screen, StyleDef, Underline,
 };
 
-use crate::look::{term, Rgb};
+use crate::look::{self, Rgb, Term};
 
 /// Bits of [`Run::flags`].
 pub mod flags {
@@ -116,10 +116,10 @@ pub struct PaneView {
     pub holders: Vec<(u16, kitty::Run)>,
 }
 
-/// The xterm 256-colour palette, its first sixteen the app's.
-pub fn xterm(i: u8) -> Rgb {
+/// The xterm 256-colour palette, its first sixteen the theme's.
+pub fn xterm(i: u8, ansi: &[Rgb; 16]) -> Rgb {
     match i {
-        0..=15 => term::ANSI16[i as usize],
+        0..=15 => ansi[i as usize],
         16..=231 => {
             let i = i - 16;
             let lv = |v: u8| if v == 0 { 0 } else { 55 + 40 * v as u32 };
@@ -139,15 +139,17 @@ fn rgb((r, g, b): (u8, u8, u8)) -> Rgb {
 struct Palette {
     fg: Rgb,
     bg: Rgb,
+    theme: Term,
     over: Vec<(u8, Rgb)>,
 }
 
 impl Palette {
-    fn of(m: &Mirror) -> Palette {
+    fn of(m: &Mirror, theme: Term) -> Palette {
         let c = &m.term().colors;
         Palette {
-            fg: c.fg.map_or(term::FG, rgb),
-            bg: c.bg.map_or(term::BG, rgb),
+            fg: c.fg.map_or(theme.fg, rgb),
+            bg: c.bg.map_or(theme.bg, rgb),
+            theme,
             over: c.palette.iter().map(|(i, v)| (*i, rgb(*v))).collect(),
         }
     }
@@ -159,7 +161,7 @@ impl Palette {
                 .over
                 .iter()
                 .find(|(j, _)| *j == i)
-                .map_or_else(|| xterm(i), |(_, v)| *v),
+                .map_or_else(|| xterm(i, &self.theme.ansi), |(_, v)| *v),
             Color::Rgb(r, g, b) => rgb((r, g, b)),
         }
     }
@@ -237,7 +239,7 @@ pub fn build(m: &Mirror, top: Option<u64>) -> PaneView {
         CursorStyle::Underline => Cursor::Underline,
         _ => Cursor::Block,
     };
-    v.cursor_color = t.colors.cursor.map_or(term::CURSOR, rgb);
+    v.cursor_color = t.colors.cursor.map_or(v.cursor_color, rgb);
     v.sb_epoch = t.sb_epoch;
     v.primary = primary;
     v.mouse = t.mouse != MouseMode::None;
@@ -254,13 +256,13 @@ pub fn build(m: &Mirror, top: Option<u64>) -> PaneView {
 /// command's lines, cut from wherever the mirror holds them.
 pub fn rows<'a>(m: &Mirror, rows: impl IntoIterator<Item = &'a Row>) -> PaneView {
     let t = m.term();
-    let pal = Palette::of(m);
+    let pal = Palette::of(m, look::term());
     let mut v = PaneView {
         rev: m.rev(),
         cols: t.cols,
         fg: pal.fg,
         bg: pal.bg,
-        cursor_color: term::CURSOR,
+        cursor_color: pal.theme.cursor,
         ..PaneView::default()
     };
     // Placeholders draw nothing without a virtual placement, so are left as text unparsed.
@@ -474,11 +476,11 @@ mod tests {
 
     #[test]
     fn palette_corners() {
-        assert_eq!(xterm(1), 0xef4444);
-        assert_eq!(xterm(16), 0x000000);
-        assert_eq!(xterm(231), 0xffffff);
-        assert_eq!(xterm(232), 0x080808);
-        assert_eq!(xterm(196), 0xff0000);
+        assert_eq!(xterm(1, &look::term().ansi), 0xef4444);
+        assert_eq!(xterm(16, &look::term().ansi), 0x000000);
+        assert_eq!(xterm(231, &look::term().ansi), 0xffffff);
+        assert_eq!(xterm(232, &look::term().ansi), 0x080808);
+        assert_eq!(xterm(196, &look::term().ansi), 0xff0000);
     }
 
     #[test]

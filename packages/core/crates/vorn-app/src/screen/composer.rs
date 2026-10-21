@@ -4,7 +4,7 @@
 use super::{agent_icon, c, ico, mod_label, truncate, white, Screen};
 use crate::act::Act;
 use crate::app::MODEL_ID;
-use crate::look;
+use crate::look::{self, Color};
 use crate::models::{footer, rows, Listing, Row, Status};
 use crate::state::{basename, MenuKind};
 use crate::ui::{area, div, field, image, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
@@ -21,7 +21,7 @@ fn chip(
     name: &str,
     label: &str,
     size: f32,
-    color: u32,
+    color: Color,
     a11y: &str,
     tint: Option<Rgba>,
 ) -> El {
@@ -195,7 +195,7 @@ fn model_chip(s: &Screen<'_>, agent: &str) -> Option<El> {
     let id = s.acts.on("composer", Act::Open(MenuKind::LaunchModel));
     let hot = if open { 1.0 } else { s.ui.hover(id) };
     let a11y = label.map_or("Model: agent default".to_owned(), |l| format!("Model: {l}"));
-    let tone = |set: u32| c(if label.is_some() { set } else { look::GRAY_500 });
+    let tone = |set: Color| c(if label.is_some() { set } else { look::GRAY_500 });
     Some(
         div()
             .id(id)
@@ -467,13 +467,13 @@ fn git_chips(s: &Screen<'_>) -> Vec<El> {
         (
             "New worktree".to_owned(),
             look::AMBER_400,
-            Some(Rgba::hexa(look::AMBER_400, 0.1)),
+            Some(look::AMBER_400.alpha(0.1)),
         )
     } else if let Some(w) = &l.worktree {
         (
             truncate(basename(w), 16),
             look::AMBER_400,
-            Some(Rgba::hexa(look::AMBER_400, 0.1)),
+            Some(look::AMBER_400.alpha(0.1)),
         )
     } else {
         (String::new(), look::GRAY_600, None)
@@ -509,7 +509,7 @@ fn git_chips(s: &Screen<'_>) -> Vec<El> {
 /// The line under the box: what to do first, why the launch failed, or a
 /// tip.
 fn hint(s: &Screen<'_>) -> El {
-    let line = |t: &str, color: u32| text(t, 11.0, c(color)).line_height(16.0).mt(8.0);
+    let line = |t: &str, color: Color| text(t, 11.0, c(color)).line_height(16.0).mt(8.0);
     if s.st.composer.project.is_none() {
         return line(look::PICK_PROJECT, look::GRAY_600);
     }
@@ -573,7 +573,7 @@ pub(super) fn overlay(s: &Screen<'_>) -> Option<El> {
             .on(Action::Click)
             .absolute(0.0, 0.0)
             .size(s.size.0, s.size.1)
-            .bg(Rgba::hexa(0, 0.5))
+            .bg(crate::ui::theme::shadow(0.5))
             .layered()
             .center()
             .child(modal),

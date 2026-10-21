@@ -7045,6 +7045,7 @@ dependencies = [
  "vorn-store",
  "vorn-term-mirror",
  "vorn-term-proto",
+ "vorn-theme",
  "vorn-tree",
  "vornui",
  "wasm-bindgen",
@@ -7282,6 +7283,7 @@ dependencies = [
  "vorn-extensions",
  "vorn-guest-build",
  "vorn-spawn",
+ "vorn-theme",
  "vorn-tree",
  "wasmtime",
  "wasmtime-wasi",
@@ -7534,6 +7536,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-theme"
+version = "0.0.0"
+dependencies = [
+ "toml 1.1.7+spec-1.1.0",
+]
+
+[[package]]
 name = "vorn-tree"
 version = "0.0.0"
 dependencies = [
@@ -7736,6 +7745,7 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "vorn-spawn",
+ "vorn-theme",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

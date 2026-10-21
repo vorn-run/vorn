@@ -92,6 +92,18 @@ pub struct Manifest {
     /// adapter needs no service.
     #[serde(skip)]
     pub agent: Option<toml::Value>,
+    /// Its `[theme]` section, as written and already checked: UI tokens and
+    /// a terminal palette. Data, as an agent adapter is.
+    #[serde(skip)]
+    pub theme: Option<toml::Value>,
+}
+
+impl Manifest {
+    /// The theme its `[theme]` section sets, named by the package.
+    pub fn theme(&self) -> Option<vorn_theme::Theme> {
+        let section = self.theme.as_ref()?;
+        vorn_theme::Theme::from_section(&self.id, &self.name, section).ok()
+    }
 }
 
 /// Where a package keeps the migrations that make its tables.
@@ -1071,6 +1083,7 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         storage: None,
         mcp: Vec::new(),
         agent: None,
+        theme: None,
     })
 }
 

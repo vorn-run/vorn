@@ -86,7 +86,7 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
                 .absolute(0.0, 4.0)
                 .size(w, 8.0)
                 .rounded(4.0)
-                .bg(c(0xefefef)),
+                .bg(c(look::SLIDER_TRACK)),
         )
         .child(
             div()
@@ -209,6 +209,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
     if let Some(d) = s.term_drawing {
         rows_col = rows_col.child(drawing_row(s, d));
     }
+    rows_col = rows_col.child(colour_rows(s));
     div()
         .col()
         .child(header("Appearance", "Customize how Vorn looks", None))
@@ -243,6 +244,266 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
                     false,
                 )),
         )
+}
+
+/// The id of a theme's preview tile, which the app reads the hover of.
+pub(crate) fn theme_tile_id(theme: &str) -> Id {
+    Id::new(&format!("theme-tile:{theme}"))
+}
+
+/// A choice stored as a string in `defaults`, and its options.
+fn text_seg(s: &Screen<'_>, key: &str, fallback: &str, opts: &[(&'static str, &str)]) -> El {
+    let chosen = defaults(s)
+        .and_then(|d| d.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or(fallback);
+    let segs = opts
+        .iter()
+        .map(|(label, v)| Seg {
+            label,
+            icon: None,
+            act: default_act(key, format!("\"{v}\"")),
+            on: chosen == *v,
+            disabled: false,
+        })
+        .collect();
+    segmented(s, key, segs, 12.0)
+}
+
+/// Colour scheme, the light and dark themes, interface style, contrast,
+/// materials, and the palette now drawn.
+fn colour_rows(s: &Screen<'_>) -> El {
+    use crate::appearance as a;
+    use vorn_theme::Appearance as Look;
+    let prefs = a::prefs(defaults(s));
+    let scheme = text_seg(
+        s,
+        a::SCHEME,
+        prefs.scheme.key(),
+        &[("System", "system"), ("Light", "light"), ("Dark", "dark")],
+    );
+    let chrome = text_seg(
+        s,
+        a::CHROME,
+        prefs.chrome.key(),
+        &[("Neutral", "neutral"), ("Themed", "tinted")],
+    );
+    let reduced = s.ui.reduced_transparency();
+    let materials = text_seg(
+        s,
+        a::MATERIALS,
+        prefs.materials.key(),
+        &[
+            ("Solid", "solid"),
+            ("Native", "native"),
+            ("Themed", "themed"),
+        ],
+    );
+    div()
+        .col()
+        .child(row(
+            "Colour Scheme",
+            "Follow the system, or always use the light or the dark theme",
+            None,
+            scheme,
+            false,
+        ))
+        .child(theme_row(s, a::LIGHT, "Light Theme", Look::Light, &prefs.light))
+        .child(theme_row(s, a::DARK, "Dark Theme", Look::Dark, &prefs.dark))
+        .child(row(
+            "Interface Style",
+            "Neutral keeps Vorn's own surfaces; Themed tints them with the theme",
+            None,
+            chrome,
+            false,
+        ))
+        .child(switch_row(
+            s,
+            a::CONTRAST,
+            prefs.contrast,
+            "Contrast Correction",
+            "Lift text that reads below 4.5:1, keeping its hue",
+            None,
+        ))
+        .child(row(
+            "Materials",
+            if cfg!(windows) {
+                "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme. The sidebar changes at the next launch"
+            } else {
+                "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme"
+            },
+            reduced.then_some("Reduce transparency is on in the system settings, so surfaces stay solid."),
+            materials,
+            reduced,
+        ))
+        .child(palette_row())
+}
+
+/// A row of tiles, one per theme of `look`, each drawn in its own colours.
+fn theme_row(
+    s: &Screen<'_>,
+    key: &str,
+    title: &str,
+    kind: vorn_theme::Appearance,
+    chosen: &str,
+) -> El {
+    let installed = s.st.settings.appearance.installed();
+    let mut tiles = div().row().wrap_children().gap(8.0).mt(12.0);
+    for t in vorn_theme::bundled()
+        .iter()
+        .chain(installed)
+        .filter(|t| t.appearance == kind)
+    {
+        tiles = tiles.child(theme_tile(s, key, t, t.id == chosen));
+    }
+    div()
+        .col()
+        .py(16.0)
+        .border_bottom(1.0, white(0.06))
+        .child(
+            text(title, 14.0, c(look::GRAY_200))
+                .weight(500)
+                .line_height(20.0)
+                .role(Role::Label, title),
+        )
+        .child(
+            text(
+                "Point at a theme to preview it; click to use it",
+                12.0,
+                c(look::GRAY_500),
+            )
+            .line_height(16.0)
+            .mt(2.0)
+            .silent(),
+        )
+        .child(tiles)
+}
+
+/// A theme's preview: its window, sidebar, ink and accent, and its eight
+/// terminal colours, with its name under it.
+fn theme_tile(s: &Screen<'_>, key: &str, t: &vorn_theme::Theme, on: bool) -> El {
+    use vorn_theme::Token as T;
+    let id = theme_tile_id(&t.id);
+    s.acts
+        .bind(id, set(default_act(key, format!("\"{}\"", t.id))));
+    let hot = s.ui.hover(id);
+    let rgba = |token| Rgba::from(t.get(token));
+    let line = |w: f32, token| div().size(w, 3.0).rounded(1.5).bg(rgba(token));
+    let mut ansi = div().row().gap(2.0);
+    for &c in &t.terminal.ansi[1..7] {
+        ansi = ansi.child(div().size(8.0, 8.0).rounded(2.0).bg(Rgba::from(c)));
+    }
+    let edge = if on {
+        white(0.45)
+    } else {
+        white(0.08).mix(white(0.2), hot)
+    };
+    let preview = div()
+        .row()
+        .size(120.0, 72.0)
+        .rounded(4.0)
+        .clip()
+        .bg(rgba(T::SurfaceBase))
+        .border(1.0, edge)
+        .child(
+            div()
+                .col()
+                .gap(4.0)
+                .w(32.0)
+                .h_full()
+                .p(6.0)
+                .bg(rgba(T::SurfacePanel))
+                .child(line(18.0, T::InkSecondary))
+                .child(line(14.0, T::InkFaint))
+                .child(line(16.0, T::InkFaint)),
+        )
+        .child(
+            div()
+                .col()
+                .gap(5.0)
+                .p(8.0)
+                .grow()
+                .child(line(48.0, T::Ink))
+                .child(line(36.0, T::InkSecondary))
+                .child(div().size(20.0, 6.0).rounded(2.0).bg(rgba(T::Accent)))
+                .child(ansi),
+        );
+    let name = if on {
+        c(look::GRAY_100)
+    } else {
+        c(look::GRAY_400)
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .col()
+        .gap(6.0)
+        .role(Role::RadioButton, &t.name)
+        .selected(on)
+        .ring(4.0)
+        .child(preview)
+        .child(text(&t.name, 12.0, name).line_height(16.0).silent())
+}
+
+/// The terminal palette now drawn: 16 ANSI colours, then foreground,
+/// background, cursor and selection, each with its value.
+fn palette_row() -> El {
+    let term = crate::ui::palette::terminal();
+    let swatch = |label: String, color: Rgba| {
+        div()
+            .row()
+            .items_center()
+            .gap(6.0)
+            .w(144.0)
+            .child(
+                div()
+                    .size(14.0, 14.0)
+                    .rounded(3.0)
+                    .bg(color)
+                    .border(1.0, white(0.08)),
+            )
+            .child(
+                text(
+                    format!("{label} #{:06x}", color.to_hex()),
+                    12.0,
+                    c(look::GRAY_400),
+                )
+                .line_height(16.0)
+                .silent(),
+            )
+    };
+    let mut grid = div().row().wrap_children().gap(6.0).mt(12.0);
+    for (i, &color) in term.ansi.iter().enumerate() {
+        grid = grid.child(swatch(format!("{i:>2}"), color));
+    }
+    for (label, color) in [
+        ("fg", term.foreground),
+        ("bg", term.background),
+        ("cursor", term.cursor),
+        ("sel", term.selection),
+    ] {
+        grid = grid.child(swatch(label.to_owned(), color));
+    }
+    div()
+        .col()
+        .py(16.0)
+        .child(
+            text("Terminal Palette", 14.0, c(look::GRAY_200))
+                .weight(500)
+                .line_height(20.0)
+                .role(Role::Label, "Terminal Palette"),
+        )
+        .child(
+            text(
+                "The theme's colours as the terminal draws them now",
+                12.0,
+                c(look::GRAY_500),
+            )
+            .line_height(16.0)
+            .mt(2.0)
+            .silent(),
+        )
+        .child(grid)
 }
 
 /// Settings › Experimental: one switch for everything still being tried.
@@ -451,7 +712,7 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
                     text("Full command blocks", 11.0, c(look::GRAY_500))
                 } else {
                     let tone = if sh.level == "limited" {
-                        Rgba::hexa(look::AMBER_500, 0.8)
+                        look::AMBER_500.alpha(0.8)
                     } else {
                         c(look::GRAY_500)
                     };
@@ -822,8 +1083,8 @@ fn tone_dot(t: Tone) -> Rgba {
         Tone::Blocked => c(look::BRONZO),
         Tone::Broken => c(look::DANGER),
         Tone::Live => c(look::INK),
-        Tone::Settled => Rgba::hexa(look::INK, look::INK_FAINT),
-        Tone::Idle => Rgba::hexa(look::INK, 0.18),
+        Tone::Settled => look::INK.alpha(look::INK_FAINT),
+        Tone::Idle => look::INK.alpha(0.18),
     }
 }
 

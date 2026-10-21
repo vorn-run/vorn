@@ -31,6 +31,7 @@ pub mod menu;
 pub mod motion;
 pub mod native;
 pub mod pace;
+pub mod palette;
 mod render;
 pub mod scene;
 pub mod text;

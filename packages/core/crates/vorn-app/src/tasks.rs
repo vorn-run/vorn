@@ -7,7 +7,7 @@ use web_time::Instant;
 use serde_json::{json, Map, Value};
 use vorn_protocol::TaskConfig;
 
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 
 /// One task status: its key, label, lucide icon, colour and empty text.
 pub struct Status {
@@ -15,13 +15,13 @@ pub struct Status {
     pub label: &'static str,
     pub icon: &'static str,
     /// `TASK_STATUS_TEXT`; `None` is `text-ink-faint`.
-    pub color: Option<Rgb>,
+    pub color: Option<Color>,
     pub empty: &'static str,
 }
 
-pub const SLATE: Rgb = look::STATUS_SLATE;
-pub const BLUE: Rgb = look::STATUS_BLUE;
-pub const SAGE: Rgb = look::STATUS_SAGE;
+pub const SLATE: Color = look::STATUS_SLATE;
+pub const BLUE: Color = look::STATUS_BLUE;
+pub const SAGE: Color = look::STATUS_SAGE;
 
 /// `TASK_STATUS_ORDER` with what each shows.
 pub const STATUSES: [Status; 5] = [

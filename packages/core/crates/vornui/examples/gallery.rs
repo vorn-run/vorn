@@ -245,9 +245,14 @@ fn type_specimen() -> El {
                 div()
                     .p(16.0)
                     .bg(color::SURFACE_SUNKEN)
-                    .child(lines(color::INK)),
+                    .child(lines(color::INK.rgba())),
             )
-            .child(div().p(16.0).bg(color::WHITE).child(lines(color::GRAY_700))),
+            .child(
+                div()
+                    .p(16.0)
+                    .bg(color::WHITE)
+                    .child(lines(color::GRAY_700.rgba())),
+            ),
     )
 }
 
@@ -273,7 +278,7 @@ fn motion(ui: &Ui, on: bool) -> El {
     );
     let tint = ui.animate(
         key.child("tint"),
-        if on { color::BRONZO } else { color::GRAY_600 },
+        if on { color::BRONZO } else { color::GRAY_600 }.rgba(),
         Transition::COLORS,
     );
     let size = ui.animate(

@@ -6,7 +6,7 @@ use web_time::Instant;
 use super::settings::{header, row, toggle};
 use super::{c, ico, white, Screen};
 use crate::act::Act;
-use crate::look::{self, Rgb};
+use crate::look::{self, Color};
 use crate::network::{
     address_host, address_kind, devices_label, format_remaining, grouped, others_label, pair_link,
     Adding, AddressKind, Mode, NetAct, Network, DEVICE_NAME, HOST_TOKEN, HOST_URL,
@@ -866,7 +866,7 @@ fn ghost(s: &Screen<'_>, place: &str, label: &str, act: NetAct) -> El {
 }
 
 /// `px-2 py-1 text-xs` text button in `rest` ink, white on hover.
-fn link(s: &Screen<'_>, place: &str, label: &str, act: NetAct, rest: Rgb) -> El {
+fn link(s: &Screen<'_>, place: &str, label: &str, act: NetAct, rest: Color) -> El {
     let id = net(place, s, act);
     let hot = s.ui.hover(id);
     div()

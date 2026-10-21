@@ -1,0 +1,31 @@
+# Catppuccin, Copyright (c) 2021 Catppuccin.
+# Licence: MIT (THIRD_PARTY_NOTICES.md).
+id = "catppuccin-mocha"
+name = "Catppuccin Mocha"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "Catppuccin's darkest flavour."
+
+[theme]
+appearance = "dark"
+
+[theme.ui]
+surface-base = "#1e1e2e"
+surface-panel = "#181825"
+surface-sunken = "#252536"
+surface-overlay = "#313244"
+ink = "#cdd6f4"
+ink-bright = "#f5f7ff"
+accent = "#cba6f7"
+danger = "#f38ba8"
+
+[theme.terminal]
+foreground = "#cdd6f4"
+background = "#1e1e2e"
+cursor = "#f5e0dc"
+selection = "#585b70"
+ansi = [
+  "#45475a", "#f38ba8", "#a6e3a1", "#f9e2af", "#89b4fa", "#f5c2e7", "#94e2d5", "#a6adc8",
+  "#585b70", "#f37799", "#89d88b", "#ebd391", "#74a8fc", "#f2aede", "#6bd7ca", "#bac2de",
+]

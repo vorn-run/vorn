@@ -19,6 +19,7 @@ members = [
   "crates/grid-client",
   "crates/size",
   "crates/vornui",
+  "crates/theme",
   "crates/vorn-components",
   "crates/phone",
   "crates/protocol",

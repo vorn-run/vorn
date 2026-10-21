@@ -75,7 +75,7 @@ fn divider(s: &Screen<'_>, id: Id, side_by_side: bool, label: &str) -> El {
         .id(id)
         .shrink0()
         .sense(Sense::DRAG)
-        .bg(white(0.06).mix(Rgba::hexa(look::BLUE_500, 0.4), hot))
+        .bg(white(0.06).mix(look::BLUE_500.alpha(0.4), hot))
         .role(Role::Splitter, label)
         .vertical(side_by_side);
     if side_by_side {
@@ -769,7 +769,7 @@ pub(super) fn alert(
         .on(Action::Click)
         .absolute(0.0, 0.0)
         .size(s.size.0, s.size.1)
-        .bg(Rgba::hexa(0, 0.3))
+        .bg(crate::ui::theme::shadow(0.3))
         .layered()
         .center()
         .child(panel)

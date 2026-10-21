@@ -12,7 +12,7 @@ pub use vornui::widgets::{
 };
 pub use vornui::window::{run as run_window, run_with, App as WindowApp, Waker, WindowOptions};
 pub use vornui::winit::window::Window as NativeWindow;
-pub use vornui::{backend, cells, icons, menu, theme, widgets};
+pub use vornui::{backend, cells, icons, menu, palette, theme, widgets};
 pub use vornui::{
     custom, decode_png, div, icon, image, rasterize_svg_rgba, shape, text, Action, Clipboard,
     Cursor, Dropped, El, Event, Id, Input, Laid, MemoryClipboard, Offscreen, Place, Rect,

@@ -31,6 +31,7 @@ embed-resource = "3"
 [dependencies]
 # The UI layer, reached only through `src/ui.rs`.
 vornui = { path = "../vornui" }
+vorn-theme = { path = "../theme" }
 # The composed components the screens are built from.
 vorn-components = { path = "../vorn-components" }
 # Extension templates and their rows, checked as vornd sends them.

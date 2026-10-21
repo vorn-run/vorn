@@ -121,6 +121,10 @@ struct Live<A> {
     pacer: Pacer,
     /// A frame the app asked for that waits for the beat.
     pending: Option<Instant>,
+    /// The OS material behind the window, as last set: `Some(dark)` while on.
+    material: Option<bool>,
+    /// The swapchain can show the OS material: on Windows only a composited one.
+    see_through: bool,
 }
 
 struct Runner<A, F> {
@@ -227,19 +231,20 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         // load; elsewhere a window shown before its first frame flashes the system's white.
         #[cfg(target_os = "macos")]
         if !o.transparent {
-            let [r, g, b, _] = crate::theme::color::SURFACE_BASE.0;
+            let [r, g, b, _] = crate::theme::color::SURFACE_BASE.rgba().0;
             crate::macos::set_background(&window, (f64::from(r), f64::from(g), f64::from(b)));
             window.set_visible(true);
             crate::macos::flush();
         }
         let mut cfg = self.cfg;
         cfg.scale = window.scale_factor() as f32;
-        let instance = wgpu::Instance::new(instance_desc());
-        let surface = instance
-            .create_surface(window.clone())
-            .map_err(|e| e.to_string())?;
+        let (instance, surface, adapter, composited) = renderer(&window, o.os_material)?;
+        // A composited window launching solid still needs its frame extended to show.
+        #[cfg(windows)]
+        if composited {
+            os_material(&window, None);
+        }
         let mode = RenderMode::from_env();
-        let adapter = Gpu::adapter(&instance, Some(&surface)).ok();
         let (present, mut ui) = match adapter {
             Some(a) if mode.wants_device(&a) => {
                 let gpu = Gpu::open(instance, a)?;
@@ -278,6 +283,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
             });
         let make = self.make.take().ok_or("app already made")?;
         ui.set_maximized(window.is_maximized());
+        ui.set_system_dark(window.theme() != Some(winit::window::Theme::Light));
         #[cfg(target_os = "macos")]
         if let Some(at) = o.inset_title {
             crate::macos::place_traffic_lights(&window, at);
@@ -296,6 +302,8 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
             tree: None,
             pacer: Pacer::new(period),
             pending: None,
+            material: None,
+            see_through: composited || !cfg!(windows),
         })
     }
 }
@@ -442,7 +450,15 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> ApplicationHandler<UserEvent> for R
                 l.ui.wheel_phase(dy, phase);
                 l.dispatch();
             }
+            WindowEvent::ThemeChanged(theme) => {
+                l.ui.set_system_dark(*theme != winit::window::Theme::Light);
+                l.window.request_redraw();
+            }
             WindowEvent::Focused(focused) => {
+                // Reduce transparency sends no event; a window coming forward looks again.
+                if *focused {
+                    l.ui.set_reduced_transparency(crate::palette::system_reduced_transparency());
+                }
                 l.ui.set_window_focused(*focused);
                 if !*focused {
                     l.ui.pointer_leave();
@@ -543,6 +559,108 @@ fn cursor_in(_: &Window) -> Option<(f32, f32)> {
     None
 }
 
+type Renderer = (
+    wgpu::Instance,
+    wgpu::Surface<'static>,
+    Option<wgpu::Adapter>,
+    bool,
+);
+
+/// The instance, surface and adapter `window` draws with, and whether they
+/// are composited: on Windows with `material`, DirectComposition when that
+/// finds a hardware adapter; otherwise the default.
+fn renderer(window: &Arc<Window>, material: bool) -> Result<Renderer, String> {
+    let open = |desc| -> Result<Renderer, String> {
+        let instance = wgpu::Instance::new(desc);
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|e| e.to_string())?;
+        let adapter = Gpu::adapter(&instance, Some(&surface)).ok();
+        Ok((instance, surface, adapter, false))
+    };
+    #[cfg(windows)]
+    if material {
+        use crate::gpu::{composited_desc, swapchain, Swapchain};
+        // A failed DX12 instance or surface falls through to the default too.
+        let tried = open(composited_desc()).ok();
+        let kind = tried
+            .as_ref()
+            .and_then(|r| r.2.as_ref())
+            .map(|a| a.get_info().device_type);
+        if let (Swapchain::Composited, Some((instance, surface, adapter, _))) =
+            (swapchain(material, kind), tried)
+        {
+            return Ok((instance, surface, adapter, true));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = material;
+    open(instance_desc())
+}
+
+/// Shows the system's material behind the window in the dark or light
+/// appearance, or takes it away (`None`); `false` when the system has none.
+#[cfg(target_os = "macos")]
+fn os_material(window: &Window, dark: Option<bool>) -> bool {
+    let [r, g, b, _] = crate::theme::color::SURFACE_BASE.rgba().0;
+    let solid = (f64::from(r), f64::from(g), f64::from(b));
+    crate::macos::set_material(window, dark, solid)
+}
+
+/// Mica, which Windows 11 has and Windows 10 refuses; only for a composited window.
+#[cfg(windows)]
+fn os_material(window: &Window, dark: Option<bool>) -> bool {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_MAINWINDOW, DWMSBT_NONE,
+        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+    use windows_sys::Win32::UI::Controls::MARGINS;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Some(RawWindowHandle::Win32(h)) = window.window_handle().ok().map(|h| h.as_raw()) else {
+        return false;
+    };
+    let hwnd = h.hwnd.get() as HWND;
+    let kind = if dark.is_some() {
+        DWMSBT_MAINWINDOW
+    } else {
+        DWMSBT_NONE
+    };
+    // Always extended: otherwise the window's GDI surface covers the composited frame.
+    let edge = -1;
+    let margins = MARGINS {
+        cxLeftWidth: edge,
+        cxRightWidth: edge,
+        cyTopHeight: edge,
+        cyBottomHeight: edge,
+    };
+    let dark_mode = i32::from(dark.unwrap_or(true));
+    let size = |n: usize| n as u32;
+    // SAFETY: winit's live window; each value outlives its call.
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            (&raw const dark_mode).cast(),
+            size(std::mem::size_of::<i32>()),
+        );
+        let ok = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+            (&raw const kind).cast(),
+            size(std::mem::size_of_val(&kind)),
+        ) >= 0;
+        DwmExtendFrameIntoClientArea(hwnd, &margins);
+        ok
+    }
+}
+
+/// Linux and Windows 10 stay solid.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn os_material(_: &Window, _: Option<bool>) -> bool {
+    false
+}
+
 impl<A: App> Live<A> {
     /// Does what the app asked of the window; true when it asked to close.
     fn apply_requests(&mut self) -> bool {
@@ -604,8 +722,50 @@ impl<A: App> Live<A> {
         self.window.request_redraw();
     }
 
+    /// Puts the OS material behind the window when the palette asks for one
+    /// and the compositor blends the frame's alpha, or takes it away.
+    fn sync_material(&mut self) {
+        let Present::Gpu { surface, config } = &mut self.present else {
+            return;
+        };
+        let Some(gpu) = &self.ui.gpu else {
+            return;
+        };
+        let want = (self.see_through
+            && crate::palette::materials() != vorn_theme::Materials::Solid)
+            .then(crate::palette::dark);
+        if want == self.material {
+            return;
+        }
+        let caps = surface.get_capabilities(&gpu.adapter);
+        let blend = [
+            wgpu::CompositeAlphaMode::PreMultiplied,
+            wgpu::CompositeAlphaMode::PostMultiplied,
+        ]
+        .into_iter()
+        .find(|m| caps.alpha_modes.contains(m));
+        let on = match (want, blend) {
+            (Some(dark), Some(mode)) if os_material(&self.window, Some(dark)) => {
+                config.alpha_mode = mode;
+                true
+            }
+            _ => {
+                if self.material.is_some() {
+                    os_material(&self.window, None);
+                }
+                config.alpha_mode = opaque(&caps);
+                false
+            }
+        };
+        surface.configure(&gpu.device, config);
+        // Asked for and unavailable is remembered too, so it is tried once.
+        self.material = want;
+        self.ui.set_see_through(on);
+    }
+
     fn redraw(&mut self) -> Result<(), String> {
         let now = Instant::now();
+        self.sync_material();
         #[cfg(target_os = "macos")]
         self.ui
             .set_live_resize(crate::macos::in_live_resize(&self.window));
@@ -691,6 +851,17 @@ impl<A: App> Live<A> {
     }
 }
 
+/// Opaque where offered: a DirectComposition swapchain lists `Auto` first,
+/// which leaves its alpha unspecified.
+fn opaque(caps: &wgpu::SurfaceCapabilities) -> wgpu::CompositeAlphaMode {
+    let o = wgpu::CompositeAlphaMode::Opaque;
+    if caps.alpha_modes.contains(&o) {
+        o
+    } else {
+        caps.alpha_modes[0]
+    }
+}
+
 /// Picks the surface's format and mode for `gpu` and configures it at `px`.
 pub(crate) fn configure(
     gpu: &Gpu,
@@ -720,7 +891,7 @@ pub(crate) fn configure(
     ]
     .into_iter()
     .find(|m| transparent && caps.alpha_modes.contains(m))
-    .unwrap_or(caps.alpha_modes[0]);
+    .unwrap_or_else(|| opaque(&caps));
     // Copying from the frame is what backdrop blur reads; without it blurs
     // are skipped.
     let usage =

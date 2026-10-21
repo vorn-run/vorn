@@ -136,7 +136,7 @@ fn footer(s: &Screen<'_>) -> El {
     };
     let fg = if p.refreshing {
         check = check.opacity(0.5).role(Role::Button, label);
-        k::GRAY_500
+        k::GRAY_500.rgba()
     } else {
         let id = s.acts.on("plug-catalog", act(PlugAct::CatalogRefresh));
         check = check

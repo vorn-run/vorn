@@ -32,6 +32,9 @@ pub struct Panel {
     rendering: Option<Pending>,
     /// What its tree's events answered, still on their way.
     told: Vec<Pending>,
+    /// vornd's `defaults`, for the appearance settings.
+    defaults: Value,
+    appearance: crate::appearance::Appearance,
 }
 
 impl Panel {
@@ -44,7 +47,7 @@ impl Panel {
         let (rpc, events) = Rpc::connect(ep, wake).map_err(|e| e.to_string())?;
         rpc.call(
             "subscribe:set",
-            json!({ "topics": ["extension:*"], "terminalBytes": false }),
+            json!({ "topics": ["extension:*", "config:changed"], "terminalBytes": false }),
         )
         .map_err(|e| e.to_string())?;
         let mut p = Panel {
@@ -56,7 +59,12 @@ impl Panel {
             out: Vec::new(),
             rendering: None,
             told: Vec::new(),
+            defaults: Value::Null,
+            appearance: crate::appearance::Appearance::default(),
         };
+        if let Ok(config) = p.rpc.call("config:load", Value::Null) {
+            p.defaults = config["defaults"].clone();
+        }
         p.reload();
         if p.points.get(key).is_none() {
             return Err(format!("no window point {key:?}"));
@@ -79,6 +87,7 @@ impl Panel {
             .ok()
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default();
+        self.appearance.listed(&list);
         self.points.listed(&list);
         for (ext, coll) in self.points.to_ask() {
             let answer = self
@@ -110,6 +119,7 @@ impl Panel {
                     }
                 }
                 "extension:contributionsChanged" => stale = true,
+                "config:changed" => self.defaults = params["defaults"].clone(),
                 _ => {}
             }
         }
@@ -209,6 +219,12 @@ impl Panel {
     }
 
     pub fn view(&mut self, ui: &mut Ui) -> El {
+        self.appearance.apply(
+            Some(&self.defaults),
+            ui.system_dark(),
+            ui.reduced_transparency(),
+            None,
+        );
         self.acts.clear();
         let Some(p) = self.points.get(&self.key) else {
             return div();
@@ -229,7 +245,7 @@ impl Panel {
             .justify_between()
             .px(12.0)
             .py(8.0)
-            .border_bottom(1.0, Rgba::white(0.06))
+            .border_bottom(1.0, crate::ui::theme::bright(0.06))
             .id(Id::new("panel-drag"))
             .sense(Sense::WINDOW_DRAG)
             .child(
@@ -245,7 +261,7 @@ impl Panel {
                 .w_full()
                 .rounded(4.0)
                 .bg(k::SURFACE_OVERLAY)
-                .border(1.0, Rgba::white(0.08))
+                .border(1.0, crate::ui::theme::bright(0.08))
                 .role(Role::Dialog, p.title.as_str())
                 .child(header)
                 .child(

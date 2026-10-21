@@ -18,6 +18,8 @@ taffy = { version = "0.10", default-features = false, features = ["std", "taffy_
 etagere = "0.3"
 resvg = { version = "0.48", default-features = false }
 png = "0.18"
+# The colour tokens and the theme a window draws with.
+vorn-theme = { path = "../theme" }
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "1.0"
 unicode-segmentation = "1"
@@ -51,7 +53,7 @@ web-sys = { version = "0.3", features = [
   "CssStyleDeclaration", "CanvasRenderingContext2d", "ImageData", "Navigator", "Clipboard",
   "ClipboardEvent", "DataTransfer", "KeyboardEvent", "InputEvent", "CompositionEvent", "Event",
   "EventTarget", "MouseEvent", "Node", "DomRect", "ResizeObserver", "ResizeObserverEntry",
-  "ResizeObserverSize", "ResizeObserverOptions", "ResizeObserverBoxOptions", "MediaQueryList",
+  "ResizeObserverSize", "ResizeObserverOptions", "ResizeObserverBoxOptions", "MediaQueryList", "MediaQueryListEvent",
   "console", "Location", "UrlSearchParams", "Text", "DragEvent", "File", "FileList", "Blob",
 ] }
 
@@ -75,11 +77,15 @@ objc2-foundation = { version = "0.2.2", default-features = false, features = ["s
 # The CPU raster raises its threads' priority (see cpu.rs); the clipboard's
 # image and where a drop landed (window.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false }
 
 [[bench]]
 name = "raster"
+harness = false
+
+[[bench]]
+name = "materials"
 harness = false

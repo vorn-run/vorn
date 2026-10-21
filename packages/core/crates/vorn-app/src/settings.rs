@@ -603,6 +603,10 @@ pub struct Settings {
     pub confirm_end: Option<String>,
     /// The Card Row Height slider (`rowHeight`), pixels.
     pub row_height: f32,
+    /// The themes extensions bring, and the palette they last resolved to.
+    pub appearance: crate::appearance::Appearance,
+    /// The theme tile under the pointer, drawn until the pointer leaves it.
+    pub theme_preview: Option<String>,
 }
 
 impl Settings {

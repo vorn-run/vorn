@@ -100,7 +100,7 @@ pub(super) fn palette(s: &Screen<'_>) -> El {
         .max_h(420.0)
         .rounded(12.0)
         .border(1.0, white(0.08))
-        .bg(c(look::SURFACE_OVERLAY))
+        .floating()
         .clip()
         .role(Role::Dialog, "Command palette")
         .child(search)

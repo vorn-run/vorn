@@ -14,7 +14,7 @@ use crate::look;
 use crate::screen::runs::{run_entry, Controls};
 use crate::screen::{c, ico, white, Screen};
 use crate::tasks::{self, Form, TaskAct};
-use crate::ui::{div, field, image, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
+use crate::ui::{div, field, image, text, tooltip, Action, El, Id, Role, TextStyle};
 
 pub const WIDTH: f32 = 420.0;
 
@@ -270,7 +270,7 @@ pub(super) fn images(s: &Screen<'_>, form: Form, size: f32) -> El {
                     .absolute_right(2.0, 2.0)
                     .size(16.0, 16.0)
                     .rounded(8.0)
-                    .bg(Rgba::hexa(0x000000, 0.70))
+                    .bg(crate::ui::theme::shadow(0.70))
                     .center()
                     .role(Role::Button, "Remove image")
                     .child(ico(

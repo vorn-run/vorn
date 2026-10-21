@@ -399,16 +399,18 @@ impl Ui {
             return;
         };
         let uv = [u + src[0], v + src[1], src[2], src[3]];
-        self.scene.rounded_image(dst, uv, Rgba::white(1.0), radius);
+        self.scene
+            .rounded_image(dst, uv, crate::theme::bright(1.0), radius);
     }
 
     /// Starts a frame on an empty scene.
-    pub fn begin(&mut self, clear: Rgba) {
+    pub fn begin(&mut self, clear: impl Into<Rgba>) {
         self.begin_at(clear, Instant::now());
     }
 
     /// Starts a frame at `now`: tests drive animations and timers with it.
-    pub fn begin_at(&mut self, clear: Rgba, now: Instant) {
+    pub fn begin_at(&mut self, clear: impl Into<Rgba>, now: Instant) {
+        let clear = clear.into();
         self.st.now = now;
         self.wake.set(None);
         self.scene.clear();
@@ -1086,10 +1088,21 @@ impl Ui {
                 let thumb = (at as i32, len as i32);
                 let track = Rect::new(clip_box.right() - 1.0, clip_box.y, 1.0, rows);
                 let color = theme::scrollbar::THUMB_HOVER;
-                self.record(cx, cells::Op::Scroll { thumb, color }, track);
+                self.record(
+                    cx,
+                    cells::Op::Scroll {
+                        thumb,
+                        color: color.rgba(),
+                    },
+                    track,
+                );
             }
-            self.scene
-                .quad(track.scaled(k), c, theme::scrollbar::RADIUS * k, None);
+            self.scene.quad(
+                track.scaled(k),
+                c.rgba(),
+                theme::scrollbar::RADIUS * k,
+                None,
+            );
         }
         if clips {
             self.scene.pop_clip();
@@ -1103,7 +1116,7 @@ impl Ui {
                 if snap { outer.snapped() } else { outer },
                 Rgba::TRANSPARENT,
                 (theme::focus::RADIUS + d) * k,
-                Some((w, theme::focus::RING)),
+                Some((w, theme::focus::RING.rgba())),
             );
         }
         for ov in &el.overlays {
@@ -1258,7 +1271,7 @@ impl Ui {
             };
             if fill > 0.0 {
                 let op = cells::Op::Fill {
-                    color: Rgba::white(fill),
+                    color: crate::theme::bright(fill),
                 };
                 self.record(cx, op, rl);
             }
@@ -1268,6 +1281,7 @@ impl Ui {
         let chip = |c: Rgba| {
             let small = rl.h <= 1.0 && rl.w <= 24.0 && el.radius > 0.0;
             if small && c.0[3] > 0.01 && c.0[3] < 0.10 {
+                // literal-colour: the chip's own colour, only its alpha raised.
                 Rgba([c.0[0], c.0[1], c.0[2], 0.10])
             } else {
                 c
@@ -1288,7 +1302,7 @@ impl Ui {
             self.record(cx, op, rl);
         }
         if ring {
-            let color = Rgba::white(0.06);
+            let color = crate::theme::bright(0.06);
             self.record(cx, cells::Op::Fill { color }, rl);
         }
         if let Some((_, color)) = el.border.filter(|(w, c)| *w > 0.0 && c.0[3] > 0.0) {
@@ -1329,7 +1343,7 @@ impl Ui {
                 Content::Icon { color, .. }
                 | Content::Svg { color, .. }
                 | Content::Text { color, .. } => *color,
-                _ => theme::color::INK,
+                _ => theme::color::INK.rgba(),
             });
             let glyph = g.to_owned();
             let icon = match &el.content {
@@ -1543,7 +1557,8 @@ impl Ui {
                     sh.caret(end).0
                 };
                 let rr = Rect::new(ox + x0, oy + l.top, (x1 - x0).max(1.0), l.height);
-                self.scene.quad(rr, theme::color::SELECTION, 0.0, None);
+                self.scene
+                    .quad(rr, theme::color::SELECTION.rgba(), 0.0, None);
             }
         }
         for (range, bg) in &look.marks {

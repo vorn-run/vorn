@@ -147,7 +147,8 @@ fn chip(hot: f32) -> El {
 }
 
 /// A listing's glyph: its own paths, else the built-in mark for its id.
-pub(super) fn glyph(l: Option<&Listing>, connector: &str, size: f32, color: Rgba) -> El {
+pub(super) fn glyph(l: Option<&Listing>, connector: &str, size: f32, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     let own = l.and_then(|l| {
         l.catalog
             .as_ref()
@@ -164,7 +165,8 @@ pub(super) fn glyph(l: Option<&Listing>, connector: &str, size: f32, color: Rgba
 }
 
 /// A square well around a glyph.
-pub(super) fn well(size: f32, radius: f32, bg: Rgba, glyph: El) -> El {
+pub(super) fn well(size: f32, radius: f32, bg: impl Into<Rgba>, glyph: El) -> El {
+    let bg = bg.into();
     div()
         .size(size, size)
         .shrink0()
@@ -175,24 +177,25 @@ pub(super) fn well(size: f32, radius: f32, bg: Rgba, glyph: El) -> El {
 }
 
 /// A 6 px status dot.
-pub(super) fn dot(color: Rgba) -> El {
+pub(super) fn dot(color: impl Into<Rgba>) -> El {
+    let color = color.into();
     div().size(6.0, 6.0).rounded(3.0).shrink0().bg(color)
 }
 
 pub(super) fn tone_dot(t: Tone) -> Rgba {
     match t {
-        Tone::Blocked => k::BRONZO,
-        Tone::Broken => k::DANGER,
-        Tone::Live => k::INK,
-        Tone::Settled => k::INK_FAINT,
-        Tone::Idle => k::INK_GHOST,
+        Tone::Blocked => k::BRONZO.rgba(),
+        Tone::Broken => k::DANGER.rgba(),
+        Tone::Live => k::INK.rgba(),
+        Tone::Settled => k::INK_FAINT.rgba(),
+        Tone::Idle => k::INK_GHOST.rgba(),
     }
 }
 
 /// Text never drops to ghost: a word is thinner than a disc.
 pub(super) fn tone_text(t: Tone) -> Rgba {
     match t {
-        Tone::Idle => k::INK_FAINT,
+        Tone::Idle => k::INK_FAINT.rgba(),
         other => tone_dot(other),
     }
 }
@@ -243,10 +246,10 @@ pub(super) fn chip_button(
     a: PlugAct,
     glyph: Option<&str>,
     label: &str,
-    fg: Rgba,
+    fg: impl Into<Rgba>,
     enabled: bool,
 ) -> El {
-    let mut fg = fg;
+    let mut fg = fg.into();
     let b = if enabled {
         let id = s.acts.on(place, act(a));
         let hot = s.ui.hover(id);
@@ -303,9 +306,10 @@ pub(super) fn text_button(
     a: PlugAct,
     label: &str,
     size: f32,
-    rest: Rgba,
-    hot_fg: Rgba,
+    rest: impl Into<Rgba>,
+    hot_fg: impl Into<Rgba>,
 ) -> El {
+    let (rest, hot_fg) = (rest.into(), hot_fg.into());
     let id = s.acts.on(place, act(a));
     let fg = rest.mix(hot_fg, s.ui.hover(id));
     div()

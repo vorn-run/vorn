@@ -40,7 +40,7 @@ fn frame(s: &Screen<'_>, w: f32, name: &str, body: El, closes: bool) -> El {
             .on(Action::Click)
             .absolute(0.0, 0.0)
             .size(s.size.0, s.size.1)
-            .bg(crate::ui::Rgba::hexa(0, 0.5))
+            .bg(crate::ui::theme::shadow(0.5))
             .layered()
     };
     back.center().child(panel)
@@ -160,7 +160,7 @@ fn browser_checkbox(on: bool, accent: Rgba, mark: Rgba) -> El {
     if on {
         bx.bg(accent).child(ico("check", 10.0, 3.0, mark))
     } else {
-        bx.bg(c(look::WHITE)).border(1.0, c(0x767676))
+        bx.bg(c(look::WHITE)).border(1.0, c(look::GRAY_500))
     }
 }
 
@@ -454,7 +454,7 @@ fn missed(s: &Screen<'_>) -> Option<El> {
     for (i, m) in s.st.wf.missed.iter().enumerate() {
         let id = s.acts.on("wf-missed", act(WfAct::MissedToggle(i)));
         let hot = s.ui.hover(id);
-        let bx = browser_checkbox(m.on, c(0x0075ff), c(look::WHITE));
+        let bx = browser_checkbox(m.on, c(look::BLUE_600), c(look::WHITE));
         let when = crate::tasks::locale_string(&m.at);
         list = list.child(
             div()

@@ -25,8 +25,8 @@ use crate::state::{
     basename, now_ms, Dialog, Filter, LayoutMode, Menu, MenuKind, Recent, State, Worktree,
 };
 use crate::ui::{
-    decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Rgba, Role, TreeUpdate, Ui,
-    WheelPhase, WindowRequest,
+    decode_png, mods, El, Event as UiEvent, Id, Input, Laid, Role, TreeUpdate, Ui, WheelPhase,
+    WindowRequest,
 };
 use crate::view::PaneView;
 use vorn_protocol::TerminalSession;
@@ -344,6 +344,8 @@ pub struct App {
     /// Why the grid is not there, when it is not.
     pub grid_error: Option<String>,
     views: HashMap<String, PaneView>,
+    /// The system's appearance and Reduce transparency, as the window last said.
+    system_look: (bool, bool),
     /// Where each session's terminal was painted (physical pixels), for the pointer.
     term_boxes: HashMap<String, crate::ui::Rect>,
     /// A double-click asked vornd for a word; the click that ends it keeps the selection.
@@ -541,6 +543,7 @@ impl App {
             grid,
             grid_error,
             views: HashMap::new(),
+            system_look: (true, false),
             term_boxes: HashMap::new(),
             word_pending: false,
             scrolls: HashMap::new(),
@@ -834,6 +837,42 @@ impl App {
         }
     }
 
+    /// The theme whose tile in Settings › Appearance is under the pointer.
+    fn hovered_theme(&self, ui: &Ui) -> Option<String> {
+        if !self.st.settings.open {
+            return None;
+        }
+        let bundled = vorn_theme::bundled().iter();
+        bundled
+            .chain(self.st.settings.appearance.installed())
+            .find(|t| ui.hovered(crate::screen::settings::theme_tile_id(&t.id)))
+            .map(|t| t.id.clone())
+    }
+
+    /// Installs the palette the appearance settings resolve to; when the
+    /// colours change, every terminal is drawn again in the new ones.
+    fn retheme(&mut self) {
+        let (dark, reduced) = self.system_look;
+        let preview = self.st.settings.theme_preview.as_deref();
+        let changed = self.st.settings.appearance.apply(
+            self.store.config.get("defaults"),
+            dark,
+            reduced,
+            preview,
+        );
+        if let Some(dir) = &self.data_dir {
+            self.st.settings.appearance.keep_materials(
+                self.store.config.get("defaults"),
+                &crate::appearance::launch_file(dir),
+            );
+        }
+        if changed {
+            if let Some(g) = &self.grid {
+                g.touch_all();
+            }
+        }
+    }
+
     pub fn pump(&mut self) {
         self.sync_update();
         while let Ok(event) = self.events.try_recv() {
@@ -930,6 +969,7 @@ impl App {
                 Some(answer) => self.answered(kind, answer),
             }
         }
+        self.retheme();
         let mut shells = Vec::new();
         if let Some(g) = &self.grid {
             for id in g.take_dirty() {
@@ -3244,7 +3284,12 @@ impl App {
     /// Builds, lays out and paints a frame into `ui.scene`, attaching and
     /// sizing each card's terminal to the box it got.
     pub fn frame(&mut self, ui: &mut Ui, size: (f32, f32)) -> TreeUpdate {
-        ui.begin(Rgba::hex(look::SURFACE_BASE));
+        let clear = if ui.see_through() {
+            crate::ui::theme::shadow(0.0)
+        } else {
+            look::SURFACE_BASE.rgba()
+        };
+        ui.begin(clear);
         let root = self.view(ui, size);
         let laid = ui.layout(root, size);
         self.paint(ui, &laid);
@@ -3254,6 +3299,8 @@ impl App {
     /// The frame's element tree for a `size` window, after taking in what
     /// vornd sent.
     pub fn view(&mut self, ui: &mut Ui, size: (f32, f32)) -> El {
+        self.system_look = (ui.system_dark(), ui.reduced_transparency());
+        self.st.settings.theme_preview = self.hovered_theme(ui);
         self.pump();
         self.flex_tick(ui);
         self.grid_replies(ui);

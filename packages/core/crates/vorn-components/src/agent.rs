@@ -48,7 +48,7 @@ impl AgentMarks {
                 Mark {
                     image,
                     glyph: glyph.unwrap_or("›").to_owned(),
-                    tint: first_fill(svg).unwrap_or(color::INK),
+                    tint: first_fill(svg).unwrap_or(color::INK.rgba()),
                     svg: svg.to_owned(),
                 },
             );
@@ -64,7 +64,7 @@ impl AgentMarks {
     fn cell_mark(&self, agent: &str) -> (&str, Rgba) {
         self.0
             .get(agent)
-            .map_or(("›", color::INK), |m| (m.glyph.as_str(), m.tint))
+            .map_or(("›", color::INK.rgba()), |m| (m.glyph.as_str(), m.tint))
     }
 }
 
@@ -76,7 +76,7 @@ pub fn agent_icon(marks: &AgentMarks, agent: &str, size: f32) -> El {
             let (g, tint) = marks.cell_mark(agent);
             image(id, size, size).glyph(g).glyph_tint(tint)
         }
-        None => crate::lucide("terminal", size, 1.5, color::GRAY_400),
+        None => crate::lucide("terminal", size, 1.5, color::GRAY_400.rgba()),
     }
 }
 
@@ -124,6 +124,9 @@ mod tests {
             Some(Rgba::hex(0xffffff))
         );
         assert_eq!(first_fill("<svg/>"), None);
-        assert_eq!(AgentMarks::default().cell_mark("shell"), ("›", color::INK));
+        assert_eq!(
+            AgentMarks::default().cell_mark("shell"),
+            ("›", color::INK.rgba())
+        );
     }
 }

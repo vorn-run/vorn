@@ -1,6 +1,7 @@
 // Generated from the Seti font (MIT, Jesse Weed): the file-icon tables and
 // each glyph's outline in a 1000-unit box. Regenerate rather than edit.
 
+// literal-colour: each file type's mark, content rather than chrome.
 /// Icon name, glyph and colour (`D`).
 pub(super) const DEFS: &[(&str, u32, u32)] = &[
     ("_R", 0xE001, 0x519aba),

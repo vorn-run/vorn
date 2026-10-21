@@ -97,6 +97,7 @@ impl AgentInfo {
         let short_name = Some(text(v, "shortName"))
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| label.clone());
+        // literal-colour: an agent with no colour of its own is white.
         let (color, _) = hex(v.get("color").and_then(Value::as_str)).unwrap_or((0xffffff, None));
         let bg_alpha = hex(v.get("tint").and_then(Value::as_str))
             .and_then(|(_, a)| a)

@@ -88,14 +88,14 @@ fn block(s: &Screen<'_>, form: Form, b: &md::Block) -> El {
         size: 14.0,
         line: LINE,
         weight: 400,
-        color: 0xe5e7eb,
+        color: look::GRAY_200.hex(),
     };
     match b {
         md::Block::Heading(level, text) => {
             let (size, color) = match level {
-                1 => (20.0, 0xf3f4f6),
-                2 => (15.2, 0xe5e7eb),
-                _ => (12.8, 0xd1d5db),
+                1 => (20.0, look::GRAY_100.hex()),
+                2 => (15.2, look::GRAY_200.hex()),
+                _ => (12.8, look::GRAY_300.hex()),
             };
             flow(
                 text,
@@ -116,7 +116,7 @@ fn block(s: &Screen<'_>, form: Form, b: &md::Block) -> El {
                 .child(flow(
                     text,
                     Look {
-                        color: 0x9ca3af,
+                        color: look::GRAY_400.hex(),
                         ..base
                     },
                 ))
@@ -132,14 +132,14 @@ fn block(s: &Screen<'_>, form: Form, b: &md::Block) -> El {
                 .child(div().w(20.0).shrink0().child(text_el(
                     &mark,
                     Look {
-                        color: 0xd1d5db,
+                        color: look::GRAY_300.hex(),
                         ..base
                     },
                 )))
                 .child(div().grow().min_w0().child(flow(
                     text,
                     Look {
-                        color: 0xd1d5db,
+                        color: look::GRAY_300.hex(),
                         ..base
                     },
                 )))
@@ -163,14 +163,14 @@ fn block(s: &Screen<'_>, form: Form, b: &md::Block) -> El {
                 .role(Role::CheckBox, "Task item")
                 .toggled(*checked);
             bx = if *checked {
-                bx.bg(c(0x22c55e))
+                bx.bg(c(look::GREEN_500))
                     .child(ico("check", 11.0, 2.5, c(look::WHITE)))
             } else {
                 bx.border(1.5, white(0.2))
             };
             let look = if *checked {
                 Look {
-                    color: 0x6b7280,
+                    color: look::GRAY_500.hex(),
                     ..base
                 }
             } else {
@@ -191,7 +191,7 @@ fn block(s: &Screen<'_>, form: Form, b: &md::Block) -> El {
             .rounded(6.0)
             .bg(white(0.04))
             .child(
-                text(code.as_str(), 12.0, c(0xd1d5db))
+                text(code.as_str(), 12.0, c(look::GRAY_300))
                     .mono()
                     .line_height(19.2)
                     .wrapping(),
@@ -222,18 +222,18 @@ fn flow(runs: &[md::Inline], l: Look) -> El {
         let mut look = l;
         if r.bold {
             look.weight = 600;
-            look.color = 0xf3f4f6;
+            look.color = look::GRAY_100.hex();
         }
         if r.link {
-            look.color = 0x60a5fa;
+            look.color = look::BLUE_400.hex();
         }
         if r.strike {
-            look.color = 0x6b7280;
+            look.color = look::GRAY_500.hex();
         }
         if r.code {
             row = row.child(
                 div().px(5.0).rounded(4.0).bg(white(0.06)).child(
-                    text(r.text.as_str(), 12.0, c(0xd1d5db))
+                    text(r.text.as_str(), 12.0, c(look::GRAY_300))
                         .mono()
                         .line_height(l.line)
                         .silent(),

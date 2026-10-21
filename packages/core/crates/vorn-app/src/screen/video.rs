@@ -11,7 +11,7 @@ use super::points::ScopedBinder;
 use super::{c, ico, white, Screen};
 use crate::look;
 use crate::panes::stage_id;
-use crate::ui::{custom, div, text, tooltip, Action, El, Id, Place, Rgba, Role, Sense};
+use crate::ui::{custom, div, text, tooltip, Action, El, Id, Place, Role, Sense};
 use crate::video::{frame_metrics, stepped_zoom, ZOOM_MAX, ZOOM_MIN};
 
 /// What the part's controls tell its extension, all as events on `node`.
@@ -149,7 +149,7 @@ pub(crate) fn part(b: &ScopedBinder<'_, '_>, node: &str, v: &Video) -> El {
             .py(4.0)
             .shrink0()
             .child(
-                text(e, 10.0, Rgba::hexa(look::AMBER_400, 0.9))
+                text(e, 10.0, look::AMBER_400.alpha(0.9))
                     .wrapping()
                     .min_w0()
                     .grow()
@@ -352,7 +352,7 @@ fn picker(s: &Screen<'_>, tell: &Tell<'_, '_, '_>, p: &Picker) -> El {
     }
     if let Some(e) = &p.error {
         return list.child(state(
-            text(e.as_str(), 11.0, Rgba::hexa(look::RED_400, 0.8))
+            text(e.as_str(), 11.0, look::RED_400.alpha(0.8))
                 .wrapping()
                 .min_w0()
                 .role(Role::Alert, e.as_str()),

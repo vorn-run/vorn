@@ -12,7 +12,7 @@ use crate::runs::{self, s as sv, Line, RunAct};
 use crate::ui::{div, text, tooltip, Action, El, Rgba, Role};
 
 fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 fn secondary() -> Rgba {
@@ -70,7 +70,7 @@ pub fn status_dot(status: &str) -> El {
     div()
         .size(8.0, 8.0)
         .rounded(4.0)
-        .bg(Rgba::hexa(rgb, a))
+        .bg(rgb.alpha(a))
         .role(Role::Image, runs::label(status))
 }
 
@@ -434,7 +434,7 @@ fn trace(s: &Screen<'_>, ns: &Value, key: &str, nid: &str, can_resume: bool) -> 
             .max_h(280.0)
             .scroll_y()
             .rounded(4.0)
-            .bg(Rgba::hexa(0x000000, 0.30))
+            .bg(crate::ui::theme::shadow(0.30))
             .border(1.0, white(0.05));
         for l in &timeline {
             // A closing line break opens no new line in a `<pre>`.

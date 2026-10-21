@@ -122,21 +122,21 @@ pub fn column_at<'b>(
 }
 
 fn white(a: f32) -> Rgba {
-    Rgba::white(a)
+    vornui::theme::bright(a)
 }
 
 fn faint() -> Rgba {
-    color::INK_FAINT
+    color::INK_FAINT.rgba()
 }
 
 fn secondary() -> Rgba {
-    color::INK_SECONDARY
+    color::INK_SECONDARY.rgba()
 }
 
 /// The colour `t` draws in on a board, where many show at once: good is muted.
 pub fn tone(t: Tone) -> Rgba {
     match t {
-        Tone::Good => color::STATUS_SAGE,
+        Tone::Good => color::STATUS_SAGE.rgba(),
         other => crate::tree::tone(other),
     }
 }
@@ -461,7 +461,7 @@ impl Board<'_> {
     }
 
     fn icon(&self, name: &str, t: Option<Tone>) -> El {
-        let ink = t.map_or(color::GRAY_400, tone);
+        let ink = t.map_or(color::GRAY_400.rgba(), tone);
         match self.bind.icon(name, 14.0) {
             Some(drawn) => drawn.shrink0(),
             None => crate::lucide(name, 14.0, 2.0, ink).shrink0(),
@@ -486,7 +486,7 @@ impl Board<'_> {
             .py(4.0)
             .shrink0()
             .rounded(radius::SM)
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+            .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot))
             .ring(radius::SM)
             .role(Role::Button, "More")
             .child(crate::lucide(
@@ -513,7 +513,7 @@ impl Board<'_> {
                 .min_w(160.0)
                 .py(4.0)
                 .bg(color::SURFACE_OVERLAY)
-                .border(1.0, Rgba::white(0.10))
+                .border(1.0, vornui::theme::bright(0.10))
                 .rounded(radius::LG)
                 .role(Role::Menu, "More")
                 .children(entries);
@@ -550,7 +550,7 @@ impl Board<'_> {
             .px(8.0)
             .py(5.0)
             .rounded(radius::SM)
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+            .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot))
             .role(Role::MenuItem, a.label)
             .child(crate::lucide(a.icon, 12.0, 2.0, ink))
             .child(

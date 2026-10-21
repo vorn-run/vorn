@@ -103,7 +103,7 @@ fn run(
     let mut s = State {
         typed: 10,
         scroll: 0,
-        clear: color::SURFACE_BASE,
+        clear: color::SURFACE_BASE.rgba(),
     };
     let mut frame = |ui: &mut Ui, s: State, out: &mut Vec<u8>| {
         ui.begin(color::SURFACE_BASE);
@@ -138,7 +138,7 @@ fn text_typing(cells: (u16, u16)) -> Vec<Duration> {
     let mut s = State {
         typed: 10,
         scroll: 0,
-        clear: color::SURFACE_BASE,
+        clear: color::SURFACE_BASE.rgba(),
     };
     let mut times = Vec::new();
     for i in 0..=FRAMES {
@@ -173,9 +173,9 @@ fn main() {
     };
     let repaint = |i: usize, s: State| State {
         clear: if i.is_multiple_of(2) {
-            color::SURFACE_SUNKEN
+            color::SURFACE_SUNKEN.rgba()
         } else {
-            color::SURFACE_BASE
+            color::SURFACE_BASE.rgba()
         },
         ..s
     };

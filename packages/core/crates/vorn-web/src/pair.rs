@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use vorn_app::client::rpc::Wake;
 use vorn_app::look;
 use vorn_app::page;
-use vorn_app::ui::{div, field, text, Action, El, Event, Id, Rgba, Role, TextStyle, Ui};
+use vorn_app::ui::{div, field, text, Action, El, Event, Id, Role, TextStyle, Ui};
 use web_time::{Duration, Instant};
 
 const FIELD: Id = Id(0x7765_625f_7061_6972);
@@ -132,8 +132,8 @@ impl Pair {
 
     pub fn view(&mut self, ui: &mut Ui) -> El {
         let (w, h) = ui.viewport();
-        let ink = |a| Rgba::hexa(look::INK, a);
-        let white = |a| Rgba::hexa(look::WHITE, a);
+        let ink = |a| look::INK.alpha(a);
+        let white = |a| look::WHITE.alpha(a);
         let focus = if ui.focused(FIELD) { 1.0 } else { 0.0 };
         let style = TextStyle {
             line_height: 20.0,
@@ -181,7 +181,7 @@ impl Pair {
         let line = |t: String, a: f32| text(t, 12.0, ink(a)).line_height(16.0).wrapping().silent();
         let status = match (&self.error, &self.waiting) {
             (Some(e), _) => Some(
-                text(e.clone(), 12.0, Rgba::hex(look::RED_400))
+                text(e.clone(), 12.0, look::RED_400.rgba())
                     .line_height(16.0)
                     .wrapping(),
             ),
@@ -234,7 +234,7 @@ impl Pair {
             .size(w, h)
             .col()
             .center()
-            .bg(Rgba::hex(look::SURFACE_BASE))
+            .bg(look::SURFACE_BASE.rgba())
             .child(card)
     }
 }

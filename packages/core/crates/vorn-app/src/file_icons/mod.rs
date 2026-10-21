@@ -28,6 +28,7 @@ pub fn resolve(name: &str) -> (u32, u32) {
     let named = |icon: &str| {
         def(icon)
             .or_else(|| def(DEFAULT))
+            // literal-colour: the default file mark's own colour.
             .unwrap_or((0xE023, 0xd4d7d6))
     };
     if let Some(icon) = lookup(NAMES, &lower) {

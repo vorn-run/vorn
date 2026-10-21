@@ -12,7 +12,7 @@ use accesskit::Role;
 use crate::element::{div, icon, text, Action, Content, EditLook, El, Id, Place, Sense};
 use crate::scene::Rgba;
 use crate::text::TextStyle;
-use crate::theme::{color, radius, shadow};
+use crate::theme::{color, radius, shadow, Color};
 use crate::Ui;
 
 pub use crate::icons;
@@ -23,13 +23,16 @@ pub fn item_id(group: Id, index: usize) -> Id {
 }
 
 /// `rest` at rest, `hot` when `id` is hovered, following its transition.
-fn tint(ui: &Ui, id: Id, rest: Rgba, hot: Rgba) -> Rgba {
+fn tint(ui: &Ui, id: Id, rest: impl Into<Rgba>, hot: impl Into<Rgba>) -> Rgba {
+    let rest = rest.into();
+    let hot = hot.into();
     rest.mix(hot, ui.hover(id))
 }
 
 /// A UI string at `size` with an explicit line height (Tailwind's
 /// `text-xs` and `text-sm` set both).
-fn label(s: &str, (size, line): (f32, f32), c: Rgba) -> El {
+fn label(s: &str, (size, line): (f32, f32), c: impl Into<Rgba>) -> El {
+    let c = c.into();
     text(s, size, c).line_height(line).silent()
 }
 
@@ -59,8 +62,8 @@ pub fn tooltip_at(
         .px(8.0)
         .py(4.0)
         .rounded(radius::MD)
-        .border(1.0, Rgba::white(0.08))
-        .bg(color::SURFACE_OVERLAY)
+        .border(1.0, crate::theme::bright(0.08))
+        .floating()
         .shadow(&shadow::LG)
         .role(Role::Tooltip, label)
         .child(text(label, 11.0, color::GRAY_200).silent())
@@ -78,7 +81,7 @@ pub fn button(ui: &Ui, id: Id, text: &str) -> El {
         .px(10.0)
         .py(4.0)
         .rounded(radius::MD)
-        .bg(tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.06)))
+        .bg(tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.06)))
         .on(Action::Click)
         .ring(radius::SM)
         .role(Role::Button, text)
@@ -96,7 +99,7 @@ pub fn icon_button(ui: &Ui, id: Id, svg: &str, size: f32, label: &str) -> El {
     let b = div()
         .p(4.0)
         .rounded(radius::SM)
-        .bg(tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.06)))
+        .bg(tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.06)))
         .on(Action::Click)
         .ring(radius::SM)
         .role(Role::Button, label)
@@ -153,7 +156,7 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
         let id = item_id(group, i);
         let on = i == selected;
         let fg = if on {
-            color::WHITE
+            color::WHITE.rgba()
         } else {
             tint(ui, id, color::GRAY_500, color::GRAY_300)
         };
@@ -166,7 +169,7 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
             .py(4.0)
             .rounded(radius::MD)
             .bg(if on {
-                Rgba::white(0.1)
+                crate::theme::bright(0.1)
             } else {
                 Rgba::TRANSPARENT
             })
@@ -205,7 +208,7 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
         .gap(2.0)
         .p(2.0)
         .rounded(radius::LG)
-        .bg(Rgba::white(0.04))
+        .bg(crate::theme::bright(0.04))
         .role(Role::RadioGroup, name)
         .children(items.iter().enumerate().map(pill))
 }
@@ -217,11 +220,11 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
 pub fn segmented<'a>(ui: &Ui, segments: impl IntoIterator<Item = (Id, &'a str, bool)>) -> El {
     let segment = |(id, text, on): (Id, &str, bool)| {
         let (fg, bg) = if on {
-            (color::GRAY_200, Rgba::white(0.1))
+            (color::GRAY_200.rgba(), crate::theme::bright(0.1))
         } else {
             (
                 tint(ui, id, color::GRAY_500, color::GRAY_300),
-                tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04)),
+                tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.04)),
             )
         };
         div()
@@ -241,7 +244,7 @@ pub fn segmented<'a>(ui: &Ui, segments: impl IntoIterator<Item = (Id, &'a str, b
         .row()
         .w_full()
         .rounded(radius::LG)
-        .border(1.0, Rgba::white(0.06))
+        .border(1.0, crate::theme::bright(0.06))
         .clip()
         .children(segments.into_iter().map(segment))
 }
@@ -335,37 +338,42 @@ pub fn picker(
             .py(2.0)
             .mx(-6.0)
             .rounded(radius::SM)
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), hot)),
+            .bg(Rgba::TRANSPARENT.mix(crate::theme::bright(0.04), hot)),
         PickerLook::Compact => trigger
             .px(8.0)
             .py(4.0)
             .rounded(radius::MD)
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot)),
+            .bg(Rgba::TRANSPARENT.mix(crate::theme::bright(0.06), hot)),
         PickerLook::Chip => trigger
             .px(6.0)
             .py(2.0)
             .rounded(radius::SM)
-            .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
-            .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.04), hot)),
+            .border(
+                1.0,
+                crate::theme::bright(0.12).mix(crate::theme::bright(0.25), hot),
+            )
+            .bg(Rgba::TRANSPARENT.mix(crate::theme::bright(0.04), hot)),
         PickerLook::Select => trigger
             .gap(8.0)
             .px(8.0)
             .py(6.0)
             .rounded(radius::SM)
-            .bg(Rgba::white(0.05))
+            .bg(crate::theme::bright(0.05))
             .border(
                 1.0,
-                Rgba::white(0.1).mix(Rgba::white(0.2), if open { 1.0 } else { 0.0 }),
+                crate::theme::bright(0.1)
+                    .mix(crate::theme::bright(0.2), if open { 1.0 } else { 0.0 }),
             ),
         PickerLook::Field => trigger
             .w_full()
             .px(12.0)
             .py(6.0)
             .rounded(radius::SM)
-            .bg(Rgba::white(0.05))
+            .bg(crate::theme::bright(0.05))
             .border(
                 1.0,
-                Rgba::white(0.1).mix(Rgba::white(0.2), if open { 1.0 } else { 0.0 }),
+                crate::theme::bright(0.1)
+                    .mix(crate::theme::bright(0.2), if open { 1.0 } else { 0.0 }),
             ),
     };
     if !open {
@@ -393,8 +401,8 @@ pub fn picker(
         .id(menu)
         .col()
         .min_w(180.0)
-        .bg(color::SURFACE_OVERLAY)
-        .border(1.0, Rgba::white(0.08))
+        .floating()
+        .border(1.0, crate::theme::bright(0.08))
         .rounded(radius::LG)
         .clip()
         .opacity(p)
@@ -411,14 +419,14 @@ pub fn picker(
 pub fn option(ui: &Ui, group: Id, index: usize, selected: bool, c: Choice<'_>) -> El {
     let id = item_id(group, index);
     let fg = if selected {
-        color::WHITE
+        color::WHITE.rgba()
     } else {
         tint(ui, id, color::GRAY_300, color::WHITE)
     };
     let bg = if selected {
-        Rgba::white(0.06)
+        crate::theme::bright(0.06)
     } else {
-        tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04))
+        tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.04))
     };
     div()
         .id(id)
@@ -484,14 +492,14 @@ pub fn tab_strip(ui: &Ui, strip: Id, tabs: &[Tab<'_>], active: usize) -> El {
         let id = tab_id(strip, i);
         let on = i == active;
         let fg = if on {
-            color::GRAY_200
+            color::GRAY_200.rgba()
         } else {
             tint(ui, id, color::GRAY_500, color::GRAY_300)
         };
         let bg = if on {
-            Rgba::white(0.06)
+            crate::theme::bright(0.06)
         } else {
-            tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.03))
+            tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.03))
         };
         let close = t.closable.then(|| {
             let cid = tab_close_id(strip, i);
@@ -556,7 +564,7 @@ pub fn tab_strip(ui: &Ui, strip: Id, tabs: &[Tab<'_>], active: usize) -> El {
                 .id(add)
                 .p(4.0)
                 .rounded(radius::SM)
-                .bg(tint(ui, add, Rgba::TRANSPARENT, Rgba::white(0.06)))
+                .bg(tint(ui, add, Rgba::TRANSPARENT, crate::theme::bright(0.06)))
                 .on(Action::Click)
                 .ring(radius::SM)
                 .role(Role::Button, "New tab")
@@ -579,7 +587,7 @@ pub fn split(ui: &Ui, id: Id, side_by_side: bool, default: f32, first: El, secon
         .id(id)
         .shrink0()
         .sense(Sense::DRAG)
-        .bg(Rgba::white(0.06).mix(color::BLUE_500.alpha(0.4), hot))
+        .bg(crate::theme::bright(0.06).mix(color::BLUE_500.alpha(0.4), hot))
         .role(Role::Splitter, "Resize")
         .value(format!("{}%", (r * 100.0).round()))
         .vertical(side_by_side);
@@ -596,12 +604,18 @@ pub fn split(ui: &Ui, id: Id, side_by_side: bool, default: f32, first: El, secon
         .child(second.flex(1.0 - r))
 }
 
-fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) -> Content {
+fn edit_look(
+    style: TextStyle,
+    color: impl Into<Rgba>,
+    placeholder: &str,
+    multiline: bool,
+) -> Content {
+    let color = color.into();
     Content::Edit(Box::new(EditLook {
         style,
         color,
         placeholder: placeholder.to_owned(),
-        placeholder_color: color::GRAY_600,
+        placeholder_color: color::GRAY_600.rgba(),
         multiline,
         textarea: false,
         nowrap: false,
@@ -614,7 +628,8 @@ fn edit_look(style: TextStyle, color: Rgba, placeholder: &str, multiline: bool) 
 
 /// A code field: a `<textarea>` whose lines do not wrap, as tall as the
 /// caller sizes it, coloured with [`El::edit_colors`].
-pub fn code(id: Id, name: &str, style: TextStyle, color: Rgba) -> El {
+pub fn code(id: Id, name: &str, style: TextStyle, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     let mut look = edit_look(style, color, "", true);
     if let Content::Edit(l) = &mut look {
         l.textarea = true;
@@ -629,7 +644,14 @@ pub fn code(id: Id, name: &str, style: TextStyle, color: Rgba) -> El {
 
 /// A bare one-line text field in `style`, for callers that draw their own
 /// frame around it.
-pub fn field(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgba) -> El {
+pub fn field(
+    id: Id,
+    name: &str,
+    placeholder: &str,
+    style: TextStyle,
+    color: impl Into<Rgba>,
+) -> El {
+    let color = color.into();
     div()
         .id(id)
         .sense(Sense::TEXT)
@@ -639,7 +661,14 @@ pub fn field(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgb
 
 /// A bare `<textarea>` in `style`: Enter starts a new line and Cmd+Enter
 /// (Ctrl+Enter off macOS) reports `Event::Submit`.
-pub fn textarea(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgba) -> El {
+pub fn textarea(
+    id: Id,
+    name: &str,
+    placeholder: &str,
+    style: TextStyle,
+    color: impl Into<Rgba>,
+) -> El {
+    let color = color.into();
     let mut look = edit_look(style, color, placeholder, true);
     if let Content::Edit(l) = &mut look {
         l.textarea = true;
@@ -653,7 +682,8 @@ pub fn textarea(id: Id, name: &str, placeholder: &str, style: TextStyle, color: 
 
 /// A bare multiline text field in `style`; Enter reports `Event::Submit`,
 /// Shift+Enter starts a new line. It is as tall as the caller sizes it.
-pub fn area(id: Id, name: &str, placeholder: &str, style: TextStyle, color: Rgba) -> El {
+pub fn area(id: Id, name: &str, placeholder: &str, style: TextStyle, color: impl Into<Rgba>) -> El {
+    let color = color.into();
     div()
         .id(id)
         .sense(Sense::TEXT)
@@ -672,8 +702,11 @@ pub fn text_input(ui: &Ui, id: Id, name: &str, placeholder: &str) -> El {
         .px(6.0)
         .py(2.0)
         .rounded(radius::SM)
-        .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
-        .bg(tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04)))
+        .border(
+            1.0,
+            crate::theme::bright(0.12).mix(crate::theme::bright(0.25), hot),
+        )
+        .bg(tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.04)))
         .content(edit_look(
             TextStyle {
                 line_height: 18.0,
@@ -705,8 +738,11 @@ pub fn text_area_input(ui: &Ui, id: Id, name: &str, placeholder: &str, lines: u8
         .py(4.0)
         .h(f32::from(lines) * 18.0 + 8.0)
         .rounded(radius::SM)
-        .border(1.0, Rgba::white(0.12).mix(Rgba::white(0.25), hot))
-        .bg(tint(ui, id, Rgba::TRANSPARENT, Rgba::white(0.04)))
+        .border(
+            1.0,
+            crate::theme::bright(0.12).mix(crate::theme::bright(0.25), hot),
+        )
+        .bg(tint(ui, id, Rgba::TRANSPARENT, crate::theme::bright(0.04)))
         .content(look)
         .role(Role::MultilineTextInput, name)
 }
@@ -737,7 +773,7 @@ pub fn composer(id: Id, placeholder: &str, bar: impl IntoIterator<Item = El>) ->
     div()
         .col()
         .rounded(radius::XL)
-        .border(1.0, Rgba::white(0.06))
+        .border(1.0, crate::theme::bright(0.06))
         .bg(color::SURFACE_RAISED)
         .child(field)
         .child(
@@ -745,7 +781,7 @@ pub fn composer(id: Id, placeholder: &str, bar: impl IntoIterator<Item = El>) ->
                 .absolute_bottom()
                 .px(12.0)
                 .py(8.0)
-                .border_top(1.0, Rgba::white(0.04))
+                .border_top(1.0, crate::theme::bright(0.04))
                 .child(div().row().items_center().gap(4.0).children(bar)),
         )
 }
@@ -777,9 +813,9 @@ pub fn switch_track(on: bool) -> El {
         .shrink0()
         .rounded(radius::FULL)
         .bg(if on {
-            color::BLUE_500
+            color::BLUE_500.rgba()
         } else {
-            Rgba::white(0.1)
+            crate::theme::bright(0.1)
         })
         .child(
             div()
@@ -793,9 +829,9 @@ pub fn switch_track(on: bool) -> El {
 /// A switch on a terminal: the word "on" or "off" in its track's colour.
 fn switch_cells(on: bool) -> El {
     let (fg, bg) = if on {
-        (color::WHITE, color::BLUE_500)
+        (color::WHITE.rgba(), color::BLUE_500.rgba())
     } else {
-        (color::GRAY_400, Rgba::white(0.1))
+        (color::GRAY_400.rgba(), crate::theme::bright(0.1))
     };
     div()
         .row()
@@ -846,9 +882,9 @@ pub fn confirm(
 ) -> El {
     let down = |id: Id| if ui.pressed(id) { 1.0 } else { 0.0 };
     let wash = |id: Id, rest: f32, hot: f32, pressed: f32| {
-        Rgba::white(rest)
-            .mix(Rgba::white(hot), ui.hover(id))
-            .mix(Rgba::white(pressed), down(id))
+        crate::theme::bright(rest)
+            .mix(crate::theme::bright(hot), ui.hover(id))
+            .mix(crate::theme::bright(pressed), down(id))
     };
     let cancel_btn = div()
         .id(cancel)
@@ -866,7 +902,7 @@ pub fn confirm(
         ));
     let (bg, edge, fg) = match tone {
         Tone::Danger => {
-            let red = |a| Rgba::hexa(crate::theme::rgb::RED_500, a);
+            let red = |a| crate::theme::color::RED_500.alpha(a);
             (
                 red(0.1).mix(red(0.2), ui.hover(ok)).mix(red(0.3), down(ok)),
                 Some(red(0.2)),
@@ -894,8 +930,8 @@ pub fn confirm(
         .max_w(280.0)
         .p(12.0)
         .rounded(radius::LG)
-        .border(1.0, Rgba::white(0.1))
-        .bg(color::SURFACE_OVERLAY)
+        .border(1.0, crate::theme::bright(0.1))
+        .floating()
         .shadow(&shadow::XL2)
         .role(Role::AlertDialog, message)
         .child(label(message, crate::theme::text::XS, color::GRAY_300).mb(12.0))
@@ -922,13 +958,28 @@ pub enum ToastKind {
 
 impl ToastKind {
     /// The icon and the Tailwind 400/500 pair it is tinted with.
-    fn look(self) -> (&'static str, u32, u32) {
-        use crate::theme::rgb;
+    fn look(self) -> (&'static str, Color, Color) {
         match self {
-            ToastKind::Success => ("check", rgb::GREEN_400, rgb::GREEN_500),
-            ToastKind::Error => ("x", rgb::RED_400, rgb::RED_500),
-            ToastKind::Warning => ("triangle-alert", rgb::AMBER_400, rgb::AMBER_500),
-            ToastKind::Info => ("info", rgb::BLUE_400, rgb::BLUE_500),
+            ToastKind::Success => (
+                "check",
+                crate::theme::color::GREEN_400,
+                crate::theme::color::GREEN_500,
+            ),
+            ToastKind::Error => (
+                "x",
+                crate::theme::color::RED_400,
+                crate::theme::color::RED_500,
+            ),
+            ToastKind::Warning => (
+                "triangle-alert",
+                crate::theme::color::AMBER_400,
+                crate::theme::color::AMBER_500,
+            ),
+            ToastKind::Info => (
+                "info",
+                crate::theme::color::BLUE_400,
+                crate::theme::color::BLUE_500,
+            ),
         }
     }
 }
@@ -947,11 +998,11 @@ pub fn toast(ui: &Ui, close: Id, message: &str, kind: ToastKind) -> El {
         .min_w(200.0)
         .max_w(360.0)
         .rounded(radius::LG)
-        .border(1.0, Rgba::hexa(edge, 0.2))
-        .bg(Rgba::hexa(0x1a1a1e, 0.92))
+        .border(1.0, edge.alpha(0.2))
+        .bg(color::SURFACE_OVERLAY.alpha(0.92))
         .shadow(&shadow::XL)
         .role(Role::Status, message)
-        .child(icon(lucide(glyph, 2.5), 15.0, Rgba::hex(fg)))
+        .child(icon(lucide(glyph, 2.5), 15.0, fg))
         .child(
             div()
                 .row()
@@ -979,7 +1030,7 @@ pub fn popover(name: &str) -> El {
     div()
         .col()
         .rounded(radius::MD)
-        .border(1.0, Rgba::white(0.08))
+        .border(1.0, crate::theme::bright(0.08))
         .bg(color::SURFACE_RAISED)
         .shadow(&shadow::LG)
         .role(Role::Dialog, name)
@@ -1005,7 +1056,9 @@ pub fn scrim(id: Id, size: (f32, f32), alpha: f32) -> El {
 }
 
 /// A count or status badge: `text` at 10 px, medium, on a rounded tint.
-pub fn badge(text: &str, fg: Rgba, bg: Rgba) -> El {
+pub fn badge(text: &str, fg: impl Into<Rgba>, bg: impl Into<Rgba>) -> El {
+    let fg = fg.into();
+    let bg = bg.into();
     div()
         .row()
         .items_center()
@@ -1029,7 +1082,15 @@ pub fn chip(ui: &Ui, id: Id, name: &str, body: impl IntoIterator<Item = El>) -> 
         .h(26.0)
         .px(8.0)
         .rounded(radius::MD)
-        .border(1.0, tint(ui, id, Rgba::white(0.06), Rgba::white(0.12)))
+        .border(
+            1.0,
+            tint(
+                ui,
+                id,
+                crate::theme::bright(0.06),
+                crate::theme::bright(0.12),
+            ),
+        )
         .bg(color::SURFACE_RAISED)
         .ring(radius::MD)
         .role(Role::Button, name)
@@ -1039,7 +1100,8 @@ pub fn chip(ui: &Ui, id: Id, name: &str, body: impl IntoIterator<Item = El>) -> 
 /// A `<kbd>`: mono text on `white/[0.04]` in a `white/[0.06]` outline,
 /// `(size, line height)` as the caller's `text-*` and `leading-*` set it
 /// (`KbdHint` is `leading-none`; a shortcut list inherits its line's).
-pub fn kbd(text: &str, (size, line): (f32, f32), fg: Rgba) -> El {
+pub fn kbd(text: &str, (size, line): (f32, f32), fg: impl Into<Rgba>) -> El {
+    let fg = fg.into();
     div()
         .row()
         .items_center()
@@ -1047,8 +1109,8 @@ pub fn kbd(text: &str, (size, line): (f32, f32), fg: Rgba) -> El {
         .px(6.0)
         .py(2.0)
         .rounded(radius::SM)
-        .bg(Rgba::white(0.04))
-        .border(1.0, Rgba::white(0.06))
+        .bg(crate::theme::bright(0.04))
+        .border(1.0, crate::theme::bright(0.06))
         .shrink0()
         .child(
             crate::element::text(text, size, fg)

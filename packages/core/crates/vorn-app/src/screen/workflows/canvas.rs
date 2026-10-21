@@ -19,7 +19,7 @@ use crate::ui::{div, text, Action, El, Id, Rgba, Role, Sense};
 use crate::workflows::{self as wf, Anchor, Draft, Gesture, Panel, WfAct};
 
 fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 fn secondary() -> Rgba {
@@ -310,7 +310,7 @@ fn status_dot_color(st: &str) -> Option<Rgba> {
     )
     .then(|| {
         let (rgb, a) = runs::dot(st);
-        Rgba::hexa(rgb, a)
+        rgb.alpha(a)
     })
 }
 
@@ -537,7 +537,7 @@ fn loop_frame(
     let border = if selected {
         white(0.40)
     } else if status == Some("error") {
-        Rgba::hexa(look::DANGER, 0.6)
+        look::DANGER.alpha(0.6)
     } else {
         white(0.08)
     };

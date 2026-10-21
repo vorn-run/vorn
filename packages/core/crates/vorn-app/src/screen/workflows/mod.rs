@@ -26,7 +26,7 @@ pub use dialogs::dialog;
 pub use editor::editor;
 
 fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 fn secondary() -> Rgba {
@@ -231,7 +231,7 @@ pub fn icon_colors_from(
     on_icon: impl Fn(String) -> Act,
     on_color: impl Fn(String) -> Act,
 ) -> El {
-    let tint = hex(Some(color)).unwrap_or(c(0x3b82f6));
+    let tint = hex(Some(color)).unwrap_or(c(look::BLUE_500));
     let mut grid = div().row().wrap_children().gap(4.0);
     for &(name, glyph, label) in options {
         let id = s.acts.on(place, on_icon(name.to_owned()));
@@ -251,7 +251,12 @@ pub fn icon_colors_from(
             .border(1.0, if on { white(0.2) } else { white(0.0) })
             .role(Role::Button, label)
             .selected(on)
-            .child(ico(glyph, 12.0, 1.5, if on { tint } else { c(0x9ca3af) }));
+            .child(ico(
+                glyph,
+                12.0,
+                1.5,
+                if on { tint } else { c(look::GRAY_400) },
+            ));
         grid = grid.child(tooltip(s.ui, b, id, label, None));
     }
     let mut swatches = div().row().gap(6.0);
@@ -363,7 +368,7 @@ pub fn is_off(s: &Screen<'_>) -> bool {
 /// What the view says while the Workflow editor is switched off: the
 /// workflows are kept and still run.
 pub fn off() -> El {
-    let faint = || Rgba::white(0.45);
+    let faint = || crate::ui::theme::bright(0.45);
     div()
         .col()
         .grow()
@@ -700,7 +705,7 @@ fn gate_button(
 ) -> El {
     let id = s.acts.on("wf-gate", a);
     let hot = if disabled { 0.0 } else { s.ui.hover(id) };
-    let bronzo = |a: f32| Rgba::hexa(look::BRONZO, a);
+    let bronzo = |a: f32| look::BRONZO.alpha(a);
     let (fg, bg, border) = if approve {
         (
             bronzo(1.0),
@@ -710,8 +715,8 @@ fn gate_button(
     } else {
         (
             secondary().mix(c(look::DANGER), hot),
-            white(0.0).mix(Rgba::hexa(look::DANGER, 0.10), hot),
-            white(0.06).mix(Rgba::hexa(look::DANGER, 0.30), hot),
+            white(0.0).mix(look::DANGER.alpha(0.10), hot),
+            white(0.06).mix(look::DANGER.alpha(0.30), hot),
         )
     };
     let mut b = div()
@@ -1151,13 +1156,13 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> E
         let color = match st {
             "waiting" => {
                 let (rgb, a) = runs::dot("waiting");
-                Rgba::hexa(rgb, a)
+                rgb.alpha(a)
             }
             "scheduled" => secondary(),
             "disabled" => faint(),
             _ => {
                 let (rgb, a) = runs::dot("error");
-                Rgba::hexa(rgb, a)
+                rgb.alpha(a)
             }
         };
         div()

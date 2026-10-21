@@ -5,10 +5,35 @@
 
 use serde_json::Value;
 use vorn_app::highlight::{highlight, Color};
+use vornui::theme::Token;
 
-const TEXT: Color = (0xdbd7ca, 0xee);
+/// vitesse-dark, which the fixtures were made with, as `0xRRGGBB` and alpha.
+type Rgb = (u32, u8);
 
-fn shiki_color(v: &Value) -> Color {
+const TEXT: Rgb = (0xdbd7ca, 0xee);
+
+/// The colour Vorn Dark gives a span, as Shiki writes it.
+fn vitesse((token, a): Color) -> Rgb {
+    let rgb = match token {
+        Token::SyntaxText => return TEXT,
+        Token::SyntaxComment => return (0x758575, 0xdd),
+        Token::SyntaxString => 0xc98a7d,
+        Token::SyntaxNumber => 0x4c9a91,
+        Token::SyntaxKeyword => 0x4d9375,
+        Token::SyntaxStorage => 0xcb7676,
+        Token::SyntaxConstant => 0xc99076,
+        Token::SyntaxFunction => 0x80a665,
+        Token::SyntaxVariable => 0xbd976a,
+        Token::SyntaxProperty => 0xb8a965,
+        Token::SyntaxType => 0x5da994,
+        Token::SyntaxPunct => 0x666666,
+        Token::SyntaxList => 0xd4976c,
+        other => panic!("{other:?} is not a syntax token"),
+    };
+    (rgb, a)
+}
+
+fn shiki_color(v: &Value) -> Rgb {
     let Some(s) = v.as_str() else { return TEXT };
     let hex = s.trim_start_matches('#');
     let rgb = u32::from_str_radix(&hex[..6], 16).unwrap_or(0);
@@ -34,7 +59,7 @@ fn agreement(name: &str) -> f64 {
         let i = mine.partition_point(|(r, _)| r.end <= at);
         mine.get(i)
             .filter(|(r, _)| r.start <= at)
-            .map_or(TEXT, |(_, c)| *c)
+            .map_or(TEXT, |(_, c)| vitesse(*c))
     };
     let (mut same, mut all) = (0usize, 0usize);
     let mut at = 0;

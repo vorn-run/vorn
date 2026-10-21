@@ -55,7 +55,7 @@ fn frame(ui: &mut Ui, clear: Rgba, tick: u32) {
 fn bench(c: &mut Criterion) {
     let mut ui = Ui::headless(RenderMode::Cpu, &UiConfig::system(2.0, 13.0));
     let target = ui.offscreen(((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32));
-    frame(&mut ui, color::SURFACE_BASE, 0);
+    frame(&mut ui, color::SURFACE_BASE.rgba(), 0);
     ui.render_offscreen(&target);
     let mut g = c.benchmark_group("cpu raster, 8 panes at 2x");
     g.sample_size(30);
@@ -68,20 +68,20 @@ fn bench(c: &mut Criterion) {
             } else {
                 color::SURFACE_SUNKEN
             };
-            frame(&mut ui, clear, tick);
+            frame(&mut ui, clear.rgba(), tick);
             ui.render_offscreen(&target)
         })
     });
     g.bench_function("one pane changes", |b| {
         b.iter(|| {
             tick += 1;
-            frame(&mut ui, color::SURFACE_BASE, tick);
+            frame(&mut ui, color::SURFACE_BASE.rgba(), tick);
             ui.render_offscreen(&target)
         })
     });
     g.bench_function("nothing changes", |b| {
         b.iter(|| {
-            frame(&mut ui, color::SURFACE_BASE, tick);
+            frame(&mut ui, color::SURFACE_BASE.rgba(), tick);
             ui.render_offscreen(&target)
         })
     });

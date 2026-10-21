@@ -80,7 +80,7 @@ pub fn mark(look: Option<&crate::library::Look>, size: f32, color: Rgba) -> El {
         Some(svg) if look.is_some_and(|l| !l.connector.is_empty()) => {
             crate::ui::icon(svg, size, color)
         }
-        _ => ico("zap", size, 2.0, Rgba::hexa(look::INK, look::INK_SECONDARY)),
+        _ => ico("zap", size, 2.0, look::INK.alpha(look::INK_SECONDARY)),
     }
 }
 
@@ -149,7 +149,7 @@ fn library(s: &Screen<'_>, at: &Anchor) -> El {
     let entries = crate::library::entries(&src, at.into(), &s.st.wf.search, &lib.recent, &lib.open);
     let reach = entries.iter().filter(|e| e.reachable()).count();
     let lit = lib.highlight.min(reach.saturating_sub(1));
-    let secondary = Rgba::hexa(look::INK, look::INK_SECONDARY);
+    let secondary = look::INK.alpha(look::INK_SECONDARY);
     let mut list = div().col().p(8.0);
     if reach == 0 {
         list = list.child(

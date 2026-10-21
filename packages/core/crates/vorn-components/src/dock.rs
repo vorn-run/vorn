@@ -22,7 +22,7 @@ fn label(s: &str, size: f32, fg: Rgba) -> El {
 
 /// The `·` between a pill's name and its detail.
 fn middot() -> El {
-    label("\u{b7}", 10.0, color::GRAY_600).shrink0()
+    label("\u{b7}", 10.0, color::GRAY_600.rgba()).shrink0()
 }
 
 /// A minimized session, as its pill shows it.
@@ -49,14 +49,17 @@ pub fn minimized_pill(ui: &Ui, marks: &AgentMarks, id: Id, m: &Minimized<'_>) ->
         .px(10.0)
         .py(4.0)
         .rounded(radius::MD)
-        .border(1.0, Rgba::white(0.06).mix(Rgba::white(0.12), hot))
+        .border(
+            1.0,
+            vornui::theme::bright(0.06).mix(vornui::theme::bright(0.12), hot),
+        )
         .bg(color::SURFACE_RAISED)
         .ring(radius::MD)
         .role(Role::Button, m.name)
         .child(status_dot(ui, m.status))
         .child(agent_icon(marks, m.agent, 14.0).shrink0())
         .child(
-            label(m.name, 11.0, color::GRAY_200)
+            label(m.name, 11.0, color::GRAY_200.rgba())
                 .weight(500)
                 .truncate()
                 .max_w(120.0),
@@ -74,8 +77,12 @@ pub fn minimized_pill(ui: &Ui, marks: &AgentMarks, id: Id, m: &Minimized<'_>) ->
                 .gap(2.0)
                 .max_w(90.0)
                 .min_w(0.0)
-                .child(lucide(glyph, 9.0, 1.5, tint).shrink0())
-                .child(label(branch, 10.0, color::GRAY_500).mono().truncate()),
+                .child(lucide(glyph, 9.0, 1.5, tint.rgba()).shrink0())
+                .child(
+                    label(branch, 10.0, color::GRAY_500.rgba())
+                        .mono()
+                        .truncate(),
+                ),
         );
     }
     tooltip_at(ui, pill, id, "Click to restore", None, Place::Below)
@@ -144,17 +151,27 @@ pub fn approval_pill(ui: &Ui, ids: ApprovalIds, a: &Approval<'_>) -> El {
                 .shrink0()
                 .bg(color::BRONZO),
         )
-        .child(lucide(a.icon, 12.0, 1.5, a.icon_color.unwrap_or(color::GRAY_100)).shrink0())
         .child(
-            label(name, 11.0, color::GRAY_200)
+            lucide(
+                a.icon,
+                12.0,
+                1.5,
+                a.icon_color.unwrap_or(color::GRAY_100.rgba()),
+            )
+            .shrink0(),
+        )
+        .child(
+            label(name, 11.0, color::GRAY_200.rgba())
                 .weight(500)
                 .truncate()
                 .max_w(140.0),
         );
     if let Some(m) = a.message.filter(|m| !m.is_empty()) {
-        pill = pill
-            .child(middot())
-            .child(label(m, 10.0, color::GRAY_500).truncate().max_w(230.0));
+        pill = pill.child(middot()).child(
+            label(m, 10.0, color::GRAY_500.rgba())
+                .truncate()
+                .max_w(230.0),
+        );
     }
     pill.child(
         div()
@@ -167,16 +184,16 @@ pub fn approval_pill(ui: &Ui, ids: ApprovalIds, a: &Approval<'_>) -> El {
                 ids.approve,
                 "check",
                 "Approve",
-                color::INK_SECONDARY,
-                color::INK,
-                Rgba::white(0.08),
+                color::INK_SECONDARY.rgba(),
+                color::INK.rgba(),
+                vornui::theme::bright(0.08),
             ))
             .child(small(
                 ids.reject,
                 "x",
                 "Reject",
-                color::INK_FAINT,
-                color::DANGER,
+                color::INK_FAINT.rgba(),
+                color::DANGER.rgba(),
                 color::DANGER.alpha(0.1),
             )),
     )
@@ -192,8 +209,8 @@ pub enum DockKind {
 impl DockKind {
     fn title(self) -> (&'static str, Rgba) {
         match self {
-            DockKind::Waiting => ("WAITING APPROVAL", color::INK_SECONDARY),
-            DockKind::Minimized => ("MINIMIZED", color::GRAY_500),
+            DockKind::Waiting => ("WAITING APPROVAL", color::INK_SECONDARY.rgba()),
+            DockKind::Minimized => ("MINIMIZED", color::GRAY_500.rgba()),
         }
     }
 }
@@ -237,7 +254,13 @@ pub fn dock(ui: &Ui, ids: DockIds, state: DockState, items: Vec<(DockKind, El)>)
     let overflow = items.split_off(items.len().min(MAX_INLINE));
     for (i, (_, group)) in grouped(items).into_iter().enumerate() {
         if i > 0 {
-            row = row.child(div().w(1.0).h(16.0).shrink0().bg(Rgba::white(0.08)));
+            row = row.child(
+                div()
+                    .w(1.0)
+                    .h(16.0)
+                    .shrink0()
+                    .bg(vornui::theme::bright(0.08)),
+            );
         }
         row = row.child(
             div()
@@ -261,7 +284,10 @@ pub fn dock(ui: &Ui, ids: DockIds, state: DockState, items: Vec<(DockKind, El)>)
             .min_w(28.0)
             .px(6.0)
             .rounded(radius::MD)
-            .border(1.0, Rgba::white(0.06).mix(Rgba::white(0.12), hot))
+            .border(
+                1.0,
+                vornui::theme::bright(0.06).mix(vornui::theme::bright(0.12), hot),
+            )
             .bg(color::SURFACE_RAISED)
             .ring(radius::MD)
             .role(Role::Button, format!("{n} more dock items"))
@@ -297,7 +323,7 @@ pub fn dock(ui: &Ui, ids: DockIds, state: DockState, items: Vec<(DockKind, El)>)
         .justify_center()
         .size(22.0, 22.0)
         .rounded(radius::SM)
-        .bg(Rgba::TRANSPARENT.mix(Rgba::white(0.06), hot))
+        .bg(Rgba::TRANSPARENT.mix(vornui::theme::bright(0.06), hot))
         .ring(radius::SM)
         .role(Role::Button, "Collapse session dock")
         .child(lucide(
@@ -349,7 +375,10 @@ fn collapsed(
         .h(26.0)
         .px(8.0)
         .rounded(radius::MD)
-        .border(1.0, Rgba::white(0.06).mix(Rgba::white(0.12), hot))
+        .border(
+            1.0,
+            vornui::theme::bright(0.06).mix(vornui::theme::bright(0.12), hot),
+        )
         .bg(color::SURFACE_RAISED)
         .ring(radius::MD)
         .role(Role::Button, &tip)
@@ -403,7 +432,7 @@ fn panel(items: Vec<(DockKind, El)>, footer: Option<El>) -> El {
                 .px(4.0)
                 .pb(4.0)
                 .mb(2.0)
-                .border_bottom(1.0, Rgba::white(0.06))
+                .border_bottom(1.0, vornui::theme::bright(0.06))
                 .child(f),
         );
     }

@@ -20,6 +20,7 @@
 "crates/hooks" = "sessions"
 "crates/agents" = "sessions"
 "crates/layout" = "settings"
+"crates/theme" = "settings"
 "crates/vault" = "settings"
 "crates/store" = "projects"
 "crates/remote" = "projects"

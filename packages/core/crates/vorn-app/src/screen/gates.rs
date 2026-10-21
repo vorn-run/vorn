@@ -12,7 +12,7 @@ use crate::runs::{self, s as sv};
 use crate::ui::{div, field, text, textarea, Action, El, Id, Rgba, Role, TextStyle};
 
 fn ink(a: f32) -> Rgba {
-    Rgba::hexa(look::INK, a)
+    look::INK.alpha(a)
 }
 
 fn secondary() -> Rgba {
@@ -24,11 +24,11 @@ fn faint() -> Rgba {
 }
 
 fn bronzo(a: f32) -> Rgba {
-    Rgba::hexa(look::BRONZO, a)
+    look::BRONZO.alpha(a)
 }
 
 fn danger(a: f32) -> Rgba {
-    Rgba::hexa(look::DANGER, a)
+    look::DANGER.alpha(a)
 }
 
 /// `GATE_APPROVE`, `GATE_NEUTRAL` and `GATE_REJECT`.
@@ -1052,7 +1052,7 @@ pub fn review(s: &Screen<'_>) -> Option<El> {
         div()
             .absolute(0.0, 0.0)
             .size(s.size.0, s.size.1)
-            .bg(Rgba::hexa(0, 0.6))
+            .bg(crate::ui::theme::shadow(0.6))
             .layered()
             .center()
             .child(panel),
