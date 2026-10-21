@@ -159,8 +159,8 @@ mod tests {
     use vorn_theme::Token;
 
     #[test]
-    fn stored_choices_are_read_whatever_experimental_says() {
-        let d = json!({ "colorScheme": "light", "darkTheme": "nord", "materials": "native", "experimental": false });
+    fn stored_choices_are_read() {
+        let d = json!({ "colorScheme": "light", "darkTheme": "nord", "materials": "native" });
         let p = prefs(Some(&d));
         assert_eq!(p.scheme, Scheme::Light);
         assert_eq!(p.dark, "nord");

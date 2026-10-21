@@ -1264,16 +1264,11 @@ fn prompt_marks_survive_resizes() {
     }
 }
 
-/// Kitty images behind Settings › Experimental: a card attached later, and one that reconnects
-/// with nothing kept, get the pixels before the snapshot that places them; switched off, the
-/// next batch takes them away.
+/// Kitty images: a card attached later, and one that reconnects with nothing kept, get the
+/// pixels before the snapshot that places them.
 #[test]
 fn a_card_attached_later_shows_the_images_already_placed() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    let cfg = Arc::new(vorn_engine::Config {
-        images: Arc::new(AtomicBool::new(true)),
-        ..(*gridrig::config(SCROLLBACK)).clone()
-    });
+    let cfg = gridrig::config(SCROLLBACK);
     let mut b = LogBuilder::new(Size::new(40, 10));
     b.push(Record::Resize {
         cols: 40,
@@ -1283,11 +1278,10 @@ fn a_card_attached_later_shows_the_images_already_placed() {
         req: None,
     });
     b.data("\x1b_Ga=T,f=32,s=2,v=1,c=4,r=2,i=7,q=2;/wAA/wD/AP8=\x1b\\\r\n\r\nafter\r\n");
-    b.data("x");
     let entries = b.build().entries;
-    let mut rig = Rig::with_config((40, 10), Arc::clone(&cfg));
+    let mut rig = Rig::with_config((40, 10), cfg);
     rig.attach(1, 1, true, None);
-    rig.feed(&entries[..2]);
+    rig.feed(&entries);
     rig.settle();
     let shows = |rig: &Rig, conn: u64| {
         let pane = rig.clients[&conn].pane(1).unwrap();
@@ -1312,9 +1306,4 @@ fn a_card_attached_later_shows_the_images_already_placed() {
     rig.settle();
     assert_eq!(shows(&rig, 1), placed);
     assert_eq!(shows(&rig, 2), placed);
-
-    cfg.images.store(false, Ordering::Relaxed);
-    rig.feed(&entries[2..]);
-    rig.settle();
-    assert_eq!(shows(&rig, 2), ((0, 0), vec![], None));
 }

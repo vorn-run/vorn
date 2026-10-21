@@ -156,7 +156,7 @@ and when the place shows.
 A settings page is listed under Extensions in the Settings sidebar, and in
 the palette as its title and "Settings". It may name the app's own page it
 follows with `after` (`appearance`, `general`, `updates`, `notifications`,
-`experimental`, `agents`, `mcp`, `keys` or `network`), as SSH & Hosts
+`agents`, `mcp`, `keys` or `network`), as SSH & Hosts
 follows `agents`, so it keeps that place and its palette entry, its bare
 title.
 

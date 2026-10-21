@@ -279,7 +279,6 @@ impl Serving {
         let Some(changes) = native.upgrade() else {
             return;
         };
-        changes.experimental(defaults(&changes).await["experimental"].as_bool() == Some(true));
         let signal = self.data_dir().join(".db-signal");
         let mut seen = std::fs::read(&signal).ok();
         let mut every = tokio::time::interval(SIGNAL_EVERY);
@@ -306,10 +305,9 @@ impl Serving {
             if let Some(work) = native.work() {
                 work.workflows_changed_elsewhere();
             }
-            let defaults = defaults(&native).await;
-            native.experimental(defaults["experimental"].as_bool() == Some(true));
             if self.config.host.is_none() {
-                let network = defaults["networkAccessEnabled"].as_bool() == Some(true);
+                let network =
+                    defaults(&native).await["networkAccessEnabled"].as_bool() == Some(true);
                 self.rebind(&native, port::host(network)).await;
             }
         }

@@ -1,4 +1,4 @@
-//! A version 27 file is brought up to the current schema, rows kept.
+//! A version 27 or 28 file is brought up to the current schema, rows kept.
 
 mod common;
 
@@ -84,7 +84,7 @@ fn the_upgrade_keeps_rows_and_records_the_new_version() {
     let dir = tempfile::tempdir().unwrap();
     seed_27(dir.path());
     let store = open(dir.path());
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
     drop(store);
 
     let d = dir.path();
@@ -113,7 +113,33 @@ fn the_upgrade_keeps_rows_and_records_the_new_version() {
     }
 
     let store = open(dir.path());
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
+}
+
+#[test]
+fn a_version_28_file_loses_the_experimental_switch() {
+    let dir = new_database();
+    raw(dir.path())
+        .execute_batch(
+            "UPDATE schema_meta SET value = '28' WHERE key = 'schema_version';
+             INSERT INTO defaults (key, value) VALUES ('experimental', 'true'), ('tuiDrawing', 'true');",
+        )
+        .unwrap();
+    let store = open(dir.path());
+    assert_eq!(store.schema_version().unwrap(), 29);
+    drop(store);
+
+    let value = |key: &str| -> Option<String> {
+        use rusqlite::OptionalExtension;
+        raw(dir.path())
+            .query_row("SELECT value FROM defaults WHERE key = ?", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+            .unwrap()
+    };
+    assert_eq!(value("experimental"), None);
+    assert_eq!(value("tuiDrawing").as_deref(), Some("true"));
 }
 
 /// Upgrades a copy of a real database, named by `VORN_UPGRADE_DB` (a
@@ -143,7 +169,7 @@ fn a_copy_of_a_real_database_upgrades() {
     let before: Vec<i64> = tables.iter().map(|t| count(t)).collect();
 
     let store = open(dir);
-    assert_eq!(store.schema_version().unwrap(), 28);
+    assert_eq!(store.schema_version().unwrap(), 29);
     drop(store);
 
     let after: Vec<i64> = tables.iter().map(|t| count(t)).collect();

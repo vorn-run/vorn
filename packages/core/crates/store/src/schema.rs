@@ -1,5 +1,5 @@
 //! The database's schema: one baseline that a new file is created with, and
-//! the single step that brings a version 27 file up to it.
+//! the steps that bring a version 27 or 28 file up to it.
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,7 @@ use crate::sql::{json_text, now_iso, num, opt_num, opt_text, random_uuid};
 use crate::{Error, Result, Store};
 
 /// The version [`BASELINE_DDL`] is.
-pub(crate) const SCHEMA_VERSION: i64 = 28;
+pub(crate) const SCHEMA_VERSION: i64 = 29;
 
 /// The oldest version that is upgraded rather than refused.
 const UPGRADES_FROM: i64 = 27;
@@ -398,8 +398,8 @@ const DROPPED_IN_28: [(&str, &str); 5] = [
 ];
 
 /// Creates the schema in a new file, upgrades a version 27 file (adding
-/// `device_tokens.last_address` when missing), and refuses one older than
-/// that. A current file is left alone.
+/// `device_tokens.last_address` when missing) and a version 28 one, and
+/// refuses one older than that. A current file is left alone.
 pub(crate) fn create(store: &mut Store) -> Result<()> {
     let workspace = store.options()?.default_workspace.clone();
     let owner = store.options()?.owner_name.clone();
@@ -427,18 +427,12 @@ pub(crate) fn create(store: &mut Store) -> Result<()> {
                 [CONFIG_REVISION_KEY],
             )?;
         }
-        UPGRADES_FROM => {
-            if !columns(&tx, "device_tokens")?
-                .iter()
-                .any(|c| c == "last_address")
-            {
-                tx.execute_batch("ALTER TABLE device_tokens ADD COLUMN last_address TEXT")?;
+        v @ UPGRADES_FROM..SCHEMA_VERSION => {
+            if v < 28 {
+                upgrade_to_28(&tx)?;
             }
-            for (table, column) in DROPPED_IN_28 {
-                if columns(&tx, table)?.iter().any(|c| c == column) {
-                    tx.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))?;
-                }
-            }
+            // Settings › Experimental is gone, and its saved switch with it.
+            tx.execute("DELETE FROM defaults WHERE key = 'experimental'", [])?;
         }
         v if v >= SCHEMA_VERSION => return Ok(()),
         v => {
@@ -453,6 +447,23 @@ pub(crate) fn create(store: &mut Store) -> Result<()> {
         [SCHEMA_VERSION.to_string()],
     )?;
     tx.commit()?;
+    Ok(())
+}
+
+/// Version 27 to 28: adds `device_tokens.last_address` when missing and drops
+/// the columns nothing reads.
+fn upgrade_to_28(tx: &Connection) -> Result<()> {
+    if !columns(tx, "device_tokens")?
+        .iter()
+        .any(|c| c == "last_address")
+    {
+        tx.execute_batch("ALTER TABLE device_tokens ADD COLUMN last_address TEXT")?;
+    }
+    for (table, column) in DROPPED_IN_28 {
+        if columns(tx, table)?.iter().any(|c| c == column) {
+            tx.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))?;
+        }
+    }
     Ok(())
 }
 

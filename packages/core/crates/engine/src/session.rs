@@ -31,7 +31,6 @@
 //! first, which rebuilds the terminal the cut swapped in, so nothing a
 //! client or a recovery sees tells the two apart.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -111,9 +110,6 @@ pub struct Config {
     /// by id. Where none of them holds, or a session has none, the
     /// analyzer's patterns decide.
     pub agents: Option<Agents>,
-    /// Settings › Experimental: whether programs may draw kitty images,
-    /// read at each batch so the switch takes effect without a restart.
-    pub images: Arc<AtomicBool>,
 }
 
 /// Asked of a session by id: see [`Config::agents`]. `None` while the host
@@ -154,7 +150,6 @@ impl Default for Config {
             idle: None,
             viewed: None,
             agents: None,
-            images: Arc::default(),
         }
     }
 }
@@ -1306,9 +1301,6 @@ impl Run {
         match &e.rec {
             Record::Data { bytes, .. } => {
                 self.term.rules = ctx.rules;
-                self.term
-                    .em
-                    .set_images(ctx.cfg.images.load(Ordering::Relaxed));
                 status = self.term.feed(bytes, ctx.cfg.analyze, fx);
                 self.since_cut += bytes.len() as u64;
                 self.last_output = now;

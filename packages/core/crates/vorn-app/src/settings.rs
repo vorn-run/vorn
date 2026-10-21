@@ -15,8 +15,6 @@ pub enum Category {
     General,
     Updates,
     Notifications,
-    /// One switch for the native work still being tried.
-    Experimental,
     Agents,
     Mcp,
     /// The Extensions manager (its route keeps the old `connectors`).
@@ -37,7 +35,6 @@ impl Category {
             "general" => Category::General,
             "updates" => Category::Updates,
             "notifications" => Category::Notifications,
-            "experimental" => Category::Experimental,
             "agents" => Category::Agents,
             "mcp" => Category::Mcp,
             "connectors" | "extensions" | "plugins" => Category::Connectors,
@@ -55,7 +52,6 @@ impl Category {
             Category::General => "General",
             Category::Updates => "Updates",
             Category::Notifications => "Notifications",
-            Category::Experimental => "Experimental",
             Category::Agents => "Coding Agents",
             Category::Mcp => "Skills & MCP",
             Category::Connectors => "Extensions",
@@ -88,7 +84,6 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
             Category::General,
             Category::Updates,
             Category::Notifications,
-            Category::Experimental,
         ],
     ),
     (
