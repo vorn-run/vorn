@@ -80,8 +80,8 @@ impl App {
                 let Some(p) = self.st.points.get(&key).cloned() else {
                     return;
                 };
-                // The Workflow editor's Run asks for a run's inputs and session here, as it always did.
-                if p.extension == crate::workflows::EDITOR && p.call.as_deref() == Some("run") {
+                // Workflows' Run asks for a run's inputs and session here, as it always did.
+                if p.extension == crate::workflows::ID && p.call.as_deref() == Some("run") {
                     let args: Value = serde_json::from_str(&args).unwrap_or_default();
                     let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
                     if let Some(id) = text("id") {

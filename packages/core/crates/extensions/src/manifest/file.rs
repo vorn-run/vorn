@@ -361,6 +361,8 @@ struct RawActivation {
     agent: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     platform: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    setting: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -410,6 +412,41 @@ struct RawContributes {
     triggers: Vec<RawTriggerType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     workflows: Vec<RawWorkflow>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    preferences: Vec<RawPreference>,
+}
+
+/// `[[contributes.preferences]]`: a setting the extension reads.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawPreference {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default: Option<RawDefault>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    options: Vec<RawPreferenceOption>,
+}
+
+/// A preference's default: a bool's `true` or `false`, a choice's option id.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+enum RawDefault {
+    Bool(bool),
+    Text(String),
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawPreferenceOption {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
 }
 
 /// `[[contributes.nodes]]`: a node type.
@@ -982,6 +1019,12 @@ impl Raw {
             payload.insert("actions".into(), json!([{ "type": "_" }]));
         }
         if let Some(activates) = &self.activates {
+            if !activates.setting.is_empty() {
+                return Err(at(
+                    "activates.setting",
+                    "belongs to a contribution's when, not the extension's own rule".into(),
+                ));
+            }
             let value = activates.to_json();
             check_activation(at, "activates", activates, &value)?;
             payload.insert("activates".into(), value);
@@ -1233,6 +1276,7 @@ impl RawActivation {
             ("remoteHost", &self.remote_host),
             ("agent", &self.agent),
             ("platform", &self.platform),
+            ("setting", &self.setting),
         ] {
             if !list.is_empty() {
                 m.insert(key.into(), json!(list));
@@ -1246,6 +1290,7 @@ impl RawActivation {
             + self.remote_host.len()
             + self.agent.len()
             + self.platform.len()
+            + self.setting.len()
     }
 }
 
@@ -1260,11 +1305,12 @@ fn check_activation(
     let count = kept.workspace_contains.len()
         + kept.remote_host.len()
         + kept.agent.len()
-        + kept.platform.len();
+        + kept.platform.len()
+        + kept.setting.len();
     if count != raw.len() {
         return Err(at(
             field,
-            "names an agent, platform or path this Vorn does not know".into(),
+            "names an agent, platform, path or setting this Vorn does not know".into(),
         ));
     }
     Ok(())
@@ -1513,11 +1559,13 @@ impl RawContributes {
                 list.push(Value::Object(m));
             }
         }
+        let preferences = self.preferences_json(at)?;
         for (key, list) in [
             ("panes", panes),
             ("footers", footers),
             ("linkHandlers", links),
             ("layouts", layouts),
+            ("preferences", preferences),
         ]
         .into_iter()
         .chain(flows)
@@ -1529,7 +1577,124 @@ impl RawContributes {
         if out.is_empty() {
             return Err(at("contributes", "contributes nothing".into()));
         }
+        self.check_settings(at, &out)?;
         Ok(Value::Object(out))
+    }
+
+    fn preferences_json(&self, at: &At<'_>) -> Result<Vec<Value>, FileError> {
+        let mut list = Vec::new();
+        for (i, p) in self.preferences.iter().enumerate() {
+            let field = format!("contributes.preferences[{i}]");
+            let mut m = contribution_json(
+                &p.id,
+                p.title.as_ref(),
+                p.description.as_ref(),
+                None,
+                at,
+                &field,
+            )?;
+            if !super::is_contribution_id(&p.id) {
+                return Err(at(
+                    &format!("{field}.id"),
+                    "needs an id of letters, digits, - and _, starting with a letter".into(),
+                ));
+            }
+            if self.preferences[..i].iter().any(|q| q.id == p.id) {
+                return Err(at(
+                    &format!("{field}.id"),
+                    format!("`{}` names another preference too", p.id),
+                ));
+            }
+            m.insert("type".into(), json!(p.kind));
+            match (p.kind.as_str(), &p.default) {
+                ("bool", None | Some(RawDefault::Bool(_))) if p.options.is_empty() => {}
+                ("bool", Some(RawDefault::Text(_))) => {
+                    return Err(at(&format!("{field}.default"), "is true or false".into()));
+                }
+                ("bool", _) => {
+                    return Err(at(
+                        &format!("{field}.options"),
+                        "belongs to a choice".into(),
+                    ));
+                }
+                ("choice", _) if p.options.is_empty() => {
+                    return Err(at(
+                        &format!("{field}.options"),
+                        "lists the choices, each with an id and a title".into(),
+                    ));
+                }
+                ("choice", Some(RawDefault::Text(d))) if p.options.iter().any(|o| &o.id == d) => {}
+                ("choice", None) => {}
+                ("choice", _) => {
+                    return Err(at(
+                        &format!("{field}.default"),
+                        "is the id of one of its options".into(),
+                    ));
+                }
+                _ => {
+                    return Err(at(&format!("{field}.type"), "is bool or choice".into()));
+                }
+            }
+            match &p.default {
+                Some(RawDefault::Bool(b)) => {
+                    m.insert("default".into(), json!(b));
+                }
+                Some(RawDefault::Text(t)) => {
+                    m.insert("default".into(), json!(t));
+                }
+                None => {}
+            }
+            if !p.options.is_empty() {
+                let mut seen: Vec<&String> = Vec::new();
+                let mut options = Vec::new();
+                for (j, o) in p.options.iter().enumerate() {
+                    if !super::is_contribution_id(&o.id) || seen.contains(&&o.id) {
+                        return Err(at(
+                            &format!("{field}.options[{j}].id"),
+                            "is a unique id of letters, digits, - and _, starting with a letter"
+                                .into(),
+                        ));
+                    }
+                    seen.push(&o.id);
+                    let mut om = Map::new();
+                    om.insert("id".into(), json!(o.id));
+                    opt(&mut om, "title", o.title.as_ref());
+                    options.push(Value::Object(om));
+                }
+                m.insert("options".into(), Value::Array(options));
+            }
+            list.push(Value::Object(m));
+        }
+        Ok(list)
+    }
+
+    /// Every `when.setting` names one of this extension's on-off preferences.
+    fn check_settings(&self, at: &At<'_>, out: &Map<String, Value>) -> Result<(), FileError> {
+        let switches: Vec<&str> = self
+            .preferences
+            .iter()
+            .filter(|p| p.kind == "bool")
+            .map(|p| p.id.as_str())
+            .collect();
+        for (key, list) in out {
+            let toml_key = match key.as_str() {
+                "cardFooters" => "card_footers",
+                "linkHandlers" => "link_handlers",
+                other => other,
+            };
+            for (i, item) in list.as_array().into_iter().flatten().enumerate() {
+                let named = item["when"]["setting"].as_array().into_iter().flatten();
+                for name in named.filter_map(Value::as_str) {
+                    if !switches.contains(&name) {
+                        return Err(at(
+                            &format!("contributes.{toml_key}[{i}].when.setting"),
+                            format!("`{name}` is not an on-off preference under [[contributes.preferences]]"),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1585,6 +1750,7 @@ impl From<&Manifest> for Raw {
             remote_host: a.remote_host.clone(),
             agent: a.agent.clone(),
             platform: a.platform.clone(),
+            setting: a.setting.clone(),
         };
         let is_connector = m.protocol.is_some()
             || !m.triggers.is_empty()
@@ -1804,6 +1970,36 @@ impl From<&Manifest> for Raw {
                     description: w.base.description.clone(),
                     when: w.base.when.as_ref().map(when),
                     file: w.file.clone(),
+                })
+                .collect();
+            raw.preferences = c
+                .preferences()
+                .iter()
+                .map(|p| {
+                    let (kind, default, options) = match &p.kind {
+                        super::PreferenceKind::Bool { default } => {
+                            ("bool", RawDefault::Bool(*default), Vec::new())
+                        }
+                        super::PreferenceKind::Choice { default, options } => (
+                            "choice",
+                            RawDefault::Text(default.clone()),
+                            options
+                                .iter()
+                                .map(|o| RawPreferenceOption {
+                                    id: o.id.clone(),
+                                    title: (o.title != o.id).then(|| o.title.clone()),
+                                })
+                                .collect(),
+                        ),
+                    };
+                    RawPreference {
+                        id: p.base.id.clone(),
+                        title: title(&p.base),
+                        description: p.base.description.clone(),
+                        kind: kind.to_owned(),
+                        default: Some(default),
+                        options,
+                    }
                 })
                 .collect();
             raw

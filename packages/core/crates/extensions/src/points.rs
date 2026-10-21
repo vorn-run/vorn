@@ -2,15 +2,17 @@
 //! place it draws a tree in, and every command, menu item, launcher and
 //! attention point, flat and in place order.
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
+use crate::activation::settings_hold;
 use crate::manifest::{Manifest, PaneDraws, Place};
 
 /// Every contribution of `manifest` a client draws or lists, as
 /// `{extension, kind, id, title, ..., tree?}`; a pane only when it is a tree,
 /// and its `[theme]` as kind `themes` with the section as written, so every
-/// client reads it with `vorn_theme` as vornd checked it.
-pub fn listed(manifest: &Manifest) -> Vec<Value> {
+/// client reads it with `vorn_theme` as vornd checked it. One whose
+/// `when.setting` names only preferences that are off in `settings` is left out.
+pub fn listed(manifest: &Manifest, settings: &Map<String, Value>) -> Vec<Value> {
     let mut out = Vec::new();
     if let Some(theme) = manifest.theme() {
         out.push(json!({
@@ -31,13 +33,17 @@ pub fn listed(manifest: &Manifest) -> Vec<Value> {
         v
     };
     for pane in c.panes() {
-        if pane.draws == PaneDraws::Tree {
+        if pane.draws == PaneDraws::Tree && settings_hold(pane.base.when.as_ref(), settings) {
             let v = json!({ "id": pane.base.id, "title": pane.base.title, "tree": true });
             out.push(entry(Place::Panes, v));
         }
     }
     for place in Place::POINTS {
-        for point in c.points(place) {
+        for point in c
+            .points(place)
+            .iter()
+            .filter(|p| settings_hold(p.base.when.as_ref(), settings))
+        {
             let v = serde_json::to_value(point).unwrap_or_else(|_| json!({}));
             out.push(entry(place, v));
         }
@@ -78,7 +84,7 @@ tree = true
 "#,
         )
         .unwrap();
-        let listed = listed(&m);
+        let listed = listed(&m, &Map::new());
         let kinds: Vec<_> = listed
             .iter()
             .map(|p| (p["kind"].as_str().unwrap(), p["id"].as_str().unwrap()))
@@ -99,7 +105,7 @@ tree = true
     #[test]
     fn lists_a_theme_with_its_section() {
         let text = vorn_theme::manifests()[2];
-        let listed = listed(&parse(text).unwrap());
+        let listed = listed(&parse(text).unwrap(), &Map::new());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0]["kind"], "themes");
         assert_eq!(listed[0]["id"], "solarized-dark");

@@ -134,7 +134,7 @@ struct Waiting<'a> {
 }
 
 /// Everything waiting for a person in the active workspace, oldest first,
-/// from the extensions' attention items. A Workflow editor gate opens its
+/// from the extensions' attention items. A Workflows gate opens its
 /// run and is answered there, as the run pane answers it.
 fn waiting<'a>(s: &'a Screen<'_>) -> Vec<Waiting<'a>> {
     use crate::points::PointAct;
@@ -144,7 +144,7 @@ fn waiting<'a>(s: &'a Screen<'_>) -> Vec<Waiting<'a>> {
         .into_iter()
         .map(|(p, row)| {
             let text = |k: &str| row.str(k).filter(|v| !v.is_empty());
-            if p.extension == crate::workflows::EDITOR {
+            if p.extension == crate::workflows::ID {
                 let run = text("run").unwrap_or_default().to_owned();
                 let node = text("node").unwrap_or_default();
                 let gate = crate::gates::key(crate::gates::Place::Pane, &run, node);

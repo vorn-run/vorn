@@ -294,8 +294,8 @@ a page at a time, windows them, drags them between columns and opens them.
 
 `examples/extensions/turns` draws a tree in every place, and
 `examples/extensions/agent-footer` a card footer. Vorn's own Tasks
-(`packages/core/extensions/tasks`) and Workflow editor
-(`packages/core/extensions/workflow-editor`) draw their main views this way;
+(`packages/core/extensions/tasks`) and Workflows
+(`packages/core/extensions/workflows`) draw their main views this way;
 Files (`packages/core/extensions/files`) draws its pane and cards, Shell
 blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
 (`packages/core/extensions/browser`) a session's tabs over its page, and

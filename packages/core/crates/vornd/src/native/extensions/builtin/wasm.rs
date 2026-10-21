@@ -30,9 +30,6 @@ pub struct Component {
     pub stop: Option<&'static str>,
 }
 
-/// The Workflow editor's id.
-pub const EDITOR: &str = "vorn.workflow-editor";
-
 /// Worktree cleanup (`packages/core/extensions/worktrees`).
 pub fn worktrees() -> Component {
     Component {
@@ -66,14 +63,15 @@ pub fn widget() -> Component {
     }
 }
 
-/// The Workflow editor (`packages/core/extensions/workflow-editor`): its
-/// menus and gates are published as it is switched on.
-pub fn workflow_editor() -> Component {
+/// Workflows (`packages/core/extensions/workflows`): its view, menus and
+/// gates, published as it is switched on, and the steps and triggers the
+/// engine runs ([`vorn_workflows`]).
+pub fn workflows() -> Component {
     use vorn_extensions::events::{WORKFLOW_CHANGED, WORKFLOW_GATES};
     Component {
-        manifest: include_str!("../../../../../../extensions/workflow-editor/vorn-extension.toml"),
+        manifest: vorn_workflows::MANIFEST,
         events: &[WORKFLOW_CHANGED, WORKFLOW_GATES],
-        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/workflow-editor.wasm")),
+        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/workflows.wasm")),
         on_by_default: true,
         start: Some("refresh"),
         stop: None,

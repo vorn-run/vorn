@@ -1,4 +1,4 @@
-//! The Workflow editor: the Workflows view (a tree whose `graph` is the
+//! Workflows: the Workflows view (a tree whose `graph` is the
 //! client's canvas), Run workflow in the grid's, a card's and a terminal's
 //! menus (`[[contributes.menus]]` listing the workflows each offers), and
 //! the approval gates waiting for a person (`[[contributes.attention]]`),
@@ -8,7 +8,8 @@
 //! Vorn ships it as a Wasm component. The rows it publishes follow the
 //! workflows (`workflow.changed`) and their runs' gates (`workflow.gates`);
 //! off, it publishes nothing and its view, menu items and gates leave every
-//! client, and the workflows still run.
+//! client. The steps and triggers its manifest declares run in the core's
+//! engine (`crates/workflows`), so off they stop too.
 
 use vorn_extension_sdk::tree::{self, sdk, Surface};
 use vorn_extension_sdk::{arg, json, Ctx, Error, Event, Extension, Host, Init, Op, Value};
@@ -151,7 +152,7 @@ impl Extension for Editor {
             "open" | "move" | "connect" => Ok(Value::Null),
             other => Err(Error::new(
                 "unknown-action",
-                format!("Workflow editor has no action {other}"),
+                format!("Workflows has no action {other}"),
             )),
         }
     }

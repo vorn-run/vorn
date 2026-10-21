@@ -1,0 +1,110 @@
+id = "vorn.workflows"
+name = "Workflows"
+version = "0.9.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "Workflows: the view with their runs and the editor, where each step is a card on a canvas; the steps and triggers they are built from (agents, scripts and HTTP requests; manual runs, schedules, webhooks and a session coming back); Run workflow in the grid's, a card's and a terminal's menus; and approval gates waiting for you beside agents asking. Off, a workflow stops at those steps and its schedules and webhooks do not fire; the workflows are kept."
+
+[declares]
+uses = ["tasks.read", "tasks.write", "sessions.read", "sessions.launch", "workflows.read", "workflows.write", "process.run"]
+
+[service]
+component = "workflows.wasm"
+events = ["workflow.changed", "workflow.gates"]
+
+[[contributes.views]]
+id = "workflows"
+title = "Workflows"
+icon = "workflow"
+key = "Mod+Shift+W"
+tree = true
+
+[[contributes.menus]]
+id = "run"
+title = "Run workflow"
+menu = "grid"
+icon = "workflow"
+rows = "manual"
+call = "run"
+
+[[contributes.menus]]
+id = "run-on-card"
+title = "Run workflow"
+menu = "card"
+icon = "workflow"
+rows = "contextual"
+call = "run"
+
+[[contributes.menus]]
+id = "run-on-terminal"
+title = "Run workflow"
+menu = "terminal"
+icon = "workflow"
+rows = "contextual"
+call = "run"
+
+[[contributes.attention]]
+id = "gates"
+title = "Approval gates"
+icon = "hand"
+rows = "gates"
+call = "approve"
+deny = "reject"
+
+[[contributes.nodes]]
+id = "launchAgent"
+title = "Agent"
+icon = "play"
+category = "steps"
+
+[[contributes.nodes]]
+id = "script"
+title = "Script"
+icon = "terminal"
+category = "steps"
+
+[[contributes.nodes]]
+id = "httpRequest"
+title = "HTTP request"
+icon = "globe"
+category = "steps"
+
+[[contributes.triggers]]
+id = "manual"
+title = "Manual"
+icon = "zap"
+
+[[contributes.triggers]]
+id = "recurring"
+title = "Recurring schedule"
+icon = "clock"
+timing = "cron"
+
+[[contributes.triggers]]
+id = "once"
+title = "Schedule once"
+icon = "calendar"
+timing = "once"
+
+[[contributes.triggers]]
+id = "sessionRestored"
+title = "Session restored"
+icon = "rotate-ccw"
+
+[[contributes.triggers]]
+id = "webhook"
+title = "Webhook"
+icon = "globe"
+timing = "webhook"
+
+[[contributes.workflows]]
+id = "default-task-workflow"
+title = "Default Task Workflow"
+description = "An agent picks up a task moved to In Progress."
+file = "workflows/default-task.toml"
+
+[[contributes.workflows]]
+id = "dev-server-on-restore"
+title = "Bring the dev server back"
+description = "The dev server comes back with its session; off until you turn it on."
+file = "workflows/dev-server.toml"

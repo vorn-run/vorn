@@ -9,9 +9,9 @@ use serde_json::{json, Map, Value};
 use crate::graph;
 use crate::runs::{self, s};
 
-/// The Workflow editor built-in: its view, its Run workflow menu items and
-/// the gates it says are waiting are drawn here.
-pub const EDITOR: &str = "vorn.workflow-editor";
+/// The Workflows built-in: its view, its Run workflow menu items and the
+/// gates it says are waiting are drawn here.
+pub const ID: &str = "vorn.workflows";
 
 /// The landing's two tabs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]

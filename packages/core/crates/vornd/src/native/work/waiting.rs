@@ -1,6 +1,6 @@
 //! The approval gates waiting for a person, as public events: each time a
 //! run's waiting gates change, `workflow.gates` says which wait now, so the
-//! Workflow editor (an extension) lists them beside agents asking. A run
+//! Workflows extension lists them beside agents asking. A run
 //! with no gate, now or before, costs a scan of its states and nothing more.
 
 use std::collections::BTreeMap;

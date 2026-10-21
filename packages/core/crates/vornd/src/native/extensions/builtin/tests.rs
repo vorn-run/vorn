@@ -691,3 +691,36 @@ async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
     until(|| s.core.shut_down() == ["u1", "u2", "u3"]).await;
     assert!(s.router.rows(device::ID, "open").is_empty());
 }
+
+#[test]
+fn the_old_workflow_editor_switch_folds_into_workflows_once() {
+    // (Workflows as kept, the old editor as kept, Workflows after.)
+    let cases = [
+        (Some(true), true, true),
+        (Some(false), true, true),
+        (Some(true), false, true),
+        (Some(false), false, false),
+        (None, false, true),
+    ];
+    for (workflows, editor, merged) in cases {
+        let s = setup();
+        let file = s.dir.path().join("builtins.json");
+        let mut kept = serde_json::Map::new();
+        if let Some(on) = workflows {
+            kept.insert(vorn_workflows::ID.into(), json!(on));
+        }
+        kept.insert(OLD_WORKFLOW_EDITOR.into(), json!(editor));
+        std::fs::write(&file, Value::Object(kept).to_string()).unwrap();
+
+        let started: Vec<Arc<dyn Builtin>> = vec![Arc::new(wasm::workflows())];
+        let b = Builtins::new(Arc::clone(&s.router), file.clone(), started);
+        assert_eq!(
+            b.is_on(vorn_workflows::ID),
+            merged,
+            "{workflows:?} {editor}"
+        );
+        let saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(saved.get(OLD_WORKFLOW_EDITOR), None);
+        assert_eq!(saved[vorn_workflows::ID], json!(merged));
+    }
+}

@@ -28,6 +28,7 @@ use crate::gate::{self, Caller, StorageCall, World};
 use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
+use crate::preferences::{self, Preferences};
 use crate::sandbox;
 
 /// What every program is started with.
@@ -47,6 +48,8 @@ pub struct RouterSettings {
     pub placed_blobs: Vec<(String, PathBuf)>,
     /// What compiles a Wasm component into the cache when it is not there.
     pub compiler: Compiler,
+    /// The file the extensions' preferences are kept in; none keeps them in memory.
+    pub preferences: Option<PathBuf>,
 }
 
 impl RouterSettings {
@@ -59,6 +62,7 @@ impl RouterSettings {
             blobs: None,
             placed_blobs: Vec::new(),
             compiler: Compiler::None,
+            preferences: None,
         }
     }
 }
@@ -177,6 +181,7 @@ pub struct Router {
     /// Each subscribed extension's queue, read by its own delivery task.
     queues: Mutex<HashMap<String, Queue>>,
     blobs: Option<BlobStore>,
+    preferences: Mutex<Preferences>,
     me: Weak<Router>,
 }
 
@@ -219,7 +224,9 @@ impl Router {
                 .iter()
                 .fold(BlobStore::new(root), |s, (id, folder)| s.place(id, folder))
         });
+        let preferences = Mutex::new(Preferences::load(settings.preferences.clone()));
         Arc::new_cyclic(|me| Router {
+            preferences,
             store,
             lifecycle,
             world,
@@ -511,6 +518,46 @@ impl Router {
             .get(&(id.to_owned(), collection.to_owned()))
             .map(|rows| rows.values().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// The preferences `manifest` declares, by id: what the person chose, or the default.
+    pub fn preferences(&self, manifest: &Manifest) -> Map<String, Value> {
+        guard(&self.preferences).resolved(manifest)
+    }
+
+    /// The preferences `manifest` declares as Settings draws them, each with its value.
+    pub fn listed_preferences(&self, manifest: &Manifest) -> Vec<Value> {
+        guard(&self.preferences).listed(manifest)
+    }
+
+    /// The rows `manifest`'s extension reads from `collection`: its
+    /// preferences for [`preferences::COLLECTION`], else what it published.
+    pub fn rows_of(&self, manifest: &Manifest, collection: &str) -> Vec<Value> {
+        if collection == preferences::COLLECTION {
+            return guard(&self.preferences).rows(manifest);
+        }
+        self.rows(&manifest.id, collection)
+    }
+
+    /// Keeps a person's `value` for preference `key` of `manifest`'s
+    /// extension, then tells clients drawing its rows, so its trees draw again.
+    pub fn set_preference(
+        &self,
+        manifest: &Manifest,
+        key: &str,
+        value: Value,
+    ) -> Result<(), ExtError> {
+        let row = guard(&self.preferences).set(manifest, key, value)?;
+        let caller = Caller::of(manifest);
+        let told = [json!({ "op": "upsert", "row": row })];
+        self.world
+            .published(&caller, preferences::COLLECTION, &told);
+        Ok(())
+    }
+
+    /// Forgets the preferences a person gave extension `id`, as it is removed.
+    pub fn forget_preferences(&self, id: &str) {
+        guard(&self.preferences).forget(id);
     }
 
     /// Removes every file extension `id` keeps in its own store; blocks on the disk.
@@ -963,6 +1010,14 @@ pub(crate) async fn answer(
                 Ok(p) => p,
                 Err(e) => return invalid(method, &e),
             };
+            if p.collection == preferences::COLLECTION {
+                warn!(
+                    "[extensions] {} published to {}, which only Vorn writes",
+                    caller.extension,
+                    preferences::COLLECTION
+                );
+                return None;
+            }
             router.publish(caller, &p.collection, p.ops);
             None
         }
@@ -985,9 +1040,7 @@ pub(crate) async fn answer(
                 Ok(p) => p,
                 Err(e) => return invalid(method, &e),
             };
-            Some(Ok(Value::Array(
-                router.rows(&caller.extension, &p.collection),
-            )))
+            Some(Ok(Value::Array(router.rows_of(manifest, &p.collection))))
         }
         Method::HostStartSession => {
             let p: params::HostStartSession = match serde_json::from_value(params) {

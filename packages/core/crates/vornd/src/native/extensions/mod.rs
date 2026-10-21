@@ -62,6 +62,8 @@ pub const METHODS: &[&str] = &[
     "extension:contributions",
     "extension:builtins",
     "extension:setBuiltin",
+    "extension:preferences",
+    "extension:setPreference",
 ];
 
 /// Told to every client when what extensions contribute changed: a package
@@ -416,7 +418,8 @@ impl Extensions {
             if !pack.is_extension() {
                 continue;
             }
-            for mut c in points::listed(&pack.manifest) {
+            let settings = self.router.preferences(&pack.manifest);
+            for mut c in points::listed(&pack.manifest, &settings) {
                 c["extensionName"] = json!(pack.manifest.name);
                 c["builtin"] = json!(false);
                 out.push(c);
@@ -574,6 +577,24 @@ impl Extensions {
                         json!({ "id": id, "on": on })
                     }),
                     None => Err("extension:setBuiltin takes on: true or false".to_owned()),
+                }
+            }
+            "extension:preferences" => self
+                .manifest_of(text(params, "id"))
+                .map(|m| Value::Array(self.router.listed_preferences(&m))),
+            "extension:setPreference" => {
+                let (id, key) = (text(params, "id"), text(params, "key"));
+                let value = params.get("value").cloned().unwrap_or(Value::Null);
+                match self.manifest_of(id) {
+                    Ok(m) => match self.router.set_preference(&m, key, value.clone()) {
+                        Ok(()) => {
+                            self.contributions_changed(id);
+                            self.resync_sessions();
+                            Ok(json!({ "id": id, "key": key, "value": value }))
+                        }
+                        Err(err) => Err(err.message),
+                    },
+                    Err(err) => Err(err),
                 }
             }
             "extension:mcpTools" => self.listed_tools().await.map(|tools| {
@@ -735,6 +756,7 @@ impl Extensions {
         self.kill_terminals(&closed);
         self.hosts.stop_extension(id).await;
         self.router.forget(id).await;
+        self.router.forget_preferences(id);
         let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
         blocking(move || installs.remove(&owned)).await?;
         let (router, owned) = (Arc::clone(&self.router), id.to_owned());
@@ -795,6 +817,29 @@ impl Extensions {
         }
     }
 
+    /// The manifest of built-in or installed extension `id`.
+    fn manifest_of(&self, id: &str) -> Result<Arc<vorn_extensions::manifest::Manifest>, String> {
+        if let Some(m) = self.builtins.manifest(id) {
+            return Ok(m);
+        }
+        self.router
+            .store()
+            .inspect_unmeasured(id)
+            .map(|p| Arc::new(p.manifest))
+            .map_err(|_| format!("No extension \"{id}\" is installed"))
+    }
+
+    /// Syncs every live session again, so what a changed preference shows on a card follows it.
+    fn resync_sessions(&self) {
+        let (Some(me), Some(live)) = (self.me.upgrade(), self.around.live()) else {
+            return;
+        };
+        for session in live {
+            let me = Arc::clone(&me);
+            tokio::spawn(async move { me.sync(session).await });
+        }
+    }
+
     /// The running session `id`, or the error for a missing one.
     fn live(&self, id: &str) -> Result<Live, String> {
         self.session(id)
@@ -824,7 +869,10 @@ impl Extensions {
         let packs = self.hosts.store().extensions();
         let remote = self.remote_host(session, &packs).await;
         let subject = subject_of(session, remote.as_deref());
-        packs.iter().map(|p| state(p, &subject)).collect()
+        packs
+            .iter()
+            .map(|p| state(p, &subject, &self.router.preferences(&p.manifest)))
+            .collect()
     }
 
     /// Starts the bands `session` shows and stops the rest, then tells its windows what shows.
@@ -840,8 +888,9 @@ impl Extensions {
         let mut wanted = Vec::new();
         let mut states = Vec::with_capacity(packs.len());
         for pack in &packs {
-            let shown = activation::shown_on(pack, &subject);
-            states.push(state(pack, &subject));
+            let settings = self.router.preferences(&pack.manifest);
+            let shown = activation::shown_with(pack, &subject, &settings);
+            states.push(state(pack, &subject, &settings));
             let footers = pack
                 .contributions()
                 .map(|c| c.footers())
@@ -1096,11 +1145,13 @@ fn subject_of<'a>(session: &'a Live, remote_host: Option<&'a str>) -> Subject<'a
 }
 
 /// One extension's activation on a card, as clients read it.
-fn state(pack: &InstalledPack, subject: &Subject<'_>) -> Value {
+fn state(pack: &InstalledPack, subject: &Subject<'_>, settings: &Map<String, Value>) -> Value {
     let mut state = Map::new();
     state.insert("extensionId".into(), json!(pack.id));
     state.insert("extensionName".into(), json!(pack.name()));
-    if let Ok(Value::Object(shown)) = serde_json::to_value(activation::shown_on(pack, subject)) {
+    if let Ok(Value::Object(shown)) =
+        serde_json::to_value(activation::shown_with(pack, subject, settings))
+    {
         state.extend(shown);
     }
     Value::Object(state)
@@ -1411,8 +1462,8 @@ impl Around for Wired {
             .into_iter()
             .collect();
         started.extend(native.tasks().map(builtin::tasks::entry));
-        // Where the Workflow editor always was in Settings: after Tasks.
-        started.push(Arc::new(builtin::wasm::workflow_editor()));
+        // Where Workflows' view always was in Settings: after Tasks.
+        started.push(Arc::new(builtin::wasm::workflows()));
         started.extend(builtin::agents::entries(native.adapters()));
         started
     }

@@ -303,7 +303,7 @@ fn dot_status(run: &Value) -> &str {
     }
 }
 
-/// The Workflows view: the Workflow editor's tree, its `graph` the view the
+/// The Workflows view: Workflows' tree, its `graph` the view the
 /// app draws; the view itself until the tree has come, or when it cannot be
 /// drawn, as the canvas is the app's whatever the extension answers.
 pub fn view(s: &Screen<'_>) -> El {
@@ -333,7 +333,7 @@ pub fn view(s: &Screen<'_>) -> El {
     }
 
     let point = s.st.points.find(
-        crate::workflows::EDITOR,
+        crate::workflows::ID,
         crate::points::kind::VIEWS,
         "workflows",
     );
@@ -360,7 +360,7 @@ pub fn view(s: &Screen<'_>) -> El {
 /// Whether the Workflow editor is switched off, as the built-ins list says; unknown is not off.
 pub fn is_off(s: &Screen<'_>) -> bool {
     s.st.points.builtins.iter().any(|b| {
-        b.get("id").and_then(Value::as_str) == Some(crate::workflows::EDITOR)
+        b.get("id").and_then(Value::as_str) == Some(crate::workflows::ID)
             && b.get("on") == Some(&Value::Bool(false))
     })
 }

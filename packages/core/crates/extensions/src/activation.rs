@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 use crate::js;
 use crate::manifest::{Activation, Contribution};
@@ -84,19 +85,42 @@ pub fn matches(rule: Option<&Activation>, subject: &Subject<'_>) -> bool {
     true
 }
 
+/// Whether the preferences `rule` names leave it shown: none named, or any
+/// one on in `settings` (its extension's, defaults included). A name it does
+/// not hold widens the rule rather than hiding the contribution.
+pub fn settings_hold(rule: Option<&Activation>, settings: &Map<String, Value>) -> bool {
+    rule.is_none_or(|r| {
+        r.setting.is_empty()
+            || r.setting
+                .iter()
+                .any(|s| settings.get(s).and_then(Value::as_bool).unwrap_or(true))
+    })
+}
+
 fn shown<'a>(
     contributions: impl Iterator<Item = &'a Contribution>,
     subject: &Subject<'_>,
+    settings: &Map<String, Value>,
 ) -> Vec<String> {
     contributions
-        .filter(|c| matches(c.when.as_ref(), subject))
+        .filter(|c| matches(c.when.as_ref(), subject) && settings_hold(c.when.as_ref(), settings))
         .map(|c| c.id.clone())
         .collect()
 }
 
 /// What `pack` shows on `subject`; nothing for a connector or when its own
-/// rule does not hold.
+/// rule does not hold. Rules naming its preferences hold, as they do by default.
 pub fn shown_on(pack: &InstalledPack, subject: &Subject<'_>) -> Shown {
+    shown_with(pack, subject, &Map::new())
+}
+
+/// [`shown_on`], with `pack`'s preferences as `settings`, so a contribution
+/// whose `when.setting` names only preferences that are off is not shown.
+pub fn shown_with(
+    pack: &InstalledPack,
+    subject: &Subject<'_>,
+    settings: &Map<String, Value>,
+) -> Shown {
     if !pack.is_extension() || !matches(pack.manifest.activates.as_ref(), subject) {
         return Shown::default();
     }
@@ -108,9 +132,9 @@ pub fn shown_on(pack: &InstalledPack, subject: &Subject<'_>) -> Shown {
     };
     Shown {
         active: true,
-        panes: shown(c.panes().iter().map(|p| &p.base), subject),
-        footers: shown(c.footers().iter().map(|f| &f.base), subject),
-        link_handlers: shown(c.link_handlers().iter().map(|l| &l.base), subject),
+        panes: shown(c.panes().iter().map(|p| &p.base), subject, settings),
+        footers: shown(c.footers().iter().map(|f| &f.base), subject, settings),
+        link_handlers: shown(c.link_handlers().iter().map(|l| &l.base), subject, settings),
     }
 }
 

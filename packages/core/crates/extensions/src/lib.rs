@@ -39,6 +39,7 @@ pub mod pack;
 pub mod page;
 pub mod points;
 pub mod polls;
+pub mod preferences;
 pub mod router;
 pub mod sandbox;
 pub mod signin;

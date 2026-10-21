@@ -7267,7 +7267,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vorn-ext-workflow-editor"
+name = "vorn-ext-workflows"
 version = "0.0.0"
 dependencies = [
  "vorn-extension-sdk",

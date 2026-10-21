@@ -388,7 +388,7 @@ impl Work {
         self.tell_changed();
     }
 
-    /// Tells whoever follows the workflows (the Workflow editor) that they changed.
+    /// Tells whoever follows the workflows (the Workflows extension) that they changed.
     fn tell_changed(&self) {
         if let Some(native) = self.native.upgrade() {
             native

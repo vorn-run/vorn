@@ -14,9 +14,9 @@ const SHIPPED: [(&str, &str, &str); 9] = [
     ("vorn-ext-widget", "extensions/widget", "widget.wasm"),
     ("vorn-ext-tasks", "extensions/tasks", "tasks.wasm"),
     (
-        "vorn-ext-workflow-editor",
-        "extensions/workflow-editor",
-        "workflow-editor.wasm",
+        "vorn-ext-workflows",
+        "extensions/workflows",
+        "workflows.wasm",
     ),
     ("vorn-ext-blocks", "extensions/blocks", "blocks.wasm"),
     ("vorn-ext-files", "extensions/files", "files.wasm"),
