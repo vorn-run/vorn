@@ -2696,7 +2696,9 @@ pub(super) mod tests {
         let (spec, input) = fed.host.last_start();
         assert_eq!(spec.cwd, shell::home_dir());
         let remote = remote_of(&input);
-        assert!(remote.line.starts_with("ssh -t -p 2222 -A -- me@box.example"));
+        assert!(remote
+            .line
+            .starts_with("ssh -t -p 2222 -A -- me@box.example"));
         assert!(remote.command.starts_with("cd /srv/far-not-here && acme"));
         assert!(remote.command.contains("--resume conv-rr"));
         assert_eq!(
