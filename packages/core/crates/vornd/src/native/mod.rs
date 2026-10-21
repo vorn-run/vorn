@@ -1125,6 +1125,8 @@ pub struct Conn {
     viewer: Mutex<config::Viewer>,
     /// The public events this connection asked to hear, if it did.
     events: Mutex<Option<event_stream::Subscription>>,
+    /// Each extension's tree events, answered in the order they came.
+    tree_events: InOrder,
 }
 
 impl Conn {
@@ -1142,6 +1144,7 @@ impl Conn {
                 config::Viewer::Local
             }),
             events: Mutex::new(None),
+            tree_events: InOrder::default(),
         })
     }
 
@@ -1252,10 +1255,17 @@ impl Conn {
         }
     }
 
-    /// Runs the call off this task and answers it.
+    /// Runs the call off this task and answers it. A tree event waits for
+    /// the one before it to the same extension: a field's later text must
+    /// not land before its earlier one.
     fn answer(self: &Arc<Self>, method: String, id: Value, params: Value) {
         let conn = Arc::clone(self);
+        let turn = tree_event_of(&method, &params).map(|ext| self.tree_events.turn(ext));
         tokio::spawn(async move {
+            let _done = match turn {
+                Some(turn) => Some(turn.wait().await),
+                None => None,
+            };
             let viewer = conn
                 .viewer
                 .lock()
@@ -1272,6 +1282,50 @@ impl Conn {
             });
             conn.reply.send_now(&frame);
         });
+    }
+}
+
+/// The extension an `extension:call` delivering a tree event goes to.
+fn tree_event_of<'a>(method: &str, params: &'a Value) -> Option<&'a str> {
+    (method == "extension:call"
+        && params.get("action").and_then(Value::as_str) == Some(vorn_tree::EVENT))
+    .then(|| params.get("id").and_then(Value::as_str))
+    .flatten()
+}
+
+/// Queues per key, taken in the order [`InOrder::turn`] is called.
+#[derive(Default)]
+struct InOrder(Mutex<HashMap<String, tokio::sync::oneshot::Receiver<()>>>);
+
+impl InOrder {
+    /// The next place in `key`'s queue. Taken synchronously, so the order
+    /// is the callers' and not the tasks' that later wait on it.
+    fn turn(&self, key: &str) -> Turn {
+        let (done, next) = tokio::sync::oneshot::channel();
+        let before = self
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.to_owned(), next);
+        Turn { before, done }
+    }
+}
+
+/// A place in an [`InOrder`] queue.
+struct Turn {
+    before: Option<tokio::sync::oneshot::Receiver<()>>,
+    done: tokio::sync::oneshot::Sender<()>,
+}
+
+impl Turn {
+    /// Waits for the one before to finish; dropping what this returns lets
+    /// the next one go.
+    async fn wait(self) -> tokio::sync::oneshot::Sender<()> {
+        if let Some(before) = self.before {
+            // Dropped or sent, the one before has finished either way.
+            let _ = before.await;
+        }
+        self.done
     }
 }
 
@@ -1310,6 +1364,38 @@ mod tests {
             )
         );
         assert_eq!(Answer::Unanswered.frame(&id), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn takes_turns_in_the_order_they_were_given() {
+        let order = InOrder::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut tasks = Vec::new();
+        for i in 0..64u64 {
+            let turn = order.turn("vorn.ssh");
+            let seen = Arc::clone(&seen);
+            tasks.push(tokio::spawn(async move {
+                // Later turns are ready first; they still wait.
+                tokio::time::sleep(std::time::Duration::from_millis(64 - i)).await;
+                let _done = turn.wait().await;
+                seen.lock().expect("seen").push(i);
+            }));
+        }
+        // Another key does not wait on this one.
+        order.turn("vorn.other").wait().await;
+        for task in tasks {
+            task.await.expect("task");
+        }
+        assert_eq!(*seen.lock().expect("seen"), (0..64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn only_a_tree_event_is_ordered() {
+        let event = json!({ "id": "vorn.ssh", "action": vorn_tree::EVENT, "args": {} });
+        assert_eq!(tree_event_of("extension:call", &event), Some("vorn.ssh"));
+        let render = json!({ "id": "vorn.ssh", "action": vorn_tree::RENDER });
+        assert_eq!(tree_event_of("extension:call", &render), None);
+        assert_eq!(tree_event_of("extension:list", &event), None);
     }
 
     #[test]
