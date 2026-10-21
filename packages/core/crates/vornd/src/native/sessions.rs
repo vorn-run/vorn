@@ -1306,7 +1306,8 @@ fn prepare_remote(
     };
     let marker = login::marker(id);
     let remote = Remote {
-        line: login::ssh_line(&target, &marker, Platform::HOST),
+        line: login::ssh_line(&target, &marker, Platform::HOST)
+            .map_err(|e| Answer::Error(e.to_string()))?,
         command: login::remote_command(&req.project_path, &launch_line),
         marker,
         password: (target.auth == login::Auth::Password)

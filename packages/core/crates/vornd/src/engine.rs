@@ -44,8 +44,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{
-    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer,
-    Pool, Summary, Viewed,
+    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Local, Open, Out,
+    Peer, Pool, Summary, Viewed,
 };
 use vorn_sessiond_wire::{
     Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnSpec,
@@ -283,6 +283,9 @@ impl Engine {
                 .agent_type(id)
                 .map(|t| rules_of.get(&t).and_then(|a| a.screen_rules()))
         }));
+        // Only a session whose program runs here may load images from files.
+        let placed = Arc::clone(&registry);
+        let local = Local(Arc::new(move |id: &str| placed.local(id)));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
@@ -295,6 +298,7 @@ impl Engine {
                 idle: cfg.idle.or(Some(IDLE)),
                 viewed: Some(viewed),
                 agents: cfg.agents.or(Some(agents)),
+                local: cfg.local.or(Some(local)),
                 ..cfg
             },
             write_timeout,

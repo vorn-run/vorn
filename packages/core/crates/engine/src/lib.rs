@@ -28,7 +28,7 @@ mod term;
 pub use pool::{Pool, Sink};
 pub use program::{ProgramRecord, Programs};
 pub use session::{
-    Agents, Base, Brief, Cadence, Config, Effect, EffectId, Input, Open, Out, Session, State,
+    Agents, Base, Brief, Cadence, Config, Effect, EffectId, Input, Local, Open, Out, Session, State,
     Summary, Viewed, PIPED_SIZE,
 };
 pub use snapshot::VtSnapshot;

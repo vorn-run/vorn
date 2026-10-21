@@ -6998,6 +6998,7 @@ dependencies = [
  "toml 1.1.7+spec-1.1.0",
  "vorn-analysis",
  "vorn-recovery",
+ "vorn-remote",
  "vorn-screen",
  "vorn-spawn",
  "vorn-term-proto",

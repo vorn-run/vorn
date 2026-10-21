@@ -8,10 +8,16 @@ const GHOSTTY_COMMIT: &str = "b7207b2ef6aa3e05af992a6febb9ee83ad69bb8c";
 
 /// Fixes applied to the fetched commit until upstream has them, in order. A
 /// `GHOSTTY_SOURCE_DIR` or pkg-config build uses its source as it is.
-const PATCHES: &[(&str, &str)] = &[(
-    "0001-mark-zero-width-joins-dirty.patch",
-    include_str!("patches/0001-mark-zero-width-joins-dirty.patch"),
-)];
+const PATCHES: &[(&str, &str)] = &[
+    (
+        "0001-mark-zero-width-joins-dirty.patch",
+        include_str!("patches/0001-mark-zero-width-joins-dirty.patch"),
+    ),
+    (
+        "0002-refuse-every-file-medium-alike.patch",
+        include_str!("patches/0002-refuse-every-file-medium-alike.patch"),
+    ),
+];
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,

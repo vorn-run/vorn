@@ -110,6 +110,10 @@ pub struct Config {
     /// by id. Where none of them holds, or a session has none, the
     /// analyzer's patterns decide.
     pub agents: Option<Agents>,
+    /// Whether a session's program runs on this machine, asked of it by id.
+    /// Only such a session's programs may load kitty images from files;
+    /// with none, or while it says it does not know, none may.
+    pub local: Option<Local>,
 }
 
 /// Asked of a session by id: see [`Config::agents`]. `None` while the host
@@ -122,6 +126,18 @@ pub struct Agents(pub Arc<dyn Fn(&str) -> Option<Option<&'static Rules>> + Send 
 impl std::fmt::Debug for Agents {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Agents")
+    }
+}
+
+/// Asked of a session by id: see [`Config::local`]. `None` while the host
+/// does not know where the session runs.
+#[derive(Clone)]
+#[allow(clippy::type_complexity)]
+pub struct Local(pub Arc<dyn Fn(&str) -> Option<bool> + Send + Sync>);
+
+impl std::fmt::Debug for Local {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Local")
     }
 }
 
@@ -150,6 +166,7 @@ impl Default for Config {
             idle: None,
             viewed: None,
             agents: None,
+            local: None,
         }
     }
 }
@@ -535,6 +552,42 @@ pub struct Session {
     /// The agent's screen rules once [`Config::agents`] knows them, else
     /// when it was last asked.
     rules: Resolve,
+    /// Whether the program runs here once [`Config::local`] knows, else
+    /// when it was last asked.
+    local: Where,
+}
+
+/// Where a session's program stands: see [`Config::local`].
+#[derive(Debug, Clone, Copy)]
+enum Where {
+    Known(bool),
+    Asked(Instant),
+    Never,
+}
+
+/// Whether the session's program runs here, asking [`Config::local`] while
+/// it does not know and a while has passed since it was last asked.
+fn locate(state: &mut Where, cfg: &Config, id: &str, now: Instant) -> bool {
+    match *state {
+        Where::Known(local) => return local,
+        Where::Asked(at) if now.duration_since(at) < RESOLVE_EVERY => return false,
+        Where::Asked(_) | Where::Never => {}
+    }
+    let asked = cfg.local.as_ref().map(|Local(ask)| ask(id));
+    match asked {
+        Some(Some(local)) => {
+            *state = Where::Known(local);
+            local
+        }
+        Some(None) => {
+            *state = Where::Asked(now);
+            false
+        }
+        None => {
+            *state = Where::Known(false);
+            false
+        }
+    }
 }
 
 /// Where a session's screen rules stand.
@@ -650,6 +703,7 @@ impl Session {
             waiting: Vec::new(),
             snapshots: Vec::new(),
             rules: Resolve::Never,
+            local: Where::Never,
         }
     }
 
@@ -913,6 +967,8 @@ impl Session {
             return;
         };
         let rules = resolve(&mut self.rules, &self.cfg, &self.id, now);
+        let local = locate(&mut self.local, &self.cfg, &self.id, now);
+        run.term.set_local(local);
         let first = out.len();
         let mut applied = false;
         for e in entries {

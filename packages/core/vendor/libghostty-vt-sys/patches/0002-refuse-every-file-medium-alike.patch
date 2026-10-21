@@ -1,0 +1,130 @@
+Answer every refused file, temporary file or shared memory transmission with
+the same reply, whatever the reason the path was refused.
+
+diff --git a/src/terminal/kitty/graphics_image.zig b/src/terminal/kitty/graphics_image.zig
+index 6f87280ca..1a3442e42 100644
+--- a/src/terminal/kitty/graphics_image.zig
++++ b/src/terminal/kitty/graphics_image.zig
+@@ -152,6 +152,25 @@ pub const LoadingImage = struct {
+             return result;
+         }
+ 
++        // Every refusal of a medium other than direct reads the same,
++        // whatever the reason, so a reply says nothing of the filesystem.
++        result.loadPath(io, alloc, t, cmd.data, limits) catch |err| return switch (err) {
++            error.OutOfMemory => error.OutOfMemory,
++            else => error.UnsupportedMedium,
++        };
++
++        return result;
++    }
++
++    /// Loads the data a non-direct medium names by its path.
++    fn loadPath(
++        result: *LoadingImage,
++        io: std.Io,
++        alloc: Allocator,
++        t: command.Transmission,
++        data: []const u8,
++        limits: Limits,
++    ) !void {
+         // Verify our capabilities and limits allow this.
+         {
+             // Special case if we don't support decoding PNGs and the format
+@@ -175,7 +194,7 @@ pub const LoadingImage = struct {
+         // Otherwise, the payload data is guaranteed to be a path.
+ 
+         if (comptime builtin.os.tag != .windows) {
+-            if (std.mem.indexOfScalar(u8, cmd.data, 0) != null) {
++            if (std.mem.indexOfScalar(u8, data, 0) != null) {
+                 // POSIX paths cannot contain internal nulls.
+                 log.warn("invalid image path: BadPathName", .{});
+                 return error.InvalidData;
+@@ -185,12 +204,10 @@ pub const LoadingImage = struct {
+         // Depending on the medium, load the data from the path.
+         switch (t.medium) {
+             .direct => unreachable, // handled above
+-            .file => try result.readFile(.file, io, alloc, t, cmd.data),
+-            .temporary_file => try result.readFile(.temporary_file, io, alloc, t, cmd.data),
+-            .shared_memory => try result.readSharedMemory(io, alloc, t, cmd.data),
++            .file => try result.readFile(.file, io, alloc, t, data),
++            .temporary_file => try result.readFile(.temporary_file, io, alloc, t, data),
++            .shared_memory => try result.readSharedMemory(io, alloc, t, data),
+         }
+-
+-        return result;
+     }
+ 
+     /// Reads the data from a shared memory segment.
+@@ -963,7 +980,7 @@ test "image load rejects invalid POSIX shared memory names" {
+     defer cmd.deinit(alloc);
+ 
+     try testing.expectError(
+-        error.InvalidData,
++        error.UnsupportedMedium,
+         LoadingImage.init(testing.io, alloc, &cmd, .{
+             .file = false,
+             .temporary_file = .disabled,
+@@ -1257,7 +1274,7 @@ test "image load: temporary file without correct path" {
+     };
+     defer cmd.deinit(alloc);
+     var dir_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+-    try testing.expectError(error.TemporaryFileNotNamedCorrectly, LoadingImage.init(
++    try testing.expectError(error.UnsupportedMedium, LoadingImage.init(
+         io,
+         alloc,
+         &cmd,
+@@ -1308,7 +1325,7 @@ test "image load: temporary file outside directory prefix is rejected" {
+     };
+     defer cmd.deinit(alloc);
+     try testing.expectError(
+-        error.TemporaryFileNotInTempDir,
++        error.UnsupportedMedium,
+         LoadingImage.init(io, alloc, &cmd, .allWithTempDir(trusted_path)),
+     );
+ 
+@@ -1488,7 +1505,7 @@ test "image load: regular file size rejects short data" {
+     defer cmd.deinit(alloc);
+ 
+     try testing.expectError(
+-        error.InvalidData,
++        error.UnsupportedMedium,
+         LoadingImage.init(io, alloc, &cmd, .{
+             .file = true,
+             .temporary_file = .disabled,
+@@ -1599,7 +1616,7 @@ test "image load: windows UNC path is rejected before open" {
+         };
+         defer cmd.deinit(alloc);
+         try testing.expectError(
+-            error.InvalidData,
++            error.UnsupportedMedium,
+             LoadingImage.init(io, alloc, &cmd, .{
+                 .file = true,
+                 .temporary_file = .disabled,
+@@ -1650,7 +1667,7 @@ test "image load: windows device namespace paths are rejected before open" {
+             };
+             defer cmd.deinit(alloc);
+             try testing.expectError(
+-                error.InvalidData,
++                error.UnsupportedMedium,
+                 LoadingImage.init(io, alloc, &cmd, .allWithTempDir(dir_path)),
+             );
+         }
+@@ -1671,7 +1688,7 @@ test "image load: windows device namespace paths are rejected before open" {
+         };
+         defer cmd.deinit(alloc);
+         try testing.expectError(
+-            error.InvalidData,
++            error.UnsupportedMedium,
+             LoadingImage.init(io, alloc, &cmd, .allWithTempDir(dir_path)),
+         );
+     }
+@@ -1710,7 +1727,7 @@ test "image load: windows reserved device names are rejected before open" {
+         };
+         defer cmd.deinit(alloc);
+         try testing.expectError(
+-            error.InvalidData,
++            error.UnsupportedMedium,
+             LoadingImage.init(io, alloc, &cmd, .{
+                 .file = true,
+                 .temporary_file = .disabled,

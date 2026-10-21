@@ -2410,6 +2410,16 @@ impl SessionRegistry {
             .or_else(|| r.headless_record(id).map(|h| h.agent_type.clone()))
     }
 
+    /// Whether session `id`'s program runs on this machine: every session
+    /// but a terminal logged in to a remote host. `None` until the copy can
+    /// be answered from.
+    pub fn local(&self, id: &str) -> Option<bool> {
+        self.read(|r| {
+            r.terminal(id)
+                .is_none_or(|(t, _)| t.remote_host_id.as_deref().is_none_or(str::is_empty))
+        })
+    }
+
     /// Marks the registry as in use, which the health check then reports on.
     pub fn want(&self) {
         self.wanted.store(true, Ordering::Release);

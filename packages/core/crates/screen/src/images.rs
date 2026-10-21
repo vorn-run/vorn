@@ -1,4 +1,4 @@
-//! Kitty graphics: the switch that lets a terminal decode PNG and load images from files, and
+//! Kitty graphics: the switches that let a terminal decode PNG and load images from files, and
 //! what a renderer reads of the images a program stored and where it placed them.
 //!
 //! The terminal library parses the protocol and keeps the images, their placements and its
@@ -89,20 +89,33 @@ pub(crate) fn allow_png(on: bool) {
 }
 
 impl Emulator {
-    /// Turns images on or off: with them on, PNG decodes and files the program could read itself
-    /// load (the terminal library's own checks on paths and temp files apply), and a checkpoint
-    /// keeps the live terminal, since it cannot carry them. Off is how a terminal always behaved.
+    /// Turns images on or off: with them on, PNG decodes and images sent in the stream itself
+    /// load, and a checkpoint keeps the live terminal, since it cannot carry them. Off is how a
+    /// terminal always behaved. Loading from files is its own switch, [`Emulator::set_image_files`].
     pub fn set_images(&mut self, on: bool) {
-        if self.images == on {
+        self.images = on;
+    }
+
+    /// Lets images load from files, temp files and shared memory, which only a program on this
+    /// machine can name: on for a local terminal, off for one whose program runs elsewhere. The
+    /// terminal library's own checks on paths apply, temp files only under the OS temp dir with
+    /// the protocol's name, and every medium refused gets the same error reply.
+    pub fn set_image_files(&mut self, on: bool) {
+        if self.image_files == on {
             return;
         }
-        self.images = on;
+        self.image_files = on;
         let tmp = std::env::temp_dir();
         let _ = self.term.set_kitty_image_from_file_allowed(on);
         let _ = self.term.set_kitty_image_from_shared_mem_allowed(on);
         let _ = self
             .term
             .set_kitty_image_temp_file_dir(on.then_some(tmp.as_path()));
+    }
+
+    /// Whether images may load from files (see [`Emulator::set_image_files`]).
+    pub fn image_files(&self) -> bool {
+        self.image_files
     }
 
     /// Whether images are on (see [`Emulator::set_images`]).
