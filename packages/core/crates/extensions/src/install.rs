@@ -349,7 +349,11 @@ impl Installs {
     }
 
     /// Keeps what was read into `dir` for [`Installs::confirm`], or drops it when it did not read.
-    fn stage(&self, dir: PathBuf, staged: Result<(Value, Manifest), String>) -> Result<Sheet, String> {
+    fn stage(
+        &self,
+        dir: PathBuf,
+        staged: Result<(Value, Manifest), String>,
+    ) -> Result<Sheet, String> {
         let (source, manifest) = match staged {
             Ok(found) => found,
             Err(err) => {
@@ -1393,7 +1397,9 @@ migrations = "migrations"
             sha256,
         };
 
-        let unpinned = installs.inspect_archive(&bytes, json!({}), None).unwrap_err();
+        let unpinned = installs
+            .inspect_archive(&bytes, json!({}), None)
+            .unwrap_err();
         assert!(unpinned.contains("reserved"), "{unpinned}");
         let other = installs
             .inspect_archive(&bytes, json!({}), Some(&pin("00".repeat(32))))
@@ -1403,10 +1409,16 @@ migrations = "migrations"
             id: "vorn.other".into(),
             ..pin(sha256_hex(&bytes))
         };
-        assert!(installs.inspect_archive(&bytes, json!({}), Some(&renamed)).is_err());
+        assert!(installs
+            .inspect_archive(&bytes, json!({}), Some(&renamed))
+            .is_err());
 
         let sheet = installs
-            .inspect_archive(&bytes, json!({"shipped": "1.2.0"}), Some(&pin(sha256_hex(&bytes))))
+            .inspect_archive(
+                &bytes,
+                json!({"shipped": "1.2.0"}),
+                Some(&pin(sha256_hex(&bytes))),
+            )
             .unwrap();
         let pack = installs.confirm(&sheet.token, "vorn.sample").unwrap();
         assert_eq!(pack.version, "1.2.0");
@@ -1426,7 +1438,7 @@ migrations = "migrations"
     fn a_git_install_claiming_vorns_namespace_is_refused() {
         let Some(git) = git() else { return };
         let source = repo(&[
-            (file::FILE, &shipped_manifest("vorn.worktrees")),
+            (file::FILE, &shipped_manifest("vorn.sample")),
             ("hello.sh", "true\n"),
         ]);
         let root = tempfile::tempdir().unwrap();
@@ -1434,13 +1446,16 @@ migrations = "migrations"
         let url = format!("file://{}", source.path().display());
         let refused = installs.inspect_git(&url, None).unwrap_err();
         assert!(refused.contains("reserved"), "{refused}");
-        assert!(installs.store().describe("vorn.worktrees").is_none());
+        assert!(installs.store().describe("vorn.sample").is_none());
     }
 
     #[test]
     fn an_unpinned_pack_installs_under_an_id_of_its_own() {
         let manifest = shipped_manifest("acme.sample");
-        let bytes = tgz("acme", &[(file::FILE, manifest.as_bytes()), ("hello.sh", b"true\n")]);
+        let bytes = tgz(
+            "acme",
+            &[(file::FILE, manifest.as_bytes()), ("hello.sh", b"true\n")],
+        );
         let root = tempfile::tempdir().unwrap();
         let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
         let sheet = installs.inspect_archive(&bytes, json!({}), None).unwrap();
@@ -1459,8 +1474,12 @@ migrations = "migrations"
             let mut header = tar::Header::new_ustar();
             header.set_size(manifest.len() as u64);
             header.set_entry_type(tar::EntryType::Regular);
-            both.append_data(&mut header, format!("{top}/{}", file::FILE), manifest.as_bytes())
-                .unwrap();
+            both.append_data(
+                &mut header,
+                format!("{top}/{}", file::FILE),
+                manifest.as_bytes(),
+            )
+            .unwrap();
         }
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         std::io::Write::write_all(&mut gz, &both.into_inner().unwrap()).unwrap();
@@ -1473,7 +1492,8 @@ migrations = "migrations"
         let mut header = tar::Header::new_ustar();
         header.set_entry_type(tar::EntryType::Symlink);
         header.set_size(0);
-        link.append_link(&mut header, "a/evil", "/etc/passwd").unwrap();
+        link.append_link(&mut header, "a/evil", "/etc/passwd")
+            .unwrap();
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         std::io::Write::write_all(&mut gz, &link.into_inner().unwrap()).unwrap();
         let refused = installs
@@ -1481,7 +1501,9 @@ migrations = "migrations"
             .unwrap_err();
         assert!(refused.contains("not a plain file"), "{refused}");
 
-        assert!(installs.inspect_archive(b"not a tgz", json!({}), None).is_err());
+        assert!(installs
+            .inspect_archive(b"not a tgz", json!({}), None)
+            .is_err());
         assert!(installs.inspect_archive(&two, json!({}), None).is_ok());
         let staged = fs::read_dir(root.path())
             .unwrap()

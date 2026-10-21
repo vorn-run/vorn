@@ -2,7 +2,7 @@
 
 Vorn runs each coding agent CLI through an adapter. An adapter is an extension package whose manifest has an `[agent]` section. The section says, as data, how Vorn finds the CLI, launches it, resumes a conversation, lists its models, reads its past sessions and its status, and installs its hooks. Most adapters need no program at all.
 
-The adapters Vorn ships are in `packages/core/crates/adapters/agents/`, one folder each, in the same format. Adding one there is adding its folder and its name to `agents/shipped.toml`; no code changes. Any other adapter installs like any extension.
+The adapters Vorn ships live in the [extensions repository](https://github.com/vorn-run/extensions) under `adapters/`, one folder each, in the same format, and install like any other extension. Vorn carries the versions `packages/core/shipped.toml` pins, so a first launch works offline.
 
 This guide builds an adapter for a made-up CLI called `acme`.
 

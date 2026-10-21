@@ -92,7 +92,11 @@ impl Adapters {
     /// Reads the adapters installed under `packages`, as the extension host
     /// keeps them, before the host has started.
     pub fn load_installed(&self, packages: &Path) {
-        self.set_installed(read_installed(&PackStore::new(packages)));
+        let installed = read_installed(&PackStore::new(packages));
+        // This crate's tests run their test adapters beside whatever they install.
+        #[cfg(test)]
+        let installed = testing::installed().into_iter().chain(installed).collect();
+        self.set_installed(installed);
     }
 
     /// The installed packages' adapters; a later one claiming an id already
@@ -299,22 +303,29 @@ no_prompt = ["-p", ""]
 
     /// The three test adapters, installed.
     pub fn adapters() -> Arc<Adapters> {
-        Adapters::with(
-            [("test.acme", ACME), ("test.beta", BETA), ("test.gamma", GAMMA)]
-                .into_iter()
-                .filter_map(|(extension, manifest)| {
-                    let agent = vorn_agents::from_manifest_text(manifest).ok()??;
-                    let icon = icon_path(&agent)
-                        .is_some()
-                        .then(|| String::from_utf8_lossy(ICON).into_owned());
-                    Some(Installed {
-                        extension: extension.to_owned(),
-                        agent,
-                        icon,
-                    })
-                })
-                .collect(),
-        )
+        Adapters::with(installed())
+    }
+
+    /// The three test adapters.
+    pub fn installed() -> Vec<Installed> {
+        [
+            ("test.acme", ACME),
+            ("test.beta", BETA),
+            ("test.gamma", GAMMA),
+        ]
+        .into_iter()
+        .filter_map(|(extension, manifest)| {
+            let agent = vorn_agents::from_manifest_text(manifest).ok()??;
+            let icon = icon_path(&agent)
+                .is_some()
+                .then(|| String::from_utf8_lossy(ICON).into_owned());
+            Some(Installed {
+                extension: extension.to_owned(),
+                agent,
+                icon,
+            })
+        })
+        .collect()
     }
 }
 
@@ -338,7 +349,7 @@ mod tests {
         );
 
         let dir = tempfile::tempdir().unwrap();
-        adapters.load_installed(&dir.path().join("connectors"));
+        adapters.set_installed(read_installed(&PackStore::new(dir.path())));
         assert!(adapters.agents().is_empty());
         assert!(adapters.get(&first).is_none());
         assert_eq!(adapters.describe(), json!([]));

@@ -90,13 +90,14 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
     let entry = raw.as_object()?;
     let id = text(entry, "id")?;
     let name = text(entry, "name")?;
-    // A released pack installs from its checksummed archive; anything else runs from npm.
-    let packed = non_empty(entry, "packUrl").is_some() && non_empty(entry, "sha256").is_some();
+    let extension = entry.get("kind").and_then(Value::as_str) == Some("extension");
+    // A released extension installs from its checksummed archive; anything else runs from npm.
+    let packed =
+        extension && non_empty(entry, "packUrl").is_some() && non_empty(entry, "sha256").is_some();
     let package = non_empty(entry, "packageName");
     if package.is_none() && !packed {
         return None;
     }
-    let extension = entry.get("kind").and_then(Value::as_str) == Some("extension");
     let adds = extension
         .then(|| manifest::contributes(entry.get("contributes")))
         .flatten();

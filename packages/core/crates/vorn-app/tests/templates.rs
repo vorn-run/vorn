@@ -332,7 +332,7 @@ fn every_template_kind_draws_on_every_surface() {
         "t-extensions-installed",
         Some(CONTENT),
         &["INSTALLED", "Turns", "Linked from"],
-        &["INSTALLED", "Turns"],
+        &["Turns", "Linked from"],
     );
 
     // Connectors is one built-in; its row opens Settings › Connections, its own page.

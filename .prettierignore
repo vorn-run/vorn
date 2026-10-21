@@ -35,6 +35,3 @@ packages/core/crates/vorn-web/dist/
 
 # Written by vorn-workflow-bench.
 packages/core/bench/workflows/results/
-
-# Recorded byte for byte from 0.8 hook installers.
-packages/core/crates/adapters/agents/*/fixtures/

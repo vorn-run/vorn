@@ -37,9 +37,12 @@ pub fn shipped() -> Vec<vorn_agents::Agent> {
     RECORDED_AGENTS
         .iter()
         .map(|(id, command, headless)| {
-            let text = format!(
-                "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{command}\"\nheadless_args = {headless:?}\n"
+            let mut text = format!(
+                "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{command}\"\n"
             );
+            if !headless.is_empty() {
+                text.push_str(&format!("headless_args = {headless:?}\n"));
+            }
             vorn_agents::from_manifest_text(&text)
                 .expect("a recorded agent reads")
                 .expect("it has an agent")

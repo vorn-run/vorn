@@ -262,9 +262,19 @@ mod tests {
         assert_eq!(synced.installed, ["vorn.a"]);
         assert_eq!(f.version("vorn.a").as_deref(), Some("1.0.0"));
         assert_eq!(f.version("vorn.b"), None);
-        let source = f.installs.store().describe("vorn.a").unwrap().source.unwrap();
+        let source = f
+            .installs
+            .store()
+            .describe("vorn.a")
+            .unwrap()
+            .source
+            .unwrap();
         assert_eq!(source["shipped"], "1.0.0");
-        assert_eq!(f.sync(), Synced::default(), "a second start changes nothing");
+        assert_eq!(
+            f.sync(),
+            Synced::default(),
+            "a second start changes nothing"
+        );
     }
 
     #[test]
@@ -290,7 +300,12 @@ mod tests {
         let old = Fixture::new(&[("vorn.a", "1.0.0", true)]);
         old.sync();
         let new = Fixture {
-            packs: vec![("vorn.a".into(), "1.1.0".into(), tgz("vorn.a", "1.1.0"), true)],
+            packs: vec![(
+                "vorn.a".into(),
+                "1.1.0".into(),
+                tgz("vorn.a", "1.1.0"),
+                true,
+            )],
             ..old
         };
         assert_eq!(new.sync().updated, ["vorn.a"]);
@@ -332,8 +347,7 @@ mod tests {
             serde_json::from_slice(&fs::read(&switches).unwrap()).unwrap();
         assert_eq!(kept, BTreeMap::from([("vorn.files".to_owned(), false)]));
         let state: State =
-            serde_json::from_slice(&fs::read(f.dir.path().join("shipped.json")).unwrap())
-                .unwrap();
+            serde_json::from_slice(&fs::read(f.dir.path().join("shipped.json")).unwrap()).unwrap();
         assert_eq!(state.declined, BTreeSet::from(["vorn.a".to_owned()]));
     }
 }

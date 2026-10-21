@@ -4,9 +4,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use vorn_extensions::api::types::{Request, Response};
 use vorn_extensions::api::ExtError;
-use vorn_extensions::events::{
-    AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_EXITED,
-};
+use vorn_extensions::events::{AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_EXITED};
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;

@@ -32,7 +32,10 @@ fn the_shipped_set_keeps_to_the_frozen_api_where_it_moved() {
     };
     if let Err(found) = freeze::check_extensions(workspace(), Path::new(&checkout)) {
         let lines: Vec<String> = found.iter().map(ToString::to_string).collect();
-        panic!("the shipped set is past the frozen API:\n{}", lines.join("\n"));
+        panic!(
+            "the shipped set is past the frozen API:\n{}",
+            lines.join("\n")
+        );
     }
 }
 
@@ -57,10 +60,16 @@ fn a_shipped_extension_past_the_public_api_is_named() {
         "{found:#?}"
     );
     let says = |needle: &str| found.iter().any(|f| f.message.contains(needle));
-    assert!(says("is vorn.bad@1.0.0, and shipped.toml pins vorn.bad@2.0.0"));
-    assert!(says("depends on vorn-extensions; an extension builds on vorn-extension-sdk alone"));
+    assert!(says(
+        "is vorn.bad@1.0.0, and shipped.toml pins vorn.bad@2.0.0"
+    ));
+    assert!(says(
+        "depends on vorn-extensions; an extension builds on vorn-extension-sdk alone"
+    ));
     assert!(says("uses vorn_extension_sdk::guest"));
-    assert!(says("names task.secretly, which is no public bridge method"));
+    assert!(says(
+        "names task.secretly, which is no public bridge method"
+    ));
 }
 
 #[test]

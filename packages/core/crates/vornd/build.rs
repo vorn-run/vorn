@@ -78,7 +78,11 @@ fn embed_shipped(workspace: &Path, out: &Path) {
             .unwrap_or(true);
         let file = dir.join(format!("{id}-{version}.vorn.tgz"));
         let Ok(bytes) = std::fs::read(&file) else {
-            assert!(!required, "{} is missing; run scripts/shipped.mjs", file.display());
+            assert!(
+                !required,
+                "{} is missing; run scripts/shipped.mjs",
+                file.display()
+            );
             println!(
                 "cargo:warning={} is missing, so this build ships without {id}; run scripts/shipped.mjs",
                 file.display()

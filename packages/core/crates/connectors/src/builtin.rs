@@ -2403,7 +2403,13 @@ mod tests {
     struct Served(Vec<u8>);
 
     impl Fetch for Served {
-        fn get(&self, _: &str, _: Duration, _: u64, _: &dyn Fn(u64, u64)) -> Result<Vec<u8>, String> {
+        fn get(
+            &self,
+            _: &str,
+            _: Duration,
+            _: u64,
+            _: &dyn Fn(u64, u64),
+        ) -> Result<Vec<u8>, String> {
             Ok(self.0.clone())
         }
     }
@@ -2422,10 +2428,12 @@ mod tests {
         vorn_extensions::install::pack(folder.path(), &[], Some(&tgz), &[]).unwrap();
         let bytes = std::fs::read(&tgz).unwrap();
         let root = tempfile::tempdir().unwrap();
-        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), Vec::new());
-        let entry = |sha256: String| {
-            json!({ "id": "vorn.sample", "version": "1.0.0", "packUrl": "https://example.com/s", "sha256": sha256 })
-        };
+        let installs = Installs::new(
+            PackStore::new(root.path()),
+            PathBuf::from("git"),
+            Vec::new(),
+        );
+        let entry = |sha256: String| json!({ "id": "vorn.sample", "version": "1.0.0", "packUrl": "https://example.com/s", "sha256": sha256 });
 
         let other = stage_listed(&installs, &entry("00".repeat(32)), &Served(bytes.clone()));
         assert!(other.unwrap_err().contains("not the one Vorn pinned"));

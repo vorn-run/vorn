@@ -141,10 +141,17 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
             json!({ "shipped": shipped.version, "sha256": shipped.sha256 }),
             "{pack}"
         );
-        assert!(pack["icon"].is_object(), "{id} has no icon of its own: {pack}");
+        assert!(
+            pack["icon"].is_object(),
+            "{id} has no icon of its own: {pack}"
+        );
         assert_eq!(pack["running"], false, "{pack}");
         let dir = data.join("connectors").join(id).join(shipped.version);
-        assert!(dir.join("vorn-extension.toml").is_file(), "{}", dir.display());
+        assert!(
+            dir.join("vorn-extension.toml").is_file(),
+            "{}",
+            dir.display()
+        );
     }
     let listed = c.result("agent:list", json!(null)).await;
     let mut names: Vec<String> = agents()
@@ -166,7 +173,10 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
     for id in defaults() {
         let removed = c.result("extension:remove", json!({ "id": id })).await;
         assert_eq!(removed["removed"], id);
-        assert!(!data.join("connectors").join(id).exists(), "{id} left files");
+        assert!(
+            !data.join("connectors").join(id).exists(),
+            "{id} left files"
+        );
     }
     assert!(tables(&db, &prefix).is_empty(), "worktrees left its tables");
     let left = c.result("extension:installed", json!({})).await;
@@ -174,11 +184,9 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
     assert_eq!(c.result("agent:list", json!(null)).await, json!([]));
     let points = c.result("extension:contributions", json!({})).await;
     assert!(
-        !points
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|p| p["extension"].as_str().is_some_and(|e| defaults().contains(&e))),
+        !points.as_array().unwrap().iter().any(|p| p["extension"]
+            .as_str()
+            .is_some_and(|e| defaults().contains(&e))),
         "{points}"
     );
 
@@ -214,7 +222,11 @@ async fn an_older_shipped_install_is_updated_and_the_persons_own_is_left_alone()
     // An older shipped claude, and an extension of the person's own.
     for (id, version, source) in [
         ("vorn.agents.claude", "0.9.0", json!({ "shipped": "0.9.0" })),
-        ("mine", "0.1.0", json!({ "git": "file:///mine", "rev": "abc" })),
+        (
+            "mine",
+            "0.1.0",
+            json!({ "git": "file:///mine", "rev": "abc" }),
+        ),
     ] {
         let dir = packages.join(id).join(version);
         std::fs::create_dir_all(&dir).unwrap();
