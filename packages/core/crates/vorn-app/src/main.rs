@@ -556,8 +556,9 @@ impl Waiting {
 /// The connecting thread: retires an older vornd, then tries until one
 /// answers, starting the bundled vornd after the first miss.
 fn connecting(dir: &Path, wake: &Wake, tx: &std::sync::mpsc::Sender<Heard>) {
-    // After an update the running vornd is the last build's: this build's
-    // takes over, and the session holder keeps the terminals.
+    // After an update the running vornd is the last build's, and after a
+    // relaunch it may count as no app: this build's takes over, and the
+    // session holder keeps the terminals.
     if let Some(server) = Server::locate() {
         launch::retire_older(dir, &server);
     }

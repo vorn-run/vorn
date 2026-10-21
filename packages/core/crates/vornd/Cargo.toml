@@ -99,3 +99,7 @@ vorn-pipeline = { path = "../pipeline" }
 vorn-recovery = { path = "../recovery" }
 vorn-screen = { path = "../screen" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "sync", "time", "io-util", "test-util"] }
+
+# Starts a sessiond counting as no app but itself, as one outliving its app does.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+libc = "0.2"

@@ -161,6 +161,7 @@ impl Server {
 pub struct Identity {
     pub app_version: String,
     pub build_channel: String,
+    pub pid: Option<u32>,
 }
 
 impl Identity {
@@ -170,6 +171,7 @@ impl Identity {
         Identity {
             app_version: field("appVersion"),
             build_channel: field("buildChannel"),
+            pid: params["pid"].as_u64().and_then(|p| u32::try_from(p).ok()),
         }
     }
 }
@@ -185,9 +187,18 @@ pub fn replaces(incumbent: &Identity, version: &str, channel: &str) -> bool {
         && incumbent.app_version != version
 }
 
-/// After an update: stops the running vornd for `dir` when it is an older
-/// packaged build, so the caller starts the one shipped with this app.
-/// Whether it stopped one.
+/// Whether a running vornd of this build should be restarted because macOS
+/// counts it as another app (`elsewhere`), as once the app that started it
+/// has quit: the programs in its terminals would ask for privacy permissions
+/// in their own names rather than Vorn's. Only between packaged builds, so a
+/// dev or test harness never ends a vornd it did not start.
+pub fn reattributes(incumbent: &Identity, channel: &str, elsewhere: bool) -> bool {
+    incumbent.build_channel == "packaged" && channel == "packaged" && elsewhere
+}
+
+/// Stops the running vornd for `dir` when it is an older packaged build, or
+/// one macOS counts as another app, so the caller starts the one shipped
+/// with this app. Whether it stopped one.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn retire_older(dir: &Path, server: &Server) -> bool {
     let Ok(ep) = Endpoint::find(dir) else {
@@ -207,13 +218,22 @@ pub fn retire_older(dir: &Path, server: &Server) -> bool {
             Err(_) => return false,
         }
     };
-    if !replaces(&identity, env!("CARGO_PKG_VERSION"), server.channel()) {
+    if replaces(&identity, env!("CARGO_PKG_VERSION"), server.channel()) {
+        eprintln!(
+            "vorn-app: the running vornd is {}; replacing it with this build",
+            identity.app_version
+        );
+    } else if reattributes(
+        &identity,
+        server.channel(),
+        identity
+            .pid
+            .is_some_and(vorn_spawn::attribution::counts_as_another_app),
+    ) {
+        eprintln!("vorn-app: the running vornd counts as another app; restarting it");
+    } else {
         return false;
     }
-    eprintln!(
-        "vorn-app: the running vornd is {}; replacing it with this build",
-        identity.app_version
-    );
     let _ = rpc.call("server:shutdown", Value::Null);
     drop(rpc);
     // Gone once its port refuses a connection.
@@ -330,6 +350,7 @@ mod tests {
         let id = |v: &str, c: &str| Identity {
             app_version: v.into(),
             build_channel: c.into(),
+            pid: None,
         };
         assert!(replaces(
             &id("0.8.0-beta.8", "packaged"),
@@ -359,6 +380,23 @@ mod tests {
         assert_eq!(
             Identity::from(&serde_json::json!({ "appVersion": "1.0.0" })),
             id("1.0.0", "unknown")
+        );
+    }
+
+    #[test]
+    fn restarts_only_a_packaged_vornd_counting_as_another_app() {
+        let id = |c: &str| Identity {
+            app_version: "1.0.0".into(),
+            build_channel: c.into(),
+            pid: Some(7),
+        };
+        assert!(reattributes(&id("packaged"), "packaged", true));
+        assert!(!reattributes(&id("packaged"), "packaged", false));
+        assert!(!reattributes(&id("dev"), "packaged", true));
+        assert!(!reattributes(&id("packaged"), "dev", true));
+        assert_eq!(
+            Identity::from(&serde_json::json!({ "pid": 7, "buildChannel": "packaged" })).pid,
+            Some(7)
         );
     }
 

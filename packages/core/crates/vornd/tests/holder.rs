@@ -753,6 +753,122 @@ impl Older {
     }
 }
 
+/// Start this build's sessiond under `home` counting as no app but itself,
+/// as one does once the app that started it has quit.
+#[cfg(target_os = "macos")]
+fn start_counting_as_itself(home: &Path) -> Instance {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    type SetDisclaim =
+        unsafe extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int;
+    let bin = launch::install(&sessiond_bin(), home, &sessiond_version()).expect("install");
+    let c = |b: &[u8]| CString::new(b).unwrap();
+    let argv = [
+        c(bin.as_os_str().as_bytes()),
+        c(b"--home"),
+        c(home.as_os_str().as_bytes()),
+    ];
+    let mut ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr().cast_mut()).collect();
+    ptrs.push(std::ptr::null_mut());
+    let env: Vec<CString> = std::env::vars_os()
+        .filter(|(k, _)| k != "VORN_SESSIOND_IDLE_EXIT")
+        .map(|(k, v)| c(&[k.as_bytes(), b"=", v.as_bytes()].concat()))
+        .collect();
+    let mut envp: Vec<*mut libc::c_char> = env.iter().map(|e| e.as_ptr().cast_mut()).collect();
+    envp.push(std::ptr::null_mut());
+    // SAFETY: dlsym with a NUL-terminated name.
+    let disclaim = unsafe {
+        libc::dlsym(
+            libc::RTLD_DEFAULT,
+            c"responsibility_spawnattrs_setdisclaim".as_ptr(),
+        )
+    };
+    assert!(!disclaim.is_null(), "libSystem can disclaim");
+    // SAFETY: attributes and file actions this frame initialises and
+    // destroys; argv and envp are null-terminated and outlive the call; the
+    // symbol is that function.
+    unsafe {
+        let mut attr: libc::posix_spawnattr_t = std::mem::zeroed();
+        let mut acts: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+        libc::posix_spawnattr_init(&mut attr);
+        libc::posix_spawn_file_actions_init(&mut acts);
+        for fd in 0..3 {
+            libc::posix_spawn_file_actions_addopen(
+                &mut acts,
+                fd,
+                c"/dev/null".as_ptr(),
+                libc::O_RDWR,
+                0,
+            );
+        }
+        let set = std::mem::transmute::<*mut libc::c_void, SetDisclaim>(disclaim);
+        assert_eq!(set(&mut attr, 1), 0);
+        let mut pid = 0;
+        let rc = libc::posix_spawn(
+            &mut pid,
+            argv[0].as_ptr(),
+            &acts,
+            &attr,
+            ptrs.as_ptr(),
+            envp.as_ptr(),
+        );
+        libc::posix_spawn_file_actions_destroy(&mut acts);
+        libc::posix_spawnattr_destroy(&mut attr);
+        assert_eq!(rc, 0, "sessiond starts");
+        // Reaped as it exits, so it is not left a zombie that looks alive.
+        std::thread::spawn(move || libc::waitpid(pid, std::ptr::null_mut(), 0));
+    }
+    let t = Instant::now();
+    loop {
+        if let Some(i) = launch::running(home).pop() {
+            return i;
+        }
+        assert!(t.elapsed() < PATIENCE, "sessiond announces itself");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A sessiond of this very build that counts as another app, as after the
+/// app that started it quit, is replaced by one counting as vornd's app, so
+/// the programs it starts ask for privacy permissions in Vorn's name.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_sessiond_counting_as_another_app_is_replaced() {
+    use vorn_spawn::attribution::{counts_as_another_app, responsible_for};
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let old = start_counting_as_itself(home.path());
+    reap.add(old.pid);
+    assert_eq!(responsible_for(old.pid), Some(old.pid));
+
+    let v = Vornd::start(home.path(), &[]);
+    let holder = v.wait_for("the old one reported", |s| {
+        s["current"].is_object() && s["older"].as_array().is_some_and(|o| !o.is_empty())
+    });
+    let current = &holder["current"];
+    reap.add(pid(current));
+    assert_ne!(pid(current), old.pid, "{}", v.log_text());
+    assert_eq!(current["build"], old.build.as_str(), "the same build");
+    assert!(
+        !counts_as_another_app(pid(current)),
+        "it counts as vornd's app"
+    );
+    let older = holder["older"].as_array().unwrap();
+    assert_eq!(older.len(), 1, "{holder}");
+    assert_eq!(older[0]["handedOff"], true);
+    assert!(
+        gone_within(old.pid, PATIENCE),
+        "the old sessiond did not exit: {}",
+        v.log_text()
+    );
+    v.stop();
+
+    // Started again, vornd keeps the one that counts as its app.
+    let v = Vornd::start(home.path(), &[]);
+    assert_eq!(v.current()["instance"], current["instance"]);
+    v.stop();
+}
+
 /// An older build's sessiond hands its live sessions to the new one: the
 /// shell carries on there from the cursor its last client reached, and the
 /// older one stays only until it has reaped the shell.

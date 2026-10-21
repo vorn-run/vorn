@@ -11,6 +11,12 @@
 //! cannot is left alone, still holding its sessions, and reported so the app
 //! can ask before ending them.
 //!
+//! On macOS the programs a sessiond starts count as the app that started it,
+//! for privacy permissions. It outlives that app, and once the app quits its
+//! programs count as no app at all, so a vornd started by an app replaces a
+//! sessiond of its build that counts as another one the same way, and new
+//! programs count as Vorn again.
+//!
 //! With the session engine built in, the connection to the current sessiond
 //! is also where every session it holds is attached and parsed (see
 //! [`crate::engine`]). A drained sessiond that still runs sessions is
@@ -39,6 +45,7 @@ use vorn_sessiond_wire::Adopt;
 use vorn_sessiond_wire::{
     Drain, FrameReader, Hello, Message, Nonce, SessionRef, ToSessiond, ToVornd, Welcome, PROTO,
 };
+use vorn_spawn::attribution;
 
 /// The sessiond protocols this vornd speaks.
 pub const SESSIOND_PROTOS: std::ops::RangeInclusive<u16> = PROTO..=PROTO;
@@ -286,9 +293,19 @@ async fn up(
     // Resolving paths touches the disk, so the sorting happens off the runtime.
     let (installed, mine, others) = tokio::task::spawn_blocking(move || {
         let installed = launch::install(&bundled, &home, &version_owned)?;
-        let (mine, others): (Vec<Instance>, Vec<Instance>) = launch::running(&home)
-            .into_iter()
-            .partition(|i| i.build == version_owned && i.proto == PROTO && i.runs(&installed));
+        let app = attribution::counts_as_an_app();
+        let (mine, others): (Vec<Instance>, Vec<Instance>) =
+            launch::running(&home).into_iter().partition(|i| {
+                let ours = i.build == version_owned && i.proto == PROTO && i.runs(&installed);
+                if ours && app && attribution::counts_as_another_app(i.pid) {
+                    info!(
+                        pid = i.pid,
+                        "the session holder counts as another app; replacing it"
+                    );
+                    return false;
+                }
+                ours
+            });
         io::Result::Ok((installed, mine, others))
     })
     .await
