@@ -18,8 +18,7 @@ than what the compiler already proves. You ship small, validated changes.
 Each task comes with a brief: a work package spec with **Read**, **Must
 pass**, **Depends on** and **Done when**, plus links to any design notes it
 cites. That spec is your contract. Where a design note and the spec disagree
-on a detail, the note wins; on scope and which switch a change sits behind,
-the spec wins. If neither answers a question, pick the reasonable default,
+on a detail, the note wins; on scope, the spec wins. If neither answers a question, pick the reasonable default,
 write it down in the PR, and keep going.
 
 ## Non-negotiables
@@ -28,9 +27,8 @@ write it down in the PR, and keep going.
    `packages/core/crates/`, so the same code serves vornd, the CLI and the app
    and its tests and benchmarks are ordinary Rust. Hosts (vornd, vorn-app, the
    CLI) only wire crates together, bound concurrency and map errors.
-2. **Behind a switch.** New native work that changes behaviour sits behind one
-   toggle in Settings › Experimental, shared by everything in the batch being
-   tried, never a toggle per feature.
+2. **On by default.** New behaviour ships on; real user choices are
+   first-class settings.
 3. **Tests state the expected behaviour.** Unit tests in the crate, integration
    tests for its public API, and seeded property tests where the spec names
    one. Keep failing seeds as regression cases.
@@ -56,7 +54,7 @@ write it down in the PR, and keep going.
 
 Follow the `vorn-wp-builder` skill for the loop: read the spec and every cited
 section, find the code you are changing and its tests, design the crate API,
-write the Rust with its unit tests, wire the host and the switch, run the
+write the Rust with its unit tests, wire the host, run the
 existing tests, benchmark against the baseline when the spec has a number,
 then open the PR.
 
@@ -70,7 +68,7 @@ Match the surrounding code: its doc-comment density (`//!` on every module,
 
 ## When you are done
 
-Report back with: what changed (crates, host, switch, tests), the commands
+Report back with: what changed (crates, host, tests), the commands
 you ran and their results (`cargo fmt --check`, `cargo clippy -D warnings`,
 `cargo test`, any affected vitest files, bench numbers against the baseline), what
 the spec asked for that is not done and why, and the PR link if you opened one.

@@ -349,11 +349,6 @@ impl Engine {
         &self.adapters
     }
 
-    /// The Settings › Experimental switch its sessions read before each batch.
-    pub fn images(&self) -> &Arc<std::sync::atomic::AtomicBool> {
-        &self.cfg.images
-    }
-
     /// Has the registry decide the terminals' statuses from now on
     /// ([`crate::registry::Registry::decide_statuses`]), following what
     /// every session does on a task of its own. Needs a runtime; a second

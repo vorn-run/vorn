@@ -80,10 +80,20 @@ pub(crate) struct Term {
     pub(crate) programs: Store,
 }
 
+/// Every terminal lets its programs draw kitty images.
+fn drawing_images(mut em: Emulator) -> Emulator {
+    em.set_images(true);
+    em
+}
+
 impl Term {
     pub(crate) fn fresh(cols: u16, rows: u16, scrollback: usize) -> vorn_screen::Result<Term> {
         Ok(Term {
-            em: Emulator::with_scrollback(u32::from(cols), u32::from(rows), scrollback)?,
+            em: drawing_images(Emulator::with_scrollback(
+                u32::from(cols),
+                u32::from(rows),
+                scrollback,
+            )?),
             analyzer: Analyzer::new(),
             carry: Vec::new(),
             status: vorn_analysis::STATUS_NONE,
@@ -198,7 +208,11 @@ impl Term {
     pub(crate) fn reset(&mut self) -> vorn_screen::Result<()> {
         let (cols, rows) = (self.em.cols(), self.em.rows());
         let scrollback = self.em.scrollback_limit();
-        self.em = Emulator::with_scrollback(u32::from(cols), u32::from(rows), scrollback)?;
+        self.em = drawing_images(Emulator::with_scrollback(
+            u32::from(cols),
+            u32::from(rows),
+            scrollback,
+        )?);
         self.carry.clear();
         self.fidelity = Fidelity::Approximate;
         self.set_colors(self.colors);
@@ -257,7 +271,7 @@ impl Term {
         };
         let cp = Checkpoint::decode(parts.screen).ok_or(Rejected::Decode)?;
         let analyzer = Analyzer::restore(parts.analysis).ok_or(Rejected::Decode)?;
-        let em = Emulator::restore(&cp).map_err(|_| Rejected::Rebuild)?;
+        let em = drawing_images(Emulator::restore(&cp).map_err(|_| Rejected::Rebuild)?);
         let term = Term {
             em,
             analyzer,

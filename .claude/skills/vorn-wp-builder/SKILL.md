@@ -1,6 +1,6 @@
 ---
 name: vorn-wp-builder
-description: Build a native core work package in packages/core, from its spec to a merged PR. Use when starting or continuing one, or any Rust change that adds a native path behind a Settings › Experimental switch.
+description: Build a native core work package in packages/core, from its spec to a merged PR. Use when starting or continuing one, or any Rust change that adds a native path to vornd, vorn-app or the CLI.
 ---
 
 # Building a native core work package
@@ -23,7 +23,7 @@ in code.
 1. Read the spec and every linked section. Note each must-pass test id.
 2. Find the code being changed and every test that covers it (the crate's
    `tests/`, `crates/vornd/tests/`, `tests/*.test.ts`). Those tests become your
-   acceptance suite with the switch on.
+   acceptance suite.
 3. Read the existing crates (`packages/core/crates/*`) and how the nearest
    finished one is wired into vornd or vorn-app. Reuse their shapes.
 
@@ -48,13 +48,12 @@ in code.
 - Criterion benches in `crates/<name>/benches/` when the spec has a number.
 - Apply the `rust-idioms` skill throughout.
 
-## 4. Wiring and switch
+## 4. Wiring
 
 - vornd, vorn-app or the CLI calls the crate; keep that layer thin (types,
   concurrency, errors).
-- One switch in Settings › Experimental for the whole batch of native work
-  being tried, never one per feature. Add to the batch's switch if it has
-  one.
+- New behaviour ships on by default, with no Settings › Experimental switch.
+  Anything a user should choose is a first-class setting on its own page.
 
 ## 5. Validate locally (before every push)
 
@@ -69,8 +68,7 @@ cd ../..
 yarn build:core
 yarn lint && yarn format:check && yarn typecheck
 
-# Acceptance runs with the switch off and on: the tests that cover a switched
-# path turn it on themselves, as vornd would read it from the settings.
+# Acceptance: the tests that cover the changed path.
 yarn vitest run tests/<the files the spec names>
 
 # When the spec has a number.
@@ -116,7 +114,7 @@ lint cannot turn clippy red on its own, so a clippy failure is yours.
   session link in PR bodies or comments.
 - Keep the PR to the package. Note anything out of scope as a follow-up.
 - PR body: brief. What the PR changes and how it was tested (commands, test
-  names, bench numbers), and the switch name. No attribution or "Requested
+  names, bench numbers). No attribution or "Requested
   by" lines, no roadmap or work-package numbers, no links to design notes or
   artifacts, and nothing about later phases or plans.
 - Every PR waits for Copilot's review. Fix the worthwhile comments, reply to

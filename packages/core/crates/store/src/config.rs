@@ -195,7 +195,6 @@ impl Store {
                 "enableHoverPreview",
                 "worktreeRetention",
                 "tuiDrawing",
-                "experimental",
             ],
         );
         Ok(out)
