@@ -49,6 +49,8 @@ pub struct VorndHost {
     pub(crate) notes: broadcast::Sender<Note>,
     /// Woken when an inbox row is settled, so the next one is delivered.
     pub(crate) drain: Arc<Notify>,
+    /// The workflows that are files in a project, and which are turned on.
+    pub(crate) files: Arc<super::files::Files>,
 }
 
 impl VorndHost {
@@ -58,6 +60,7 @@ impl VorndHost {
         native: Weak<Native>,
         loopback: Arc<Loopback>,
         drain: Arc<Notify>,
+        files: Arc<super::files::Files>,
     ) -> VorndHost {
         VorndHost {
             db,
@@ -66,6 +69,7 @@ impl VorndHost {
             loopback,
             notes: broadcast::channel(NOTES_KEPT).0,
             drain,
+            files,
         }
     }
 
@@ -245,6 +249,10 @@ impl Host for VorndHost {
             .call(method, Some(params), CALL_LIMIT)
             .await
             .map_err(|e| e.0)
+    }
+
+    fn refuses(&self, workflow: &vorn_work::model::Workflow) -> Option<String> {
+        self.files.refuses(&workflow.id)
     }
 
     fn first_agent(&self) -> Option<String> {

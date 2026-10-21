@@ -138,6 +138,10 @@ impl Work {
         let Some(workflow) = vorn_work::model::Workflow::from_json(row) else {
             return;
         };
+        if let Some(why) = self.files.refuses(&workflow.id) {
+            debug!(workflow = %workflow.id, %why, "a workflow not turned on was not fired");
+            return;
+        }
         if !self.engine.registry().fans_out(workflow.trigger_type()) {
             self.engine.run_scheduled_workflow(workflow, inputs);
             return;

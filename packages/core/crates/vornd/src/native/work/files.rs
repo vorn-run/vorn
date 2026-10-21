@@ -5,6 +5,10 @@
 //! made in Vorn saved to a project's folder in one call; and the workflows
 //! installed extensions ship (`[[contributes.workflows]]`), added once.
 //!
+//! A project's file runs nothing until the user turns it on: trust is kept
+//! per file as the hash of the content turned on, so a file edited outside
+//! Vorn is off again until turned on again.
+//!
 //! Which stored workflow came from which file is kept in
 //! `vornd/workflow-files.json` beside the database, so a file removed while
 //! vornd was down still takes its workflow with it.
@@ -41,6 +45,28 @@ struct State {
     /// Each file's workflow as last read or written: what an edit of the
     /// file and an edit in the editor made apart both started from.
     base: HashMap<PathBuf, Value>,
+    /// Each file's content hash as the user turned it on.
+    trusted: BTreeMap<PathBuf, String>,
+    /// Each file's content hash as last read or written.
+    hashes: BTreeMap<PathBuf, String>,
+    /// What each file's workflow runs, for the user to see before turning it on.
+    runs: HashMap<PathBuf, Vec<String>>,
+}
+
+impl State {
+    /// Whether `file` is as the user turned it on.
+    fn trusts(&self, file: &Path) -> bool {
+        matches!((self.trusted.get(file), self.hashes.get(file)), (Some(t), Some(h)) if t == h)
+    }
+
+    fn forget(&mut self, file: &Path) {
+        self.stamps.remove(file);
+        self.errors.remove(file);
+        self.base.remove(file);
+        self.trusted.remove(file);
+        self.hashes.remove(file);
+        self.runs.remove(file);
+    }
 }
 
 /// The workflow files vornd knows.
@@ -58,6 +84,70 @@ struct Kept {
     files: BTreeMap<String, PathBuf>,
     #[serde(default)]
     seeded: BTreeSet<String>,
+    #[serde(default)]
+    trusted: BTreeMap<PathBuf, String>,
+    #[serde(default)]
+    hashes: BTreeMap<PathBuf, String>,
+}
+
+/// A file's content hash, as trust is kept.
+fn digest(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// `wf` with `enabled` as `from` has it: an untrusted file's own setting,
+/// never the off the store holds for it.
+fn enabled_as(mut wf: Value, from: &Value) -> Value {
+    if let Some(map) = wf.as_object_mut() {
+        match from.get("enabled") {
+            Some(v) => {
+                map.insert("enabled".into(), v.clone());
+            }
+            None => {
+                map.shift_remove("enabled");
+            }
+        }
+    }
+    wf
+}
+
+/// One line per thing a workflow does when it runs: its trigger, and each
+/// step with the command, script or prompt it runs.
+pub fn runs(wf: &Value) -> Vec<String> {
+    let first = |v: Option<&Value>| {
+        v.and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_owned)
+    };
+    wf.get("nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|node| {
+            let kind = node.get("type").and_then(Value::as_str).unwrap_or("step");
+            let config = node.get("config").unwrap_or(&Value::Null);
+            let label = first(node.get("label")).unwrap_or_else(|| kind.to_owned());
+            if kind == "trigger" {
+                let on = first(config.get("triggerType")).unwrap_or_else(|| "manual".into());
+                return format!("Trigger: {on}");
+            }
+            let agent = first(config.get("agentType"));
+            let what = first(config.get("scriptContent"))
+                .or_else(|| first(config.get("command")))
+                .or_else(|| first(config.get("prompt")));
+            match (agent, what) {
+                (Some(agent), Some(what)) => format!("{label} ({agent}): {what}"),
+                (Some(agent), None) => format!("{label} ({agent})"),
+                (None, Some(what)) => format!("{label}: {what}"),
+                (None, None) => format!("{label} ({kind})"),
+            }
+        })
+        .collect()
 }
 
 fn stamp(path: &Path) -> Option<Stamp> {
@@ -95,6 +185,8 @@ impl Files {
             state: Mutex::new(State {
                 by_id: kept.files,
                 seeded: kept.seeded,
+                trusted: kept.trusted,
+                hashes: kept.hashes,
                 ..State::default()
             }),
             record,
@@ -109,6 +201,8 @@ impl Files {
         let kept = Kept {
             files: state.by_id.clone(),
             seeded: state.seeded.clone(),
+            trusted: state.trusted.clone(),
+            hashes: state.hashes.clone(),
         };
         let written = self
             .record
@@ -130,13 +224,47 @@ impl Files {
         self.lock().by_id.get(id).cloned()
     }
 
-    /// Every file and what is wrong with the ones that do not read.
+    /// Why workflow `id` may not run: it came from a file not turned on.
+    pub fn refuses(&self, id: &str) -> Option<String> {
+        let s = self.lock();
+        let file = s.by_id.get(id)?;
+        (!s.trusts(file)).then(|| {
+            format!(
+                "{} is off until you turn it on from its row in Workflows",
+                file.display()
+            )
+        })
+    }
+
+    /// Turns on workflow `id`'s file as it is now; whether it came from one.
+    pub fn trust(&self, id: &str) -> bool {
+        let mut s = self.lock();
+        let Some(file) = s.by_id.get(id).cloned() else {
+            return false;
+        };
+        let Some(hash) = s.hashes.get(&file).cloned() else {
+            return false;
+        };
+        s.trusted.insert(file, hash);
+        self.keep(&s);
+        true
+    }
+
+    /// Every file, whether it is on and what it runs, and what is wrong
+    /// with the ones that do not read.
     pub fn listed(&self) -> Value {
         let s = self.lock();
         let files: Vec<Value> = s
             .by_id
             .iter()
-            .map(|(id, path)| json!({ "workflowId": id, "path": path }))
+            .map(|(id, path)| {
+                json!({
+                    "workflowId": id,
+                    "path": path,
+                    "trusted": s.trusts(path),
+                    "runs": s.runs.get(path).cloned().unwrap_or_default(),
+                })
+            })
             .collect();
         let errors: Vec<Value> = s
             .errors
@@ -253,9 +381,7 @@ impl Work {
             {
                 let mut s = self.files.lock();
                 s.by_id.remove(&id);
-                s.stamps.remove(&path);
-                s.errors.remove(&path);
-                s.base.remove(&path);
+                s.forget(&path);
                 self.files.keep(&s);
             }
             let w = id.clone();
@@ -278,6 +404,8 @@ impl Work {
         let Ok(text) = std::fs::read_to_string(file) else {
             return false;
         };
+        let hash = digest(&text);
+        let trusted = self.files.lock().trusted.get(file) == Some(&hash);
         let conns = connections(self).await;
         let bindings = Bindings {
             connections: &conns,
@@ -358,7 +486,8 @@ impl Work {
                     .await
                     .flatten()
                     .filter(Value::is_object)
-                    .map(as_file);
+                    .map(as_file)
+                    .map(|ours| if trusted { ours } else { enabled_as(ours, &base) });
                 match ours {
                     Some(ours) if ours != base => vorn_workflow_file::meet(&base, &ours, &theirs),
                     _ => theirs.clone(),
@@ -366,7 +495,11 @@ impl Work {
             }
             None => theirs.clone(),
         };
-        let (stored, w) = (met.clone(), id.clone());
+        let mut stored = met.clone();
+        if !trusted {
+            stored["enabled"] = json!(false);
+        }
+        let w = id.clone();
         let (changed, row) = self
             .db
             .run(move |s| {
@@ -375,15 +508,21 @@ impl Work {
             })
             .await
             .unwrap_or((false, None));
-        let mut at = at;
+        let (mut at, mut hash) = (at, hash);
         if met != theirs {
             let text = vorn_workflow_file::update(&text, &met, &bindings);
-            if std::fs::write(file, text).is_ok() {
+            if std::fs::write(file, &text).is_ok() {
                 at = stamp(file);
+                hash = digest(&text);
             }
         }
+        let ran = runs(&met);
         // The base is the row as stored, defaults and all, so a plain edit of the file meets nothing.
-        let base = row.filter(Value::is_object).map(as_file).unwrap_or(met);
+        let base = row
+            .filter(Value::is_object)
+            .map(as_file)
+            .map(|b| if trusted { b } else { enabled_as(b, &met) })
+            .unwrap_or(met);
         let renamed: Vec<String> = {
             let mut s = self.files.lock();
             let renamed: Vec<String> = s
@@ -397,6 +536,11 @@ impl Work {
             }
             s.by_id.insert(id.clone(), file.to_owned());
             s.base.insert(file.to_owned(), base);
+            if trusted {
+                s.trusted.insert(file.to_owned(), hash.clone());
+            }
+            s.hashes.insert(file.to_owned(), hash);
+            s.runs.insert(file.to_owned(), ran);
             if let Some(at) = at {
                 s.stamps.insert(file.to_owned(), at);
             }
@@ -445,11 +589,15 @@ impl Work {
             project: project.as_ref().map(|(n, p)| (n.as_str(), p.as_str())),
         };
         let old = std::fs::read_to_string(&file).unwrap_or_default();
-        let ours = as_file(row);
         // The file changed since it was last read: both edits meet.
-        let (known, base) = {
+        let (known, base, trusted) = {
             let s = self.files.lock();
-            (s.stamps.get(&file).copied(), s.base.get(&file).cloned())
+            let trusted = s.trusts(&file) && s.hashes.get(&file) == Some(&digest(&old));
+            (s.stamps.get(&file).copied(), s.base.get(&file).cloned(), trusted)
+        };
+        let ours = match (&base, trusted) {
+            (Some(base), false) => enabled_as(as_file(row), base),
+            _ => as_file(row),
         };
         let mut next = ours.clone();
         if known != stamp(&file) {
@@ -460,7 +608,10 @@ impl Work {
                 }
                 next = vorn_workflow_file::meet(&base, &ours, &theirs);
                 if next != ours {
-                    let stored = next.clone();
+                    let mut stored = next.clone();
+                    if !trusted {
+                        stored["enabled"] = json!(false);
+                    }
                     self.db.run(move |s| upsert(s, &stored)).await;
                     self.workflows_changed();
                 }
@@ -473,11 +624,18 @@ impl Work {
                 return;
             }
         }
+        let hash = digest(&text);
         let mut s = self.files.lock();
         if let Some(at) = stamp(&file) {
             s.stamps.insert(file.clone(), at);
         }
+        if trusted {
+            s.trusted.insert(file.clone(), hash.clone());
+        }
+        s.hashes.insert(file.clone(), hash);
+        s.runs.insert(file.clone(), runs(&next));
         s.base.insert(file, next);
+        self.files.keep(&s);
     }
 
     /// Removes the file of workflow `id`, as the workflow was deleted.
@@ -489,7 +647,7 @@ impl Work {
         if let Err(err) = std::fs::remove_file(&file) {
             warn!(%err, file = %file.display(), "could not remove a deleted workflow's file");
         }
-        s.stamps.remove(&file);
+        s.forget(&file);
         self.files.keep(&s);
     }
 
@@ -530,10 +688,14 @@ impl Work {
         let text = vorn_workflow_file::write(&as_file(row), &bindings);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("Could not make {}: {e}", dir.display()))?;
-        std::fs::write(&file, text)
+        std::fs::write(&file, &text)
             .map_err(|e| format!("Could not write {}: {e}", file.display()))?;
         let mut s = self.files.lock();
         s.by_id.insert(id.to_owned(), file.clone());
+        // Made in Vorn, so it stays on as it is.
+        let hash = digest(&text);
+        s.trusted.insert(file.clone(), hash.clone());
+        s.hashes.insert(file.clone(), hash);
         if let Some(at) = stamp(&file) {
             s.stamps.insert(file.clone(), at);
         }
@@ -541,8 +703,9 @@ impl Work {
             &std::fs::read_to_string(&file).unwrap_or_default(),
             &bindings,
         ) {
-            s.base
-                .insert(file.clone(), vorn_work::js_numbers(read.workflow));
+            let read = vorn_work::js_numbers(read.workflow);
+            s.runs.insert(file.clone(), runs(&read));
+            s.base.insert(file.clone(), read);
         }
         self.files.keep(&s);
         info!(file = %file.display(), workflow = %id, "a workflow was saved to a file");
