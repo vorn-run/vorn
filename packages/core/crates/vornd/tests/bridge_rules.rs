@@ -20,7 +20,7 @@ const PROGRAM: &str = include_str!("../../extensions/tests/fixtures/program.mjs"
 const MANIFEST: &str = r#"id = "test.rules"
 name = "Rules"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "program.mjs"]
@@ -71,8 +71,19 @@ impl Ws {
 
     /// What the program got back when it asked Vorn `method` with `params`.
     async fn relay(&mut self, method: &str, params: Value) -> Value {
+        self.relay_as("test.rules", method, params).await
+    }
+
+    /// What `test.flows` got back when it called `method`.
+    async fn flows(&mut self, method: &str, args: Value) -> Value {
+        let params = json!({ "method": method, "args": args });
+        self.relay_as("test.flows", "host.call", params).await
+    }
+
+    /// [`Ws::relay`] through the program of extension `id`.
+    async fn relay_as(&mut self, id: &str, method: &str, params: Value) -> Value {
         let args = json!({ "method": method, "params": params, "notification": false });
-        let answer = self.call("test.rules:relay", args).await;
+        let answer = self.call(&format!("{id}:relay"), args).await;
         assert!(answer.get("error").is_none(), "{answer}");
         answer["result"].clone()
     }
@@ -162,16 +173,23 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
         "test.rules does not declare the host evil.example"
     );
 
-    // The board's and the workflows' own calls are the built-ins' alone.
-    let refused = c
+    // The calls the shipped editors make are public, held to the same declared permissions.
+    let listed = c
         .relay(
             "host.call",
             json!({ "method": "workflow.list", "args": {} }),
         )
         .await;
+    assert!(listed.get("error").is_none(), "{listed}");
+    let refused = c
+        .relay(
+            "host.call",
+            json!({ "method": "workflow.unseed", "args": {} }),
+        )
+        .await;
     assert_eq!(
         refused["error"]["message"],
-        "workflow.list is open only to the extensions Vorn ships"
+        "test.rules does not declare workflows.write, which workflow.unseed needs"
     );
 
     // Its own tables, made by its migration, and nobody else's.
@@ -246,4 +264,87 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
     let insert =
         json!({ "sql": "INSERT INTO x_test_0rules_notes (body) VALUES (?)", "params": ["again"] });
     assert_eq!(c.relay("storage.exec", insert).await["result"], 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_extension_seeds_runs_and_removes_only_its_own_workflows() {
+    if !node() {
+        return;
+    }
+    let served = serve();
+    let mut c = Ws {
+        ws: connect(served.port, CREDENTIAL).await,
+        next_id: 0,
+    };
+    let folder = tempfile::tempdir().unwrap();
+    let manifest = MANIFEST
+        .replace("test.rules", "test.flows")
+        .replace(
+            "\"storage\", \"workflows.read\"",
+            "\"workflows.read\", \"workflows.write\"",
+        )
+        .replace("[storage]\nmigrations = \"migrations\"\n", "");
+    std::fs::write(folder.path().join("vorn-extension.toml"), manifest).unwrap();
+    std::fs::write(folder.path().join("program.mjs"), PROGRAM).unwrap();
+    let linked = c
+        .call("extension:link", json!({ "path": folder.path() }))
+        .await;
+    assert!(linked.get("error").is_none(), "{linked}");
+    let workflow = |id: &str, step: &str| {
+        json!({ "id": id, "name": id, "icon": "Plug", "iconColor": "#fff", "enabled": false,
+                "edges": [], "nodes": [{ "id": "t", "type": "trigger", "config": {} },
+                                      { "id": "s", "type": step, "config": {} }] })
+    };
+    let refused = |answer: &Value| answer["error"]["message"].as_str().unwrap_or("").to_owned();
+
+    // Someone else's workflows are not its to seed, remove or run.
+    let theirs = workflow("import:bundle:a", "condition");
+    let answer = c
+        .flows("workflow.seed", json!({ "workflows": [theirs] }))
+        .await;
+    assert_eq!(
+        refused(&answer),
+        "workflow.seed: import:bundle:a is not test.flows's; its workflows' ids start with test.flows:"
+    );
+    let answer = c
+        .flows("workflow.unseed", json!({ "prefix": "import:" }))
+        .await;
+    assert_eq!(
+        refused(&answer),
+        "workflow.unseed: import: is not test.flows's; its workflows' ids start with test.flows:"
+    );
+    let answer = c
+        .flows("workflow.run", json!({ "workflowId": "wf-theirs" }))
+        .await;
+    assert_eq!(
+        refused(&answer),
+        "test.flows does not declare process.run, which workflow.run needs for wf-theirs, a workflow not its own"
+    );
+
+    // Its own, but a step that runs commands or an agent needs process.run.
+    for step in ["script", "launchAgent", "nobodyDeclaresThis"] {
+        let answer = c
+            .flows(
+                "workflow.seed",
+                json!({ "workflows": [workflow("test.flows:x", step)] }),
+            )
+            .await;
+        assert_eq!(
+            refused(&answer),
+            format!("test.flows does not declare process.run, which workflow.seed needs for test.flows:x: its {step} step runs commands")
+        );
+    }
+
+    // What is its own and runs nothing is seeded, and removed again.
+    let answer = c
+        .flows(
+            "workflow.seed",
+            json!({ "workflows": [workflow("test.flows:y", "condition")] }),
+        )
+        .await;
+    assert_eq!(answer["result"], json!({ "created": [true] }), "{answer}");
+    let answer = c
+        .flows("workflow.unseed", json!({ "prefix": "test.flows:" }))
+        .await;
+    assert_eq!(answer["result"], json!({ "removed": 1 }), "{answer}");
 }

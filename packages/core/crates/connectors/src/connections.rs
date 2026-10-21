@@ -120,14 +120,19 @@ pub fn sdk_connection_filters(pack: &Value, trigger: Option<&str>) -> Map<String
     out
 }
 
-/// The id of the workflow a connection is seeded with for `event`.
+/// Where the workflows seeded for connections were kept before seeded ids
+/// had to start with the seeding extension's id; moved once at start.
+pub const OLD_SEEDED_PREFIX: &str = "connector:";
+
+/// The id of the workflow a connection is seeded with for `event`, in the
+/// built-in's own namespace.
 pub fn seeded_workflow_id(connection_id: &str, event: &str) -> String {
-    format!("connector:{connection_id}:{event}")
+    format!("{}{event}", seeded_workflow_prefix(connection_id))
 }
 
 /// The prefix of every workflow seeded for a connection.
 pub fn seeded_workflow_prefix(connection_id: &str) -> String {
-    format!("connector:{connection_id}:")
+    format!("{}:{connection_id}:", crate::builtin::ID)
 }
 
 /// `cronEveryMinutes`.
@@ -658,7 +663,7 @@ mod tests {
             &manifest,
             &json!({ "name": "Tickets", "event": "mcpPoll", "defaultCronFromMinutes": 120 }),
         );
-        assert_eq!(wf["id"], "connector:c1:mcpPoll");
+        assert_eq!(wf["id"], "vorn.connectors:c1:mcpPoll");
         assert_eq!(wf["nodes"][0]["config"]["cron"], "0 */2 * * *");
         assert_eq!(wf["nodes"][0]["label"], "Poll Poll");
         assert_eq!(wf["nodes"][1]["config"]["initialStatus"], "in_progress");

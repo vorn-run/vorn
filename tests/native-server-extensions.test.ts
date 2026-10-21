@@ -45,7 +45,7 @@ function install(dataDir: string, id: string): void {
     `id = "${id}"`,
     `name = "${id.toUpperCase()}"`,
     'version = "1.0.0"',
-    'api = "vorn:extension@0.9"',
+    'api = "vorn:extension@1.0"',
     '',
     '[service]',
     'command = ["node", "index.js"]',

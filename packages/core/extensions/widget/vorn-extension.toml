@@ -1,7 +1,7 @@
 id = "vorn.widget"
 name = "Widget"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "A small window over the others: every agent's status, and Allow or Deny for the tools they ask to use."
 
 [declares]

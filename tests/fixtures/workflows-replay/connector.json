@@ -30,7 +30,7 @@
         }
       ],
       "env": [],
-      "api": "vorn:extension@0.9",
+      "api": "vorn:extension@1.0",
       "source": {
         "git": "<work>/tickets",
         "rev": "<rev>"

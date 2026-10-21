@@ -89,6 +89,8 @@ pub struct Init {
     pub version: String,
     /// The Vorn version running it.
     pub vorn: String,
+    /// The extension API that Vorn speaks, `vorn:extension@1.0`.
+    pub api: String,
 }
 
 /// Who is calling, and about which project.

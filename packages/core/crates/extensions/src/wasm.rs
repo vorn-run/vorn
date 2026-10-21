@@ -976,6 +976,17 @@ struct Ends<'a> {
     stderr: &'a Stderr,
 }
 
+/// The handshake a component makes before it is linked: the API version its
+/// imports name against the one this Vorn speaks, refused naming both rather
+/// than as a link error.
+fn speaks(component: &Component, engine: &Engine) -> Result<(), String> {
+    let ty = component.component_type();
+    let built = crate::compat::imported(ty.imports(engine).map(|(name, _)| name));
+    built.map_or(Ok(()), |built| {
+        crate::compat::admit(built, crate::compat::ApiVersion::host())
+    })
+}
+
 /// The component's thread: instantiate, init, then calls and events until the queue goes or it traps.
 fn run(
     name: &str,
@@ -1001,6 +1012,10 @@ fn run(
     // WASI's own waits (a guest's sleep) run on vornd's runtime.
     let tokio = state.tokio.clone();
     let _in_tokio = tokio.enter();
+    if let Err(why) = speaks(&component, &rt.engine) {
+        let _ = ready.send(Err(format!("{name} did not start: {why}")));
+        return;
+    }
     let mut linker = Linker::<State>::new(&rt.engine);
     let linked = wasmtime_wasi::p2::add_to_linker_sync(&mut linker).and_then(|()| {
         bindings::Extension::add_to_linker::<State, HasSelf<State>>(&mut linker, |s| s)
@@ -1019,6 +1034,7 @@ fn run(
                 id: init.id.clone(),
                 version: init.version.clone(),
                 vorn: init.vorn.clone(),
+                api: init.api.clone(),
             };
             api.vorn_extension_guest()
                 .call_init(&mut store, &ctx)

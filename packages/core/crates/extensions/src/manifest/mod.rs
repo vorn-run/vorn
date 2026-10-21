@@ -55,10 +55,11 @@ pub struct Manifest {
     pub permissions: Option<Vec<Permission>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub activates: Option<Activation>,
-    /// `vorn:extension@0.9`; `None` for a connector's own manifest that names no protocol.
+    /// `vorn:extension@1.0`; `None` for a connector's own manifest that names no protocol.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<String>,
-    /// The Vorn releases it runs on, as `>=0.9`.
+    /// The API versions it runs on, as `>=1.0`; checked at install against
+    /// the version this Vorn speaks ([`crate::compat::Range`]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vorn: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,7 +117,7 @@ impl Manifest {
     /// events). A package with both starts one program in either role, and
     /// its first message, `guest.init` or `vorn/hello`, says which.
     pub fn speaks_api(&self) -> bool {
-        self.api.as_deref() == Some(API)
+        self.api.is_some()
             && (self.protocol.is_none()
                 || self
                     .contributes
@@ -595,10 +596,8 @@ pub struct Point {
     /// For attention: the method denying an item calls, with its `id`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deny: Option<String>,
-    /// For a built-in's settings page: the app's own page it follows in the
-    /// sidebar, one of [`SETTINGS_PAGES`], so a page that left the app for
-    /// a built-in keeps its place. Another extension's page stays under
-    /// Extensions whatever it says.
+    /// For a settings page: the app's own page it follows in the sidebar,
+    /// one of [`SETTINGS_PAGES`]; without it the page stays under Extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
 }

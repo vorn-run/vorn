@@ -25,8 +25,8 @@ use tracing::info;
 use crate::gate::{enforced, CORE_METHODS};
 use crate::manifest::{file, Manifest, Permission};
 use crate::pack::{
-    directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack, PackStore,
-    CURRENT_FILE,
+    check_id, directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack,
+    PackStore, CURRENT_FILE,
 };
 
 /// Long enough to read a sheet, short enough that walking away costs nothing.
@@ -390,6 +390,10 @@ impl Installs {
                     .collect();
                 if p == Permission::Storage {
                     format!("{used} (its own tables, storage.*)")
+                } else if p == Permission::ProcessRun {
+                    format!(
+                        "{used} (runs commands: workflow steps it seeds, workflows not its own)"
+                    )
                 } else if !enforced(p) {
                     format!("{used} (declared; Vorn cannot hold it to this)")
                 } else {
@@ -700,9 +704,7 @@ fn linkable(folder: &Path) -> Result<(PathBuf, Manifest), String> {
         .canonicalize()
         .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
     let manifest = read_dir_manifest(&folder)?;
-    if !is_safe_id(&manifest.id) {
-        return Err(format!("\"{}\" is not an extension id", manifest.id));
-    }
+    check_id(&manifest.id)?;
     Ok((folder, manifest))
 }
 
@@ -710,10 +712,9 @@ fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
     if !dir.join(file::FILE).is_file() {
         return Err(format!("The repository has no {} at its root", file::FILE));
     }
+    crate::pack::relabel_dir(dir)?;
     let manifest = read_dir_manifest(dir)?;
-    if !is_safe_id(&manifest.id) {
-        return Err(format!("\"{}\" is not an extension id", manifest.id));
-    }
+    check_id(&manifest.id)?;
     Ok(manifest)
 }
 
@@ -934,7 +935,7 @@ mod tests {
     const MANIFEST: &str = r#"id = "test.marker"
 name = "Marker"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "test"
 
 [build]
@@ -974,7 +975,7 @@ migrations = "migrations"
             sheet.methods,
             [
                 "sessions.read (sessions.list, sessions.get, agents.list)",
-                "process.run (declared; Vorn cannot hold it to this)",
+                "process.run (runs commands: workflow steps it seeds, workflows not its own)",
                 "storage (its own tables, storage.*)"
             ]
         );
@@ -1028,6 +1029,69 @@ migrations = "migrations"
         assert!(!pack.path.join("node_modules").exists());
         fs::write(folder.path().join("hello.sh"), "echo edited").unwrap();
         assert_eq!(fs::read_to_string(pack.path.join("hello.sh")).unwrap(), "");
+    }
+
+    #[test]
+    fn install_and_link_check_the_api_and_vorn_range_against_this_vorn() {
+        let both = |from: &str, to: &str| {
+            let folder = tempfile::tempdir().unwrap();
+            let text = MANIFEST
+                .replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "")
+                .replace(from, to);
+            fs::write(folder.path().join(file::FILE), text).unwrap();
+            fs::write(folder.path().join("hello.sh"), "").unwrap();
+            let root = tempfile::tempdir().unwrap();
+            let installs = Installs::new(PackStore::new(root.path()), "git", env());
+            let path = folder.path().display().to_string();
+            let copied = installs.inspect_git(&path, None).map(|_| ());
+            let linked = installs.inspect_link(folder.path()).map(|_| ());
+            (copied, linked)
+        };
+        let attempt = |from: &str, to: &str| {
+            let (copied, linked) = both(from, to);
+            assert_eq!(copied, linked);
+            copied
+        };
+        let api = "api = \"vorn:extension@1.0\"";
+        // Equal.
+        assert_eq!(attempt(api, api), Ok(()));
+        assert_eq!(attempt(api, &format!("{api}\nvorn = \">=1.0\"")), Ok(()));
+        // Newer.
+        let newer = attempt(api, "api = \"vorn:extension@1.1\"").unwrap_err();
+        assert_eq!(
+            newer,
+            "vorn-extension.toml:4: api: built for vorn:extension@1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
+        );
+        let newer = attempt(api, &format!("{api}\nvorn = \">=1.1\"")).unwrap_err();
+        assert_eq!(
+            newer,
+            "vorn-extension.toml:5: vorn: runs on vorn:extension >=1.1; this Vorn speaks vorn:extension@1.0, so update Vorn to run it"
+        );
+        // Older.
+        let older = attempt(api, "api = \"vorn:extension@0.8\"").unwrap_err();
+        assert!(
+            older.contains("built for vorn:extension@0.8, which this Vorn no longer speaks; it speaks vorn:extension@1.0"),
+            "{older}"
+        );
+        let older = attempt(api, &format!("{api}\nvorn = \"<1.0\"")).unwrap_err();
+        assert!(older.contains("update the extension"), "{older}");
+        // A 0.9 package is relabelled as it installs; a linked folder is not.
+        let (copied, linked) = both(api, "api = \"vorn:extension@0.9\"");
+        assert_eq!(copied, Ok(()));
+        assert!(linked.unwrap_err().contains("built for vorn:extension@0.9"));
+        // An id Vorn's own workflows start with is no extension's.
+        for id in crate::pack::RESERVED_IDS {
+            let reserved =
+                format!("\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:");
+            let id_line = format!("id = \"{id}\"");
+            assert_eq!(attempt("id = \"test.marker\"", &id_line), Err(reserved));
+        }
+        // Nor is one in the namespace of the extensions Vorn ships.
+        let shipped = "\"vorn.connectors\" is reserved: ids starting with vorn. are the extensions Vorn ships";
+        assert_eq!(
+            attempt("id = \"test.marker\"", "id = \"vorn.connectors\""),
+            Err(shipped.to_owned())
+        );
     }
 
     #[test]
@@ -1124,7 +1188,7 @@ migrations = "migrations"
         let folder = tempfile::tempdir().unwrap();
         let manifest = |agent: &str| {
             format!(
-                "id = \"test.agents\"\nname = \"Agents\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\npublisher = \"test\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n\n[activates]\nagent = [\"{agent}\"]\n"
+                "id = \"test.agents\"\nname = \"Agents\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"test\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n\n[activates]\nagent = [\"{agent}\"]\n"
             )
         };
         let write =
@@ -1210,7 +1274,7 @@ migrations = "migrations"
             r#"id = "test.gh"
 name = "GitHub"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "index.js"]
@@ -1245,7 +1309,7 @@ type = "issue"
             r#"id = "test.x"
 name = "X"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 [service]
 command = ["node", "index.js"]
 [declares]

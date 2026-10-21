@@ -13030,7 +13030,7 @@
           }
         },
         "output": {
-          "id": "connector:c0:mcpPoll",
+          "id": "vorn.connectors:c0:mcpPoll",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13097,7 +13097,7 @@
           }
         },
         "output": {
-          "id": "connector:c1:other",
+          "id": "vorn.connectors:c1:other",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13164,7 +13164,7 @@
           }
         },
         "output": {
-          "id": "connector:c2:other",
+          "id": "vorn.connectors:c2:other",
           "name": "N",
           "icon": "mcp",
           "iconColor": "#64748b",
@@ -13237,7 +13237,7 @@
           }
         },
         "output": {
-          "id": "connector:c3:mcpPoll",
+          "id": "vorn.connectors:c3:mcpPoll",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13297,7 +13297,7 @@
           }
         },
         "output": {
-          "id": "connector:c4:mcpPoll",
+          "id": "vorn.connectors:c4:mcpPoll",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13370,7 +13370,7 @@
           }
         },
         "output": {
-          "id": "connector:c5:mcpPoll",
+          "id": "vorn.connectors:c5:mcpPoll",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13443,7 +13443,7 @@
           }
         },
         "output": {
-          "id": "connector:c6:mcpPoll",
+          "id": "vorn.connectors:c6:mcpPoll",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13516,7 +13516,7 @@
           }
         },
         "output": {
-          "id": "connector:c7:mcpPoll",
+          "id": "vorn.connectors:c7:mcpPoll",
           "name": "N",
           "icon": "mcp",
           "iconColor": "#64748b",
@@ -13583,7 +13583,7 @@
           }
         },
         "output": {
-          "id": "connector:c8:mcpPoll",
+          "id": "vorn.connectors:c8:mcpPoll",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",
@@ -13650,7 +13650,7 @@
           }
         },
         "output": {
-          "id": "connector:c9:other",
+          "id": "vorn.connectors:c9:other",
           "name": "N",
           "icon": "sdk",
           "iconColor": "#64748b",

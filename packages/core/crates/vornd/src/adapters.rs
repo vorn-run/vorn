@@ -308,7 +308,7 @@ pub(crate) mod testing {
 id = "test.acme"
 name = "Acme"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 [agent]
 id = "acme"
 name = "Acme Code"
@@ -355,7 +355,7 @@ any = ['^> $']
 id = "test.beta"
 name = "Beta"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 [agent]
 id = "beta"
 name = "Beta CLI"
@@ -377,7 +377,7 @@ resume_tail = ["exec", "resume", "{id}", "-"]
 id = "test.gamma"
 name = "Gamma"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 [agent]
 id = "gamma"
 name = "Gamma CLI"

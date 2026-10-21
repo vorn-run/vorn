@@ -91,7 +91,6 @@ pub fn unscope(key: &str) -> (&str, Option<&str>) {
 pub struct Point {
     pub extension: String,
     pub extension_name: String,
-    pub builtin: bool,
     pub kind: String,
     pub id: String,
     pub title: String,
@@ -126,7 +125,6 @@ impl Point {
         Some(Point {
             extension_name: text("extensionName").unwrap_or_else(|| extension.clone()),
             extension,
-            builtin: v.get("builtin").and_then(Value::as_bool) == Some(true),
             kind,
             id: s(v, "id")?.to_owned(),
             title: text("title").unwrap_or_default(),
@@ -153,12 +151,12 @@ impl Point {
         )
     }
 
-    /// The app settings page a built-in's settings page follows in the
-    /// sidebar; another extension's page never leaves Extensions.
+    /// The app settings page a settings page follows in the sidebar; without
+    /// one it stays under Extensions.
     pub fn placed_after(&self) -> Option<crate::settings::Category> {
         self.after
             .as_deref()
-            .filter(|_| self.builtin && self.kind == kind::SETTINGS)
+            .filter(|_| self.kind == kind::SETTINGS)
             .and_then(crate::settings::Category::from_id)
     }
 
@@ -776,26 +774,18 @@ mod tests {
     }
 
     #[test]
-    fn only_a_builtin_settings_page_follows_an_app_page() {
+    fn a_settings_page_follows_the_app_page_it_names() {
         let mut v = point(kind::SETTINGS);
+        assert_eq!(Point::from_value(&v).expect("a point").placed_after(), None);
         v["after"] = json!("agents");
-        let other = Point::from_value(&v).expect("a point");
         assert_eq!(
-            other.placed_after(),
-            None,
-            "another extension's stays under Extensions"
-        );
-        v["builtin"] = json!(true);
-        let builtin = Point::from_value(&v).expect("a point");
-        assert_eq!(
-            builtin.placed_after(),
+            Point::from_value(&v).expect("a point").placed_after(),
             Some(crate::settings::Category::Agents)
         );
         v["after"] = json!("nowhere");
         assert_eq!(Point::from_value(&v).expect("a point").placed_after(), None);
         let mut menu = point(kind::MENUS);
         menu["after"] = json!("agents");
-        menu["builtin"] = json!(true);
         assert_eq!(
             Point::from_value(&menu).expect("a point").placed_after(),
             None

@@ -500,7 +500,7 @@ async fn check_names_the_line_and_an_extensions_layout_is_listed() {
     let ext = tempfile::tempdir().unwrap();
     std::fs::write(
         ext.path().join("vorn-extension.toml"),
-        "id = \"acme.layouts\"\nname = \"Acme layouts\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[[contributes.layouts]]\nid = \"acme-dev\"\ntitle = \"Acme dev\"\nfile = \"layouts/dev.toml\"\n",
+        "id = \"acme.layouts\"\nname = \"Acme layouts\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n\n[[contributes.layouts]]\nid = \"acme-dev\"\ntitle = \"Acme dev\"\nfile = \"layouts/dev.toml\"\n",
     )
     .unwrap();
     std::fs::create_dir(ext.path().join("layouts")).unwrap();

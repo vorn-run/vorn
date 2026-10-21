@@ -304,7 +304,7 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
     let folder = tempfile::tempdir().unwrap();
     fs::write(
         folder.path().join("vorn-extension.toml"),
-        "id = \"test.ticks\"\nname = \"Ticks\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[service]\ncommand = [\"node\", \"program.mjs\"]\nevents = [\"test.tick\"]\n",
+        "id = \"test.ticks\"\nname = \"Ticks\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n\n[service]\ncommand = [\"node\", \"program.mjs\"]\nevents = [\"test.tick\"]\n",
     )
     .unwrap();
     fs::copy(fixture("program.mjs"), folder.path().join("program.mjs")).unwrap();
@@ -415,7 +415,7 @@ async fn under_the_sandbox_profile_the_pilot_runs_and_writes_stay_in_its_folder(
     let outside = tempfile::tempdir().unwrap();
     fs::write(
         folder.path().join("vorn-extension.toml"),
-        "id = \"test.held\"\nname = \"Held\"\nversion = \"1.0.0\"\napi = \"vorn:extension@0.9\"\n\n[actions.try]\ncommand = [\"bash\", \"try.sh\"]\n",
+        "id = \"test.held\"\nname = \"Held\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n\n[actions.try]\ncommand = [\"bash\", \"try.sh\"]\n",
     )
     .unwrap();
     let script = format!(

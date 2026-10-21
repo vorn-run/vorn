@@ -11,7 +11,7 @@ use tracing::info;
 use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
-use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
+use vorn_extensions::gate::{self, Answer, Caller, StorageCall, World};
 use vorn_store::extension::{ExtensionTables, Grant};
 
 use crate::native::config::Viewer;
@@ -373,6 +373,21 @@ fn read_key(path: &str) -> Result<Value, String> {
     Ok(key)
 }
 
+/// Whether a step of `node_type` runs commands or agents: one the Workflows
+/// built-in runs, or one no extension declares, which runs as its agent.
+fn runs_commands(native: &Native, node_type: &str) -> bool {
+    let Some(step) = vorn_work::model::NodeKind::parse(node_type)
+        .step()
+        .map(str::to_owned)
+    else {
+        return false;
+    };
+    let provider = native
+        .work()
+        .and_then(|w| w.engine.registry().provider(&step));
+    provider.is_none_or(|p| p == vorn_workflows::ID)
+}
+
 impl World for Wired {
     fn call(&self, caller: &Caller, method: &str, args: Value) -> Answer<Value> {
         let native = self.native.upgrade();
@@ -380,17 +395,10 @@ impl World for Wired {
         let extension = caller.extension.clone();
         let project = text(&args, "project").or_else(|| caller.project.clone());
         let weak = self.native.clone();
+        let caller = caller.clone();
         Box::pin(async move {
             let native = native.ok_or_else(stopping)?;
             let m = method.as_str();
-            if vorn_extensions::gate::BUILTIN_ONLY.contains(&m)
-                && !super::builtin::SHIPPED.contains(&extension.as_str())
-            {
-                return Err(ExtError::new(
-                    "denied",
-                    format!("{m} is open only to the extensions Vorn ships"),
-                ));
-            }
             // What runs is read once vornd knows it, as a client's reads are.
             if matches!(m, "sessions.list" | "sessions.get") {
                 if let Some(registry) = native.registry.get().cloned() {
@@ -631,6 +639,7 @@ impl World for Wired {
                 "workflow.run" => {
                     let id = text(&args, "workflowId")
                         .ok_or_else(|| needs(m, "the workflowId to run"))?;
+                    gate::admit_run(&caller, &id)?;
                     let inputs = args.get("inputs").cloned().unwrap_or(Value::Null);
                     ask(
                         &native,
@@ -657,6 +666,9 @@ impl World for Wired {
                         .and_then(Value::as_array)
                         .cloned()
                         .ok_or_else(|| needs(m, "the workflows to seed"))?;
+                    for wf in &workflows {
+                        gate::admit_seed(&caller, wf, |t| runs_commands(&native, t))?;
+                    }
                     on_store(&native, m, move |s| {
                         let mut created = Vec::with_capacity(workflows.len());
                         for wf in workflows {
@@ -677,6 +689,7 @@ impl World for Wired {
                         .ok_or_else(|| {
                             needs(m, "the prefix its workflows' ids start with, ending in :")
                         })?;
+                    gate::admit_own(&caller, m, &prefix)?;
                     on_store(&native, m, move |s| {
                         let workflows = s.call("dbListWorkflows", json!([]))?;
                         let mut removed = 0u64;

@@ -580,7 +580,7 @@ impl Router {
         let child = Child::start_with(&launch, format!("[extensions] {}", pack.name()), Some(tx))?;
         let caller = Caller {
             extension: pack.id.clone(),
-            project: None,
+            ..Caller::of(&pack.manifest)
         };
         tokio::spawn(dispatch(
             self.me.clone(),
@@ -602,11 +602,13 @@ impl Router {
             id: pack.id.clone(),
             version: pack.version.clone(),
             vorn: self.settings.version.clone(),
+            api: crate::api::API.to_owned(),
         };
         if let Some(component) = &service.component {
             let source = Source::File(pack.path.join(component));
+            let caller = Caller::of(&pack.manifest);
             return self
-                .start_component(source, Arc::new(pack.manifest.clone()), ctx)
+                .start_component(source, Arc::new(pack.manifest.clone()), caller, ctx)
                 .await;
         }
         let child = self.spawn_program(pack, &service.command)?;
@@ -632,8 +634,10 @@ impl Router {
             id: m.id.clone(),
             version: m.version.clone(),
             vorn: self.settings.version.clone(),
+            api: crate::api::API.to_owned(),
         };
-        self.start_component(Source::Bundled(bundled.wasm), Arc::clone(m), ctx)
+        let caller = Caller::builtin(m);
+        self.start_component(Source::Bundled(bundled.wasm), Arc::clone(m), caller, ctx)
             .await
     }
 
@@ -642,13 +646,10 @@ impl Router {
         &self,
         source: Source,
         manifest: Arc<Manifest>,
+        caller: Caller,
         init: InitCtx,
     ) -> Result<Program, String> {
         let name = format!("[extensions] {}", manifest.name);
-        let caller = Caller {
-            extension: manifest.id.clone(),
-            project: None,
-        };
         let start = crate::wasm::Start {
             source,
             cache: self.store.root().join(crate::component::COMPILED),
@@ -671,6 +672,7 @@ impl Router {
         &self,
         _source: Source,
         manifest: Arc<Manifest>,
+        _caller: Caller,
         _init: InitCtx,
     ) -> Result<Program, String> {
         Err(format!(

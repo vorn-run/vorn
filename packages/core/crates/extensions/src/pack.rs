@@ -174,6 +174,39 @@ pub fn is_safe_id(id: &str) -> bool {
         && !id.contains("..")
 }
 
+/// Ids Vorn's own workflow ids start with (`import:`, `connector:`,
+/// `system:`): an extension of that id would own them.
+pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
+
+/// The namespace of the extensions Vorn ships: one installed under such an
+/// id would own its workflows (`vorn.connectors:` and the rest).
+pub const SHIPPED_NAMESPACE: &str = "vorn.";
+
+/// Whether `id` is Vorn's: no installed or linked extension may have it.
+pub fn is_reserved(id: &str) -> bool {
+    // The one place to admit a shipped package, by pinned checksum, once built-ins install like any other.
+    RESERVED_IDS.contains(&id) || id.starts_with(SHIPPED_NAMESPACE)
+}
+
+/// Refuses an id an extension may not have: unsafe as a directory, or
+/// reserved for Vorn's own extensions and workflows.
+pub fn check_id(id: &str) -> Result<(), String> {
+    if !is_safe_id(id) {
+        return Err(format!("\"{id}\" is not an extension id"));
+    }
+    if id.starts_with(SHIPPED_NAMESPACE) {
+        return Err(format!(
+            "\"{id}\" is reserved: ids starting with {SHIPPED_NAMESPACE} are the extensions Vorn ships"
+        ));
+    }
+    if is_reserved(id) {
+        return Err(format!(
+            "\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:"
+        ));
+    }
+    Ok(())
+}
+
 /// A version names a directory too, so it is held to the same rule.
 pub fn is_safe_version(version: &str) -> bool {
     let b = version.as_bytes();
@@ -210,7 +243,70 @@ pub fn read_dir_manifest(dir: &Path) -> Result<Manifest, String> {
     file::parse(&text).map_err(|e| e.to_string())
 }
 
+/// Relabels the manifest in `dir` from a pre-1.0 API to this Vorn's
+/// ([`crate::compat::relabel`]); whether it wrote. Install runs it on an
+/// unpacked package and vornd on every installed one at start, the one
+/// rewrite for both.
+pub fn relabel_dir(dir: &Path) -> Result<bool, String> {
+    use std::io::Write;
+    let toml = dir.join(file::FILE);
+    let refused = |e: &dyn std::fmt::Display| format!("cannot relabel {}: {e}", toml.display());
+    match fs::symlink_metadata(&toml) {
+        Ok(m) if m.file_type().is_symlink() => return Err(refused(&"it is a symbolic link")),
+        Ok(_) => {}
+        Err(_) => return Ok(false),
+    }
+    let Ok(text) = fs::read_to_string(&toml) else {
+        return Ok(false);
+    };
+    let Some(next) = crate::compat::relabel(&text) else {
+        return Ok(false);
+    };
+    // create_new refuses any path already there, a symbolic link included,
+    // so a folder from a repository cannot aim the write elsewhere.
+    let tmp = dir.join(format!(".{}.{}.tmp", file::FILE, std::process::id()));
+    let mut out = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| refused(&e))?;
+    let written = out
+        .write_all(next.as_bytes())
+        .and_then(|()| out.sync_all())
+        .and_then(|()| fs::rename(&tmp, &toml));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(refused(&e));
+    }
+    Ok(true)
+}
+
 impl PackStore {
+    /// Relabels every installed version's manifest written for the pre-1.0
+    /// API; a linked folder is the person's own and is left alone. Answers
+    /// the folders it rewrote, and the ones it could not with why.
+    pub fn relabel_installed(&self) -> (Vec<PathBuf>, Vec<String>) {
+        let (mut done, mut failed) = (Vec::new(), Vec::new());
+        for id in self.ids() {
+            let Ok(entries) = fs::read_dir(self.root.join(&id)) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                let named = entry.file_name().to_str().is_some_and(is_safe_version);
+                if !named || !entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    continue;
+                }
+                match relabel_dir(&dir) {
+                    Ok(true) => done.push(dir),
+                    Ok(false) => {}
+                    Err(why) => failed.push(why),
+                }
+            }
+        }
+        (done, failed)
+    }
+
     pub fn new(root: impl Into<PathBuf>) -> PackStore {
         PackStore { root: root.into() }
     }
@@ -417,6 +513,92 @@ mod tests {
     }
 
     #[test]
+    fn installed_packages_written_for_0_9_are_relabelled_and_read_again() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = install(root.path(), "old", "1.0.0", &extension("Old"));
+        let toml = dir.join(file::FILE);
+        let text = fs::read_to_string(&toml).unwrap();
+        fs::write(&toml, text.replace(manifest::API, "vorn:extension@0.9")).unwrap();
+        let linked = tempfile::tempdir().unwrap();
+        fs::write(
+            linked.path().join(file::FILE),
+            "api = \"vorn:extension@0.9\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.path().join("mine")).unwrap();
+        fs::write(
+            root.path().join("mine").join(CURRENT_FILE),
+            json!({ "linked": linked.path() }).to_string(),
+        )
+        .unwrap();
+        let store = PackStore::new(root.path());
+        assert!(store.describe("old").is_none(), "0.9 is refused as it is");
+
+        let (done, failed) = store.relabel_installed();
+        assert_eq!((done, failed), (vec![dir], Vec::<String>::new()));
+        assert_eq!(fs::read_to_string(&toml).unwrap(), text);
+        assert!(store.describe("old").is_some());
+        assert_eq!(
+            fs::read_to_string(linked.path().join(file::FILE)).unwrap(),
+            "api = \"vorn:extension@0.9\"\n",
+            "a linked folder is the person's own"
+        );
+        assert_eq!(store.relabel_installed().0, Vec::<PathBuf>::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relabelling_follows_no_symbolic_link() {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("rc");
+        fs::write(&target, "mine\n").unwrap();
+        let old = "api = \"vorn:extension@0.9\"\n";
+
+        // A temp file the repository planted as a link is never written through.
+        let repo = tempfile::tempdir().unwrap();
+        fs::write(repo.path().join(file::FILE), old).unwrap();
+        let planted = format!(".{}.{}.tmp", file::FILE, std::process::id());
+        symlink(&target, repo.path().join(&planted)).unwrap();
+        symlink(&target, repo.path().join(format!("{}.tmp", file::FILE))).unwrap();
+        assert!(relabel_dir(repo.path()).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "mine\n");
+        assert_eq!(
+            fs::read_to_string(repo.path().join(file::FILE)).unwrap(),
+            old
+        );
+
+        // Nor is a manifest that is itself a link.
+        let repo = tempfile::tempdir().unwrap();
+        fs::write(&target, old).unwrap();
+        symlink(&target, repo.path().join(file::FILE)).unwrap();
+        let refused = relabel_dir(repo.path()).unwrap_err();
+        assert!(refused.ends_with("it is a symbolic link"), "{refused}");
+        assert_eq!(fs::read_to_string(&target).unwrap(), old);
+    }
+
+    #[test]
+    fn ids_vorn_names_its_own_workflows_by_are_reserved() {
+        for id in RESERVED_IDS {
+            let refused = check_id(id).unwrap_err();
+            assert_eq!(
+                refused,
+                format!("\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:")
+            );
+        }
+        for id in ["vorn.connectors", "vorn.workflows", "vorn.anything"] {
+            assert_eq!(
+                check_id(id).unwrap_err(),
+                format!(
+                    "\"{id}\" is reserved: ids starting with vorn. are the extensions Vorn ships"
+                )
+            );
+        }
+        assert!(check_id("importer").is_ok() && check_id("vornish.x").is_ok());
+        assert!(check_id("a/b").is_err());
+    }
+
+    #[test]
     fn describes_an_installed_extension() {
         let root = tempfile::tempdir().unwrap();
         let dir = install(root.path(), "ext", "1.0.0", &extension("Ext"));
@@ -499,7 +681,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         fs::write(
             folder.path().join(file::FILE),
-            "id = \"local.hello\"\nname = \"Hello\"\nversion = \"0.1.0\"\napi = \"vorn:extension@0.9\"\n[actions.greet]\ncommand = [\"bash\", \"greet.sh\"]\n",
+            "id = \"local.hello\"\nname = \"Hello\"\nversion = \"0.1.0\"\napi = \"vorn:extension@1.0\"\n[actions.greet]\ncommand = [\"bash\", \"greet.sh\"]\n",
         )
         .unwrap();
         fs::write(folder.path().join("greet.sh"), "echo hi\n").unwrap();

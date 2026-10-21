@@ -3,7 +3,7 @@
 id = "vorn.agents.hermes"
 name = "Hermes Agent"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Runs Hermes Agent: launches it, resumes a session by id and lists its past sessions."
 
 [agent]

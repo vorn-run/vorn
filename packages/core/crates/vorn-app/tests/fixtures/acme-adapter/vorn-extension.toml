@@ -3,7 +3,7 @@
 id = "test.acme"
 name = "Acme"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Runs the Acme test agent."
 
 [agent]

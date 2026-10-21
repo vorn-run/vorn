@@ -44,7 +44,7 @@ mod tests {
             r#"id = "checks"
 name = "Checks"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "index.js"]

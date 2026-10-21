@@ -2086,6 +2086,15 @@ impl Connectors {
         }
     }
 
+    /// Moves the workflows seeded under [`conns::OLD_SEEDED_PREFIX`] into the
+    /// built-in's own namespace with their runs and inbox; run once at start,
+    /// before anything reads them, and a no-op once they have moved.
+    pub async fn move_seeded(&self) -> Result<usize, String> {
+        let to = format!("{ID}:");
+        self.store(move |s| s.rename_workflows(conns::OLD_SEEDED_PREFIX, &to))
+            .await
+    }
+
     /// Settles every installed pack's implicit connection; run at start.
     pub async fn reconcile(&self) {
         for pack in self.packs().list() {

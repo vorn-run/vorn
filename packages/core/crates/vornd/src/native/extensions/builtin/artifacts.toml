@@ -1,7 +1,7 @@
 id = "vorn.artifacts"
 name = "Artifacts"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "Pages and documents an agent publishes for you to read and comment on, opened beside its session, kept in versions; and the review pages approval gates keep, with your comments sent back with the gate's answer. Off, they are kept but not shown, and agents cannot publish."
 

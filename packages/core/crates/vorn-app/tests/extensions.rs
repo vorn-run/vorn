@@ -32,7 +32,7 @@ fn install(home: &Path) {
     let manifest = r#"id = "rep"
 name = "Reporter"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [service]
 command = ["node", "index.js"]

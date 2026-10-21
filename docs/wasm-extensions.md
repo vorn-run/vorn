@@ -25,7 +25,7 @@ inside the package, in place of `command`.
 id = "acme.hello"
 name = "Hello"
 version = "0.1.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 
 [build]
 command = ["cargo", "build", "--release", "--target", "wasm32-wasip2"]
@@ -154,12 +154,11 @@ in its manifest. The host asks again whenever the extension's rows change,
 and when the place shows.
 
 A settings page is listed under Extensions in the Settings sidebar, and in
-the palette as its title and "Settings". One of the extensions Vorn ships may name
-the app's own page it follows with `after` (`appearance`, `general`,
-`updates`, `notifications`, `experimental`, `agents`, `mcp`, `keys` or
-`network`): a page that moved out of the app into a built-in, as SSH &
-Hosts after `agents`, so it keeps its place and its palette entry, its bare
-title. Another extension's `after` is ignored.
+the palette as its title and "Settings". It may name the app's own page it
+follows with `after` (`appearance`, `general`, `updates`, `notifications`,
+`experimental`, `agents`, `mcp`, `keys` or `network`), as SSH & Hosts
+follows `agents`, so it keeps that place and its palette entry, its bare
+title.
 
 A badge, a card footer and a sidebar row's marks draw once per session: the
 tree's root is a box holding one child per session, its id the session's
@@ -254,7 +253,7 @@ asks for, not what the page wanders to. Its `page` events carry:
 | `opened` | `url`                    | the page opened a window                                  |
 | `go`     | `url`, `version`         | the client's own controls moved it, as to another version |
 
-Only the extensions Vorn ships may hold a `web` part (the `web` permission).
+A `web` part needs the `web` permission.
 
 A `video` part is a simulator's screen the client takes and draws itself, a
 few times a second, inside its bezel, with the header's `tools`, a bar of
@@ -280,8 +279,7 @@ lists the simulators and reports them. Its `page` events carry:
 | `listed`  | `devices` or `error` | the simulators a `loading` picker asked for            |
 | `saved`   | `path` or `error`    | how the screenshot `save` asked for went               |
 
-Only the extensions Vorn ships may hold a `video` part (the `video`
-permission); Vorn's own Device (`packages/core/extensions/device`) draws
+A `video` part needs the `video` permission; Vorn's own Device (`packages/core/extensions/device`) draws
 the device pane with one. A Device row with `card` set is drawn over the
 session card's phone button instead of in a pane: its picker, then the
 button waiting while what was picked there starts.
@@ -368,8 +366,10 @@ current, isGitRepo}`, under `git.read`.
   under `files.read`.
 - `workflow.run` (`{workflowId, inputs}`) runs a workflow by hand,
   `workflow.resolveGate` (`{runId, nodeId, decision}`) answers a gate and
-  `workflow.gates` lists the gates waiting for a person. Like `workflow.list`,
-  they are open only to the extensions Vorn ships: a gate waits for a person.
+  `workflow.gates` lists the gates waiting for a person, under
+  `workflows.write` and `workflows.read`. A workflow outside the caller's
+  namespace (`<extension id>:`) also needs `process.run`, since its steps
+  may run commands.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
   changed).
@@ -377,7 +377,7 @@ current, isGitRepo}`, under `git.read`.
 ### `web.call`: the Browser's web views
 
 `web.call` (`{view, op, params}`) asks the app's web view `view`, a session
-id, under the `web` permission, which only the extensions Vorn ships hold.
+id, under the `web` permission.
 vornd passes it to the app as `web:{op}` with `view` among the params, and
 answers what the app does; with no app connected it fails.
 
@@ -421,7 +421,7 @@ saying the native app cannot yet.
 ### `remote.*`: the SSH built-in's hosts and keys
 
 Vorn's SSH built-in edits the remote hosts and the stored SSH keys under the
-`remote` permission, which only the extensions Vorn ships hold. The hosts
+`remote` permission. The hosts
 stay in vornd's config (`remoteHosts`) and the keys in its key store, so
 sessions on a remote host keep running with the built-in off.
 

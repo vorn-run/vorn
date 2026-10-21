@@ -1,7 +1,7 @@
 id = "vorn.files"
 name = "Files"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 publisher = "Vorn"
 description = "A session's files beside its terminal: the folder as a tree, files opened in tabs, edited, found in and saved, and popped out into cards of their own. Off, the Files pane and its cards are gone; the files are untouched."
 

@@ -894,7 +894,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
           "enabled": true, "workspaceId": "personal", "nodes": trigger("manual"), "edges": [] },
         { "id": "wf-plain", "name": "Nightly", "icon": "", "iconColor": "", "enabled": true, "workspaceId": "personal",
           "nodes": trigger("recurring"), "edges": [] },
-        { "id": "connector:c1:issue.opened", "name": "On issue", "icon": "", "iconColor": "", "enabled": true,
+        { "id": "vorn.connectors:c1:issue.opened", "name": "On issue", "icon": "", "iconColor": "", "enabled": true,
           "workspaceId": "personal", "nodes": trigger("connectorPoll"), "edges": [] }
     ]);
     app.rpc().call("config:save", config).expect("saved");
@@ -902,7 +902,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
     let mut shot = Shot::new();
     shot.until(&mut app, "the projects and workflows", |app, _| {
         let wfs = app.store.config["workflows"].as_array()?;
-        let seeded = ["wf-bug", "wf-plain", "connector:c1:issue.opened"]
+        let seeded = ["wf-bug", "wf-plain", "vorn.connectors:c1:issue.opened"]
             .iter()
             .all(|id| wfs.iter().any(|w| w["id"] == *id));
         (app.store.projects.len() == 3 && seeded).then_some(())
@@ -940,7 +940,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
             icon_run("run-sched", "wf-plain", json!({})),
             icon_run(
                 "run-pr",
-                "connector:c1:issue.opened",
+                "vorn.connectors:c1:issue.opened",
                 json!({ "connectorItem": {
                 "connectionId": "c1", "connectorId": "github", "externalId": "42",
                 "externalUrl": "https://example.test/o/r/pull/42", "title": "Fix the build"

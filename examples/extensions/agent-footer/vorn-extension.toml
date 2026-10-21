@@ -3,7 +3,7 @@
 id = "example.agent-footer"
 name = "Agent footer"
 version = "1.0.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Shows each agent's model and its last tool call under its card."
 
 [declares]

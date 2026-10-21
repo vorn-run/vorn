@@ -203,6 +203,14 @@ impl<H: Host> Registry<H> {
         }
     }
 
+    /// The extension that declares `node_type` itself, on or off; `None`
+    /// for a type nobody declares, which runs as the fallback.
+    pub fn provider(&self, node_type: &str) -> Option<String> {
+        let inner = self.read();
+        let entry = inner.nodes.iter().find(|e| e.declared.id == node_type);
+        entry.map(|e| e.declared.provider.clone())
+    }
+
     /// How a step of `node_type` runs.
     pub fn resolve(&self, node_type: &str) -> Resolved<H> {
         let inner = self.read();

@@ -2,7 +2,7 @@
 id = "vorn.agents.claude"
 name = "Claude Code"
 version = "0.9.0"
-api = "vorn:extension@0.9"
+api = "vorn:extension@1.0"
 description = "Runs Claude Code: launches and resumes it, lists its models, reads its status and answers its hooks."
 
 [agent]

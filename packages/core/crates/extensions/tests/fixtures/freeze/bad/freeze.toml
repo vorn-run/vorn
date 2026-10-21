@@ -1,0 +1,8 @@
+[core]
+"crates/core" = "billing"
+
+[hosts]
+"crates/host" = "the server"
+
+[exceptions.hooks]
+"crates/host/src/lib.rs#vorn.gone" = "a hook that was moved out"
