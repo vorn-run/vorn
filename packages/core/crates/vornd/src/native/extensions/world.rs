@@ -277,7 +277,8 @@ fn session_json(t: &crate::registry::TerminalSession) -> Value {
         .unwrap_or(&t.project_name);
     json!({
         "id": t.id, "agent": t.agent_type, "status": t.status, "name": name,
-        "projectPath": t.project_path, "worktreePath": t.worktree_path,
+        "projectName": t.project_name, "projectPath": t.project_path,
+        "worktreePath": t.worktree_path,
     })
 }
 

@@ -233,6 +233,20 @@ impl App {
         }
     }
 
+    /// Closes the cards' tree panes whose contribution went, as its extension or setting went off.
+    fn keep_panes(&mut self) {
+        let points = &self.st.points;
+        let gone: Vec<String> = (self.st.ext.panes.iter())
+            .filter(|(_, p)| {
+                crate::extensions::view_key(p).is_some_and(|k| points.get(&k).is_none())
+            })
+            .map(|(session, _)| session.clone())
+            .collect();
+        for session in gone {
+            self.ext_close(&session);
+        }
+    }
+
     /// What preference `key` of extension `id` holds now, as its page shows it.
     fn preference(&self, id: &str, key: &str) -> Value {
         let lists = [&self.st.points.builtins, &self.st.plugins.packs];
@@ -303,6 +317,7 @@ impl App {
                     Err(_) => self.st.points.listed(&[]),
                 }
                 self.keep_view();
+                self.keep_panes();
             }
             PointCall::NodeTypes => {
                 self.st.points.node_types = match answer {

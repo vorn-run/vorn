@@ -282,30 +282,28 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         .clone()
         .filter(|_| info.is_worktree == Some(true));
     // First, and not behind a submenu: what this card can show.
-    let mut items: Vec<Item> =
-        s.st.ext
-            .items(id)
-            .into_iter()
-            .map(|p| {
-                let label = if p.open {
-                    format!("Close {}", p.title)
-                } else {
-                    p.title.clone()
-                };
-                let act = Act::Ext(crate::extensions::ExtAct::Toggle {
-                    session: id.to_owned(),
-                    extension: p.extension_id,
-                    pane: p.pane_id,
-                });
-                let mut it = Item::new("puzzle", label, act).detail(p.extension_name);
-                it.icon = None;
-                it.mark(super::panes::extension_icon(
-                    p.icon.as_ref(),
-                    14.0,
-                    c(look::GRAY_500),
-                ))
-            })
-            .collect();
+    let mut items: Vec<Item> = (s.st.ext.items(id).into_iter())
+        .chain(s.st.ext.builtin_items(id, &s.st.points))
+        .map(|p| {
+            let label = if p.open {
+                format!("Close {}", p.title)
+            } else {
+                p.title.clone()
+            };
+            let act = Act::Ext(crate::extensions::ExtAct::Toggle {
+                session: id.to_owned(),
+                extension: p.extension_id,
+                pane: p.pane_id,
+            });
+            let mut it = Item::new("puzzle", label, act).detail(p.extension_name);
+            it.icon = None;
+            it.mark(super::panes::extension_icon(
+                p.icon.as_ref(),
+                14.0,
+                c(look::GRAY_500),
+            ))
+        })
+        .collect();
     let args = serde_json::json!({ "sessionId": id }).to_string();
     for (act, icon, label, _) in super::points::menu_items(s, "card", &args) {
         let mut it = Item::new("puzzle", label, act);

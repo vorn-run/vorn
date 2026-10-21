@@ -40,7 +40,11 @@ impl App {
                     .filter(|p| p.tree)
                 {
                     let open = crate::extensions::OpenPane {
-                        nonce: format!("{}{}", crate::extensions::VIEW_NONCE, p.key()),
+                        nonce: format!(
+                            "{}{}",
+                            crate::extensions::VIEW_NONCE,
+                            crate::points::scoped(&p.key(), &session)
+                        ),
                         extension_id: extension.clone(),
                         pane_id: pane.clone(),
                         url: None,

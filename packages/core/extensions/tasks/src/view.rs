@@ -7,7 +7,7 @@ use vorn_extension_sdk::tree::{Cards, Node, TextStyle, Tone};
 use vorn_extension_sdk::Value;
 
 /// The board's columns: a status, its title, icon and tone.
-const LANES: [(&str, &str, &str, Tone); 5] = [
+pub(crate) const LANES: [(&str, &str, &str, Tone); 5] = [
     ("todo", "Todo", "circle", Tone::Idle),
     ("in_progress", "In Progress", "clock", Tone::Accent),
     ("in_review", "In Review", "eye", Tone::Busy),

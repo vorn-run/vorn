@@ -570,7 +570,11 @@ pub(super) fn main_view(s: &Screen<'_>) -> El {
 /// An extension pane's body.
 pub(super) fn pane(s: &Screen<'_>, key: &str) -> El {
     match s.st.points.get(key) {
-        Some(p) => div().col().p(12.0).gap(8.0).child_if(drawn(s, p)),
+        Some(_) => div()
+            .col()
+            .p(12.0)
+            .gap(8.0)
+            .child_if(draw_scoped(s, key, None, None)),
         None => text("This pane's extension is off", 12.0, k::GRAY_500).line_height(16.0),
     }
 }

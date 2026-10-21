@@ -32,7 +32,10 @@ struct Vorn {
     /// `workflow.fire`'s args, in order.
     fired: Vec<Value>,
     rows: BTreeMap<String, Vec<Value>>,
+    /// The badges' ops, in order.
     published: Vec<Op>,
+    /// How many times the open panes were told to draw again.
+    redraws: usize,
     files: BTreeMap<String, Vec<u8>>,
 }
 
@@ -56,6 +59,7 @@ impl Vorn {
             fired: Vec::new(),
             rows: BTreeMap::new(),
             published: Vec::new(),
+            redraws: 0,
             files: BTreeMap::new(),
         }
     }
@@ -112,6 +116,10 @@ impl Host for Vorn {
                 Ok(json!({ "tasks": tasks, "next": (n == limit).then_some(offset + n) }))
             }
             "project.list" => self.store.call("dbListProjects", json!([])).map_err(err),
+            "sessions.get" => Ok(match args["sessionId"].as_str() {
+                Some("s-app") => json!({ "id": "s-app", "projectName": "app" }),
+                _ => Value::Null,
+            }),
             "agents.list" => Ok(json!([{ "id": "claude" }, { "id": "codex" }])),
             CHANGED => {
                 self.changed.push(args);
@@ -134,6 +142,10 @@ impl Host for Vorn {
     }
 
     fn publish(&mut self, collection: &str, ops: Vec<Op>) {
+        if collection == pane::REDRAW {
+            self.redraws += 1;
+            return;
+        }
         let rows = self.rows.entry(collection.to_owned()).or_default();
         for op in &ops {
             match op {
@@ -724,4 +736,98 @@ fn its_manifest_reads_and_draws_only_trees() {
     assert_eq!(tools.as_array().unwrap().len(), 7);
     let docs: Value = serde_json::from_str(NODE_DOCS).unwrap();
     assert!(docs.get("createTaskFromItem").is_some());
+}
+
+fn pane_at(t: &mut Tasks, v: &mut Vorn, scope: &str) -> tree::Node {
+    let answer = ask(
+        t,
+        v,
+        tree::RENDER,
+        json!({ "point": pane::PANE, "surface": { "scope": scope } }),
+    )
+    .unwrap();
+    tree::read(&answer).unwrap().tree
+}
+
+/// Each entry's id under its group's heading, in order.
+fn listed(pane: &tree::Node) -> Vec<(String, Vec<String>)> {
+    pane.children
+        .iter()
+        .filter_map(|g| {
+            let tree::Kind::Group { heading, .. } = &g.kind else {
+                return None;
+            };
+            let ids = g.children.iter().filter_map(|e| e.id.clone()).collect();
+            Some((heading.clone(), ids))
+        })
+        .collect()
+}
+
+fn pane_event(t: &mut Tasks, v: &mut Vorn, id: &str, kind: &str, value: &str) -> Value {
+    ask(
+        t,
+        v,
+        tree::EVENT,
+        json!({ "point": pane::PANE, "event": { "id": id, "kind": kind, "value": value, "scope": "s-app" } }),
+    )
+    .unwrap()
+}
+
+#[test]
+fn the_pane_beside_a_card_lists_only_its_projects_tasks() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = Vorn::new(dir.path());
+    let mut t = tasks();
+    for (id, project) in [("a1", "app"), ("o1", "other"), ("a2", "app")] {
+        let task = json!({ "id": id, "projectName": project, "title": id });
+        ask(&mut t, &mut v, "task:create", task).unwrap();
+    }
+    ask(&mut t, &mut v, "move", json!({ "id": "a2", "to": "done" })).unwrap();
+
+    let pane = pane_at(&mut t, &mut v, "s-app");
+    assert_eq!(
+        listed(&pane),
+        [
+            ("Todo".to_owned(), vec!["a1".to_owned()]),
+            ("Done".to_owned(), vec!["a2".to_owned()]),
+        ]
+    );
+    let unknown = pane_at(&mut t, &mut v, "s-gone");
+    assert!(matches!(unknown.kind, tree::Kind::Notice { .. }));
+}
+
+#[test]
+fn a_task_opens_in_the_pane_and_moves_from_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = Vorn::new(dir.path());
+    let mut t = tasks();
+    let task = json!({ "id": "a1", "projectName": "app", "title": "Ship" });
+    ask(&mut t, &mut v, "task:create", task).unwrap();
+
+    pane_event(&mut t, &mut v, "a1", "toggle", "true");
+    let pane = pane_at(&mut t, &mut v, "s-app");
+    let row = &pane.children[0].children[0];
+    let tree::Kind::Entry(e) = &row.kind else {
+        panic!("an entry: {row:?}")
+    };
+    assert_eq!(e.expanded, Some(true));
+    assert_eq!(e.code.as_deref(), Some("APP-A1"));
+
+    let redraws = v.redraws;
+    pane_event(&mut t, &mut v, "status:a1", "select", "in_review");
+    assert_eq!(v.read("a1")["status"], "in_review");
+    assert_eq!(v.redraws, redraws + 1, "open panes draw again");
+    pane_event(&mut t, &mut v, "complete:a1", "click", "");
+    assert_eq!(v.read("a1")["status"], "done");
+    assert_eq!(
+        pane_event(&mut t, &mut v, "focus:s9", "click", ""),
+        json!({ "focus": "s9" })
+    );
+
+    pane_event(&mut t, &mut v, "a1", "toggle", "false");
+    let pane = pane_at(&mut t, &mut v, "s-app");
+    let tree::Kind::Entry(e) = &pane.children[0].children[0].kind else {
+        panic!("an entry")
+    };
+    assert_eq!(e.expanded, Some(false));
 }

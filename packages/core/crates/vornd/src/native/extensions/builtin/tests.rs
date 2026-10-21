@@ -724,3 +724,19 @@ fn the_old_workflow_editor_switch_folds_into_workflows_once() {
         assert_eq!(saved[vorn_workflows::ID], json!(merged));
     }
 }
+
+#[test]
+fn the_tasks_pane_is_offered_only_while_its_setting_is_on() {
+    let m = tasks::manifest();
+    let pane = |on: bool| {
+        let settings = serde_json::Map::from_iter([("pane".to_owned(), json!(on))]);
+        vorn_extensions::points::listed(&m, &settings)
+            .iter()
+            .any(|p| p["kind"] == "panes" && p["id"] == "tasks")
+    };
+    assert!(pane(true));
+    assert!(!pane(false));
+    let s = setup();
+    let defaults = s.router.preferences(&m);
+    assert_eq!(defaults.get("pane"), Some(&json!(true)), "on by default");
+}

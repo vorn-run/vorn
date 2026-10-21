@@ -173,7 +173,9 @@ in, so their tree is asked for with that place as `surface.scope`: the
 session a pane or a shell's commands draw for, the row a card draws for. Its
 events carry the same `scope`, and the `width` its place drew at. A tree with
 a scope is asked for again when a row whose `id` is that scope changes, in
-any of the extension's collections.
+any of the extension's collections; a clear of any collection asks for
+every scoped tree again. A pane's tree is offered in its card's menu, and
+`sessions.get` on its scope gives the card's `projectName`.
 
 - `[[contributes.cards]]` names `rows`: each row of that collection is a
   card in the grid, after the session its `session` field names, called by
