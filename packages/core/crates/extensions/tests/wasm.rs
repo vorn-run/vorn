@@ -16,10 +16,11 @@ use vorn_extensions::api::types::{CallCtx, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::component::{Bundled, Compiler, COMPILED};
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
-use vorn_extensions::install::Installs;
+use vorn_extensions::install::{sha256_hex, Installs, Pinned, Trust};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
-use vorn_extensions::router::{Router, RouterSettings};
+use vorn_extensions::router::{Hook, Router, RouterSettings};
+use vorn_extensions::shipped::Shipped;
 
 /// The probe component, built once per test run.
 fn probe() -> &'static Path {
@@ -31,6 +32,8 @@ fn probe() -> &'static Path {
 #[derive(Default)]
 struct Core {
     calls: Mutex<Vec<(String, String)>>,
+    /// Whether each caller owned its own namespace, as its calls came.
+    owned: Mutex<Vec<bool>>,
     started: Mutex<Vec<(String, SessionStart)>>,
 }
 
@@ -40,6 +43,10 @@ impl World for Core {
             .lock()
             .unwrap()
             .push((caller.extension.clone(), method.to_owned()));
+        self.owned
+            .lock()
+            .unwrap()
+            .push(caller.owns(&format!("{}:w", caller.extension)));
         let answer = match method {
             "sessions.list" => Ok(json!([{ "id": "s1" }])),
             m => Err(ExtError::new("unknown-method", m)),
@@ -483,4 +490,75 @@ async fn without_a_compiler_only_what_the_cache_holds_runs() {
     );
     bare.lifecycle().stop_all().await;
     rig.router.lifecycle().stop_all().await;
+}
+
+/// The probe packed as Vorn packs what it ships: `vorn.probe`, its manifest naming its hooks.
+fn probe_pack() -> Vec<u8> {
+    let text = manifest(ALL).replace(ID, "vorn.probe") + "start = \"started\"\nstop = \"stopped\"\n";
+    let wasm = fs::read(probe()).unwrap();
+    let mut tar = tar::Builder::new(Vec::new());
+    for (path, bytes) in [
+        ("vorn-extension.toml", text.as_bytes()),
+        ("probe.wasm", wasm.as_slice()),
+    ] {
+        let mut header = tar::Header::new_ustar();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        tar.append_data(&mut header, format!("vorn.probe-1.2.3/{path}"), bytes)
+            .unwrap();
+    }
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut gz, &tar.into_inner().unwrap()).unwrap();
+    gz.finish().unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_pack_vorn_pins_owns_its_namespace_and_hears_its_start_and_stop() {
+    let bytes = probe_pack();
+    let shipped = Shipped {
+        id: "vorn.probe",
+        version: "1.2.3",
+        sha256: &sha256_hex(&bytes),
+        default: true,
+        bytes: &bytes,
+    };
+    let trust = Trust {
+        pins: vec![shipped.pinned()],
+        bundled: Default::default(),
+    };
+    let root = tempfile::tempdir().unwrap();
+    let store = PackStore::new(root.path().join("extensions"));
+    let installs = Installs::new(store.clone(), "git", Vec::new()).trusting(trust.clone());
+    vorn_extensions::shipped::install(&installs, &shipped).unwrap();
+    let core = Arc::new(Core::default());
+    let router_trusting = |trust: Trust| {
+        let mut settings = RouterSettings::new(Vec::new(), "9.9.9");
+        settings.compiler = Compiler::InProcess;
+        settings.trust = trust;
+        Router::new(
+            store.clone(),
+            Lifecycle::new(Policy::default()),
+            Arc::clone(&core) as Arc<dyn World>,
+            settings,
+            vorn_extensions::events::Bus::new(),
+        )
+    };
+    let list = json!({ "method": "sessions.list", "args": {} });
+
+    let router = router_trusting(trust);
+    router.start_installed().await;
+    assert_eq!(router.rows("vorn.probe", "hooks"), [json!({ "id": "started" })]);
+    router.call("vorn.probe", "call", list.clone(), ctx()).await.unwrap();
+    router.call_hook("vorn.probe", Hook::Stop).await;
+    assert_eq!(
+        router.rows("vorn.probe", "hooks"),
+        [json!({ "id": "started" }), json!({ "id": "stopped" })]
+    );
+    router.lifecycle().stop_all().await;
+
+    // The same files, not vouched for by this build, own nothing of Vorn's.
+    let unpinned = router_trusting(Trust::default());
+    unpinned.call("vorn.probe", "call", list, ctx()).await.unwrap();
+    assert_eq!(*core.owned.lock().unwrap(), [true, false]);
+    unpinned.lifecycle().stop_all().await;
 }

@@ -25,6 +25,7 @@ use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
 use crate::component::{Bundled, Compiler, Source};
 use crate::events::{self, Bus, Queue, Tally};
 use crate::gate::{self, Caller, StorageCall, World};
+use crate::install::Trust;
 use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
@@ -50,6 +51,8 @@ pub struct RouterSettings {
     pub compiler: Compiler,
     /// The file the extensions' preferences are kept in; none keeps them in memory.
     pub preferences: Option<PathBuf>,
+    /// The packs this build pins: one installed as such owns Vorn's namespace (`vorn.`).
+    pub trust: Trust,
 }
 
 impl RouterSettings {
@@ -63,8 +66,18 @@ impl RouterSettings {
             placed_blobs: Vec::new(),
             compiler: Compiler::None,
             preferences: None,
+            trust: Trust::default(),
         }
     }
+}
+
+/// When Vorn calls an installed extension's own action ([`crate::manifest::Service`]'s `start` and `stop`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hook {
+    /// Vorn started, or the extension was just installed or updated.
+    Start,
+    /// It is about to be uninstalled.
+    Stop,
 }
 
 /// The most events one `guest.on-event` carries.
@@ -473,6 +486,38 @@ impl Router {
         ))
     }
 
+    /// Calls installed extension `id`'s `hook` action, when its manifest
+    /// names one. A failure is logged: nothing a person waits for depends on it.
+    pub async fn call_hook(&self, id: &str, hook: Hook) {
+        let Some(pack) = self.program(id) else {
+            return;
+        };
+        let Some(action) = pack.manifest.service.as_ref().and_then(|s| match hook {
+            Hook::Start => s.start.clone(),
+            Hook::Stop => s.stop.clone(),
+        }) else {
+            return;
+        };
+        let ctx = CallCtx {
+            caller: "client".to_owned(),
+            project: None,
+        };
+        if let Err(e) = self.call(id, &action, Value::Null, ctx).await {
+            warn!("[extensions] {} {action}: {}", pack.name(), e.message);
+        }
+    }
+
+    /// Calls the start action of every installed extension whose manifest names one, one after another.
+    pub async fn start_installed(&self) {
+        let store = self.store.clone();
+        let ids = tokio::task::spawn_blocking(move || store.ids())
+            .await
+            .unwrap_or_default();
+        for id in ids {
+            self.call_hook(&id, Hook::Start).await;
+        }
+    }
+
     /// Stops the service of extension `id`, whatever it runs as.
     pub async fn stop(&self, id: &str) {
         self.lifecycle.stop(&ServiceKey::new(id, "")).await;
@@ -625,10 +670,7 @@ impl Router {
         let launch = self.launch(pack, argv)?;
         let (tx, rx): (Inbox, _) = mpsc::channel(64);
         let child = Child::start_with(&launch, format!("[extensions] {}", pack.name()), Some(tx))?;
-        let caller = Caller {
-            extension: pack.id.clone(),
-            ..Caller::of(&pack.manifest)
-        };
+        let caller = self.caller_of(pack);
         tokio::spawn(dispatch(
             self.me.clone(),
             Arc::new(pack.manifest.clone()),
@@ -653,7 +695,7 @@ impl Router {
         };
         if let Some(component) = &service.component {
             let source = Source::File(pack.path.join(component));
-            let caller = Caller::of(&pack.manifest);
+            let caller = self.caller_of(pack);
             return self
                 .start_component(source, Arc::new(pack.manifest.clone()), caller, ctx)
                 .await;
@@ -673,6 +715,15 @@ impl Router {
         }
         info!("[extensions] {} started", pack.name());
         Ok(Program::Child(child))
+    }
+
+    /// Who installed `pack` asks as: Vorn's own when it is the pack this build pins for its id.
+    fn caller_of(&self, pack: &InstalledPack) -> Caller {
+        Caller {
+            extension: pack.id.clone(),
+            builtin: crate::pack::is_reserved(&pack.id) && self.settings.trust.vouches_for(pack),
+            ..Caller::of(&pack.manifest)
+        }
     }
 
     async fn start_bundled(&self, bundled: &Bundled) -> Result<Program, String> {

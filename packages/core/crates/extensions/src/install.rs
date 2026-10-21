@@ -72,6 +72,14 @@ impl Trust {
         self.pins.contains(pin)
     }
 
+    /// Whether `pack` is installed as the very pack this build pins for its
+    /// id and version, which makes it Vorn's own: never a linked folder.
+    pub fn vouches_for(&self, pack: &InstalledPack) -> bool {
+        !pack.linked
+            && pin_of(&pack.id, &pack.version, pack.source.as_ref())
+                .is_some_and(|pin| self.vouches(&pin))
+    }
+
     /// Whether only a pack this build pins may have `id`.
     fn guards(&self, id: &str) -> bool {
         id.starts_with(SHIPPED_NAMESPACE) || self.bundled.contains(id)

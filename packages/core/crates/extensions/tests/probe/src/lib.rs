@@ -66,6 +66,11 @@ impl Extension for Probe {
                 host.publish(arg(&args, "collection", method)?, ops);
                 Ok(Value::Null)
             }
+            // The hooks a manifest names, each kept as a row of its own.
+            "started" | "stopped" => {
+                host.publish("hooks", vec![Op::Upsert(json!({ "id": method }))]);
+                Ok(Value::Null)
+            }
             "rows" => host
                 .rows(arg(&args, "collection", method)?)
                 .map(Value::from),
