@@ -39,7 +39,25 @@ fn an_adapter_installs_from_its_folder_as_any_extension_does() {
     let root = tempfile::tempdir().unwrap();
     let store = vorn_extensions::pack::PackStore::new(root.path().join("packages"));
     let installs = vorn_extensions::install::Installs::new(store.clone(), "git", Vec::new());
-    let pack = installs.link(&support::package("hermes")).unwrap();
+    let shipped = support::package("hermes");
+    let refused = installs.link(&shipped).unwrap_err();
+    assert!(refused.contains("the extensions Vorn ships"), "{refused}");
+
+    // A person's own adapter is the same folder under an id of its own.
+    let folder = tempfile::tempdir().unwrap();
+    for entry in fs::read_dir(&shipped).unwrap() {
+        let path = entry.unwrap().path();
+        fs::copy(&path, folder.path().join(path.file_name().unwrap())).unwrap();
+    }
+    let toml = folder.path().join("vorn-extension.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    fs::write(
+        &toml,
+        text.replacen("id = \"vorn.agents.hermes\"", "id = \"example.hermes\"", 1),
+    )
+    .unwrap();
+    let pack = installs.link(folder.path()).unwrap();
+    assert_eq!(pack.id, "example.hermes");
     let section = pack.manifest.agent.clone().expect("an [agent] section");
     let spec = vorn_agents::AgentSpec::from_toml(section).unwrap();
     assert_eq!(spec.id, "hermes");
