@@ -2308,6 +2308,8 @@ impl PackSource {
 
 /// Fetches the pack a catalog `entry` lists and stages it, pinned to the
 /// version and checksum the entry gives: bytes that are not those are refused.
+/// The catalog is not signed, so an entry in Vorn's own namespace installs
+/// only when it is exactly a pack this build ships.
 fn stage_listed(installs: &Installs, entry: &Value, fetch: &dyn Fetch) -> Result<Sheet, String> {
     let field = |key: &str| {
         entry
@@ -2322,12 +2324,13 @@ fn stage_listed(installs: &Installs, entry: &Value, fetch: &dyn Fetch) -> Result
         field("sha256")?,
         field("version")?,
     );
-    let bytes = fetch.get(url, PACK_TIMEOUT, PACK_MAX_BYTES, &|_, _| {})?;
     let pin = Pinned {
         id: id.to_owned(),
         version: version.to_owned(),
         sha256: sha256.to_owned(),
     };
+    installs.vouch(&pin)?;
+    let bytes = fetch.get(url, PACK_TIMEOUT, PACK_MAX_BYTES, &|_, _| {})?;
     installs.inspect_archive(&bytes, json!({ "catalog": id }), Some(&pin))
 }
 
@@ -2414,35 +2417,86 @@ mod tests {
         }
     }
 
-    #[test]
-    fn installs_a_listed_pack_only_with_the_checksum_listed() {
+    fn sample_pack(id: &str) -> Vec<u8> {
         let folder = tempfile::tempdir().unwrap();
         std::fs::write(
             folder.path().join(vorn_extensions::manifest::file::FILE),
-            "id = \"vorn.sample\"\nname = \"Sample\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"Vorn\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n",
+            format!("id = \"{id}\"\nname = \"Sample\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"Vorn\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n"),
         )
         .unwrap();
         std::fs::write(folder.path().join("hello.sh"), "true\n").unwrap();
         let out = tempfile::tempdir().unwrap();
         let tgz = out.path().join("sample.tgz");
         vorn_extensions::install::pack(folder.path(), &[], Some(&tgz), &[]).unwrap();
-        let bytes = std::fs::read(&tgz).unwrap();
+        std::fs::read(&tgz).unwrap()
+    }
+
+    fn listed(id: &str, sha256: &str) -> Value {
+        json!({ "id": id, "version": "1.0.0", "packUrl": "https://example.com/s", "sha256": sha256 })
+    }
+
+    #[test]
+    fn installs_a_listed_pack_only_with_the_checksum_listed() {
+        let bytes = sample_pack("acme.sample");
         let root = tempfile::tempdir().unwrap();
         let installs = Installs::new(
             PackStore::new(root.path()),
             PathBuf::from("git"),
             Vec::new(),
         );
-        let entry = |sha256: String| json!({ "id": "vorn.sample", "version": "1.0.0", "packUrl": "https://example.com/s", "sha256": sha256 });
-
-        let other = stage_listed(&installs, &entry("00".repeat(32)), &Served(bytes.clone()));
+        let other = stage_listed(
+            &installs,
+            &listed("acme.sample", &"00".repeat(32)),
+            &Served(bytes.clone()),
+        );
         assert!(other.unwrap_err().contains("not the one Vorn pinned"));
         let sha = vorn_extensions::install::sha256_hex(&bytes);
-        let sheet = stage_listed(&installs, &entry(sha.clone()), &Served(bytes)).unwrap();
-        let pack = installs.confirm(&sheet.token, "vorn.sample").unwrap();
+        let sheet = stage_listed(&installs, &listed("acme.sample", &sha), &Served(bytes)).unwrap();
+        let pack = installs.confirm(&sheet.token, "acme.sample").unwrap();
         let source = pack.source.unwrap();
-        assert_eq!(source["catalog"], "vorn.sample");
+        assert_eq!(source["catalog"], "acme.sample");
         assert_eq!(source["sha256"], sha.as_str());
+    }
+
+    #[test]
+    fn a_listed_pack_in_vorns_namespace_installs_only_as_this_build_pins_it() {
+        let bytes = sample_pack("vorn.sample");
+        let sha = vorn_extensions::install::sha256_hex(&bytes);
+        let root = tempfile::tempdir().unwrap();
+        let shipped = Pinned {
+            id: "vorn.sample".into(),
+            version: "1.0.0".into(),
+            sha256: sha.clone(),
+        };
+        let installs = Installs::new(
+            PackStore::new(root.path()),
+            PathBuf::from("git"),
+            Vec::new(),
+        )
+        .trusting(vorn_extensions::install::Trust {
+            pins: vec![shipped],
+            ..Default::default()
+        });
+        // An attacker's pack listed under Vorn's id, its checksum matching itself.
+        let theirs = sample_pack("vorn.sample")
+            .into_iter()
+            .chain(*b"x")
+            .collect::<Vec<u8>>();
+        let their_sha = vorn_extensions::install::sha256_hex(&theirs);
+        let refused = stage_listed(
+            &installs,
+            &listed("vorn.sample", &their_sha),
+            &Served(theirs.clone()),
+        );
+        assert!(refused.unwrap_err().contains("not a pack this Vorn ships"));
+        let mut newer = listed("vorn.sample", &sha);
+        newer["version"] = json!("9.0.0");
+        let refused = stage_listed(&installs, &newer, &Served(bytes.clone()));
+        assert!(refused.unwrap_err().contains("not a pack this Vorn ships"));
+        assert!(installs.store().ids().is_empty());
+
+        let sheet = stage_listed(&installs, &listed("vorn.sample", &sha), &Served(bytes)).unwrap();
+        installs.confirm(&sheet.token, "vorn.sample").unwrap();
     }
 
     #[test]

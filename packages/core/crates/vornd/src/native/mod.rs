@@ -546,14 +546,20 @@ impl Native {
     pub fn installs(self: &Arc<Self>, data_dir: &Path) -> Arc<vorn_extensions::install::Installs> {
         Arc::clone(self.installs.get_or_init(|| {
             let me = Arc::downgrade(self);
-            Arc::new(vorn_extensions::install::Installs::reading(
-                vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
-                Box::new(move || {
-                    me.upgrade()
-                        .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
-                        .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+            Arc::new(
+                vorn_extensions::install::Installs::reading(
+                    vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
+                    Box::new(move || {
+                        me.upgrade()
+                            .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
+                            .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+                    }),
+                )
+                .trusting(vorn_extensions::install::Trust {
+                    pins: crate::shipped::SET.iter().map(|s| s.pinned()).collect(),
+                    bundled: extensions::builtin::bundled_ids(),
                 }),
-            ))
+            )
         }))
     }
 

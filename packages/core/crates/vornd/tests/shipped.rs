@@ -257,6 +257,65 @@ async fn an_older_shipped_install_is_updated_and_the_persons_own_is_left_alone()
     assert_eq!(find("mine")["version"], "0.1.0");
 }
 
+/// Inspects `folder`, holding a manifest for `id` (an adapter of `agent`
+/// when given), to install from git and to link.
+async fn inspect_both(c: &mut Ws, folder: &Path, id: &str, agent: Option<&str>) -> Vec<Value> {
+    let adds = match agent {
+        Some(agent) => format!(
+            "[agent]\nid = \"{agent}\"\nname = \"Mine\"\n\n[agent.launch]\ncommand = \"{agent}\"\n"
+        ),
+        None => "[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n".to_owned(),
+    };
+    std::fs::write(
+        folder.join("vorn-extension.toml"),
+        format!("id = \"{id}\"\nname = \"Mine\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"me\"\n\n{adds}"),
+    )
+    .unwrap();
+    let url = folder.display().to_string();
+    let mut out = Vec::new();
+    for params in [json!({ "url": url }), json!({ "url": url, "link": true })] {
+        out.push(c.call("extension:inspect", params).await);
+    }
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn no_install_takes_a_shipped_agent_or_a_bundled_id() {
+    if !carried() || !agents().contains(&"vorn.agents.claude") {
+        return;
+    }
+    let served = serve_in(tempfile::tempdir().unwrap());
+    let mut c = Ws::open(served.port).await;
+    let folder = tempfile::tempdir().unwrap();
+    for answer in inspect_both(&mut c, folder.path(), "acme.claude", Some("claude")).await {
+        let err = answer["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            err.contains("which vorn.agents.claude already runs"),
+            "{answer}"
+        );
+    }
+    for id in ["vorn.files", "vorn.tasks", "vorn.agents.claude"] {
+        for answer in inspect_both(&mut c, folder.path(), id, None).await {
+            assert!(
+                answer.get("error").is_some(),
+                "{id} was not refused: {answer}"
+            );
+        }
+    }
+    let listed = c.result("agent:list", json!(null)).await;
+    let claude = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == "claude")
+        .cloned();
+    assert_eq!(
+        claude.unwrap()["extension"],
+        "vorn.agents.claude",
+        "{listed}"
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_agent_runs_in_a_plain_terminal_with_every_adapter_removed() {

@@ -440,3 +440,22 @@ fn tasks_and_workflows_buttons_follow_their_top_bar_setting() {
         .iter()
         .any(|p| p["kind"] == "panes" && p["id"] == "tasks"));
 }
+
+#[test]
+fn every_bundled_extension_s_id_is_kept_from_installs() {
+    let ids = bundled_ids();
+    for id in [
+        "vorn.files",
+        "vorn.browser",
+        "vorn.device",
+        "vorn.ssh",
+        "vorn.blocks",
+        "vorn.widget",
+        "vorn.tasks",
+        "vorn.workflows",
+        "vorn.artifacts",
+        "vorn.connectors",
+    ] {
+        assert!(ids.contains(id), "{id} is not in {ids:?}");
+    }
+}

@@ -206,6 +206,19 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     all
 }
 
+/// The ids of every extension compiled into vornd, which share one namespace
+/// with installs (services, storage, switches), so no install may take one.
+pub fn bundled_ids() -> std::collections::BTreeSet<String> {
+    shipped(Vec::new())
+        .iter()
+        .map(|b| b.manifest())
+        .chain([tasks::MANIFEST, wasm::workflows().manifest])
+        .filter_map(|m| file::parse_builtin(m).ok())
+        .map(|m| m.id)
+        .chain([connectors::manifest().id])
+        .collect()
+}
+
 impl Builtins {
     pub fn new(router: Arc<Router>, file: PathBuf, started: Vec<Arc<dyn Builtin>>) -> Builtins {
         Builtins::with(router, file, shipped(started))

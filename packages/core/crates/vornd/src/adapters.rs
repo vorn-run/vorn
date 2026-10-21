@@ -126,10 +126,15 @@ impl Adapters {
     }
 }
 
-/// Every adapter the packages in `store` install, in the store's order.
+/// Every adapter the packages in `store` install, Vorn's own first so they
+/// keep their agent ids, then the rest in the store's order.
 pub fn read_installed(store: &PackStore) -> Vec<Installed> {
+    let (ours, theirs): (Vec<String>, Vec<String>) = store
+        .ids()
+        .into_iter()
+        .partition(|id| id.starts_with(vorn_extensions::pack::SHIPPED_NAMESPACE));
     let mut installed = Vec::new();
-    for id in store.ids() {
+    for id in ours.into_iter().chain(theirs) {
         let Ok(pack) = store.inspect_unmeasured(&id) else {
             continue;
         };
@@ -372,5 +377,29 @@ mod tests {
         assert_eq!(listed[0]["id"], "acme");
         assert_eq!(listed[0]["extension"], "test.acme");
         assert_eq!(listed[0]["icon"], "<svg/>");
+    }
+
+    #[test]
+    fn vorns_own_adapter_keeps_its_agent_over_one_installed_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        // Placed by hand, as a pack installed before installs refused a second claim would be.
+        for id in ["acme.x", "vorn.agents.acme"] {
+            let pack = dir.path().join(id).join("1.0.0");
+            std::fs::create_dir_all(&pack).unwrap();
+            let manifest = testing::ACME.replace("id = \"test.acme\"", &format!("id = \"{id}\""));
+            std::fs::write(pack.join("vorn-extension.toml"), manifest).unwrap();
+            std::fs::write(
+                dir.path().join(id).join("current.json"),
+                r#"{"version":"1.0.0"}"#,
+            )
+            .unwrap();
+        }
+        let adapters = Adapters::installed_in(dir.path());
+        assert_eq!(adapters.agents().len(), 1);
+        assert_eq!(
+            adapters.extension_of("acme").as_deref(),
+            Some("vorn.agents.acme")
+        );
+        assert_eq!(adapters.describe()[0]["extension"], "vorn.agents.acme");
     }
 }

@@ -31,7 +31,8 @@ pub struct Shipped<'a> {
 }
 
 impl Shipped<'_> {
-    fn pinned(&self) -> Pinned {
+    /// The pin this build vouches for it with.
+    pub fn pinned(&self) -> Pinned {
         Pinned {
             id: self.id.to_owned(),
             version: self.version.to_owned(),
@@ -47,11 +48,14 @@ pub struct Synced {
     pub updated: Vec<String>,
 }
 
-/// What `shipped.json` keeps: the shipped extensions the person removed.
+/// What `shipped.json` keeps: the shipped extensions the person removed, and
+/// those whose built-in switch was already carried over.
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct State {
     #[serde(default)]
     declined: BTreeSet<String>,
+    #[serde(default)]
+    migrated: BTreeSet<String>,
 }
 
 /// The shipped set's record beside the packages in `root`.
@@ -101,30 +105,38 @@ impl Record {
         }
     }
 
-    /// The record, made once from the built-ins' switches the shipped set
-    /// had before it installed like any extension: off becomes removed, and
-    /// on installs it even when the set does not by default (returned).
+    /// The record, each shipped extension's built-in switch carried over the
+    /// first time a set holding it starts: off becomes removed, and on
+    /// installs it even when the set does not by default (returned).
     fn load(&self, set: &[Shipped<'_>]) -> (State, BTreeSet<String>) {
-        if let Some(state) = self.read() {
-            return (state, BTreeSet::new());
+        let mut state = self.read().unwrap_or_default();
+        let fresh: Vec<&str> = set
+            .iter()
+            .map(|s| s.id)
+            .filter(|id| !state.migrated.contains(*id))
+            .collect();
+        let mut on = BTreeSet::new();
+        if fresh.is_empty() {
+            return (state, on);
         }
         let mut switches: BTreeMap<String, bool> = fs::read(&self.switches)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        let (mut state, mut on) = (State::default(), BTreeSet::new());
-        for s in set {
-            match switches.remove(s.id) {
+        let before = switches.len();
+        for id in fresh {
+            match switches.remove(id) {
                 Some(false) => {
-                    state.declined.insert(s.id.to_owned());
+                    state.declined.insert(id.to_owned());
                 }
                 Some(true) => {
-                    on.insert(s.id.to_owned());
+                    on.insert(id.to_owned());
                 }
                 None => {}
             }
+            state.migrated.insert(id.to_owned());
         }
-        if !state.declined.is_empty() || !on.is_empty() {
+        if switches.len() != before {
             let text = serde_json::to_vec_pretty(&switches).unwrap_or_default();
             if let Err(err) = fs::write(&self.switches, text) {
                 warn!("[extensions] could not rewrite the built-ins' switches: {err}");
@@ -212,25 +224,43 @@ mod tests {
 
     struct Fixture {
         dir: tempfile::TempDir,
-        installs: Installs,
         record: Record,
         packs: Vec<(String, String, Vec<u8>, bool)>,
+        /// Pins trusted beside the set's own.
+        also: Vec<Pinned>,
     }
 
     impl Fixture {
         fn new(packs: &[(&str, &str, bool)]) -> Fixture {
             let dir = tempfile::tempdir().unwrap();
-            let root = dir.path().join("packages");
-            let installs = Installs::new(PackStore::new(&root), PathBuf::from("git"), Vec::new());
             Fixture {
-                record: Record::beside(&root),
-                installs,
+                record: Record::beside(&dir.path().join("packages")),
                 packs: packs
                     .iter()
                     .map(|(id, v, d)| ((*id).into(), (*v).into(), tgz(id, v), *d))
                     .collect(),
+                also: Vec::new(),
                 dir,
             }
+        }
+
+        /// The installs of a build carrying this set.
+        fn installs(&self) -> Installs {
+            let pins: Vec<Pinned> = self
+                .set()
+                .iter()
+                .map(Shipped::pinned)
+                .chain(self.also.clone())
+                .collect();
+            Installs::new(
+                PackStore::new(self.dir.path().join("packages")),
+                PathBuf::from("git"),
+                Vec::new(),
+            )
+            .trusting(crate::install::Trust {
+                pins,
+                ..Default::default()
+            })
         }
 
         fn set(&self) -> Vec<Shipped<'_>> {
@@ -247,11 +277,11 @@ mod tests {
         }
 
         fn sync(&self) -> Synced {
-            sync(&self.installs, &self.set(), &self.record)
+            sync(&self.installs(), &self.set(), &self.record)
         }
 
         fn version(&self, id: &str) -> Option<String> {
-            self.installs.store().describe(id).map(|p| p.version)
+            self.installs().store().describe(id).map(|p| p.version)
         }
     }
 
@@ -263,7 +293,7 @@ mod tests {
         assert_eq!(f.version("vorn.a").as_deref(), Some("1.0.0"));
         assert_eq!(f.version("vorn.b"), None);
         let source = f
-            .installs
+            .installs()
             .store()
             .describe("vorn.a")
             .unwrap()
@@ -281,7 +311,7 @@ mod tests {
     fn a_removal_is_kept_and_a_reinstall_forgets_it() {
         let f = Fixture::new(&[("vorn.a", "1.0.0", true)]);
         f.sync();
-        f.installs.remove("vorn.a").unwrap();
+        f.installs().remove("vorn.a").unwrap();
         assert_eq!(f.sync(), Synced::default());
         assert_eq!(f.version("vorn.a"), None);
         let left: Vec<_> = fs::read_dir(f.dir.path().join("packages"))
@@ -290,7 +320,7 @@ mod tests {
             .collect();
         assert!(left.is_empty(), "{left:?}");
 
-        install(&f.installs, &f.set()[0]).unwrap();
+        install(&f.installs(), &f.set()[0]).unwrap();
         assert!(f.record.read().unwrap().declined.is_empty());
         assert_eq!(f.version("vorn.a").as_deref(), Some("1.0.0"));
     }
@@ -309,21 +339,24 @@ mod tests {
             ..old
         };
         assert_eq!(new.sync().updated, ["vorn.a"]);
-        let pack = new.installs.store().describe("vorn.a").unwrap();
+        let pack = new.installs().store().describe("vorn.a").unwrap();
         assert_eq!(pack.version, "1.1.0");
         assert_eq!(pack.previous_version.as_deref(), Some("1.0.0"));
     }
 
     #[test]
     fn an_install_of_the_persons_own_is_left_alone() {
-        let f = Fixture::new(&[("vorn.a", "2.0.0", true)]);
         let older = Fixture::new(&[("vorn.a", "1.0.0", true)]);
         let pack = &older.set()[0];
-        let sheet = f
-            .installs
+        let f = Fixture {
+            also: vec![pack.pinned()],
+            ..Fixture::new(&[("vorn.a", "2.0.0", true)])
+        };
+        let installs = f.installs();
+        let sheet = installs
             .inspect_archive(pack.bytes, json!({ "git": "x" }), Some(&pack.pinned()))
             .unwrap();
-        f.installs.confirm(&sheet.token, "vorn.a").unwrap();
+        installs.confirm(&sheet.token, "vorn.a").unwrap();
         assert_eq!(f.sync(), Synced::default());
         assert_eq!(f.version("vorn.a").as_deref(), Some("1.0.0"));
     }
@@ -349,5 +382,61 @@ mod tests {
         let state: State =
             serde_json::from_slice(&fs::read(f.dir.path().join("shipped.json")).unwrap()).unwrap();
         assert_eq!(state.declined, BTreeSet::from(["vorn.a".to_owned()]));
+    }
+
+    #[test]
+    fn a_switch_moves_when_its_extension_first_ships_after_a_start_without_it() {
+        let empty = Fixture::new(&[]);
+        let switches = empty.dir.path().join("builtins.json");
+        fs::write(&switches, r#"{"vorn.a": false, "vorn.files": false}"#).unwrap();
+        assert_eq!(empty.sync(), Synced::default());
+        assert!(
+            !empty.dir.path().join("shipped.json").exists(),
+            "a start with no set keeps no record"
+        );
+
+        let f = Fixture {
+            packs: vec![(
+                "vorn.a".into(),
+                "1.0.0".into(),
+                tgz("vorn.a", "1.0.0"),
+                true,
+            )],
+            ..empty
+        };
+        assert_eq!(
+            f.sync(),
+            Synced::default(),
+            "switched off, it is not installed"
+        );
+        assert_eq!(f.version("vorn.a"), None);
+        let state = f.record.read().unwrap();
+        assert!(state.declined.contains("vorn.a"));
+        assert!(state.migrated.contains("vorn.a"));
+
+        // An extension that joins the set later still gets its own switch carried over.
+        fs::write(&switches, r#"{"vorn.b": false, "vorn.files": false}"#).unwrap();
+        let later = Fixture {
+            packs: vec![
+                (
+                    "vorn.a".into(),
+                    "1.0.0".into(),
+                    tgz("vorn.a", "1.0.0"),
+                    true,
+                ),
+                (
+                    "vorn.b".into(),
+                    "1.0.0".into(),
+                    tgz("vorn.b", "1.0.0"),
+                    true,
+                ),
+            ],
+            ..f
+        };
+        assert_eq!(later.sync(), Synced::default());
+        assert!(later.record.read().unwrap().declined.contains("vorn.b"));
+        let kept: BTreeMap<String, bool> =
+            serde_json::from_slice(&fs::read(&switches).unwrap()).unwrap();
+        assert_eq!(kept, BTreeMap::from([("vorn.files".to_owned(), false)]));
     }
 }
