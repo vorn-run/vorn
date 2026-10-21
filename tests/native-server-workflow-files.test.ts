@@ -77,9 +77,9 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       run.nodeStates.find((n) => n.nodeId === node)?.output
 
     const trusted = async (workflowId: string): Promise<boolean | undefined> => {
-      const listed = await client.result<{ files: Array<{ workflowId: string; trusted: boolean }> }>(
-        'workflow:files'
-      )
+      const listed = await client.result<{
+        files: Array<{ workflowId: string; trusted: boolean }>
+      }>('workflow:files')
       return listed.files.find((f) => f.workflowId === workflowId)?.trusted
     }
 
