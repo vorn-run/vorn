@@ -1082,7 +1082,9 @@ mod bench {
             };
             Some((round(median), first, last))
         };
-        let mut s = String::from("\nMedian (min–max) over the repetitions:\n\n| Case | Panes | Ext | Runs |");
+        let mut s = String::from(
+            "\nMedian (min–max) over the repetitions:\n\n| Case | Panes | Ext | Runs |",
+        );
         for (label, _) in MEASURES {
             let _ = write!(s, " {label} |");
         }

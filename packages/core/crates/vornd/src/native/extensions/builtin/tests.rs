@@ -264,9 +264,12 @@ async fn offers_an_idle_worktree_and_forgets_it_when_kept() {
 async fn lists_every_worktree_for_settings() {
     let s = setup();
     let running = |s: &Setup| {
-        s.builtins.list().as_array().unwrap().iter().any(|b| {
-            b["id"] == "vorn.worktrees" && b["running"] == true
-        })
+        s.builtins
+            .list()
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["id"] == "vorn.worktrees" && b["running"] == true)
     };
     assert!(!running(&s), "nothing has called it yet");
     s.builtins
