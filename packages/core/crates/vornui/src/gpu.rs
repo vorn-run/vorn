@@ -113,14 +113,39 @@ pub(crate) fn is_software(a: &wgpu::Adapter) -> bool {
 pub fn instance_desc() -> wgpu::InstanceDescriptor {
     let mut d = wgpu::InstanceDescriptor::new_without_display_handle();
     d.backends = wgpu::Backends::PRIMARY;
-    // Only a DirectComposition swapchain blends with the window, so Mica can
-    // show through; an HWND one, and Vulkan's win32 surface, are opaque.
-    #[cfg(windows)]
-    {
-        d.backends = wgpu::Backends::DX12;
-        d.backend_options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
-    }
+    d.backend_options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromHwnd;
     d
+}
+
+/// DX12 presenting through DirectComposition: the only swapchain whose alpha
+/// the window blends, so the OS material can show through.
+#[cfg(windows)]
+pub(crate) fn composited_desc() -> wgpu::InstanceDescriptor {
+    let mut d = instance_desc();
+    d.backends = wgpu::Backends::DX12;
+    d.backend_options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
+    d
+}
+
+/// The swapchain a window's renderer presents through.
+#[cfg_attr(not(windows), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Swapchain {
+    /// [`instance_desc`]: opaque, on the platform's first-choice backend.
+    Default,
+    /// DX12 through DirectComposition: blends with the OS material.
+    Composited,
+}
+
+/// Composited only when the window wants the OS material and DirectComposition
+/// found a hardware adapter (`composited`, `None` when it found none); anything
+/// else keeps the default renderer, and the window stays solid.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn swapchain(material: bool, composited: Option<wgpu::DeviceType>) -> Swapchain {
+    match composited {
+        Some(t) if material && t != wgpu::DeviceType::Cpu => Swapchain::Composited,
+        _ => Swapchain::Default,
+    }
 }
 
 #[repr(C)]
@@ -469,4 +494,41 @@ fn upload(gpu: &Gpu, buf: &mut wgpu::Buffer, data: &[u8], label: &str) {
         *buf = vertex_buffer(&gpu.device, label, (data.len() as u64).next_power_of_two());
     }
     gpu.queue.write_buffer(buf, 0, data);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wgpu::DeviceType;
+
+    #[test]
+    fn solid_keeps_the_default_renderer_whatever_the_adapter() {
+        for t in [None, Some(DeviceType::DiscreteGpu), Some(DeviceType::Cpu)] {
+            assert_eq!(swapchain(false, t), Swapchain::Default);
+        }
+    }
+
+    #[test]
+    fn a_material_composites_only_on_a_hardware_adapter() {
+        assert_eq!(
+            swapchain(true, Some(DeviceType::DiscreteGpu)),
+            Swapchain::Composited
+        );
+        assert_eq!(
+            swapchain(true, Some(DeviceType::IntegratedGpu)),
+            Swapchain::Composited
+        );
+        assert_eq!(swapchain(true, Some(DeviceType::Cpu)), Swapchain::Default);
+        assert_eq!(swapchain(true, None), Swapchain::Default);
+    }
+
+    #[test]
+    fn the_default_renderer_is_the_platforms_first_choice() {
+        let d = instance_desc();
+        assert_eq!(d.backends, wgpu::Backends::PRIMARY);
+        assert_eq!(
+            d.backend_options.dx12.presentation_system,
+            wgpu::Dx12SwapchainKind::DxgiFromHwnd
+        );
+    }
 }

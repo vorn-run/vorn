@@ -2,6 +2,8 @@
 //! dark and its transparency setting, and the themes extensions bring,
 //! resolved to the palette this thread draws with.
 
+use std::path::{Path, PathBuf};
+
 use serde::Deserialize;
 use serde_json::Value;
 use vorn_theme::{Chrome, Materials, Prefs, Scheme, Section, Theme};
@@ -42,6 +44,19 @@ pub fn prefs(defaults: Option<&Value>) -> Prefs {
     p
 }
 
+/// Where the Materials choice is kept for the next launch: the window builds
+/// its renderer from it before vornd has answered.
+pub fn launch_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("desktop").join("materials")
+}
+
+/// The Materials choice the last launch kept in `file`; Solid when none.
+pub fn launch_materials(file: &Path) -> Materials {
+    crate::keep::read(file)
+        .and_then(|s| Materials::from_key(s.trim()))
+        .unwrap_or_default()
+}
+
 /// A theme an extension contributes, from its `extension:contributions`
 /// entry of kind `themes`; `None` when it does not read.
 pub fn listed_theme(entry: &Value) -> Option<Theme> {
@@ -68,6 +83,8 @@ pub struct Appearance {
     /// Counts changes to `installed`.
     rev: u64,
     last: Option<Inputs>,
+    /// The Materials choice last written to the launch file.
+    kept: Option<Materials>,
 }
 
 impl Appearance {
@@ -86,6 +103,22 @@ impl Appearance {
         if themes != self.installed {
             self.installed = themes;
             self.rev += 1;
+        }
+    }
+
+    /// Writes the stored Materials choice to `file` when it changed, for the
+    /// next launch; nothing before the settings have loaded.
+    pub fn keep_materials(&mut self, defaults: Option<&Value>, file: &Path) {
+        let Some(d) = defaults else {
+            return;
+        };
+        let m = d
+            .get(MATERIALS)
+            .and_then(Value::as_str)
+            .and_then(Materials::from_key)
+            .unwrap_or_default();
+        if self.kept != Some(m) && crate::keep::write(file, m.key()).is_ok() {
+            self.kept = Some(m);
         }
     }
 
@@ -179,5 +212,22 @@ mod tests {
         assert_eq!(palette::materials(), Materials::Solid);
         a.apply(Some(&d), true, false, None);
         assert_eq!(palette::materials(), Materials::Native);
+    }
+
+    #[test]
+    fn the_next_launch_reads_the_last_stored_materials() {
+        let dir = std::env::temp_dir().join(format!("vorn-materials-{}", std::process::id()));
+        let f = launch_file(&dir);
+        assert_eq!(launch_materials(&f), Materials::Solid);
+        let mut a = Appearance::default();
+        a.keep_materials(None, &f);
+        assert!(!f.exists(), "nothing is kept before the settings load");
+        a.keep_materials(Some(&json!({ "materials": "native" })), &f);
+        assert_eq!(launch_materials(&f), Materials::Native);
+        a.keep_materials(Some(&json!({})), &f);
+        assert_eq!(launch_materials(&f), Materials::Solid);
+        std::fs::write(&f, "glass").unwrap();
+        assert_eq!(launch_materials(&f), Materials::Solid);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -123,6 +123,8 @@ struct Live<A> {
     pending: Option<Instant>,
     /// The OS material behind the window, as last set: `Some(dark)` while on.
     material: Option<bool>,
+    /// The swapchain can show the OS material: on Windows only a composited one.
+    see_through: bool,
 }
 
 struct Runner<A, F> {
@@ -236,12 +238,8 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         }
         let mut cfg = self.cfg;
         cfg.scale = window.scale_factor() as f32;
-        let instance = wgpu::Instance::new(instance_desc());
-        let surface = instance
-            .create_surface(window.clone())
-            .map_err(|e| e.to_string())?;
+        let (instance, surface, adapter, composited) = renderer(&window, o.os_material)?;
         let mode = RenderMode::from_env();
-        let adapter = Gpu::adapter(&instance, Some(&surface)).ok();
         let (present, mut ui) = match adapter {
             Some(a) if mode.wants_device(&a) => {
                 let gpu = Gpu::open(instance, a)?;
@@ -300,6 +298,7 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
             pacer: Pacer::new(period),
             pending: None,
             material: None,
+            see_through: composited || !cfg!(windows),
         })
     }
 }
@@ -555,6 +554,39 @@ fn cursor_in(_: &Window) -> Option<(f32, f32)> {
     None
 }
 
+type Renderer = (
+    wgpu::Instance,
+    wgpu::Surface<'static>,
+    Option<wgpu::Adapter>,
+    bool,
+);
+
+/// The instance, surface and adapter `window` draws with, and whether they
+/// are composited: on Windows with `material`, DirectComposition when that
+/// finds a hardware adapter; otherwise the default.
+fn renderer(window: &Arc<Window>, material: bool) -> Result<Renderer, String> {
+    let open = |desc| -> Result<Renderer, String> {
+        let instance = wgpu::Instance::new(desc);
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|e| e.to_string())?;
+        let adapter = Gpu::adapter(&instance, Some(&surface)).ok();
+        Ok((instance, surface, adapter, false))
+    };
+    #[cfg(windows)]
+    if material {
+        use crate::gpu::{composited_desc, swapchain, Swapchain};
+        let (instance, surface, adapter, _) = open(composited_desc())?;
+        let kind = adapter.as_ref().map(|a| a.get_info().device_type);
+        if swapchain(material, kind) == Swapchain::Composited {
+            return Ok((instance, surface, adapter, true));
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = material;
+    open(instance_desc())
+}
+
 /// Shows the system's material behind the window in the dark or light
 /// appearance, or takes it away (`None`); `false` when the system has none.
 #[cfg(target_os = "macos")]
@@ -564,7 +596,7 @@ fn os_material(window: &Window, dark: Option<bool>) -> bool {
     crate::macos::set_material(window, dark, solid)
 }
 
-/// Mica, which Windows 11 has and Windows 10 refuses.
+/// Mica, which Windows 11 has and Windows 10 refuses; only for a composited window.
 #[cfg(windows)]
 fn os_material(window: &Window, dark: Option<bool>) -> bool {
     use windows_sys::Win32::Foundation::HWND;
@@ -583,7 +615,8 @@ fn os_material(window: &Window, dark: Option<bool>) -> bool {
     } else {
         DWMSBT_NONE
     };
-    let edge = if dark.is_some() { -1 } else { 0 };
+    // Always extended: otherwise the window's GDI surface covers the composited frame.
+    let edge = -1;
     let margins = MARGINS {
         cxLeftWidth: edge,
         cxRightWidth: edge,
@@ -687,7 +720,8 @@ impl<A: App> Live<A> {
         let Some(gpu) = &self.ui.gpu else {
             return;
         };
-        let want = (crate::palette::materials() != vorn_theme::Materials::Solid)
+        let want = (self.see_through
+            && crate::palette::materials() != vorn_theme::Materials::Solid)
             .then(crate::palette::dark);
         if want == self.material {
             return;

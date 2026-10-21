@@ -45,7 +45,7 @@ use vorn_app::ui::{
     RenderMode, Rgba, Ui, Waker, WindowApp, WindowOptions,
 };
 use vorn_app::update::Updater;
-use vorn_app::{look, ui_config, App};
+use vorn_app::{appearance, look, ui_config, App};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -755,6 +755,8 @@ fn window(args: &Args) -> Result<(), String> {
         }
     });
     let dir = args.data_dir()?;
+    let os_material = appearance::launch_materials(&appearance::launch_file(&dir))
+        != vorn_theme::Materials::Solid;
     let updater = Updater::start(Arc::clone(&wake));
     let cli = Some(vorn_app::cli_link::start(dir.clone(), Arc::clone(&wake)));
     // The window opens at once; connecting, and starting vornd, happen on a thread.
@@ -772,6 +774,7 @@ fn window(args: &Args) -> Result<(), String> {
         // title drawn; elsewhere the app, and the waiting screen, draw their own.
         decorations: cfg!(target_os = "macos"),
         inset_title: cfg!(target_os = "macos").then_some(look::TRAFFIC_LIGHTS),
+        os_material,
         ..WindowOptions::sized(look::WINDOW)
     };
     run_with("Vorn", opts, ui_config(1.0), move |_, wake| {

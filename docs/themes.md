@@ -52,7 +52,7 @@ Every colour Vorn draws comes from these tokens, on the desktop, in the browser 
 
 - **Interface style**: Neutral keeps Vorn's own surfaces and lines with the theme's accent and terminal; Themed draws every token from the theme.
 - **Contrast correction**: text that reads below 4.5:1 on its background is lifted until it does, keeping its hue; status colours keep their meaning.
-- **Materials**: Solid draws opaque surfaces. Native shows the system's translucent sidebar (macOS, Windows 11; solid elsewhere) and blurs what is behind menus, popovers and the palette. Themed does the same, tinted with the theme's surfaces. Reduce transparency in the system's settings keeps everything solid.
+- **Materials**: Solid draws opaque surfaces. Native shows the system's translucent sidebar (macOS, Windows 11; solid elsewhere; on Windows it follows at the next launch) and blurs what is behind menus, popovers and the palette. Themed does the same, tinted with the theme's surfaces. Reduce transparency in the system's settings keeps everything solid.
 
 ## Bundled themes
 

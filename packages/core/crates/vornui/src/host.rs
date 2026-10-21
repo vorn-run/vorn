@@ -140,6 +140,10 @@ pub struct WindowOptions {
     /// Opens this far (logical pixels) from the screen's bottom right
     /// corner rather than where the system places it.
     pub corner: Option<(f32, f32)>,
+    /// Settings › Appearance › Materials was not Solid at launch: on Windows
+    /// the renderer presents through DirectComposition so Mica can show
+    /// through, which only a new launch can change.
+    pub os_material: bool,
 }
 
 impl WindowOptions {
@@ -154,6 +158,7 @@ impl WindowOptions {
             skip_taskbar: false,
             transparent: false,
             corner: None,
+            os_material: false,
         }
     }
 }

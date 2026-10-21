@@ -327,7 +327,11 @@ fn colour_rows(s: &Screen<'_>) -> El {
         ))
         .child(row(
             "Materials",
-            "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme",
+            if cfg!(windows) {
+                "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme. The sidebar changes at the next launch"
+            } else {
+                "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme"
+            },
             reduced.then_some("Reduce transparency is on in the system settings, so surfaces stay solid."),
             materials,
             reduced,

@@ -860,6 +860,12 @@ impl App {
             reduced,
             preview,
         );
+        if let Some(dir) = &self.data_dir {
+            self.st.settings.appearance.keep_materials(
+                self.store.config.get("defaults"),
+                &crate::appearance::launch_file(dir),
+            );
+        }
         if changed {
             if let Some(g) = &self.grid {
                 g.touch_all();
