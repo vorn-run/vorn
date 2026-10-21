@@ -642,6 +642,19 @@ async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
 #[tokio::test]
 async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
     let s = setup();
+    let device = device::component();
+    // Compiled before the clock starts, as vornd does ahead: `until` times the Device, not the compiler.
+    let bundled = vorn_extensions::component::Bundled {
+        manifest: Arc::new(file::parse_builtin(device.manifest).unwrap()),
+        wasm: device.wasm,
+    };
+    s.router.prepare_bundled(&bundled).await.unwrap();
+    // Only the Device, so no other built-in compiles beside it.
+    let builtins = Builtins::with(
+        Arc::clone(&s.router),
+        s.dir.path().join("device.json"),
+        vec![Arc::new(device)],
+    );
     let claim = |udid: &str| json!({ "udid": udid, "name": "iPhone", "bootedHere": true });
     // Kept from before vornd started: `gone` ended meanwhile, `t1` still runs.
     s.core.keep(
@@ -649,7 +662,7 @@ async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
         "claims",
         json!({ "gone": claim("u1"), "t1": claim("u2") }),
     );
-    s.builtins.start();
+    builtins.start();
     until(|| s.core.shut_down() == ["u1"]).await;
 
     s.router.bus().emit(
@@ -664,7 +677,7 @@ async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
 
     s.core
         .keep(device::ID, "claims", json!({ "t1": claim("u3") }));
-    s.builtins.set(device::ID, false).unwrap();
+    builtins.set(device::ID, false).unwrap();
     until(|| s.core.shut_down() == ["u1", "u2", "u3"]).await;
     assert!(s.router.rows(device::ID, "open").is_empty());
 }
