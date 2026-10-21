@@ -762,7 +762,11 @@ impl Installs {
             }
         }
         fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-        write_current(&home, &json!({ "linked": folder, "installedAt": now_ms() }))?;
+        let mut current = json!({ "linked": folder, "installedAt": now_ms() });
+        if let Some(agent) = manifest.agent_id() {
+            current["linkedAgent"] = json!(agent);
+        }
+        write_current(&home, &current)?;
         info!(
             "[extensions] linked {} from {}",
             manifest.id,
@@ -909,19 +913,14 @@ impl Installs {
 
     /// Refuses an adapter for an agent another installed extension already runs.
     fn agent_unclaimed(&self, manifest: &Manifest) -> Result<(), String> {
-        let agent_id = |section: &toml::Value| {
-            vorn_agents::AgentSpec::from_toml(section.clone())
-                .ok()
-                .map(|s| s.id)
-        };
-        let Some(agent) = manifest.agent.as_ref().and_then(agent_id) else {
+        let Some(agent) = manifest.agent_id() else {
             return Ok(());
         };
         for other in self.store.ids().into_iter().filter(|o| *o != manifest.id) {
             let Ok(pack) = self.store.inspect_unmeasured(&other) else {
                 continue;
             };
-            if pack.manifest.agent.as_ref().and_then(agent_id).as_deref() == Some(agent.as_str()) {
+            if pack.manifest.agent_id().as_deref() == Some(agent.as_str()) {
                 return Err(format!(
                     "{} adds the agent \"{agent}\", which {other} already runs. Remove {other} first, or give this adapter another agent id; nothing was installed",
                     manifest.name
@@ -1697,6 +1696,18 @@ migrations = "migrations"
         let manifest = adapter_manifest(id, agent)
             .replace("version = \"1.0.0\"", &format!("version = \"{version}\""));
         tgz("t", &[(file::FILE, manifest.as_bytes())])
+    }
+
+    #[test]
+    fn a_link_records_the_agent_it_adapts() {
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = adapter_manifest("acme.linked", "sample-agent");
+        fs::write(folder.path().join(file::FILE), manifest).unwrap();
+        let pack = installs.link(folder.path()).unwrap();
+        assert_eq!(pack.linked_agent.as_deref(), Some("sample-agent"));
+        assert!(pack.installed_at.as_u64().is_some());
     }
 
     #[test]

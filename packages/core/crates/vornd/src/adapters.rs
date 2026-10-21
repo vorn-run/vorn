@@ -12,7 +12,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use serde_json::{json, Map, Value};
 use tracing::warn;
 use vorn_agents::{Agent, Agents};
-use vorn_extensions::pack::PackStore;
+use vorn_extensions::pack::{InstalledPack, PackStore};
 
 #[derive(Debug, Default)]
 struct State {
@@ -126,38 +126,36 @@ impl Adapters {
     }
 }
 
-/// Every adapter the packages in `store` install, Vorn's own first so they
-/// keep their agent ids, then the rest in the store's order. An agent runs
-/// one adapter: a later one for an agent already taken, as a linked folder
-/// edited since or a pack placed beside another, is skipped.
+/// Every adapter the packages in `store` install, Vorn's own first, then by
+/// id. An agent runs one adapter: Vorn's own keeps its agent id, then the one
+/// that claimed it first, by `installedAt`. A linked folder edited since it
+/// was linked to adapt another agent claimed it last, so it is skipped.
 pub fn read_installed(store: &PackStore) -> Vec<Installed> {
-    let (ours, theirs): (Vec<String>, Vec<String>) = store
+    let mut read: Vec<(bool, (bool, u64), InstalledPack, Agent)> = store
         .ids()
         .into_iter()
-        .partition(|id| id.starts_with(vorn_extensions::pack::SHIPPED_NAMESPACE));
-    let mut installed = Vec::new();
-    for id in ours.into_iter().chain(theirs) {
-        let Ok(pack) = store.inspect_unmeasured(&id) else {
-            continue;
-        };
-        let Some(section) = pack.manifest.agent.clone() else {
-            continue;
-        };
-        let agent = match vorn_agents::AgentSpec::from_toml(section).and_then(Agent::new) {
-            Ok(agent) => agent,
-            Err(err) => {
-                warn!("[extensions] the agent adapter in {id} does not read: {err}");
-                continue;
-            }
-        };
+        .filter_map(|id| {
+            let pack = store.inspect_unmeasured(&id).ok()?;
+            let section = pack.manifest.agent.clone()?;
+            let agent = vorn_agents::AgentSpec::from_toml(section)
+                .and_then(Agent::new)
+                .map_err(|err| warn!("[extensions] the agent adapter in {id} does not read: {err}"))
+                .ok()?;
+            let ours = id.starts_with(vorn_extensions::pack::SHIPPED_NAMESPACE);
+            let edited = pack.linked && pack.linked_agent.as_deref() != Some(&agent.spec().id);
+            let claimed = (edited, pack.installed_at.as_u64().unwrap_or(u64::MAX));
+            Some((!ours, claimed, pack, agent))
+        })
+        .collect();
+    // Claim order decides who keeps an agent; the store's id order settles a tie.
+    read.sort_by_key(|(theirs, claimed, ..)| (*theirs, *claimed));
+    let mut installed: Vec<Installed> = Vec::new();
+    for (_, _, pack, agent) in read {
         let agent_id = &agent.spec().id;
-        if let Some(first) = installed
-            .iter()
-            .find(|k: &&Installed| k.agent.spec().id == *agent_id)
-        {
+        if let Some(first) = installed.iter().find(|k| k.agent.spec().id == *agent_id) {
             warn!(
-                "[extensions] {id} adds the agent \"{agent_id}\", which {} already runs; skipped",
-                first.extension
+                "[extensions] {} adds the agent \"{agent_id}\", which {} already runs; skipped",
+                pack.id, first.extension
             );
             continue;
         }
@@ -165,11 +163,20 @@ pub fn read_installed(store: &PackStore) -> Vec<Installed> {
             .filter(|p| !p.contains("..") && !Path::new(p).is_absolute())
             .and_then(|p| std::fs::read_to_string(pack.path.join(p)).ok());
         installed.push(Installed {
-            extension: id,
+            extension: pack.id,
             agent,
             icon,
         });
     }
+    installed.sort_by(|a, b| {
+        let key = |k: &Installed| {
+            !k.extension
+                .starts_with(vorn_extensions::pack::SHIPPED_NAMESPACE)
+        };
+        key(a)
+            .cmp(&key(b))
+            .then_with(|| a.extension.cmp(&b.extension))
+    });
     installed
 }
 
@@ -416,51 +423,74 @@ mod tests {
         assert_eq!(adapters.describe()[0]["extension"], "vorn.agents.acme");
     }
 
-    #[test]
-    fn a_later_adapter_for_a_taken_agent_is_skipped_installed_or_linked() {
-        let dir = tempfile::tempdir().unwrap();
-        let manifest =
-            |id: &str| testing::ACME.replace("id = \"test.acme\"", &format!("id = \"{id}\""));
-        for id in ["acme.b", "acme.a"] {
-            let pack = dir.path().join(id).join("1.0.0");
-            std::fs::create_dir_all(&pack).unwrap();
-            std::fs::write(pack.join("vorn-extension.toml"), manifest(id)).unwrap();
-            std::fs::write(
-                dir.path().join(id).join("current.json"),
-                r#"{"version":"1.0.0"}"#,
-            )
-            .unwrap();
-        }
-        // A linked folder edited after it was linked to claim the same agent.
-        let folder = tempfile::tempdir().unwrap();
-        std::fs::write(
-            folder.path().join("vorn-extension.toml"),
-            manifest("acme.0linked"),
-        )
-        .unwrap();
-        std::fs::create_dir_all(dir.path().join("acme.0linked")).unwrap();
-        std::fs::write(
-            dir.path().join("acme.0linked").join("current.json"),
-            serde_json::json!({ "linked": folder.path() }).to_string(),
-        )
-        .unwrap();
-
-        let read = || -> Vec<String> {
-            read_installed(&PackStore::new(dir.path()))
-                .into_iter()
-                .map(|k| k.extension)
-                .collect()
+    /// Writes an adapter for `agent` as pack `id`, placed or linked, claimed at `at`.
+    fn adapter(root: &Path, id: &str, agent: &str, at: u64, linked: Option<&Path>) {
+        let manifest = testing::ACME
+            .replace("id = \"test.acme\"", &format!("id = \"{id}\""))
+            .replace("id = \"acme\"", &format!("id = \"{agent}\""));
+        let home = root.join(id);
+        let current = match linked {
+            Some(folder) => {
+                std::fs::write(folder.join("vorn-extension.toml"), manifest).unwrap();
+                serde_json::json!({ "linked": folder, "installedAt": at, "linkedAgent": agent })
+            }
+            None => {
+                std::fs::create_dir_all(home.join("1.0.0")).unwrap();
+                std::fs::write(home.join("1.0.0/vorn-extension.toml"), manifest).unwrap();
+                serde_json::json!({ "version": "1.0.0", "installedAt": at })
+            }
         };
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("current.json"), current.to_string()).unwrap();
+    }
+
+    fn extensions_in(root: &Path) -> Vec<String> {
+        read_installed(&PackStore::new(root))
+            .into_iter()
+            .map(|k| k.extension)
+            .collect()
+    }
+
+    #[test]
+    fn the_adapter_that_claimed_an_agent_first_keeps_it_installed_or_linked() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        // Placed by hand, as packs installed before installs refused a second claim would be.
+        adapter(dir.path(), "acme.a", "acme", 30, None);
+        adapter(dir.path(), "acme.b", "acme", 20, None);
+        adapter(dir.path(), "acme.0linked", "acme", 40, Some(folder.path()));
+        adapter(dir.path(), "acme.0zeta", "zeta", 50, None);
         assert_eq!(
-            read(),
-            ["acme.0linked"],
-            "the first in the store's order keeps it"
+            extensions_in(dir.path()),
+            ["acme.0zeta", "acme.b"],
+            "the earliest claim keeps it, and the list stays in id order"
         );
-        std::fs::write(
-            folder.path().join("vorn-extension.toml"),
-            manifest("acme.0linked").replace("id = \"acme\"", "id = \"other\""),
-        )
-        .unwrap();
-        assert_eq!(read(), ["acme.0linked", "acme.a"]);
+
+        adapter(dir.path(), "acme.0linked", "acme", 10, Some(folder.path()));
+        assert_eq!(
+            extensions_in(dir.path()),
+            ["acme.0linked", "acme.0zeta"],
+            "an earlier link keeps it"
+        );
+    }
+
+    #[test]
+    fn a_link_edited_to_adapt_a_running_agent_does_not_take_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        adapter(dir.path(), "acme.0linked", "other", 10, Some(folder.path()));
+        adapter(dir.path(), "acme.a", "acme", 20, None);
+        assert_eq!(extensions_in(dir.path()), ["acme.0linked", "acme.a"]);
+
+        // Edited after it was linked: earlier in both id and link time, yet it claimed acme last.
+        let toml = folder.path().join("vorn-extension.toml");
+        let edited = std::fs::read_to_string(&toml)
+            .unwrap()
+            .replace("id = \"other\"", "id = \"acme\"");
+        std::fs::write(&toml, edited).unwrap();
+        assert_eq!(extensions_in(dir.path()), ["acme.a"]);
+
+        let adapters = Adapters::installed_in(dir.path());
+        assert_eq!(adapters.extension_of("acme").as_deref(), Some("acme.a"));
     }
 }
