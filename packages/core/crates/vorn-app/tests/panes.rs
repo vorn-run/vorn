@@ -488,16 +488,13 @@ fn the_device_button_opens_the_picker_over_the_card_then_the_pane() {
         "no pane while it starts"
     );
     shot.save(&mut app, "device-opening");
-    shot.until(&mut app, "the failed start", |app, _| {
+    // The rows can clear the card before the call's answer brings the toast.
+    shot.until(&mut app, "the failed start, as a toast", |app, _| {
         app.pump();
-        (!app.st.bench.device_cards.contains(&sid)).then_some(())
+        (!app.st.bench.device_cards.contains(&sid) && app.st.toasts.iter().any(|t| t.error))
+            .then_some(())
     });
     assert!(app.st.bench.kinds(&sid).is_empty());
-    assert!(
-        app.st.toasts.iter().any(|t| t.error),
-        "the failure is a toast: {:?}",
-        app.st.toasts.iter().map(|t| &t.text).collect::<Vec<_>>()
-    );
 
     // Started, the pane opens on it with 0.8's controls.
     shot.click(&mut app, card(PaneAct::DeviceButton(sid.clone())));
