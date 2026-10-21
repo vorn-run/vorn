@@ -26,8 +26,10 @@ tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "time",
 tracing = "0.1"
 # An [agent] section is checked against the adapter format it reads as.
 vorn-agents = { path = "../agents" }
-# `pack` reads a manifest's agent rules against the adapters Vorn ships.
-vorn-adapters = { path = "../adapters" }
+# The shipped set's versions are compared to decide what an update replaces; already in the tree.
+semver = "1"
+# A pack Vorn ships or the catalog lists is admitted by its pinned checksum; already in the tree.
+sha2 = { version = "0.10", default-features = false }
 # A [theme] section is checked as the app reads it.
 vorn-theme = { path = "../theme" }
 
@@ -37,11 +39,9 @@ vorn-theme = { path = "../theme" }
 # Vorn already compiled into its cache.
 wasmtime = { version = "=49.0.3", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
 wasmtime-wasi = { version = "=49.0.3", optional = true, default-features = false, features = ["p2"] }
-# Names a compiled component by the bytes it was compiled from; already in the tree.
-sha2 = { version = "0.10", optional = true, default-features = false }
 
 [features]
-wasm = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:sha2"]
+wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
 wasm-compile = ["wasm", "wasmtime/cranelift"]
 
 [target.'cfg(unix)'.dependencies]

@@ -1,0 +1,49 @@
+# The extensions the installer carries so a first launch works offline,
+# installed like any other. Each is pinned to its released pack's version
+# and sha256; vornd's build embeds `<id>-<version>.vorn.tgz` from
+# $VORN_SHIPPED_DIR (else packages/core/shipped/), and scripts/shipped.mjs
+# builds them from the vorn-run/extensions checkout at `rev`.
+rev = "59f0ec7"
+
+[[extension]]
+id = "vorn.worktrees"
+path = "worktrees"
+version = "1.0.0"
+sha256 = "479e6b554069a1deeae10a1688cabe6c3271a2217bd7656a39aa5c7f2a13574d"
+
+[[extension]]
+id = "vorn.agents.claude"
+path = "adapters/claude"
+version = "1.0.0"
+sha256 = "21e0a8d3a2765e866fc504139e759aeac1813ff114bd1d8c9bc951b1a236b516"
+
+[[extension]]
+id = "vorn.agents.copilot"
+path = "adapters/copilot"
+version = "1.0.0"
+sha256 = "5db3b8e9da814ed04dc0214778de671e4e08c26e2cd7a864eba24df77d892ff9"
+
+[[extension]]
+id = "vorn.agents.codex"
+path = "adapters/codex"
+version = "1.0.0"
+sha256 = "d71f199cad90fd207023da1e287fe124cdb9f19574912f6d93cbaac7d850a16c"
+
+[[extension]]
+id = "vorn.agents.opencode"
+path = "adapters/opencode"
+version = "1.0.0"
+sha256 = "763accacfb0b9bb31a461dceb52667f5ece240755cce1a3df3dce23906c678dc"
+
+[[extension]]
+id = "vorn.agents.gemini"
+path = "adapters/gemini"
+version = "1.0.0"
+sha256 = "294e8ac505024b229395c8f550d8199e3df577677400bb4f8302fe7699b62772"
+
+[[extension]]
+id = "vorn.agents.hermes"
+path = "adapters/hermes"
+version = "1.0.0"
+sha256 = "af1989feb83ed5d2bf1008a4888627046f40fe15210409ff35faaff9dc244172"
+default = false

@@ -30,17 +30,6 @@ pub struct Component {
     pub stop: Option<&'static str>,
 }
 
-/// Worktree cleanup (`packages/core/extensions/worktrees`).
-pub fn worktrees() -> Component {
-    Component {
-        manifest: include_str!("../../../../../../extensions/worktrees/vorn-extension.toml"),
-        events: &[vorn_extensions::events::WORKTREE_IDLE],
-        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/worktrees.wasm")),
-        on_by_default: true,
-        start: None,
-        stop: None,
-    }
-}
 
 /// The Widget (`packages/core/extensions/widget`).
 pub fn widget() -> Component {

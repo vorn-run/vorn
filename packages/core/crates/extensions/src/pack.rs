@@ -182,9 +182,9 @@ pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
 /// id would own its workflows (`vorn.connectors:` and the rest).
 pub const SHIPPED_NAMESPACE: &str = "vorn.";
 
-/// Whether `id` is Vorn's: no installed or linked extension may have it.
+/// Whether `id` is Vorn's: only a pack whose checksum Vorn pinned may have
+/// it (see [`crate::install::Installs::inspect_archive`]).
 pub fn is_reserved(id: &str) -> bool {
-    // The one place to admit a shipped package, by pinned checksum, once built-ins install like any other.
     RESERVED_IDS.contains(&id) || id.starts_with(SHIPPED_NAMESPACE)
 }
 

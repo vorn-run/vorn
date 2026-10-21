@@ -5,7 +5,6 @@
 //! ([`wasm`]). Each has a switch; off, it subscribes to nothing, publishes
 //! nothing and contributes nothing.
 
-pub mod agents;
 pub mod artifacts;
 pub mod browser;
 pub mod connectors;
@@ -107,7 +106,6 @@ pub fn precompile(router: &Arc<Router>) {
         (tasks::MANIFEST, tasks::WASM),
         (wasm::workflows().manifest, wasm::workflows().wasm),
         (wasm::widget().manifest, wasm::widget().wasm),
-        (wasm::worktrees().manifest, wasm::worktrees().wasm),
         (wasm::blocks().manifest, wasm::blocks().wasm),
         (wasm::files().manifest, wasm::files().wasm),
         (browser::component().manifest, browser::component().wasm),
@@ -201,7 +199,6 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
         Arc::new(device::component()),
         Arc::new(ssh::component()),
         Arc::new(wasm::blocks()),
-        Arc::new(wasm::worktrees()),
         Arc::new(wasm::widget()),
         Arc::new(artifacts::Artifacts),
     ];

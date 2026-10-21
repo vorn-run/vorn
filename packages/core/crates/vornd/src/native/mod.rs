@@ -645,8 +645,8 @@ impl Native {
     pub fn set_database(&self, db: PathBuf) {
         if let Some(dir) = db.parent() {
             self.secrets.settle(dir);
-            // The shipped adapters' switches, kept beside the database by the extension host.
-            self.adapters().load_switches(&dir.join("builtins.json"));
+            // The installed adapters, before the extension host has started.
+            self.adapters().load_installed(&dir.join("connectors"));
         }
         let _ = self.db.set(db);
     }

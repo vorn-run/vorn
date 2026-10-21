@@ -139,6 +139,31 @@ impl Daemon {
         }
     }
 
+    /// Installs the shipped set ([`crate::shipped`]) through the same path as
+    /// any package, offline, before the extension host reads the packages:
+    /// on a first launch, and whenever this build carries a newer version.
+    pub async fn install_shipped(&self) {
+        let Some(dir) = self.native.database().and_then(std::path::Path::parent) else {
+            return;
+        };
+        let packages = dir.join("connectors");
+        let installs = self.native.installs(dir);
+        let record = vorn_extensions::shipped::Record::beside(&packages);
+        let Ok(synced) = tokio::task::spawn_blocking(move || {
+            vorn_extensions::shipped::sync(&installs, crate::shipped::SET, &record)
+        })
+        .await
+        else {
+            return;
+        };
+        if synced.installed.is_empty() && synced.updated.is_empty() {
+            return;
+        }
+        debug!(installed = ?synced.installed, updated = ?synced.updated, "the shipped set");
+        let adapters = std::sync::Arc::clone(self.native.adapters());
+        let _ = tokio::task::spawn_blocking(move || adapters.load_installed(&packages)).await;
+    }
+
     /// Starts the work model ([`crate::native::work`]) once vornd has a
     /// database, its own address and a credential for it: the desktop's, or
     /// the local one published beside the database.

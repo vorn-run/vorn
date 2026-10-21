@@ -90,12 +90,17 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
     let entry = raw.as_object()?;
     let id = text(entry, "id")?;
     let name = text(entry, "name")?;
-    let package = non_empty(entry, "packageName")?;
+    // A released pack installs from its checksummed archive; anything else runs from npm.
+    let packed = non_empty(entry, "packUrl").is_some() && non_empty(entry, "sha256").is_some();
+    let package = non_empty(entry, "packageName");
+    if package.is_none() && !packed {
+        return None;
+    }
     let extension = entry.get("kind").and_then(Value::as_str) == Some("extension");
     let adds = extension
         .then(|| manifest::contributes(entry.get("contributes")))
         .flatten();
-    if extension && adds.is_none() {
+    if extension && adds.is_none() && !packed {
         return None;
     }
     let dropped = [
@@ -118,7 +123,9 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
         .collect();
     out.insert("id".into(), json!(id));
     out.insert("name".into(), json!(name));
-    out.insert("packageName".into(), json!(package));
+    if let Some(package) = package {
+        out.insert("packageName".into(), json!(package));
+    }
     out.insert(
         "description".into(),
         json!(text(entry, "description").unwrap_or("")),
@@ -479,6 +486,14 @@ impl Catalog {
         (h, stale)
     }
 
+    /// The entry for `id`, as held now.
+    pub fn entry(&self, id: &str) -> Option<Value> {
+        let (held, _) = self.known(u64::MAX);
+        held.connectors
+            .into_iter()
+            .find(|e| e.get("id").and_then(Value::as_str) == Some(id))
+    }
+
     /// `catalogSnapshot`: `{items, templates, mcpServers, fetchedAt?}`, and
     /// whether the caller should refresh it in the background.
     pub fn snapshot(&self, now: u64) -> (Value, bool) {
@@ -492,7 +507,9 @@ impl Catalog {
             .iter()
             .map(|entry| {
                 let mut item = entry.clone();
-                item["launch"] = launch_spec(entry, self.repo_root.as_deref());
+                if entry.get("packageName").is_some() {
+                    item["launch"] = launch_spec(entry, self.repo_root.as_deref());
+                }
                 item
             })
             .collect();
@@ -623,6 +640,20 @@ mod tests {
         );
         assert_eq!(entries[0]["path"], "rss");
         assert!(entries[1].get("git").is_none() && entries[1].get("path").is_none());
+    }
+
+    #[test]
+    fn lists_a_released_pack_without_an_npm_package() {
+        let doc = json!({ "version": 1, "connectors": [
+            { "id": "vorn.worktrees", "name": "Worktrees", "kind": "extension", "version": "1.0.0",
+              "packUrl": "https://example.com/w.vorn.tgz", "sha256": "ab" },
+            { "id": "half", "name": "Half", "kind": "extension", "packUrl": "https://example.com/h" },
+        ] });
+        let entries = parse_catalog(&doc).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["packUrl"], "https://example.com/w.vorn.tgz");
+        assert_eq!(entries[0]["kind"], "extension");
+        assert!(entries[0].get("packageName").is_none());
     }
 
     #[test]

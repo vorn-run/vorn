@@ -22,13 +22,28 @@ const SEED_WORKFLOWS: [(&str, &str); 2] = [
 pub const DEFAULT_TASK_WORKFLOW_ID: &str = "system:default-task-workflow";
 pub const DEV_SERVER_WORKFLOW_ID: &str = "system:dev-server-on-restore";
 
-/// The agents Vorn ships switched on, in the launcher's order: the ones
-/// whose answers the recorded store answers name.
+/// The agents the recorded store answers name, `(id, command, headless args)`,
+/// in the order they were recorded in.
+const RECORDED_AGENTS: [(&str, &str, &[&str]); 5] = [
+    ("claude", "claude", &["--dangerously-skip-permissions"]),
+    ("copilot", "copilot", &["--allow-all"]),
+    ("codex", "codex", &["-a", "never"]),
+    ("opencode", "opencode", &[]),
+    ("gemini", "gemini", &["-y"]),
+];
+
+/// The agents the recorded store answers name, read as an adapter's are.
 pub fn shipped() -> Vec<vorn_agents::Agent> {
-    vorn_adapters::shipped()
+    RECORDED_AGENTS
         .iter()
-        .filter(|s| s.on_by_default)
-        .filter_map(|s| vorn_agents::from_manifest_text(s.manifest).ok().flatten())
+        .map(|(id, command, headless)| {
+            let text = format!(
+                "[agent]\nid = \"{id}\"\nname = \"{id}\"\n[agent.launch]\ncommand = \"{command}\"\nheadless_args = {headless:?}\n"
+            );
+            vorn_agents::from_manifest_text(&text)
+                .expect("a recorded agent reads")
+                .expect("it has an agent")
+        })
         .collect()
 }
 

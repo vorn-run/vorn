@@ -39,8 +39,6 @@ vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
 vorn-size = { path = "../size" }
 vorn-agents = { path = "../agents" }
-# The agent adapters Vorn ships, as data.
-vorn-adapters = { path = "../adapters" }
 vorn-git = { path = "../vorn-git" }
 # The Wasm runtime only: a component runs once the vorn command has compiled it.
 vorn-extensions = { path = "../extensions", features = ["wasm"] }
@@ -81,6 +79,9 @@ windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] 
 # Builds the extensions Vorn ships as Wasm components, which vornd carries.
 [build-dependencies]
 vorn-guest-build = { path = "../guest-build" }
+# The shipped set's lock is read and each pack checked against its pin; both already in the tree.
+sha2 = { version = "0.10", default-features = false }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
 # Tasks' triggers, built natively to fire them the way its component does.

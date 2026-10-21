@@ -1,134 +1,72 @@
-//! The agents vornd runs, from their adapters: the ones Vorn ships
-//! ([`vorn_adapters`]), each behind its switch, and any installed package
-//! with an `[agent]` section.
+//! The agents vornd runs, from their adapters: every installed package
+//! with an `[agent]` section, Vorn's own among them as ordinary installs.
 //!
 //! Every reader takes a snapshot ([`Adapters::agents`]) and holds it for the
-//! call: a switch that moves meanwhile changes the next call, never one in
-//! flight. With every adapter off the snapshot is empty and the launcher
+//! call: an install or removal meanwhile changes the next call, never one in
+//! flight. With no adapter installed the snapshot is empty and the launcher
 //! opens a plain shell.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use serde_json::{json, Map, Value};
 use tracing::warn;
 use vorn_agents::{Agent, Agents};
-
-/// A file of a package, by its path in it.
-type FileOf<'a> = Box<dyn Fn(&str) -> Option<&'a [u8]> + 'a>;
-
-/// A package an adapter is read from.
-struct Package<'a> {
-    name: &'a str,
-    manifest: &'a str,
-    on: bool,
-    file: FileOf<'a>,
-}
-
-/// One adapter vornd knows, on or off.
-#[derive(Clone, Debug)]
-struct Known {
-    agent: Agent,
-    /// The extension it comes in.
-    extension: String,
-    /// Its mark, as SVG text.
-    icon: Option<String>,
-    builtin: bool,
-    on: bool,
-}
+use vorn_extensions::pack::PackStore;
 
 #[derive(Debug, Default)]
 struct State {
-    shipped: Vec<Known>,
-    installed: Vec<Known>,
+    installed: Vec<Installed>,
     current: Arc<Agents>,
 }
 
-impl State {
-    fn rebuild(&mut self) {
-        let on = self.shipped.iter().chain(&self.installed).filter(|k| k.on);
-        self.current = Arc::new(Agents::new(on.map(|k| k.agent.clone())));
-    }
-}
-
-/// The adapters, and which are on.
+/// The installed adapters, in the launcher's order.
 #[derive(Debug)]
 pub struct Adapters {
     state: RwLock<State>,
-    /// Bumped whenever which agents are on changes.
+    /// Bumped whenever which agents are installed changes.
     changed: tokio::sync::watch::Sender<u64>,
 }
 
-/// An installed package's adapter, as the extension host read it.
+/// An installed package's adapter.
 #[derive(Clone, Debug)]
 pub struct Installed {
     pub extension: String,
     pub agent: Agent,
+    /// Its mark, as SVG text.
     pub icon: Option<String>,
 }
 
 impl Adapters {
-    /// The adapters this build runs with until it is told otherwise: the
-    /// shipped ones, or under this crate's tests the test adapters.
+    /// The adapters this build runs with until the packages are read: none,
+    /// or under this crate's tests the test adapters.
     pub fn standard() -> Arc<Adapters> {
         #[cfg(test)]
         return testing::adapters();
         #[cfg(not(test))]
-        Adapters::shipped()
+        Adapters::with(Vec::new())
     }
 
-    /// The adapters Vorn ships, each as its switch defaults.
-    pub fn shipped() -> Arc<Adapters> {
-        Adapters::from_packages(vorn_adapters::shipped().iter().map(|s| Package {
-            name: s.name,
-            manifest: s.manifest,
-            on: s.on_by_default,
-            file: Box::new(|p: &str| s.file(p)),
-        }))
+    /// The adapters the packages under `packages` install.
+    pub fn installed_in(packages: &Path) -> Arc<Adapters> {
+        Adapters::with(read_installed(&PackStore::new(packages)))
     }
 
-    fn from_packages<'a>(packages: impl Iterator<Item = Package<'a>>) -> Arc<Adapters> {
-        let shipped: Vec<Known> = packages
-            .filter_map(|s| {
-                let agent = match vorn_agents::from_manifest_text(s.manifest) {
-                    Ok(Some(agent)) => agent,
-                    Ok(None) => return None,
-                    Err(err) => {
-                        warn!(adapter = s.name, %err, "a shipped adapter does not read");
-                        return None;
-                    }
-                };
-                let extension = extension_id(s.manifest).unwrap_or_else(|| s.name.to_owned());
-                let icon = icon_path(&agent)
-                    .and_then(|p| (s.file)(&p))
-                    .and_then(|b| String::from_utf8(b.to_vec()).ok());
-                Some(Known {
-                    agent,
-                    extension,
-                    icon,
-                    builtin: true,
-                    on: s.on,
-                })
-            })
-            .collect();
-        let mut state = State {
-            shipped,
-            ..State::default()
-        };
-        state.rebuild();
-        Arc::new(Adapters {
-            state: RwLock::new(state),
+    fn with(installed: Vec<Installed>) -> Arc<Adapters> {
+        let adapters = Arc::new(Adapters {
+            state: RwLock::new(State::default()),
             changed: tokio::sync::watch::Sender::new(0),
-        })
+        });
+        adapters.set_installed(installed);
+        adapters
     }
 
-    /// The agents that are on, in the launcher's order.
+    /// The agents installed, in the launcher's order.
     pub fn agents(&self) -> Arc<Agents> {
         Arc::clone(&self.read().current)
     }
 
-    /// The agent `id` names among those on.
+    /// The agent `id` names among those installed.
     pub fn get(&self, id: &str) -> Option<Agent> {
         self.read().current.get(id).cloned()
     }
@@ -137,87 +75,38 @@ impl Adapters {
         self.state.read().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn write(&self) -> std::sync::RwLockWriteGuard<'_, State> {
-        self.state.write().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Changes the state and tells whoever follows which agents are on.
-    fn change(&self, f: impl FnOnce(&mut State)) {
-        {
-            let mut state = self.write();
-            f(&mut state);
-            state.rebuild();
-        }
-        self.changed.send_modify(|n| *n += 1);
-    }
-
-    /// Wakes whenever which agents are on changes.
+    /// Wakes whenever which agents are installed changes.
     pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
         self.changed.subscribe()
     }
 
-    /// Switches the shipped adapter of extension `extension` on or off.
-    pub fn set_shipped(&self, extension: &str, on: bool) {
-        self.change(|state| {
-            for k in state
-                .shipped
-                .iter_mut()
-                .filter(|k| k.extension == extension)
-            {
-                k.on = on;
-            }
-        });
-    }
-
-    /// The extension whose adapter runs agent `id`, among those on.
+    /// The extension whose adapter runs agent `id`.
     pub fn extension_of(&self, id: &str) -> Option<String> {
-        let state = self.read();
-        state
-            .shipped
+        self.read()
+            .installed
             .iter()
-            .chain(&state.installed)
-            .find(|k| k.on && k.agent.id() == id)
+            .find(|k| k.agent.id() == id)
             .map(|k| k.extension.clone())
     }
 
-    /// Whether `extension` is one of the shipped adapters.
-    pub fn ships(&self, extension: &str) -> bool {
-        self.read().shipped.iter().any(|k| k.extension == extension)
+    /// Reads the adapters installed under `packages`, as the extension host
+    /// keeps them, before the host has started.
+    pub fn load_installed(&self, packages: &Path) {
+        self.set_installed(read_installed(&PackStore::new(packages)));
     }
 
-    /// Reads the shipped adapters' switches from the built-ins' file, as the
-    /// extension host keeps them, before the host has started.
-    pub fn load_switches(&self, file: &Path) {
-        let saved: BTreeMap<String, bool> = std::fs::read(file)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        self.change(|state| {
-            for k in &mut state.shipped {
-                if let Some(on) = saved.get(&k.extension) {
-                    k.on = *on;
-                }
-            }
-        });
-    }
-
-    /// The installed packages' adapters, after the shipped ones; a later one
-    /// claiming an id already taken is left out.
+    /// The installed packages' adapters; a later one claiming an id already
+    /// taken is left out.
     pub fn set_installed(&self, installed: Vec<Installed>) {
-        let installed: Vec<Known> = installed
-            .into_iter()
-            .map(|i| Known {
-                agent: i.agent,
-                extension: i.extension,
-                icon: i.icon,
-                builtin: false,
-                on: true,
-            })
-            .collect();
-        self.change(|state| state.installed = installed);
+        {
+            let mut state = self.state.write().unwrap_or_else(PoisonError::into_inner);
+            state.current = Arc::new(Agents::new(installed.iter().map(|k| k.agent.clone())));
+            state.installed = installed;
+        }
+        self.changed.send_modify(|n| *n += 1);
     }
 
-    /// `agent:list`: each agent that is on, as the launcher, the pickers and
+    /// `agent:list`: each installed agent, as the launcher, the pickers and
     /// Settings draw it, in their order.
     pub fn describe(&self) -> Value {
         let state = self.read();
@@ -225,11 +114,7 @@ impl Adapters {
             .current
             .iter()
             .filter_map(|agent| {
-                let known = state
-                    .shipped
-                    .iter()
-                    .chain(&state.installed)
-                    .find(|k| k.on && k.agent == *agent)?;
+                let known = state.installed.iter().find(|k| k.agent == *agent)?;
                 Some(describe(known))
             })
             .collect();
@@ -237,8 +122,37 @@ impl Adapters {
     }
 }
 
+/// Every adapter the packages in `store` install, in the store's order.
+pub fn read_installed(store: &PackStore) -> Vec<Installed> {
+    let mut installed = Vec::new();
+    for id in store.ids() {
+        let Ok(pack) = store.inspect_unmeasured(&id) else {
+            continue;
+        };
+        let Some(section) = pack.manifest.agent.clone() else {
+            continue;
+        };
+        let agent = match vorn_agents::AgentSpec::from_toml(section).and_then(Agent::new) {
+            Ok(agent) => agent,
+            Err(err) => {
+                warn!("[extensions] the agent adapter in {id} does not read: {err}");
+                continue;
+            }
+        };
+        let icon = icon_path(&agent)
+            .filter(|p| !p.contains("..") && !Path::new(p).is_absolute())
+            .and_then(|p| std::fs::read_to_string(pack.path.join(p)).ok());
+        installed.push(Installed {
+            extension: id,
+            agent,
+            icon,
+        });
+    }
+    installed
+}
+
 /// What a client draws of one agent.
-fn describe(k: &Known) -> Value {
+fn describe(k: &Installed) -> Value {
     let spec = k.agent.spec();
     let mut out = Map::new();
     let mut put = |key: &str, v: Value| {
@@ -280,14 +194,7 @@ fn describe(k: &Known) -> Value {
         );
     }
     put("extension", json!(k.extension));
-    put("builtin", json!(k.builtin));
     Value::Object(out)
-}
-
-/// The `id` at the top of a manifest's text.
-fn extension_id(manifest: &str) -> Option<String> {
-    let table: toml::Table = toml::from_str(manifest).ok()?;
-    table.get("id")?.as_str().map(str::to_owned)
 }
 
 /// Where in its package an adapter's mark is.
@@ -390,17 +297,23 @@ no_prompt = ["-p", ""]
     const ICON: &[u8] =
         b"<svg xmlns=\"http://www.w3.org/2000/svg\"><path fill=\"#d97757\" d=\"M0 0h1v1z\"/></svg>";
 
-    /// The three test adapters, all on.
+    /// The three test adapters, installed.
     pub fn adapters() -> Arc<Adapters> {
-        Adapters::from_packages(
-            [("acme", ACME), ("beta", BETA), ("gamma", GAMMA)]
+        Adapters::with(
+            [("test.acme", ACME), ("test.beta", BETA), ("test.gamma", GAMMA)]
                 .into_iter()
-                .map(|(name, manifest)| Package {
-                    name,
-                    manifest,
-                    on: true,
-                    file: Box::new(|p: &str| (p == "icon.svg").then_some(ICON)),
-                }),
+                .filter_map(|(extension, manifest)| {
+                    let agent = vorn_agents::from_manifest_text(manifest).ok()??;
+                    let icon = icon_path(&agent)
+                        .is_some()
+                        .then(|| String::from_utf8_lossy(ICON).into_owned());
+                    Some(Installed {
+                        extension: extension.to_owned(),
+                        agent,
+                        icon,
+                    })
+                })
+                .collect(),
         )
     }
 }
@@ -410,41 +323,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_shipped_adapters_all_read() {
-        let shipped = Adapters::shipped();
-        assert_eq!(shipped.read().shipped.len(), vorn_adapters::shipped().len());
-    }
-
-    #[test]
-    fn switches_adapters_and_keeps_the_launcher_s_order() {
+    fn lists_what_is_installed_and_runs_none_once_every_adapter_is_gone() {
         let adapters = testing::adapters();
-        let on: Vec<String> = adapters
-            .agents()
-            .iter()
-            .map(|a| a.id().to_owned())
-            .collect();
-        assert!(!on.is_empty());
-        let first = adapters.agents().first().cloned().unwrap();
+        let on = adapters.agents().len();
+        assert!(on > 0);
         let listed = adapters.describe();
-        assert_eq!(listed[0]["id"], first.id());
+        let first = listed[0]["id"].as_str().unwrap().to_owned();
         assert!(listed[0]["icon"]
             .as_str()
             .is_some_and(|s| s.contains("<svg")));
-        let ext = listed[0]["extension"].as_str().unwrap().to_owned();
-        adapters.set_shipped(&ext, false);
-        assert!(adapters.get(first.id()).is_none());
-        assert_eq!(adapters.agents().len(), on.len() - 1);
+        assert_eq!(
+            adapters.extension_of(&first).as_deref(),
+            listed[0]["extension"].as_str()
+        );
 
         let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("builtins.json");
-        let off: BTreeMap<String, bool> = [testing::ACME, testing::BETA, testing::GAMMA]
-            .iter()
-            .filter_map(|m| extension_id(m))
-            .map(|id| (id, false))
-            .collect();
-        std::fs::write(&file, serde_json::to_vec(&off).unwrap()).unwrap();
-        adapters.load_switches(&file);
+        adapters.load_installed(&dir.path().join("connectors"));
         assert!(adapters.agents().is_empty());
+        assert!(adapters.get(&first).is_none());
         assert_eq!(adapters.describe(), json!([]));
+    }
+
+    #[test]
+    fn reads_an_installed_package_s_adapter_and_its_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let pack = dir.path().join("connectors/test.acme/1.0.0");
+        std::fs::create_dir_all(&pack).unwrap();
+        std::fs::write(pack.join("vorn-extension.toml"), testing::ACME).unwrap();
+        std::fs::write(pack.join("icon.svg"), "<svg/>").unwrap();
+        std::fs::write(
+            dir.path().join("connectors/test.acme/current.json"),
+            r#"{"version":"1.0.0"}"#,
+        )
+        .unwrap();
+        let adapters = Adapters::installed_in(&dir.path().join("connectors"));
+        let listed = adapters.describe();
+        assert_eq!(listed[0]["id"], "acme");
+        assert_eq!(listed[0]["extension"], "test.acme");
+        assert_eq!(listed[0]["icon"], "<svg/>");
     }
 }

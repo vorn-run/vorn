@@ -7,11 +7,10 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value};
 use vorn_connectors::{auth, catalog, connections as conns, http};
 
-/// The recordings name the agents Vorn ships, whose adapters say which ids
-/// exist and which variables an agent sets in its sessions.
+/// The recordings name these agents, which must be known ids.
 fn read_shipped_adapters() {
-    for s in vorn_adapters::shipped() {
-        vorn_agents::from_manifest_text(s.manifest).expect("a shipped adapter reads");
+    for id in ["claude", "copilot", "codex", "opencode", "gemini"] {
+        vorn_agents::know(id);
     }
 }
 

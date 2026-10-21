@@ -26,6 +26,7 @@ bench/results/
 
 # Rust core build output
 packages/core/target/
+packages/core/shipped/
 examples/extensions/*/target/
 packages/core/vornd
 packages/core/vornd.exe

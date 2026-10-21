@@ -1,9 +1,10 @@
-//! Installing an extension from git, linking a folder, removing one, and
-//! packing one for the catalog.
+//! Installing an extension from git or from a pack, linking a folder,
+//! removing one, and packing one for the catalog.
 //!
 //! An install runs nothing of the extension's before the person confirms:
-//! [`Installs::inspect_git`] clones with hooks off and reads the manifest
-//! into a [`Sheet`] that names the publisher, every command, every host, the
+//! [`Installs::inspect_git`] clones with hooks off, and
+//! [`Installs::inspect_archive`] unpacks a `.vorn.tgz`, and each reads the
+//! manifest into a [`Sheet`] that names the publisher, every command, every host, the
 //! Vorn methods it may call and what it adds, and ends with a typed
 //! confirmation that it runs as them. Only [`Installs::confirm`], given the
 //! extension's id typed back, runs its build and puts it in place.
@@ -26,7 +27,7 @@ use crate::gate::{enforced, CORE_METHODS};
 use crate::manifest::{file, Manifest, Permission};
 use crate::pack::{
     check_id, directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack,
-    PackStore, CURRENT_FILE,
+    PackStore, CURRENT_FILE, SHIPPED_NAMESPACE,
 };
 
 /// Long enough to read a sheet, short enough that walking away costs nothing.
@@ -39,6 +40,30 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const TAIL_BYTES: usize = 2000;
 /// Left out of a bundle: history, dependencies and build output a build makes again.
 const NOT_PACKED: [&str; 3] = [".git", "node_modules", "target"];
+/// The most a pack may unpack to; Vorn's own are well under a megabyte.
+const ARCHIVE_MAX_BYTES: u64 = 64 << 20;
+/// The most files a pack may hold.
+const ARCHIVE_MAX_FILES: usize = 4096;
+
+/// The pack Vorn pinned for an extension: in the shipped set the installer
+/// carries, or in the official catalog. Only a pack whose bytes are these may
+/// have an id in Vorn's own namespace (`vorn.`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pinned {
+    pub id: String,
+    pub version: String,
+    /// The pack's sha256, in lowercase hex.
+    pub sha256: String,
+}
+
+/// `bytes`' sha256, in lowercase hex.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
 
 /// A command an extension runs, and when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -285,9 +310,46 @@ impl Installs {
             })
         };
         let staged = copied.and_then(|source| {
-            let manifest = read_staged_manifest(&dir)?;
+            let manifest = read_staged_manifest(&dir, None)?;
             Ok((source, manifest))
         });
+        self.stage(dir, staged)
+    }
+
+    /// Unpacks `bytes`, a `.vorn.tgz` with one folder at its top, and
+    /// describes what it would install, running nothing of it. With `pinned`
+    /// the bytes must be exactly the pinned pack's, and only then may its id
+    /// be in Vorn's own namespace; a pack anyone else offers never is.
+    pub fn inspect_archive(
+        &self,
+        bytes: &[u8],
+        source: Value,
+        pinned: Option<&Pinned>,
+    ) -> Result<Sheet, String> {
+        self.sweep();
+        let sha256 = sha256_hex(bytes);
+        if let Some(pin) = pinned {
+            if pin.sha256 != sha256 {
+                return Err(format!(
+                    "The pack offered as {} {} is not the one Vorn pinned (its sha256 is {sha256}, not {}); nothing was installed",
+                    pin.id, pin.version, pin.sha256
+                ));
+            }
+        }
+        let root = self.store.root();
+        fs::create_dir_all(root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
+        let dir = root.join(format!(".staging-{}", token()));
+        let staged = unpack(bytes, &dir).and_then(|()| {
+            let manifest = read_staged_manifest(&dir, pinned)?;
+            let mut source = source;
+            source["sha256"] = json!(sha256);
+            Ok((source, manifest))
+        });
+        self.stage(dir, staged)
+    }
+
+    /// Keeps what was read into `dir` for [`Installs::confirm`], or drops it when it did not read.
+    fn stage(&self, dir: PathBuf, staged: Result<(Value, Manifest), String>) -> Result<Sheet, String> {
         let (source, manifest) = match staged {
             Ok(found) => found,
             Err(err) => {
@@ -504,10 +566,17 @@ impl Installs {
             ));
         }
         let result = self.place(&staged);
-        if result.is_err() {
-            let _ = fs::remove_dir_all(&staged.dir);
+        match &result {
+            Ok(pack) => self.shipped_record().accept(&pack.id),
+            Err(_) => {
+                let _ = fs::remove_dir_all(&staged.dir);
+            }
         }
         result
+    }
+
+    fn shipped_record(&self) -> crate::shipped::Record {
+        crate::shipped::Record::beside(self.store.root())
     }
 
     fn place(&self, staged: &Staged) -> Result<InstalledPack, String> {
@@ -633,6 +702,10 @@ impl Installs {
             return Err(format!("No extension \"{id}\" is installed"));
         }
         fs::remove_dir_all(&home).map_err(|e| format!("cannot remove {id}: {e}"))?;
+        // Vorn's own come back on the next start unless their removal is kept.
+        if id.starts_with(SHIPPED_NAMESPACE) {
+            self.shipped_record().decline(id);
+        }
         info!("[extensions] removed {id}");
         Ok(())
     }
@@ -708,14 +781,90 @@ fn linkable(folder: &Path) -> Result<(PathBuf, Manifest), String> {
     Ok((folder, manifest))
 }
 
-fn read_staged_manifest(dir: &Path) -> Result<Manifest, String> {
+fn read_staged_manifest(dir: &Path, pinned: Option<&Pinned>) -> Result<Manifest, String> {
     if !dir.join(file::FILE).is_file() {
         return Err(format!("The repository has no {} at its root", file::FILE));
     }
     crate::pack::relabel_dir(dir)?;
     let manifest = read_dir_manifest(dir)?;
-    installable_id(&manifest.id)?;
+    admit(&manifest, pinned)?;
     Ok(manifest)
+}
+
+/// Whether `manifest` may be installed: under an id of its own, or under
+/// Vorn's own namespace only as the very pack Vorn pinned for that id.
+fn admit(manifest: &Manifest, pinned: Option<&Pinned>) -> Result<(), String> {
+    let id = &manifest.id;
+    if let Some(pin) = pinned {
+        if pin.id != *id || pin.version != manifest.version {
+            return Err(format!(
+                "The pack pinned as {} {} holds {id} {}; nothing was installed",
+                pin.id, pin.version, manifest.version
+            ));
+        }
+        if id.starts_with(SHIPPED_NAMESPACE) {
+            return if is_safe_id(id) {
+                Ok(())
+            } else {
+                Err(format!("\"{id}\" is not an extension id"))
+            };
+        }
+    }
+    installable_id(id)
+}
+
+/// Unpacks a `.vorn.tgz` into `dir`, its one top folder dropped: plain files
+/// only, every path inside that folder, and no more than a pack may hold.
+fn unpack(bytes: &[u8], dir: &Path) -> Result<(), String> {
+    use std::path::Component;
+    let bad = |why: &str| format!("That is not a pack Vorn installs: {why}");
+    fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    let entries = archive.entries().map_err(|e| bad(&e.to_string()))?;
+    let (mut top, mut total, mut files) = (None::<std::ffi::OsString>, 0u64, 0usize);
+    for entry in entries {
+        let mut entry = entry.map_err(|e| bad(&e.to_string()))?;
+        let kind = entry.header().entry_type();
+        let path = entry.path().map_err(|e| bad(&e.to_string()))?.into_owned();
+        let mut parts = Vec::new();
+        for part in path.components() {
+            match part {
+                Component::Normal(p) => parts.push(p.to_owned()),
+                Component::CurDir => {}
+                _ => return Err(bad(&format!("{} leaves its folder", path.display()))),
+            }
+        }
+        let Some((first, rest)) = parts.split_first() else {
+            continue;
+        };
+        match &top {
+            None => top = Some(first.clone()),
+            Some(t) if t != first => return Err(bad("it holds more than one folder")),
+            Some(_) => {}
+        }
+        if kind.is_dir() {
+            continue;
+        }
+        if !kind.is_file() || rest.is_empty() {
+            return Err(bad(&format!("{} is not a plain file", path.display())));
+        }
+        files += 1;
+        total = total.saturating_add(entry.header().size().unwrap_or(u64::MAX));
+        if files > ARCHIVE_MAX_FILES || total > ARCHIVE_MAX_BYTES {
+            return Err(bad("it is larger than a pack may be"));
+        }
+        let to = rest.iter().fold(dir.to_path_buf(), |p, part| p.join(part));
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let mut out = fs::File::create(&to).map_err(|e| e.to_string())?;
+        std::io::copy(&mut (&mut entry).take(ARCHIVE_MAX_BYTES), &mut out)
+            .map_err(|e| bad(&e.to_string()))?;
+    }
+    if top.is_none() {
+        return Err(bad("it is empty"));
+    }
+    Ok(())
 }
 
 /// Refuses what [`check_id`] refuses, and a theme Vorn ships, so no
@@ -769,12 +918,8 @@ pub struct Packed {
 }
 
 /// Records the agents a manifest's `agent` rules may name outside a server:
-/// every shipped adapter's, and the ids in `installed`.
+/// the ids in `installed`, those of the adapters installed.
 pub fn know_agents(installed: &[String]) {
-    for shipped in vorn_adapters::shipped() {
-        // A shipped adapter that does not read is a build fault the adapters' own tests catch.
-        let _ = vorn_agents::from_manifest_text(shipped.manifest);
-    }
     for id in installed {
         vorn_agents::know(id);
     }
@@ -782,7 +927,7 @@ pub fn know_agents(installed: &[String]) {
 
 /// Validates `folder`'s manifest, runs its recorded checks, and lists what a
 /// bundle of it holds, writing the bundle to `out` as a `.tar.gz` when given.
-/// Agent ids in `installed` count as known beside the shipped adapters'.
+/// Agent ids in `installed`, those of the adapters installed, count as known.
 pub fn pack(
     folder: &Path,
     env: &[(String, String)],
@@ -1196,7 +1341,7 @@ migrations = "migrations"
     }
 
     #[test]
-    fn packs_a_manifest_naming_a_shipped_or_installed_agent() {
+    fn packs_a_manifest_naming_an_installed_agent() {
         let folder = tempfile::tempdir().unwrap();
         let manifest = |agent: &str| {
             format!(
@@ -1205,11 +1350,145 @@ migrations = "migrations"
         };
         let write =
             |agent: &str| fs::write(folder.path().join(file::FILE), manifest(agent)).unwrap();
-        write("claude");
-        super::pack(folder.path(), &env(), None, &[]).unwrap();
         write("acme-pack-test");
         assert!(super::pack(folder.path(), &env(), None, &[]).is_err());
         super::pack(folder.path(), &env(), None, &["acme-pack-test".to_owned()]).unwrap();
+    }
+
+    /// A `.vorn.tgz` of `files` under one `<top>/` folder, as vorn-pack writes one.
+    fn tgz(top: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut tar = tar::Builder::new(Vec::new());
+        for (path, bytes) in files {
+            let mut header = tar::Header::new_ustar();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_entry_type(tar::EntryType::Regular);
+            tar.append_data(&mut header, format!("{top}/{path}"), *bytes)
+                .unwrap();
+        }
+        let raw = tar.into_inner().unwrap();
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut gz, &raw).unwrap();
+        gz.finish().unwrap()
+    }
+
+    fn shipped_manifest(id: &str) -> String {
+        format!(
+            "id = \"{id}\"\nname = \"Shipped\"\nversion = \"1.2.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"Vorn\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n"
+        )
+    }
+
+    #[test]
+    fn admits_vorns_namespace_only_for_the_pack_it_pinned() {
+        let manifest = shipped_manifest("vorn.sample");
+        let bytes = tgz(
+            "vorn.sample-1.2.0",
+            &[(file::FILE, manifest.as_bytes()), ("hello.sh", b"true\n")],
+        );
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let pin = |sha256: String| Pinned {
+            id: "vorn.sample".into(),
+            version: "1.2.0".into(),
+            sha256,
+        };
+
+        let unpinned = installs.inspect_archive(&bytes, json!({}), None).unwrap_err();
+        assert!(unpinned.contains("reserved"), "{unpinned}");
+        let other = installs
+            .inspect_archive(&bytes, json!({}), Some(&pin("00".repeat(32))))
+            .unwrap_err();
+        assert!(other.contains("not the one Vorn pinned"), "{other}");
+        let renamed = Pinned {
+            id: "vorn.other".into(),
+            ..pin(sha256_hex(&bytes))
+        };
+        assert!(installs.inspect_archive(&bytes, json!({}), Some(&renamed)).is_err());
+
+        let sheet = installs
+            .inspect_archive(&bytes, json!({"shipped": "1.2.0"}), Some(&pin(sha256_hex(&bytes))))
+            .unwrap();
+        let pack = installs.confirm(&sheet.token, "vorn.sample").unwrap();
+        assert_eq!(pack.version, "1.2.0");
+        assert!(pack.path.join("hello.sh").is_file());
+        let source = pack.source.unwrap();
+        assert_eq!(source["shipped"], "1.2.0");
+        assert_eq!(source["sha256"], sha256_hex(&bytes).as_str());
+        let staging: Vec<_> = fs::read_dir(root.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".staging"))
+            .collect();
+        assert!(staging.is_empty(), "{staging:?}");
+    }
+
+    #[test]
+    fn a_git_install_claiming_vorns_namespace_is_refused() {
+        let Some(git) = git() else { return };
+        let source = repo(&[
+            (file::FILE, &shipped_manifest("vorn.worktrees")),
+            ("hello.sh", "true\n"),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), git, env());
+        let url = format!("file://{}", source.path().display());
+        let refused = installs.inspect_git(&url, None).unwrap_err();
+        assert!(refused.contains("reserved"), "{refused}");
+        assert!(installs.store().describe("vorn.worktrees").is_none());
+    }
+
+    #[test]
+    fn an_unpinned_pack_installs_under_an_id_of_its_own() {
+        let manifest = shipped_manifest("acme.sample");
+        let bytes = tgz("acme", &[(file::FILE, manifest.as_bytes()), ("hello.sh", b"true\n")]);
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let sheet = installs.inspect_archive(&bytes, json!({}), None).unwrap();
+        installs.confirm(&sheet.token, "acme.sample").unwrap();
+        assert!(installs.store().describe("acme.sample").is_some());
+    }
+
+    #[test]
+    fn refuses_a_pack_that_reaches_outside_its_folder() {
+        let manifest = shipped_manifest("acme.sample");
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let two = tgz("a", &[(file::FILE, manifest.as_bytes())]);
+        let mut both = tar::Builder::new(Vec::new());
+        for top in ["a", "b"] {
+            let mut header = tar::Header::new_ustar();
+            header.set_size(manifest.len() as u64);
+            header.set_entry_type(tar::EntryType::Regular);
+            both.append_data(&mut header, format!("{top}/{}", file::FILE), manifest.as_bytes())
+                .unwrap();
+        }
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut gz, &both.into_inner().unwrap()).unwrap();
+        let refused = installs
+            .inspect_archive(&gz.finish().unwrap(), json!({}), None)
+            .unwrap_err();
+        assert!(refused.contains("more than one folder"), "{refused}");
+
+        let mut link = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_ustar();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        link.append_link(&mut header, "a/evil", "/etc/passwd").unwrap();
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut gz, &link.into_inner().unwrap()).unwrap();
+        let refused = installs
+            .inspect_archive(&gz.finish().unwrap(), json!({}), None)
+            .unwrap_err();
+        assert!(refused.contains("not a plain file"), "{refused}");
+
+        assert!(installs.inspect_archive(b"not a tgz", json!({}), None).is_err());
+        assert!(installs.inspect_archive(&two, json!({}), None).is_ok());
+        let staged = fs::read_dir(root.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".staging"))
+            .count();
+        assert_eq!(staged, 1, "only the pack that read stays staged");
     }
 
     #[test]

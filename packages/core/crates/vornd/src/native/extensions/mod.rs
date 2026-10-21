@@ -373,37 +373,9 @@ impl Extensions {
 
     /// Tells the agents' registry which installed packages adapt an agent.
     fn sync_adapters(&self) {
-        let Some(adapters) = self.around.adapters() else {
-            return;
-        };
-        let store = self.router.store();
-        let mut installed = Vec::new();
-        for id in store.ids() {
-            let Ok(pack) = store.inspect_unmeasured(&id) else {
-                continue;
-            };
-            let Some(section) = pack.manifest.agent.clone() else {
-                continue;
-            };
-            let agent = match vorn_agents::AgentSpec::from_toml(section)
-                .and_then(vorn_agents::Agent::new)
-            {
-                Ok(agent) => agent,
-                Err(err) => {
-                    warn!("[extensions] the agent adapter in {id} does not read: {err}");
-                    continue;
-                }
-            };
-            let icon = crate::adapters::icon_path(&agent)
-                .filter(|p| !p.contains("..") && !Path::new(p).is_absolute())
-                .and_then(|p| fs::read_to_string(pack.path.join(p)).ok());
-            installed.push(crate::adapters::Installed {
-                extension: id.clone(),
-                agent,
-                icon,
-            });
+        if let Some(adapters) = self.around.adapters() {
+            adapters.set_installed(crate::adapters::read_installed(&self.router.store()));
         }
-        adapters.set_installed(installed);
     }
 
     /// Every contribution a client draws or lists, of the installed packages
@@ -1465,7 +1437,6 @@ impl Around for Wired {
         started.extend(native.tasks().map(builtin::tasks::entry));
         // Where Workflows' view always was in Settings: after Tasks.
         started.push(Arc::new(builtin::wasm::workflows()));
-        started.extend(builtin::agents::entries(native.adapters()));
         started
     }
 
