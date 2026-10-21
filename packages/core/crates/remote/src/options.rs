@@ -103,7 +103,9 @@ fn setting(setting: &str) -> Result<[String; 2], Refused> {
         plain(value)
     };
     if !fine {
-        return Err(Refused(format!("ssh option {key} has a value that is not allowed")));
+        return Err(Refused(format!(
+            "ssh option {key} has a value that is not allowed"
+        )));
     }
     Ok(["-o".to_owned(), format!("{key}={value}")])
 }
@@ -122,7 +124,9 @@ pub fn parse(text: &str) -> Result<Vec<String>, Refused> {
             "-J" => {
                 let next = words.next().unwrap_or_default();
                 if !jumps(next) {
-                    return Err(Refused("ssh option -J has a value that is not allowed".into()));
+                    return Err(Refused(
+                        "ssh option -J has a value that is not allowed".into(),
+                    ));
                 }
                 args.extend(["-J".to_owned(), next.to_owned()]);
             }
@@ -181,10 +185,19 @@ mod tests {
     #[test]
     fn names_the_option_it_refuses() {
         for (text, named) in [
-            ("-o ProxyCommand=nc", "ssh option ProxyCommand is not allowed"),
+            (
+                "-o ProxyCommand=nc",
+                "ssh option ProxyCommand is not allowed",
+            ),
             ("-oLocalCommand=x", "ssh option LocalCommand is not allowed"),
-            ("-o KnownHostsCommand=x", "ssh option KnownHostsCommand is not allowed"),
-            ("-o permitlocalcommand=yes", "ssh option permitlocalcommand is not allowed"),
+            (
+                "-o KnownHostsCommand=x",
+                "ssh option KnownHostsCommand is not allowed",
+            ),
+            (
+                "-o permitlocalcommand=yes",
+                "ssh option permitlocalcommand is not allowed",
+            ),
             ("-o Match", "ssh option Match is not allowed"),
             ("-o Include=/etc/x", "ssh option Include is not allowed"),
             ("-A -L 80:x:80", "ssh option -L is not allowed"),
@@ -209,7 +222,10 @@ mod tests {
             "-o LogLevel=",
             "-o HostKeyAlias=`x`",
         ] {
-            assert!(refused(text).contains("has a value that is not allowed"), "{text}");
+            assert!(
+                refused(text).contains("has a value that is not allowed"),
+                "{text}"
+            );
         }
     }
 
@@ -218,7 +234,9 @@ mod tests {
         assert!(check_destination("me", "box.example").is_ok());
         assert!(check_destination("", "fe80::1%en0").is_ok());
         assert_eq!(
-            check_destination("me", "-oProxyCommand=x").unwrap_err().to_string(),
+            check_destination("me", "-oProxyCommand=x")
+                .unwrap_err()
+                .to_string(),
             "host name \"-oProxyCommand=x\" is not allowed"
         );
         assert_eq!(

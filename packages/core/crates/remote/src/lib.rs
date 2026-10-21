@@ -346,7 +346,9 @@ mod tests {
             ..host()
         };
         assert_eq!(
-            args(&with("-o ProxyCommand=nc"), 5, None).unwrap_err().to_string(),
+            args(&with("-o ProxyCommand=nc"), 5, None)
+                .unwrap_err()
+                .to_string(),
             "ssh option ProxyCommand is not allowed"
         );
         let dashed = Host {

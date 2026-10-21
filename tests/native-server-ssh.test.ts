@@ -258,6 +258,7 @@ describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
       'PubkeyAuthentication=no',
       '-o',
       'StrictHostKeyChecking=no',
+      '--',
       'me@box.example',
       'echo __VORN_READY_<id>__ && exec $SHELL -l'
     ])
@@ -265,6 +266,7 @@ describe.skipIf(!runnable)('terminals on a remote host, through vornd', () => {
       '-t',
       '-i',
       '/keys/id_test',
+      '--',
       'you@keys.example',
       'echo __VORN_READY_<id>__ && exec $SHELL -l'
     ])

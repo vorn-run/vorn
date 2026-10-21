@@ -317,11 +317,7 @@ mod tests {
 
     #[test]
     fn refuses_options_or_a_host_it_would_not_type() {
-        let refused = |t: Target<'_>| {
-            ssh_line(&t, "M", Platform::Posix)
-                .unwrap_err()
-                .to_string()
-        };
+        let refused = |t: Target<'_>| ssh_line(&t, "M", Platform::Posix).unwrap_err().to_string();
         assert_eq!(
             refused(Target {
                 options: Some("-o ProxyCommand=sh;x"),

@@ -183,7 +183,7 @@ fn check_hosts(stored: &Value, sent: &Value) -> Result<(), String> {
     };
     for host in hosts {
         let now = login(host);
-        if host.get("id").and_then(|id| was(id)) == Some(now.clone()) {
+        if host.get("id").and_then(&was) == Some(now.clone()) {
             continue;
         }
         let [user, hostname, options] = now;
@@ -284,7 +284,10 @@ mod tests {
             ] })
         };
         let none = json!({});
-        assert_eq!(check_hosts(&none, &config("-A -o ServerAliveInterval=30")), Ok(()));
+        assert_eq!(
+            check_hosts(&none, &config("-A -o ServerAliveInterval=30")),
+            Ok(())
+        );
         assert_eq!(
             check_hosts(&none, &config("-o ProxyCommand=nc %h %p")),
             Err("Could not save host box: ssh option ProxyCommand is not allowed".into())

@@ -659,7 +659,12 @@ fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
         .gap(12.0)
         .px(20.0)
         .py(12.0)
-        .child(button("wf-turn-on-cancel", Act::CloseDialog, "Cancel", false))
+        .child(button(
+            "wf-turn-on-cancel",
+            Act::CloseDialog,
+            "Cancel",
+            false,
+        ))
         .child(button(
             "wf-turn-on-ok",
             act(WfAct::ConfirmTurnOn(id.to_owned())),

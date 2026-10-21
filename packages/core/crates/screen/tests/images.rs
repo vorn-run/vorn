@@ -274,19 +274,28 @@ fn every_refused_file_reads_the_same_whatever_the_reason() {
         // A temporary file not named as one.
         (3, "t=t", path(&misnamed)),
         // A temporary file outside the temp dir.
-        (4, "t=t", path(std::path::Path::new("/etc/tty-graphics-protocol"))),
+        (
+            4,
+            "t=t",
+            path(std::path::Path::new("/etc/tty-graphics-protocol")),
+        ),
         // A shared memory object that is not there.
         (5, "t=s", b64(b"/vorn-no-such-shm")),
         // A device.
         (6, "t=f", path(std::path::Path::new("/dev/zero"))),
     ] {
-        let reply = feed(&mut em, &apc(&format!("a=t,{keys},f=32,s=4,v=4,i={id}"), &data));
+        let reply = feed(
+            &mut em,
+            &apc(&format!("a=t,{keys},f=32,s=4,v=4,i={id}"), &data),
+        );
         assert!(reply[0].starts_with(&format!("\x1b_Gi={id};")), "{reply:?}");
         refusals.push(refusal(&reply));
     }
     assert!(misnamed.exists(), "a refused temporary file is left alone");
     assert!(
-        refusals.iter().all(|r| r == "EINVAL: unsupported medium\x1b\\"),
+        refusals
+            .iter()
+            .all(|r| r == "EINVAL: unsupported medium\x1b\\"),
         "{refusals:?}"
     );
     std::fs::remove_dir_all(&dir).unwrap();

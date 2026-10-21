@@ -1499,8 +1499,11 @@ scriptContent = "echo built"
         let path = project.to_string_lossy().into_owned();
         work.db
             .run(move |s| {
-                s.call("dbInsertProject", json!([{ "name": "p", "path": path, "preferredAgents": [] }]))
-                    .unwrap();
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
             })
             .await;
 
@@ -1517,8 +1520,11 @@ scriptContent = "echo built"
 
         let refused = |a: Answer| matches!(a, Answer::Error(e) if e.contains("turn it on"));
         assert!(refused(
-            work.call("workflow:setEnabled", &json!({ "id": "build", "enabled": true }))
-                .await
+            work.call(
+                "workflow:setEnabled",
+                &json!({ "id": "build", "enabled": true })
+            )
+            .await
         ));
         assert!(refused(
             work.call(
@@ -1606,8 +1612,11 @@ scriptContent = "echo built"
         let path = project.to_string_lossy().into_owned();
         work.db
             .run(move |s| {
-                s.call("dbInsertProject", json!([{ "name": "p", "path": path, "preferredAgents": [] }]))
-                    .unwrap();
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
             })
             .await;
         let mine = conditional("mine", json!({ "triggerType": "manual" }));

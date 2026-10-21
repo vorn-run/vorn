@@ -204,7 +204,11 @@ impl FromFile {
             .into_iter()
             .flatten()
             .filter_map(|f| {
-                let runs = f.get("runs").and_then(Value::as_array).into_iter().flatten();
+                let runs = f
+                    .get("runs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten();
                 Some((
                     s(f, "workflowId")?.to_owned(),
                     FromFile {

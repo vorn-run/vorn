@@ -2529,7 +2529,7 @@ pub(super) mod tests {
         assert_eq!(remote.marker, login::marker(id));
         assert!(
             remote.line.starts_with(
-                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A me@box.example 'echo __VORN_READY_"
+                "ssh -t -p 2222 -o PreferredAuthentications=password -o PubkeyAuthentication=no -A -- me@box.example 'echo __VORN_READY_"
             ),
             "{}",
             remote.line
@@ -2560,7 +2560,7 @@ pub(super) mod tests {
         let remote = remote_of(&input);
         let key = remote.key.as_ref().expect("the stored key");
         assert!(remote.line.starts_with(&format!(
-            "ssh -t -p 2222 -i {} -A me@box.example",
+            "ssh -t -p 2222 -i {} -A -- me@box.example",
             key.path.display()
         )));
         assert!(!key.path.exists());
@@ -2575,7 +2575,7 @@ pub(super) mod tests {
         let (_, input) = fed.host.last_start();
         assert!(remote_of(&input)
             .line
-            .starts_with("ssh -t -p 2222 -A me@box.example"));
+            .starts_with("ssh -t -p 2222 -A -- me@box.example"));
     }
 
     #[test]
@@ -2696,7 +2696,7 @@ pub(super) mod tests {
         let (spec, input) = fed.host.last_start();
         assert_eq!(spec.cwd, shell::home_dir());
         let remote = remote_of(&input);
-        assert!(remote.line.starts_with("ssh -t -p 2222 -A me@box.example"));
+        assert!(remote.line.starts_with("ssh -t -p 2222 -A -- me@box.example"));
         assert!(remote.command.starts_with("cd /srv/far-not-here && acme"));
         assert!(remote.command.contains("--resume conv-rr"));
         assert_eq!(

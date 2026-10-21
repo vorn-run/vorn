@@ -148,7 +148,9 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
             );
         }
         None if s.st.wf.held_off(d.id()).is_some() => {
-            let id = s.acts.on("wf-editor", act(WfAct::TurnOn(d.id().to_owned())));
+            let id = s
+                .acts
+                .on("wf-editor", act(WfAct::TurnOn(d.id().to_owned())));
             let hot = s.ui.hover(id);
             let b = div()
                 .id(id)
@@ -173,7 +175,8 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
                         .line_height(16.0)
                         .silent(),
                 );
-            let tip = "This workflow comes from a project file and runs nothing until you turn it on";
+            let tip =
+                "This workflow comes from a project file and runs nothing until you turn it on";
             right = right.child(tooltip(s.ui, b, id, tip, None));
         }
         None => {

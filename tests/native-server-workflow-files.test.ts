@@ -2,7 +2,9 @@
  * Workflows as files, through a vornd of the test's own: a project's
  * `.vorn/workflows/*.toml` is read into its workflows and watched, so an edit
  * to the file changes the workflow; a change made in Vorn is written back to
- * the file with its comments kept; a workflow made in Vorn is saved to a
+ * the file with its comments kept; a file runs nothing until it is turned on
+ * as it is, and goes off again when edited outside Vorn; a workflow made in
+ * Vorn is saved to a
  * project's folder in one call; a file that does not read says where;
  * `vorn workflow check` names each problem by file, line and column; and a
  * node type installed from git runs, with the workflow its extension ships.
@@ -74,6 +76,13 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     const output = (run: Run, node: string): unknown =>
       run.nodeStates.find((n) => n.nodeId === node)?.output
 
+    const trusted = async (workflowId: string): Promise<boolean | undefined> => {
+      const listed = await client.result<{ files: Array<{ workflowId: string; trusted: boolean }> }>(
+        'workflow:files'
+      )
+      return listed.files.find((f) => f.workflowId === workflowId)?.trusted
+    }
+
     beforeAll(async () => {
       served = await startServed({ credential: CREDENTIAL, sessiond: true })
       client = await Watcher.open(served.port, CREDENTIAL)
@@ -93,7 +102,7 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       await served?.stop()
     })
 
-    it("reads a project's workflow file and runs it", async () => {
+    it("reads a project's workflow file, and runs it once it is turned on", async () => {
       await until('the file to be read', async () => !!(await workflow('file-review')))
       const wf = (await workflow('file-review'))!
       expect(wf.name).toBe('File review')
@@ -102,6 +111,17 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
         { id: 'start-check', source: 'start', target: 'check' },
         { id: 'check-say', source: 'check', target: 'say' }
       ])
+      // Read from the project, it is off and runs nothing until turned on.
+      expect(wf.enabled).toBe(false)
+      expect(await trusted('file-review')).toBe(false)
+      expect(await client.result('workflow:run', { workflowId: 'file-review' })).toBeNull()
+      await expect(
+        client.result('workflow:runManual', { workflowId: 'file-review' })
+      ).rejects.toThrow('off until you turn it on')
+      expect(await client.result('workflowRun:list', { workflowId: 'file-review' })).toEqual([])
+      expect(await client.result('workflow:trust', { id: 'file-review' })).toEqual({ ok: true })
+      expect(await trusted('file-review')).toBe(true)
+      expect((await workflow('file-review'))!.enabled).toBe(true)
       await client.result('workflow:run', { workflowId: 'file-review' })
       const [run] = await finished('file-review')
       expect(run.status).toBe('success')
@@ -118,6 +138,10 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       // A plain edit of the file is read, never written back.
       await new Promise((r) => setTimeout(r, 1_500))
       expect(fs.readFileSync(file, 'utf-8')).toBe(edited)
+      // Edited outside Vorn, it is off again until turned on as it is now.
+      expect(await trusted('file-review')).toBe(false)
+      expect(await client.result('workflow:run', { workflowId: 'file-review' })).toBeNull()
+      await client.result('workflow:trust', { id: 'file-review' })
       await client.result('workflow:run', { workflowId: 'file-review' })
       const runs = await finished('file-review', 2)
       expect(output(runs[0], 'say')).toBe('said edited\n')
@@ -164,6 +188,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect(now).toContain('echo by hand')
       expect(now).toContain('name = "Renamed in the editor"')
       expect(now).toContain('# The check itself.')
+      // The hand edit was not turned on, so neither is what it met.
+      expect(await trusted('file-review')).toBe(false)
     })
 
     it('binds a connection the file names to the connection of that name here', async () => {
@@ -235,6 +261,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect(text).toContain('needs = ["t#e1"]')
       const files = await client.result<{ files: Array<{ workflowId: string }> }>('workflow:files')
       expect(files.files.map((f) => f.workflowId).sort()).toEqual(['file-review', 'made-here'])
+      // Saved from Vorn, it stays on.
+      expect(await trusted('made-here')).toBe(true)
       const again = await client.result<{ created: boolean }>('workflow:saveToFile', {
         id: 'made-here',
         projectName: 'p'

@@ -487,7 +487,13 @@ impl Work {
                     .flatten()
                     .filter(Value::is_object)
                     .map(as_file)
-                    .map(|ours| if trusted { ours } else { enabled_as(ours, &base) });
+                    .map(|ours| {
+                        if trusted {
+                            ours
+                        } else {
+                            enabled_as(ours, &base)
+                        }
+                    });
                 match ours {
                     Some(ours) if ours != base => vorn_workflow_file::meet(&base, &ours, &theirs),
                     _ => theirs.clone(),
@@ -593,7 +599,11 @@ impl Work {
         let (known, base, trusted) = {
             let s = self.files.lock();
             let trusted = s.trusts(&file) && s.hashes.get(&file) == Some(&digest(&old));
-            (s.stamps.get(&file).copied(), s.base.get(&file).cloned(), trusted)
+            (
+                s.stamps.get(&file).copied(),
+                s.base.get(&file).cloned(),
+                trusted,
+            )
         };
         let ours = match (&base, trusted) {
             (Some(base), false) => enabled_as(as_file(row), base),
