@@ -582,7 +582,6 @@ pub(super) fn view(s: &Screen<'_>) -> El {
         .min_h(0.0)
         .p(16.0);
     content = match board::point(s) {
-        None if s.st.points.loaded => content.child(off()),
         _ if shown.is_empty() => content.child(empty(s)),
         _ if board => content.child(board::view(s).unwrap_or_else(div)),
         _ => list(s, content.scroll_y(), &shown),
@@ -602,33 +601,6 @@ pub(super) fn ghost(s: &Screen<'_>) -> Option<El> {
         return None;
     }
     board::ghost(s, id, s.st.tasks.grab?)
-}
-
-/// What the view says while Tasks is switched off: the tasks are kept.
-fn off() -> El {
-    div()
-        .col()
-        .grow()
-        .w_full()
-        .items_center()
-        .justify_center()
-        .child(div().pb(12.0).child(ico("list-todo", 40.0, 1.0, faint())))
-        .child(
-            div().pb(4.0).child(
-                text("Tasks is off", 14.0, faint())
-                    .line_height(20.0)
-                    .silent(),
-            ),
-        )
-        .child(
-            text(
-                "Your tasks are kept. Turn Tasks on in Settings \u{203a} Extensions.",
-                12.0,
-                faint(),
-            )
-            .line_height(16.0)
-            .silent(),
-        )
 }
 
 /// The toolbar popover's entries.

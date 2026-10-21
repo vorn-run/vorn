@@ -61,17 +61,61 @@ fn menu_open(s: &Screen<'_>, kind: &MenuKind) -> bool {
 /// The main view pills; choosing one reports `Event::Select` on this group.
 pub const VIEWS: Id = Id(0x7669_6577_7069_6c6c);
 
-/// The views in pill order, indexed by `Event::Select`.
-pub const VIEW_ORDER: [MainView; 3] = [MainView::Sessions, MainView::Tasks, MainView::Workflows];
+/// One top-bar button: Sessions, or a view an extension adds.
+pub(super) struct TopButton {
+    pub act: Act,
+    pub view: MainView,
+    pub icon: String,
+    pub label: String,
+    pub keys: Option<String>,
+    pub on: bool,
+}
+
+/// The top bar's buttons in order, indexed by `Event::Select` on [`VIEWS`].
+pub(super) fn top_buttons(s: &Screen<'_>) -> Vec<TopButton> {
+    let sessions = TopButton {
+        act: Act::View(MainView::Sessions),
+        view: MainView::Sessions,
+        icon: "monitor".to_owned(),
+        label: "Sessions".to_owned(),
+        keys: Some(format!("{m}S", m = mod_label())),
+        on: s.st.view == MainView::Sessions,
+    };
+    let shown = super::view_point(&s.st.points, s.st.view, s.st.ext_view.as_deref())
+        .map(crate::points::Point::key);
+    let views = s.st.points.top_bar().into_iter().map(|p| TopButton {
+        act: MainView::act(p),
+        view: MainView::of(p),
+        icon: p.icon.clone().unwrap_or_else(|| "puzzle".to_owned()),
+        label: p.title.clone(),
+        keys: p.key.as_deref().map(key_label),
+        on: shown.as_deref() == Some(p.key().as_str()),
+    });
+    std::iter::once(sessions).chain(views).collect()
+}
+
+/// A manifest's key, `Mod+Shift+W`, as this platform writes it.
+fn key_label(spec: &str) -> String {
+    spec.split('+')
+        .map(|part| match part {
+            "Mod" => mod_label(),
+            "Shift" => "\u{21e7}",
+            "Alt" if crate::ui::mods::mac() => "\u{2325}",
+            "Ctrl" if crate::ui::mods::mac() => "\u{2303}",
+            "Alt" => "Alt+",
+            "Ctrl" => "Ctrl+",
+            key => key,
+        })
+        .collect()
+}
 
 /// Icon-only pills whose tooltips name the view.
 fn pills(s: &Screen<'_>) -> El {
-    let keys = [
-        format!("{m}S", m = mod_label()),
-        format!("{m}T", m = mod_label()),
-        format!("{m}\u{21e7}W", m = mod_label()),
-    ];
-    let icons = look::PILLS.map(|(name, _)| look::icon(name, 2.0).unwrap_or_default());
+    let buttons = top_buttons(s);
+    let icons: Vec<String> = buttons
+        .iter()
+        .map(|b| look::icon(&b.icon, 2.0).unwrap_or_default())
+        .collect();
     let waiting = waiting(s).len();
     let count = if waiting > 9 {
         "9+".to_owned()
@@ -79,21 +123,19 @@ fn pills(s: &Screen<'_>) -> El {
         waiting.to_string()
     };
     let hint = format!("Workflows \u{b7} {waiting} awaiting review");
-    let items: Vec<Pill<'_>> = look::PILLS
+    let items: Vec<Pill<'_>> = buttons
         .iter()
         .zip(&icons)
-        .zip(&keys)
-        .zip(VIEW_ORDER)
-        .map(|((((_, label), svg), keys), view)| {
-            let pill = Pill::icon_only(label, svg, keys);
-            if view == MainView::Workflows && waiting > 0 {
+        .map(|(b, svg)| {
+            let pill = Pill::icon_only(&b.label, svg, b.keys.as_deref().unwrap_or_default());
+            if b.view == MainView::Workflows && waiting > 0 {
                 pill.badge(&count, &hint)
             } else {
                 pill
             }
         })
         .collect();
-    let on = VIEW_ORDER.iter().position(|v| *v == s.st.view).unwrap_or(0);
+    let on = buttons.iter().position(|b| b.on).unwrap_or(0);
     widgets::pills(s.ui, VIEWS, "Main view", &items, on)
 }
 

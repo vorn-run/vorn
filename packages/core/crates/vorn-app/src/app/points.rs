@@ -18,6 +18,7 @@ use crate::act::Act;
 use crate::client::RpcError;
 use crate::points::{self, kind, unscope, PointAct, Request};
 use crate::runs::s;
+use crate::screen::MainView;
 use crate::ui::{Id, Ui, WindowRequest};
 
 /// A contributions call on its way.
@@ -221,6 +222,17 @@ impl App {
         }
     }
 
+    /// Back to Sessions when the view showing lost its button, as its extension went off.
+    fn keep_view(&mut self) {
+        let st = &mut self.st;
+        if st.view != MainView::Sessions
+            && crate::screen::view_point(&st.points, st.view, st.ext_view.as_deref()).is_none()
+        {
+            st.view = MainView::Sessions;
+            st.ext_view = None;
+        }
+    }
+
     /// What preference `key` of extension `id` holds now, as its page shows it.
     fn preference(&self, id: &str, key: &str) -> Value {
         let lists = [&self.st.points.builtins, &self.st.plugins.packs];
@@ -280,15 +292,18 @@ impl App {
 
     pub(super) fn point_answered(&mut self, call: PointCall, answer: Result<Value, RpcError>) {
         match call {
-            PointCall::List => match answer {
-                Ok(Value::Array(list)) => {
-                    self.st.settings.appearance.listed(&list);
-                    self.st.points.listed(&list);
+            PointCall::List => {
+                match answer {
+                    Ok(Value::Array(list)) => {
+                        self.st.settings.appearance.listed(&list);
+                        self.st.points.listed(&list);
+                    }
+                    Ok(_) => self.st.points.listed(&[]),
+                    // An older vornd has no contributions; ask no more.
+                    Err(_) => self.st.points.listed(&[]),
                 }
-                Ok(_) => self.st.points.listed(&[]),
-                // An older vornd has no contributions; ask no more.
-                Err(_) => self.st.points.listed(&[]),
-            },
+                self.keep_view();
+            }
             PointCall::NodeTypes => {
                 self.st.points.node_types = match answer {
                     Ok(v) => v
@@ -394,7 +409,7 @@ impl App {
             Some(id) if unscope(key).1.is_some() => self.st.selected = Some(id),
             Some(id) => {
                 if self.store.session(&id).is_some() {
-                    self.st.view = crate::screen::MainView::Sessions;
+                    self.st.view = MainView::Sessions;
                     self.st.selected = Some(id);
                 }
                 self.come_forward = true;
@@ -482,7 +497,7 @@ impl App {
             );
         }
         let palette = self.st.dialog == Some(crate::state::Dialog::Palette);
-        let workflows = self.st.view == crate::screen::MainView::Workflows;
+        let workflows = self.st.view == MainView::Workflows;
         if !self.st.points.builtins_loaded && (self.st.settings.open || palette || workflows) {
             self.st.points.builtins_loaded = true;
             self.call(
@@ -690,7 +705,7 @@ impl App {
                 Request::Focus(id) => {
                     ui.request(WindowRequest::Focus);
                     if self.store.session(&id).is_some() {
-                        self.st.view = crate::screen::MainView::Sessions;
+                        self.st.view = MainView::Sessions;
                         self.st.selected = Some(id);
                     }
                 }

@@ -7,7 +7,7 @@ mod cards;
 pub use cards::{flex_divider_id, grid_id};
 mod chrome;
 pub mod code;
-pub use chrome::{DOCK, VIEWS, VIEW_ORDER};
+pub use chrome::{DOCK, VIEWS};
 mod composer;
 mod dialogs;
 pub mod gates;
@@ -30,9 +30,10 @@ pub mod workflows;
 
 use std::collections::HashMap;
 
-use crate::act::Acts;
+use crate::act::{Act, Acts};
 use crate::client::Store;
 use crate::look::{self, Color};
+use crate::points::{Point, Points};
 use crate::state::{LayoutMode, State};
 use crate::ui::{div, icon, El, Place, Rgba, Ui};
 use crate::view::PaneView;
@@ -46,13 +47,46 @@ pub use dialogs::{PROJECT_COLOR, PROJECT_ICON, PROJECT_NAME, PROJECT_PATH};
 pub use palette::{PALETTE_INPUT, PALETTE_LIST};
 pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};
 
-/// The three views the top bar's pills switch between.
+/// The views the top bar's pills switch between: Sessions, then what
+/// extensions add under `[[contributes.views]]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum MainView {
     #[default]
     Sessions,
+    /// Tasks' board, which the app draws over its tree.
     Tasks,
+    /// Workflows' runs and editor, which the app draws over its tree.
     Workflows,
+    /// Any other extension's view, drawn from its tree; `State::ext_view` names it.
+    Extension,
+}
+
+impl MainView {
+    /// The view top-bar point `p` opens.
+    pub fn of(p: &Point) -> MainView {
+        if p.extension == tasks::board::TASKS && p.id == "board" {
+            MainView::Tasks
+        } else if p.extension == crate::workflows::ID && p.id == "workflows" {
+            MainView::Workflows
+        } else {
+            MainView::Extension
+        }
+    }
+
+    /// What choosing top-bar point `p` does.
+    pub fn act(p: &Point) -> Act {
+        match MainView::of(p) {
+            MainView::Extension => Act::ExtensionView(p.key()),
+            v => Act::View(v),
+        }
+    }
+}
+
+/// The top-bar point `view` shows; `None` for Sessions, or one switched off.
+pub fn view_point<'a>(points: &'a Points, view: MainView, ext: Option<&str>) -> Option<&'a Point> {
+    points.top_bar().into_iter().find(|p| {
+        MainView::of(p) == view && (view != MainView::Extension || ext == Some(p.key().as_str()))
+    })
 }
 
 /// The composer's state: what is typed and for which project.
@@ -109,10 +143,7 @@ impl Screen<'_> {
             main.child(cards::tabs(self))
         } else if self.st.view == MainView::Sessions && self.st.focused.is_some() {
             main.child(cards::focused(self))
-        } else if self.st.view == MainView::Workflows
-            && self.st.wf.editor.is_some()
-            && !workflows::is_off(self)
-        {
+        } else if self.st.view == MainView::Workflows && self.st.wf.editor.is_some() {
             main.child(workflows::editor(self))
         } else {
             main.child(chrome::top_bar(self))
@@ -212,8 +243,8 @@ impl Screen<'_> {
             MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
-            MainView::Workflows if workflows::is_off(self) => workflows::off(),
             MainView::Workflows => workflows::view(self),
+            MainView::Extension => points::main_view(self),
         };
         let mut col = div().col().grow().min_h(0.0);
         if st.view == MainView::Sessions {

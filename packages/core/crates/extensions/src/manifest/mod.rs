@@ -553,7 +553,7 @@ impl Place {
             Place::Windows => "Window",
             Place::Menus => "Menu item",
             Place::Dialogs => "Dialog",
-            Place::Views => "Main view",
+            Place::Views => "Top bar button",
             Place::Shell => "Shell commands",
             Place::Cards => "Card",
             Place::Attention => "Waiting for you",

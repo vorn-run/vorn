@@ -16,6 +16,8 @@ pub enum Act {
     ToggleMaximize,
     CloseWindow,
     View(MainView),
+    /// Shows an extension's own main view, by its point key.
+    ExtensionView(String),
     ToggleSidebar,
     /// Selects a card (the active tab in the tabs layout).
     Select(String),

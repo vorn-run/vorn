@@ -16,6 +16,7 @@ events = ["agent.conversation"]
 id = "board"
 title = "Tasks"
 icon = "list-todo"
+key = "Mod+T"
 tree = true
 
 [[contributes.badges]]

@@ -2,8 +2,8 @@
 //! waiting as an attention item the dock shows and the approve key answers,
 //! Run workflow as Workflows' contributed menu rows, a step type
 //! an installed extension declares in the library and its form, the editor
-//! on the kit's graph with a 200-step workflow, and the Workflows view while
-//! the editor is off.
+//! on the kit's graph with a 200-step workflow, and Workflows' button and
+//! menus following its switch.
 
 #![cfg(unix)]
 
@@ -333,43 +333,46 @@ fn the_editor_draws_a_200_step_workflow_within_a_frame() {
 }
 
 #[test]
-fn with_the_editor_off_the_view_says_so_and_run_workflow_is_gone() {
+fn switching_workflows_off_takes_its_button_and_run_workflow_away() {
     let Some(v) = TestVornd::start() else {
         return;
     };
     let mut app = connect(&v);
     add_project(&mut app, &v, "web", json!({}));
     let mut shot = Shot::new();
-    shot.until(&mut app, "the editor's menus", |app, _| {
+    shot.until(&mut app, "Workflows' menus", |app, _| {
         app.st
             .points
             .find(wf::ID, vorn_app::points::kind::MENUS, "run")
             .map(|_| ())
     });
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
+    assert_eq!(app.st.view, MainView::Workflows);
     app.rpc()
         .call("extension:setBuiltin", json!({ "id": wf::ID, "on": false }))
         .expect("switched off");
     app.st.points.stale = true;
-    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
-    shot.until(&mut app, "the editor off and its menus gone", |app, _| {
-        let off = app
-            .st
-            .points
-            .builtins
-            .iter()
-            .any(|b| b["id"] == wf::ID && b["on"] == Value::Bool(false));
-        let menus = app
-            .st
-            .points
-            .at(vorn_app::points::kind::MENUS)
-            .any(|p| p.extension == wf::ID);
-        (off && !menus).then_some(())
+    shot.until(&mut app, "its button and menus gone", |app, _| {
+        let left = app.st.points.all.iter().any(|p| p.extension == wf::ID);
+        (!left && app.st.view == MainView::Sessions).then_some(())
     });
+    // Its key goes with its button.
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
+    assert_eq!(app.st.view, MainView::Sessions);
     shot.frame(&mut app);
-    shot.save(&mut app, "x-editor-off");
+    shot.save(&mut app, "x-workflows-off");
     app.rpc()
         .call("extension:setBuiltin", json!({ "id": wf::ID, "on": true }))
         .expect("switched back on");
+    app.st.points.stale = true;
+    shot.until(&mut app, "its button back", |app, _| {
+        app.st
+            .points
+            .find(wf::ID, vorn_app::points::kind::VIEWS, "workflows")
+            .map(|_| ())
+    });
+    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
+    assert_eq!(app.st.view, MainView::Workflows);
 }
 
 #[test]

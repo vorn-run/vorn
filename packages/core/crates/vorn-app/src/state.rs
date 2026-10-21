@@ -429,6 +429,8 @@ impl LayoutRow {
 #[derive(Debug, Default)]
 pub struct State {
     pub view: MainView,
+    /// The point key of the extension view showing while `view` is [`MainView::Extension`].
+    pub ext_view: Option<String>,
     pub selected: Option<String>,
     /// The card on the focused stage.
     pub focused: Option<String>,

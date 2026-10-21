@@ -111,6 +111,8 @@ pub struct Point {
     /// A built-in's settings page: the app's own page it follows in the
     /// sidebar, as `agents`; `None` lists it under Extensions.
     pub after: Option<String>,
+    /// Shipped with Vorn, so it comes before what installed extensions add.
+    pub builtin: bool,
 }
 
 impl Point {
@@ -140,6 +142,7 @@ impl Point {
             deny: text("deny"),
             tree: v.get("tree").and_then(Value::as_bool) == Some(true),
             after: text("after"),
+            builtin: v.get("builtin").and_then(Value::as_bool) == Some(true),
         })
     }
 
@@ -345,12 +348,20 @@ impl Points {
         self.all.iter().filter(move |p| p.kind == kind)
     }
 
-    /// Shows built-in `id` as on or off, ahead of vornd's answer.
+    /// The top bar's extension buttons after Sessions: built-ins first, each
+    /// group in the order vornd lists them.
+    pub fn top_bar(&self) -> Vec<&Point> {
+        let mut views: Vec<&Point> = self.at(kind::VIEWS).collect();
+        views.sort_by_key(|p| !p.builtin);
+        views
+    }
+
     /// Shows extension `id`'s preference `key` as `value` on the built-ins' pages.
     pub fn set_preference(&mut self, id: &str, key: &str, value: &Value) {
         set_preference(&mut self.builtins, id, key, value);
     }
 
+    /// Shows built-in `id` as on or off, ahead of vornd's answer.
     pub fn set_builtin(&mut self, id: &str, on: bool) {
         for b in &mut self.builtins {
             if b.get("id").and_then(Value::as_str) == Some(id) {

@@ -18,7 +18,7 @@ use crate::models::Catalog;
 use crate::paint;
 use crate::screen::{
     card_index, intent_id, menus, rename_id, term_id, Composer, MainView, Screen, COMPOSER_INPUT,
-    PROJECT_COLOR, PROJECT_ICON, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
+    PROJECT_COLOR, PROJECT_ICON, PROJECT_NAME, PROJECT_PATH, VIEWS,
 };
 use crate::scroll::{self, Route, Rows, Scroll};
 use crate::state::{
@@ -115,7 +115,6 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     }
     if only(MOD() | mods::SHIFT) {
         return match code {
-            "KeyW" => Some(Shortcut::View(MainView::Workflows)),
             "KeyA" => Some(Shortcut::Permission(true)),
             "KeyD" => Some(Shortcut::Permission(false)),
             "ArrowUp" => Some(Shortcut::Prompt(true)),
@@ -163,7 +162,6 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
     }
     Some(match code {
         "KeyS" => Shortcut::View(MainView::Sessions),
-        "KeyT" => Shortcut::View(MainView::Tasks),
         "KeyN" => Shortcut::NewSession,
         "KeyB" => Shortcut::Sidebar,
         "KeyJ" => Shortcut::ViewOptions,
@@ -2022,13 +2020,26 @@ impl App {
             Act::ToggleMaximize => ui.request(WindowRequest::ToggleMaximize),
             Act::CloseWindow => ui.request(WindowRequest::Close),
             Act::View(v) => {
+                // A view whose extension is off has no button; one asked for anyway stays shut.
+                let gone = v != MainView::Sessions
+                    && self.st.points.loaded
+                    && crate::screen::view_point(&self.st.points, v, None).is_none();
+                if gone {
+                    return;
+                }
                 self.st.view = v;
+                self.st.ext_view = None;
                 if v != MainView::Sessions {
                     self.st.focused = None;
                 }
                 if v == MainView::Workflows {
                     self.wf_refresh();
                 }
+            }
+            Act::ExtensionView(key) => {
+                self.st.view = MainView::Extension;
+                self.st.ext_view = Some(key);
+                self.st.focused = None;
             }
             Act::ToggleSidebar => {
                 self.st.sidebar = !self.st.sidebar;
@@ -2758,8 +2769,12 @@ impl App {
                 phase,
             } => self.wheel(ui, id, dy, (x, y), phase),
             UiEvent::Select { group, index } if group == VIEWS => {
-                if let Some(&v) = VIEW_ORDER.get(index) {
-                    self.run(ui, Act::View(v), Src::default());
+                let act = match index.checked_sub(1) {
+                    None => Some(Act::View(MainView::Sessions)),
+                    Some(i) => self.st.points.top_bar().get(i).map(|p| MainView::act(p)),
+                };
+                if let Some(act) = act {
+                    self.run(ui, act, Src::default());
                 }
             }
             UiEvent::Select { group, index } if group == menus::MENU || group == menus::SUB => {
@@ -2983,6 +2998,21 @@ impl App {
             .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
         if let Some(s) = s {
             self.run_shortcut(ui, s);
+            return true;
+        }
+        let view = self
+            .st
+            .points
+            .top_bar()
+            .into_iter()
+            .find(|p| {
+                p.key
+                    .as_deref()
+                    .is_some_and(|k| crate::points::key_hit(k, code, *m, MOD()))
+            })
+            .map(MainView::act);
+        if let Some(act) = view {
+            self.run(ui, act, Src::default());
             return true;
         }
         let command = self
@@ -3689,14 +3719,9 @@ mod tests {
             shortcut("KeyS", MOD()),
             Some(Shortcut::View(MainView::Sessions))
         );
-        assert_eq!(
-            shortcut("KeyT", MOD()),
-            Some(Shortcut::View(MainView::Tasks))
-        );
-        assert_eq!(
-            shortcut("KeyW", MOD() | mods::SHIFT),
-            Some(Shortcut::View(MainView::Workflows))
-        );
+        // Tasks' and Workflows' keys come from their manifests, with their buttons.
+        assert_eq!(shortcut("KeyT", MOD()), None);
+        assert_eq!(shortcut("KeyW", MOD() | mods::SHIFT), None);
         assert_eq!(shortcut("Digit3", MOD()), Some(Shortcut::Jump(2)));
         assert_eq!(shortcut("Digit0", MOD()), None);
         assert_eq!(shortcut("BracketRight", MOD()), Some(Shortcut::Cycle(true)));

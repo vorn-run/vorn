@@ -301,6 +301,63 @@ blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
 (`packages/core/extensions/browser`) a session's tabs over its page, and
 the Device (`packages/core/extensions/device`) a session's simulator.
 
+## Top bar buttons
+
+`[[contributes.views]]` adds a button to the top bar, after Sessions, that
+opens the extension's own main view, drawn from its tree:
+
+```toml
+[[contributes.views]]
+id = "board"
+title = "Board"
+icon = "layout-grid"      # a Lucide icon name
+key = "Mod+Shift+B"       # optional: the key that opens it
+tree = true
+```
+
+The title is the button's tooltip, with its key. Vorn's own extensions'
+buttons come first, in a fixed order (Tasks, then Workflows), then each
+installed extension's, by extension name. The install sheet
+lists the button under Top bar. A button shows only while its extension is
+on: switching the extension off, or removing it, takes the button and its key
+away at once, and switching it on brings them back, without a restart. A
+`when` rule applies to it as to any contribution.
+
+## Preferences
+
+An extension declares its own settings under `[[contributes.preferences]]`.
+Each has an `id` unique in the manifest, a `title`, an optional
+`description`, a `type` and a `default`:
+
+```toml
+[[contributes.preferences]]
+id = "pane"
+title = "Board pane beside cards"
+description = "Lists the board in a pane beside each card."
+type = "bool"
+default = true
+
+[[contributes.preferences]]
+id = "sort"
+title = "Sort by"
+type = "choice"
+default = "age"
+options = [{ id = "age", title = "Age" }, { id = "name", title = "Name" }]
+```
+
+`bool` is a switch; `choice` is one of its `options`, and its `default` is
+one of their ids. They show under Settings on the extension's page, with
+their titles and descriptions, and a change applies at once, without a
+restart. An extension reads its values with `rows("preferences")`: one row
+`{id, value}` per preference, the default until the user changes it. When
+one changes, its trees are asked for again and its contributions listed
+again, as when any of its collections changes.
+
+A contribution shows only while the `bool` preferences it names are on:
+`when = { setting = ["pane"] }` (any of them, if it names several). Settings
+are not activation rules, so `[activates]` has no `setting`; a `when.setting`
+that names no `bool` preference is refused at install with its field.
+
 ## The new API
 
 ### `host.rows`

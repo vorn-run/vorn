@@ -545,6 +545,28 @@ pub(super) fn settings_page(s: &Screen<'_>, key: &str) -> El {
         .child_if(body)
 }
 
+/// An extension's own main view: its tree as a page, under its title.
+pub(super) fn main_view(s: &Screen<'_>) -> El {
+    let Some(p) = super::view_point(
+        &s.st.points,
+        super::MainView::Extension,
+        s.st.ext_view.as_deref(),
+    ) else {
+        return div();
+    };
+    let desc = p.description.clone().unwrap_or_default();
+    let (bar, body) = draw_page(s, p);
+    div()
+        .id(crate::ui::Id::new("extension-view"))
+        .col()
+        .grow()
+        .min_h(0.0)
+        .p(24.0)
+        .scroll_y()
+        .child(super::settings::header(&p.title, &desc, bar))
+        .child_if(body)
+}
+
 /// An extension pane's body.
 pub(super) fn pane(s: &Screen<'_>, key: &str) -> El {
     match s.st.points.get(key) {
