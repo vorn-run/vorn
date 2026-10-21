@@ -27,6 +27,9 @@ tests/fixtures/tasks-replay/
 
 # Rust core build output
 packages/core/target/
+# The RSS connector's shipped bundle and the feeds it is tested against, kept byte for byte.
+packages/core/bench/ext-tiers/rss/node/index.js
+packages/core/bench/ext-tiers/rss/node/fixtures/
 packages/core/crates/vorn-web/dist/
 
 

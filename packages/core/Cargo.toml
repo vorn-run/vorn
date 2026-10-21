@@ -59,6 +59,9 @@ members = [
   "bench/scale",
   "bench/workflows",
   "bench/ext-tiers",
+  "bench/ext-tiers/crash",
+  "bench/ext-tiers/rss",
+  "bench/ext-tiers/worktrees",
 ]
 exclude = ["vendor"]
 

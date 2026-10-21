@@ -1,0 +1,45 @@
+{
+  "version": "https://jsonfeed.org/version/1",
+  "title": "JSON Feed",
+  "icon": "https://cdn.micro.blog/jsonfeed/avatar.jpg",
+  "home_page_url": "https://www.jsonfeed.org/",
+  "feed_url": "https://www.jsonfeed.org/feed.json",
+  "items": [
+    {
+      "id": "http://jsonfeed.micro.blog/2020/08/07/json-feed-version.html",
+      "title": "JSON Feed version 1.1",
+      "content_html": "<p>We&rsquo;ve updated the spec to <a href=\"https://jsonfeed.org/version/1.1\">version 1.1</a>. It’s a minor update to JSON Feed, clarifying a few things in the spec and adding a couple new fields such as <code>authors</code> and <code>language</code>.</p>",
+      "date_published": "2020-08-07T11:44:36-05:00",
+      "url": "https://www.jsonfeed.org/2020/08/07/json-feed-version.html"
+    },
+    {
+      "id": "http://jsonfeed.micro.blog/2017/05/17/announcing-json-feed.html",
+      "title": "Announcing JSON Feed",
+      "content_html": "<p>We — Manton Reece and Brent Simmons — have noticed that JSON has become the developers’ choice for APIs, and that developers will often go out of their way to avoid XML. JSON is simpler to read and write, and it’s less prone to bugs.</p>",
+      "date_published": "2017-05-17T10:02:12-05:00",
+      "url": "https://www.jsonfeed.org/2017/05/17/announcing-json-feed.html"
+    },
+    {
+      "id": 42,
+      "title": "A version 1.1 item",
+      "url": "/2026/09/12/version-1-1.html",
+      "summary": "A short summary.",
+      "content_text": "Plain text with <angle> & ampersand.",
+      "date_published": "2026-09-12T08:00:00Z",
+      "date_modified": "2026-09-12T09:15:30.250Z",
+      "authors": [
+        {
+          "name": "Manton Reece"
+        },
+        {
+          "name": "Brent Simmons"
+        }
+      ],
+      "tags": [
+        "jsonfeed",
+        "spec",
+        "jsonfeed"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+[package]
+name = "vorn-bench-rss"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The RSS connector's feed reading in Rust, for the extension-tiers bench: one source built as a Wasm component and as a program"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../../crates/extension-sdk" }
+# The connector's patterns, kept as they are written in its TypeScript.
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl", "unicode-gencat"] }
+# Addresses resolved as the WHATWG URL parser resolves them, as `new URL` does.
+url = "2"
+# Item ids and seen keys hashed as the connector hashes them.
+sha2 = { version = "0.10", default-features = false }

@@ -14,7 +14,9 @@ the same API and the same permissions:
   and draws a UI. Worktree cleanup and the Widget, which Vorn ships, are two.
 
 Both are written against `wit/extension.wit` in
-`packages/core/crates/extensions`, the only definition of the API.
+`packages/core/crates/extensions`, the only definition of the API. The
+two tiers are measured against each other in
+[extension-tiers-report.md](extension-tiers-report.md).
 
 ## A component's manifest
 

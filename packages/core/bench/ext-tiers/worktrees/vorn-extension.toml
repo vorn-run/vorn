@@ -1,0 +1,37 @@
+id = "bench.worktrees"
+name = "Worktree cleanup"
+version = "0.9.0"
+api = "vorn:extension@1.0"
+description = "Offers to remove a worktree once its last session ends, and lists every worktree with what removing it frees."
+
+[declares]
+uses = ["git.read", "git.write", "sessions.launch"]
+
+[service]
+component = "worktrees.wasm"
+events = ["worktree.idle"]
+
+[[contributes.sidebar]]
+id = "idle"
+title = "Idle worktrees"
+tree = true
+
+[[contributes.menus]]
+id = "remove"
+title = "Remove Worktree…"
+menu = "worktree"
+call = "ask"
+icon = "trash-2"
+
+[[contributes.dialogs]]
+id = "confirm"
+title = "Remove Worktree"
+tree = true
+
+[[contributes.settings]]
+id = "worktrees"
+title = "Worktrees"
+description = "What every worktree costs on disk, and what can safely go."
+icon = "git-branch"
+tree = true
+call = "scan"

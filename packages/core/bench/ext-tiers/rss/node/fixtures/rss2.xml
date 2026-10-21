@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/">
+   <channel>
+      <title>NASA Space Station News</title>
+      <link>http://www.nasa.gov/</link>
+      <description>A RSS news feed containing the latest NASA press releases on the International Space Station.</description>
+      <language>en-us</language>
+      <pubDate>Tue, 10 Jun 2003 04:00:00 GMT</pubDate>
+      <lastBuildDate>Fri, 21 Jul 2023 09:04 EDT</lastBuildDate>
+      <docs>https://www.rssboard.org/rss-specification</docs>
+      <generator>Blosxom 2.1.2</generator>
+      <managingEditor>neil.armstrong@example.com (Neil Armstrong)</managingEditor>
+      <webMaster>sally.ride@example.com (Sally Ride)</webMaster>
+      <atom:link href="https://www.rssboard.org/files/sample-rss-2.xml" rel="self" type="application/rss+xml" />
+      <item>
+         <title>Louisiana Students to Hear from NASA Astronauts Aboard Space Station</title>
+         <link>http://www.nasa.gov/press-release/louisiana-students-to-hear-from-nasa-astronauts-aboard-space-station</link>
+         <description>As part of the state's first Earth-to-space call, students from Louisiana will have an opportunity soon to hear from NASA astronauts aboard the International Space Station.</description>
+         <pubDate>Fri, 21 Jul 2023 09:04 EDT</pubDate>
+         <guid>http://www.nasa.gov/press-release/louisiana-students-to-hear-from-nasa-astronauts-aboard-space-station</guid>
+      </item>
+      <item>
+         <description>NASA has selected KBR Wyle Services, LLC, of Fulton, Maryland, to provide mission and flight crew operations support for the International Space Station and future human space exploration.</description>
+         <link>http://www.nasa.gov/press-release/nasa-awards-integrated-mission-operations-contract-iii</link>
+         <pubDate>Thu, 20 Jul 2023 15:05 EDT</pubDate>
+         <guid>http://www.nasa.gov/press-release/nasa-awards-integrated-mission-operations-contract-iii</guid>
+      </item>
+      <item>
+         <title>NASA Expands Options for Spacewalking, Moonwalking Suits</title>
+         <link>http://www.nasa.gov/press-release/nasa-expands-options-for-spacewalking-moonwalking-suits-services</link>
+         <description>NASA has awarded Axiom Space and Collins Aerospace task orders under existing contracts to advance spacewalking capabilities in low Earth orbit, as well as moonwalking services for Artemis missions.</description>
+         <enclosure url="http://www.nasa.gov/sites/default/files/styles/1x1_cardfeed/public/thumbnails/image/iss068e027836orig.jpg?itok=ucNUaaGx" length="1032272" type="image/jpeg" />
+         <pubDate>Mon, 10 Jul 2023 14:14 EDT</pubDate>
+         <guid>http://www.nasa.gov/press-release/nasa-expands-options-for-spacewalking-moonwalking-suits-services</guid>
+      </item>
+      <item>
+         <title>NASA to Provide Coverage as Dragon Departs Station</title>
+         <link>http://www.nasa.gov/press-release/nasa-to-provide-coverage-as-dragon-departs-station-with-science</link>
+         <description>NASA is set to receive scientific research samples and hardware as a SpaceX Dragon cargo resupply spacecraft departs the International Space Station on Thursday, June 29.</description>
+         <pubDate>Tue, 20 May 2003 08:56:02 GMT</pubDate>
+         <guid>http://www.nasa.gov/press-release/nasa-to-provide-coverage-as-dragon-departs-station-with-science</guid>
+      </item>
+      <item>
+         <title>NASA Plans Coverage of Roscosmos Spacewalk Outside Space Station</title>
+         <link>http://liftoff.msfc.nasa.gov/news/2003/news-laundry.asp</link>
+         <description>Compared to earlier spacecraft, the International Space Station has many luxuries, but laundry facilities are not one of them.  Instead, astronauts have other options.</description>
+         <enclosure url="http://www.nasa.gov/sites/default/files/styles/1x1_cardfeed/public/thumbnails/image/spacex_dragon_june_29.jpg?itok=nIYlBLme" length="269866" type="image/jpeg" />
+         <pubDate>Mon, 26 Jun 2023 12:45 EDT</pubDate>
+         <guid>http://liftoff.msfc.nasa.gov/2003/05/20.html#item570</guid>
+      </item>
+      <item>
+         <media:title>Relative links &amp; namespaced bodies</media:title>
+         <link>/news/relative-item</link>
+         <description>A short &lt;em&gt;escaped&lt;/em&gt; summary &amp;amp; more.</description>
+         <content:encoded><![CDATA[<p>The <strong>full</strong> body &amp; more.</p>]]></content:encoded>
+         <dc:creator>Sally Ride</dc:creator>
+         <dc:date>2023-07-22T10:30:00Z</dc:date>
+         <guid isPermaLink="false">sample-relative-item</guid>
+         <category>Tests</category>
+         <category> Tests </category>
+         <dc:subject>Namespaces</dc:subject>
+      </item>
+   <item>
+       <title><![CDATA[How to Read an RSS Feed with Java Using XOM]]></title>
+       <link>https://www.rssboard.org/news/221/read-rss-feed-java-using-xom</link>
+       <description><![CDATA[&lt;figure class=&quot;text-center&quot;&gt;&lt;img src=&quot;https://www.rssboard.org/images/xml-in-a-nutshell-3rd-edition-cover-elliotte-rusty-harold-w-scott-means.jpg&quot; alt=&quot;Cover of the O'Reilly book XML in a Nutshell, 3rd Edition, by Elliotte Rusty Harold and W. Scott Means. The cover features a black-and-white illustration of the neck and head of a peafowl bird with a crest of tipped feathers on his head.&quot; class=&quot;img-fluid img-thumbnail&quot; width=&quot;350&quot; /&gt;&lt;/figure&gt;&lt;p&gt;There are a lot of libraries for processing XML data with Java that can be used to read RSS feeds. One of the best is the &lt;a href=&quot;https://xom.nu/&quot;&gt;open source library XOM&lt;/a&gt; created by the computer book author Elliotte Rusty Harold.&lt;/p&gt;&lt;p&gt;As he wrote one of his 20 books about Java and XML, Harold got so frustrated with the available Java libraries for XML that he created his own. XOM, which stands for XML Object Model, was designed to be easy to learn while still being strict about XML, requiring documents that are well-formed and utilize namespaces in complete adherence to the specification. (At the RSS Advisory Board, talk of following a spec is our love language.)&lt;/p&gt;&lt;p&gt;XOM was introduced in 2002 and is currently up to version 1.3.9, though all versions have remained compatible since 1.0. To use XOM, download the class library in one of the packages available on the XOM homepage. You can avoid needing any further configuration by choosing one of the options that includes third-party JAR files in the download. This allows XOM to use an included SAX parser under the hood to process XML.&lt;/p&gt;&lt;p&gt;Here's Java code that loads items from The Guardian's &lt;a href=&quot;https://www.rssboard.org/rss-specification&quot;&gt;RSS 2.0&lt;/a&gt; feed containing articles by Ben Hammersley, displaying them as HTML output:&lt;/p&gt;&lt;p&gt;&lt;code&gt;// create an XML builder and load the feed using a URL&lt;br /&gt;Builder bob = new Builder();&lt;br /&gt;Document doc = bob.build(&quot;https://www.theguardian.com/profile/benhammersley/rss&quot;);&lt;br /&gt;// load the root element and channel&lt;br /&gt;Element rss = doc.getRootElement();&lt;br /&gt;Element channel = rss.getFirstChildElement(&quot;channel&quot;);&lt;br /&gt;// load all items in the channel&lt;br /&gt;Elements items = channel.getChildElements(&quot;item&quot;);&lt;br /&gt;for (Element item : items) {&lt;br /&gt;&amp;nbsp;&amp;nbsp;// load elements of the item&lt;br /&gt;&amp;nbsp;&amp;nbsp;String title = item.getFirstChildElement(&quot;title&quot;).getValue();&lt;br /&gt;&amp;nbsp;&amp;nbsp;String author = item.getFirstChildElement(&quot;creator&quot;,&lt;br /&gt;&amp;nbsp;&amp;nbsp;&amp;nbsp;&amp;nbsp;&quot;http://purl.org/dc/elements/1.1/&quot;).getValue();&lt;br /&gt;&amp;nbsp;&amp;nbsp;String description = item.getFirstChildElement(&quot;description&quot;).getValue();&lt;br /&gt;&amp;nbsp;&amp;nbsp;// display the output&lt;br /&gt;&amp;nbsp;&amp;nbsp;System.out.println(&quot;&amp;lt;h2&gt;&quot; + title + &quot;&amp;lt;/h2&gt;&quot;);&lt;br /&gt;&amp;nbsp;&amp;nbsp;System.out.println(&quot;&amp;lt;p&gt;&amp;lt;b&gt;By &quot; + author + &quot;&amp;lt;/b&gt;&amp;lt;/p&gt;&quot;);&lt;br /&gt;&amp;nbsp;&amp;nbsp;System.out.println(&quot;&amp;lt;p&gt;&quot; + description + &quot;&amp;lt;/p&gt;&quot;);&lt;br /&gt;}&lt;/code&gt;&lt;/p&gt;&lt;p&gt;All of the classes used in this code are in the top-level package &lt;code&gt;nu.xom&lt;/code&gt;, which has comprehensive &lt;a href=&quot;https://xom.nu/apidocs/&quot;&gt;JavaDoc&lt;/a&gt; describing their use. Like all Java code this is a little long-winded, but Harold's class names do a good job of explaining what they do. A Builder uses its &lt;code&gt;build()&lt;/code&gt; method with a URL as the argument to load a feed into a Document over the web. There are also &lt;a href=&quot;https://xom.nu/apidocs/nu/xom/Builder.html#build-java.io.File-&quot;&gt;other build methods&lt;/a&gt; to load a feed from a file, reader, input stream, or string.&lt;/p&gt;&lt;p&gt;Elements can be retrieved by their names such as &quot;title&quot;, &quot;link&quot; or &quot;description&quot;. An element with only one child of a specific type can be retrieved using the &lt;code&gt;getFirstChildElement()&lt;/code&gt; method with the name as the argument:&lt;/p&gt;&lt;p&gt;&lt;code&gt;Element linkElement = item.getFirstChildElement(&quot;link&quot;);&lt;/code&gt;&lt;/p&gt;&lt;p&gt;An element containing multiple children of the same type uses &lt;code&gt;getChildElements()&lt;/code&gt; instead:&lt;/p&gt;&lt;p&gt;&lt;code&gt;Elements enclosures = item.getChildElements(&quot;enclosure&quot;);if (enclosures.size() &gt; 1) {&lt;br /&gt;&amp;nbsp;&amp;nbsp;System.out.println(&quot;I'm pretty sure an item should only include one enclosure&quot;);&lt;br /&gt;}&lt;/code&gt;&lt;/p&gt;&lt;p&gt;If an element is in a namespace, there must be a second argument providing the namespace URI. Like many RSS feeds, the ones from The Guardian use a &lt;a href=&quot;https://www.rssboard.org/rss-profile#namespace-elements-dublin-creator&quot;&gt;dc:creator&lt;/a&gt; element from Dublin Core to credit the item's author. That namespace has the URI &quot;http://purl.org/dc/elements/1.1/&quot;.&lt;/p&gt;&lt;p&gt;If the element specified in &lt;code&gt;getFirstChildElement()&lt;/code&gt; or &lt;code&gt;getChild Elements()&lt;/code&gt; is not present, those methods return &lt;code&gt;null&lt;/code&gt;. You may need to check for this when adapting the code to load other RSS feeds.&lt;/p&gt;&lt;p&gt;If the name Ben Hammersley sounds familiar, he &lt;a href=&quot;https://www.theguardian.com/media/2004/feb/12/broadcasting.digitalmedia&quot;&gt;coined the term &quot;podcasting&quot;&lt;/a&gt; in his February 2004 article for The Guardian about the new phenomenon of delivering audio files in RSS feeds.&lt;/p&gt;]]></description>
+       <pubDate>Tue, 01 Aug 2023 23:25:57 -0400</pubDate>
+       <dc:creator>Rogers Cadenhead</dc:creator>
+       <comments>https://www.rssboard.org/news/221/read-rss-feed-java-using-xom#discuss</comments>
+       <guid isPermaLink="false">tag:rssboard.org,2006:weblog.221</guid>
+       <category>announcements,</category>
+   </item>
+   </channel>
+</rss>

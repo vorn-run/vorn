@@ -1,6 +1,6 @@
 #!/bin/sh
-# Measures Worktree cleanup as the Wasm component Vorn ships: start, restart,
-# calls, events and memory, each repetition in a fresh process.
+# Measures the Widget, Worktree cleanup and RSS as Wasm components and as
+# programs on the same manifest, and RSS as the Node connector Vorn ships.
 #   yarn bench:ext-tiers [--reps N] [--out DIR]
 set -e
 cd "$(dirname "$0")/.."

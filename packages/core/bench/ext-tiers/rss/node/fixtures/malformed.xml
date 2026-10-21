@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Fish & Chips Weekly</title>
+    <link>https://chips.example/</link>
+    <item>
+      <title>Salt & vinegar</title>
+      <link>https://chips.example/salt</link>
+      <pubDate>Sat, 12 Sep 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Mushy peas &amp; a stray & in the title</title>
+      <link>https://chips.example/peas</link>
+      <description>Cod < haddock, says nobody</description>
+      <pubDate>Fri, 11 Sep 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Cut off mid-sentence, the connection dropped &

