@@ -114,6 +114,7 @@
 "crates/vornd/src/native/mod.rs#builtin::ssh" = "the SSH settings page's calls route to the SSH component"
 "crates/vornd/src/native/mod.rs#vorn_connectors" = "clients' connection calls route to the Connectors built-in"
 "crates/vornd/src/native/mod.rs#builtin::connectors" = "vornd holds the Connectors built-in once it has a database"
+"crates/vornd/src/native/work/files.rs#vorn_workflows" = "a project workflow's listing names the remote host the agent step resolves"
 "crates/vornd/src/native/work/host.rs#builtin::artifacts" = "a gate keeps a review page only while Artifacts is on"
 "crates/vornd/src/native/work/mod.rs#builtin::artifacts" = "artifact calls and pages are refused while Artifacts is off"
 "crates/vornd/src/native/work/schedule.rs#vorn_connectors" = "a scheduled poll of a connection runs in Connectors"
