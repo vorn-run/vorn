@@ -30,7 +30,11 @@ pub struct NodeRss {
 
 impl NodeRss {
     /// Starts the connector with `feeds` as its connection's feeds, its fetches served by `fixtures`.
-    pub async fn open(node: &Path, fixtures: SocketAddr, feeds: &[String]) -> Result<NodeRss, String> {
+    pub async fn open(
+        node: &Path,
+        fixtures: SocketAddr,
+        feeds: &[String],
+    ) -> Result<NodeRss, String> {
         let dir = dir();
         let launch = Launch {
             program: node.to_path_buf(),
@@ -46,7 +50,11 @@ impl NodeRss {
                 ("RSS_LOOKBACK_HOURS".into(), "8760".into()),
             ],
         };
-        let sdk = SdkLaunch { launch, source: Source::Command, protocol: None };
+        let sdk = SdkLaunch {
+            launch,
+            source: Source::Command,
+            protocol: None,
+        };
         let client = connector::open(&sdk, "bench.rss-node", "bench", Timeouts::default())
             .await
             .map_err(|e| format!("{e:?}"))?;
@@ -55,11 +63,19 @@ impl NodeRss {
 
     pub async fn action(&self, name: &str, args: &Value) -> Result<Value, String> {
         let args = args.as_object().cloned().unwrap_or_else(Map::new);
-        self.client.action(name, &args, None).await.map(Value::Object).map_err(|e| e.to_string())
+        self.client
+            .action(name, &args, None)
+            .await
+            .map(Value::Object)
+            .map_err(|e| e.to_string())
     }
 
     pub async fn poll(&self, cursor: Option<&str>) -> Result<Value, String> {
-        self.client.poll("newItem", cursor, None).await.map(Value::Object).map_err(|e| e.to_string())
+        self.client
+            .poll("newItem", cursor, None)
+            .await
+            .map(Value::Object)
+            .map_err(|e| e.to_string())
     }
 
     pub async fn close(&self) {
@@ -69,7 +85,10 @@ impl NodeRss {
 
 /// The connector's process: this one's child running the bundle.
 pub fn pid() -> Option<u32> {
-    let out = vorn_spawn::command("ps").args(["-A", "-o", "pid=,ppid=,command="]).output().ok()?;
+    let out = vorn_spawn::command("ps")
+        .args(["-A", "-o", "pid=,ppid=,command="])
+        .output()
+        .ok()?;
     let me = std::process::id();
     String::from_utf8_lossy(&out.stdout).lines().find_map(|l| {
         let mut parts = l.split_whitespace();

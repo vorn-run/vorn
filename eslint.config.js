@@ -15,6 +15,7 @@ export default tseslint.config(
       'packages/core/scripts/',
       'packages/core/crates/vorn-web/tests/',
       'packages/core/target/',
+      'packages/core/bench/ext-tiers/rss/node/index.js',
       'website/scripts/'
     ]
   },

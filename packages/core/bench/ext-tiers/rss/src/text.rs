@@ -35,12 +35,16 @@ const NAMED: [(&str, char); 20] = [
 /// The only entity names ever expanded; a name a DOCTYPE declares is left as written.
 fn entity(name: &str) -> Option<char> {
     let named = |n: &str| {
-        NAMED.iter().find(|(k, _)| *k == n).map(|(_, c)| *c).or_else(|| {
-            LATIN1
-                .split(' ')
-                .position(|k| k == n)
-                .and_then(|i| char::from_u32(192 + u32::try_from(i).ok()?))
-        })
+        NAMED
+            .iter()
+            .find(|(k, _)| *k == n)
+            .map(|(_, c)| *c)
+            .or_else(|| {
+                LATIN1
+                    .split(' ')
+                    .position(|k| k == n)
+                    .and_then(|i| char::from_u32(192 + u32::try_from(i).ok()?))
+            })
     };
     named(name).or_else(|| named(&name.to_lowercase()))
 }

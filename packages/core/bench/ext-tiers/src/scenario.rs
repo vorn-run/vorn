@@ -29,7 +29,9 @@ impl Transcript {
                 None => asked.push(json!([method, args])),
             }
         }
-        self.0.push(json!({ "step": what, "answer": answer, "asked": asked, "published": published }));
+        self.0.push(
+            json!({ "step": what, "answer": answer, "asked": asked, "published": published }),
+        );
     }
 
     async fn call(&mut self, rig: &Rig, action: &str, args: Value) {
@@ -48,16 +50,29 @@ impl Transcript {
 
     async fn render(&mut self, rig: &Rig, point: &str, cells: bool) {
         let surface = json!({ "cells": cells, "width": 280.0, "height": 400.0 });
-        self.call(rig, "ui.render", json!({ "point": point, "surface": surface })).await;
+        self.call(
+            rig,
+            "ui.render",
+            json!({ "point": point, "surface": surface }),
+        )
+        .await;
     }
 
     async fn click(&mut self, rig: &Rig, point: &str, id: &str) {
-        self.call(rig, "ui.event", json!({ "point": point, "event": { "id": id, "kind": "click" } })).await;
+        self.call(
+            rig,
+            "ui.event",
+            json!({ "point": point, "event": { "id": id, "kind": "click" } }),
+        )
+        .await;
     }
 
     async fn rows(&mut self, rig: &Rig, collections: &[&str]) {
         rig.quiet().await;
-        let rows: Value = collections.iter().map(|c| ((*c).to_owned(), json!(rig.rows(c)))).collect();
+        let rows: Value = collections
+            .iter()
+            .map(|c| ((*c).to_owned(), json!(rig.rows(c))))
+            .collect();
         self.step(rig, "rows", rows).await;
     }
 
@@ -100,12 +115,22 @@ pub async fn widget(rig: &Rig) -> Value {
             t.render(rig, point, cells).await;
         }
     }
-    for id in ["collapse", "expand", "vorn", "show:s1", "pick:r2:0:1", "submit:r2", "suggest:r1:0", "nope"] {
+    for id in [
+        "collapse",
+        "expand",
+        "vorn",
+        "show:s1",
+        "pick:r2:0:1",
+        "submit:r2",
+        "suggest:r1:0",
+        "nope",
+    ] {
         t.click(rig, "widget", id).await;
     }
     t.emit(rig, "agent.permission", asks()[0].clone()).await;
     t.call(rig, "deny", json!({ "id": "r1" })).await;
-    t.emit(rig, "agent.permissionClosed", json!({ "requestId": "r1" })).await;
+    t.emit(rig, "agent.permissionClosed", json!({ "requestId": "r1" }))
+        .await;
     t.emit(rig, "session.exited", json!({ "id": "s1" })).await;
     t.rows(rig, &ROWS).await;
     t.render(rig, "widget", false).await;
@@ -129,14 +154,25 @@ pub async fn worktrees(rig: &Rig) -> Value {
     }
     t.rows(rig, &ROWS).await;
     t.render(rig, "idle", false).await;
-    t.click(rig, "idle", &format!("keep:{}", worktree_path(1))).await;
+    t.click(rig, "idle", &format!("keep:{}", worktree_path(1)))
+        .await;
     t.call(rig, "scan", Value::Null).await;
     t.render(rig, "worktrees", false).await;
-    t.call(rig, "ask", json!({ "worktree": worktree_path(3), "project": project(3) })).await;
+    t.call(
+        rig,
+        "ask",
+        json!({ "worktree": worktree_path(3), "project": project(3) }),
+    )
+    .await;
     t.render(rig, "confirm", false).await;
     t.click(rig, "confirm", "confirm").await;
     t.call(rig, "reclaim_all", Value::Null).await;
-    t.call(rig, "remove_many", json!({ "ids": [worktree_path(7), worktree_path(9)] })).await;
+    t.call(
+        rig,
+        "remove_many",
+        json!({ "ids": [worktree_path(7), worktree_path(9)] }),
+    )
+    .await;
     t.call(rig, "remove", json!({ "id": "/nowhere" })).await;
     t.rows(rig, &ROWS).await;
     t.render(rig, "worktrees", true).await;
@@ -149,9 +185,17 @@ pub fn feed(name: &str) -> String {
 
 /// The feeds a poll reads: every format, one that is not there and one that does not parse.
 pub fn feeds() -> Vec<String> {
-    ["rss2.xml", "rss1.rdf", "atom.xml", "feed.json", "doctype.xml", "missing.xml", "malformed.xml"]
-        .map(feed)
-        .to_vec()
+    [
+        "rss2.xml",
+        "rss1.rdf",
+        "atom.xml",
+        "feed.json",
+        "doctype.xml",
+        "missing.xml",
+        "malformed.xml",
+    ]
+    .map(feed)
+    .to_vec()
 }
 
 /// The RSS actions' arguments, as either tier takes them.
@@ -162,8 +206,14 @@ pub fn rss_calls() -> Vec<(&'static str, Value)> {
         ("readFeed", json!({ "url": feed("feed.json"), "limit": 3 })),
         ("readFeed", json!({ "url": feed("rss1.rdf") })),
         ("readFeed", json!({ "url": feed("missing.xml") })),
-        ("readFeeds", json!({ "urls": feeds().join("\n"), "perFeed": 2, "minFeedsOk": 1 })),
-        ("readFeeds", json!({ "urls": feed("rss2.xml"), "keywords": "station" })),
+        (
+            "readFeeds",
+            json!({ "urls": feeds().join("\n"), "perFeed": 2, "minFeedsOk": 1 }),
+        ),
+        (
+            "readFeeds",
+            json!({ "urls": feed("rss2.xml"), "keywords": "station" }),
+        ),
         ("findFeeds", json!({ "url": feed("page.html") })),
         ("findFeeds", json!({ "url": feed("atom.xml") })),
     ]
@@ -176,11 +226,18 @@ pub async fn rss(rig: &Rig) -> Value {
         t.call(rig, action, args).await;
     }
     let poll = |cursor: Value| poll_args(&cursor);
-    let first = rig.call("poll", poll(Value::Null)).await.map_err(|e| e.message);
-    let cursor = first.as_ref().ok().map_or(Value::Null, |p| p["nextCursor"].clone());
+    let first = rig
+        .call("poll", poll(Value::Null))
+        .await
+        .map_err(|e| e.message);
+    let cursor = first
+        .as_ref()
+        .ok()
+        .map_or(Value::Null, |p| p["nextCursor"].clone());
     t.step(rig, "poll", json!(first.map(poll_shape))).await;
     let second = rig.call("poll", poll(cursor)).await.map_err(|e| e.message);
-    t.step(rig, "poll again", json!(second.map(poll_shape))).await;
+    t.step(rig, "poll again", json!(second.map(poll_shape)))
+        .await;
     t.into_value()
 }
 

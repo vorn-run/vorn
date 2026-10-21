@@ -8,7 +8,10 @@ use sha2::{Digest, Sha256};
 use vorn_extension_sdk::{json, Value};
 
 use crate::dates::{iso_ms, parse_date};
-use crate::text::{cut, escape_html, inline_text, js_trim, js_trim_start, one_line, plain_text, tidy, SUMMARY_LENGTH};
+use crate::text::{
+    cut, escape_html, inline_text, js_trim, js_trim_start, one_line, plain_text, tidy,
+    SUMMARY_LENGTH,
+};
 use crate::xml::{attr_of, ns, resolve_url, text_of, Doc, El};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,7 +117,10 @@ pub fn sha256_hex(text: &str) -> String {
 
 /// A stable id for an item that has no id and no link.
 pub fn hash_id(title: &str, published_at: &str) -> String {
-    format!("sha256:{}", &sha256_hex(&format!("{title}\n{published_at}"))[..16])
+    format!(
+        "sha256:{}",
+        &sha256_hex(&format!("{title}\n{published_at}"))[..16]
+    )
 }
 
 static AUTHOR: LazyLock<Regex> =
@@ -169,7 +175,11 @@ fn alternate(el: El<'_, '_>, ns: &str) -> String {
         .filter(|c| c.local() == "link" && c.ns() == ns)
         .filter(|link| {
             let rel = js_trim(link.attr("rel", "")).to_lowercase();
-            let rel = if rel.is_empty() { "alternate".to_owned() } else { rel };
+            let rel = if rel.is_empty() {
+                "alternate".to_owned()
+            } else {
+                rel
+            };
             rel == "alternate" || rel == "http://www.iana.org/assignments/relation/alternate"
         })
         .collect();
@@ -237,7 +247,11 @@ fn rss_item(item: El<'_, '_>, core: &str) -> Item {
         }),
         updated_at: parse_date(&text_of(item.child("updated", ns::ATOM))),
         summary: plain_text(&summary_source),
-        html: if encoded.is_empty() { description } else { encoded },
+        html: if encoded.is_empty() {
+            description
+        } else {
+            encoded
+        },
         categories: categories.iter().map(|c| inline_text(c)).collect(),
         ..Item::default()
     }
@@ -252,15 +266,21 @@ fn rss2(root: El<'_, '_>, source: &Source<'_>) -> Parsed {
         .into_iter()
         .flat_map(|c| c.elements("item", core))
         .chain(root.elements("item", core));
-    let site_url = or_else(link_text(channel.and_then(|c| c.child("link", core))), || {
-        channel.map_or_else(String::new, |c| alternate(c, ns::ATOM))
-    });
+    let site_url = or_else(
+        link_text(channel.and_then(|c| c.child("link", core))),
+        || channel.map_or_else(String::new, |c| alternate(c, ns::ATOM)),
+    );
     let items = items
         .filter(|i| !i.truncated())
         .map(|i| finish(rss_item(i, core), &title, source.feed_url))
         .collect();
     Parsed {
-        feed: Info { title, url: source.final_url.to_owned(), site_url, format: Format::Rss2 },
+        feed: Info {
+            title,
+            url: source.final_url.to_owned(),
+            site_url,
+            format: Format::Rss2,
+        },
         items,
     }
 }
@@ -285,9 +305,20 @@ fn rss1(root: El<'_, '_>, source: &Source<'_>) -> Parsed {
                 author: inline_text(&text_of(item.child("creator", ns::DC))),
                 published_at: parse_date(&text_of(item.child("date", ns::DC))),
                 updated_at: String::new(),
-                summary: plain_text(if description.is_empty() { &encoded } else { &description }),
-                html: if encoded.is_empty() { description } else { encoded },
-                categories: texts(item, "subject", ns::DC).iter().map(|c| inline_text(c)).collect(),
+                summary: plain_text(if description.is_empty() {
+                    &encoded
+                } else {
+                    &description
+                }),
+                html: if encoded.is_empty() {
+                    description
+                } else {
+                    encoded
+                },
+                categories: texts(item, "subject", ns::DC)
+                    .iter()
+                    .map(|c| inline_text(c))
+                    .collect(),
                 ..Item::default()
             };
             finish(draft, &title, source.feed_url)
@@ -295,7 +326,12 @@ fn rss1(root: El<'_, '_>, source: &Source<'_>) -> Parsed {
         .collect();
     let site_url = link_text(channel.and_then(|c| c.child("link", core)));
     Parsed {
-        feed: Info { title, url: source.final_url.to_owned(), site_url, format: Format::Rss1 },
+        feed: Info {
+            title,
+            url: source.final_url.to_owned(),
+            site_url,
+            format: Format::Rss1,
+        },
         items,
     }
 }
@@ -306,7 +342,11 @@ fn atom_text(el: Option<El<'_, '_>>) -> (String, String) {
         return (String::new(), String::new());
     };
     let kind = js_trim(el.attr("type", "")).to_lowercase();
-    let kind = if kind.is_empty() { "text" } else { kind.as_str() };
+    let kind = if kind.is_empty() {
+        "text"
+    } else {
+        kind.as_str()
+    };
     if kind == "xhtml" || kind == "application/xhtml+xml" {
         let markup = el
             .children()
@@ -390,8 +430,8 @@ fn json_authors(value: &Value) -> String {
 }
 
 fn json_feed(body: &str, source: &Source<'_>) -> Result<Parsed, String> {
-    let data: Value = vorn_extension_sdk::serde_json::from_str(body)
-        .map_err(|e| format!("unparseable: {e}"))?;
+    let data: Value =
+        vorn_extension_sdk::serde_json::from_str(body).map_err(|e| format!("unparseable: {e}"))?;
     let title = one_line(str_of(&data["title"]));
     let feed_author = json_authors(&data);
     let items = data["items"]
@@ -425,7 +465,11 @@ fn json_feed(body: &str, source: &Source<'_>) -> Result<Parsed, String> {
                     or_else(tidy(content_text), || plain_text(&html))
                 }),
                 html: or_else(html.clone(), || {
-                    if content_text.is_empty() { String::new() } else { escape_html(content_text) }
+                    if content_text.is_empty() {
+                        String::new()
+                    } else {
+                        escape_html(content_text)
+                    }
                 }),
                 categories: item["tags"]
                     .as_array()
@@ -474,7 +518,10 @@ pub fn parse_feed(body: &str, source: &Source<'_>) -> Result<Parsed, String> {
             "not a feed (the body starts with \"{}\"); try find feeds",
             FIRST_WORD.find(text).map_or("", |m| m.as_str())
         )),
-        _ => Err(format!("unparseable: root <{}> is not rss, RDF or feed", root.name())),
+        _ => Err(format!(
+            "unparseable: root <{}> is not rss, RDF or feed",
+            root.name()
+        )),
     }
 }
 
@@ -508,7 +555,10 @@ pub fn within_hours(items: Vec<Item>, hours: f64, now_ms: i64) -> Vec<Item> {
 mod tests {
     use super::*;
 
-    const SOURCE: Source<'static> = Source { feed_url: "https://f/x", final_url: "https://f/x" };
+    const SOURCE: Source<'static> = Source {
+        feed_url: "https://f/x",
+        final_url: "https://f/x",
+    };
 
     #[test]
     fn rss2_items_take_their_fallbacks() {
@@ -520,7 +570,10 @@ mod tests {
         let feed = parse_feed(body, &SOURCE).expect("a feed");
         assert_eq!(feed.feed.site_url, "https://site/");
         let a = &feed.items[0];
-        assert_eq!((a.url.as_str(), a.author.as_str()), ("https://site/a", "Ann"));
+        assert_eq!(
+            (a.url.as_str(), a.author.as_str()),
+            ("https://site/a", "Ann")
+        );
         assert_eq!(a.categories, ["c"]);
         let b = &feed.items[1];
         assert_eq!(b.summary, "Only & text");
@@ -530,12 +583,18 @@ mod tests {
     #[test]
     fn a_page_is_not_a_feed() {
         let err = parse_feed("<html><body>", &SOURCE).expect_err("not a feed");
-        assert_eq!(err, "not a feed (the body starts with \"<html\"); try find feeds");
+        assert_eq!(
+            err,
+            "not a feed (the body starts with \"<html\"); try find feeds"
+        );
     }
 
     #[test]
     fn dateless_items_sort_last() {
-        let item = |t: &str| Item { published_at: t.into(), ..Item::default() };
+        let item = |t: &str| Item {
+            published_at: t.into(),
+            ..Item::default()
+        };
         let mut items = vec![item(""), item("2001"), item("2003"), item("2002")];
         newest_first(&mut items);
         let order: Vec<&str> = items.iter().map(Item::time).collect();

@@ -10,7 +10,9 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufWriter, Write};
 
 use vorn_extension_sdk::serde_json::{self, json, Value};
-use vorn_extension_sdk::{dispatch, Ctx, Error, Event, Extension, Host, Init, Level, Op, Request, Response};
+use vorn_extension_sdk::{
+    dispatch, Ctx, Error, Event, Extension, Host, Init, Level, Op, Request, Response,
+};
 
 /// The JSON-RPC error an `ext-error` travels as.
 const EXT_ERROR: i64 = -32000;
@@ -25,7 +27,12 @@ pub fn serve<E: Extension>() {
 
 /// Serves `E` on `input` and `out`; a test drives it on buffers.
 pub fn serve_on<E: Extension>(input: impl BufRead, out: impl Write) {
-    let mut io = Stdio { input, out, waiting: VecDeque::new(), asked: 0 };
+    let mut io = Stdio {
+        input,
+        out,
+        waiting: VecDeque::new(),
+        asked: 0,
+    };
     let mut ext: Option<E> = None;
     while let Some(message) = io.next() {
         let id = message.get("id").cloned();
@@ -34,7 +41,12 @@ pub fn serve_on<E: Extension>(input: impl BufRead, out: impl Write) {
             "guest.init" => {
                 let c = &params["ctx"];
                 let text = |k: &str| c[k].as_str().unwrap_or_default().to_owned();
-                let init = Init { id: text("id"), version: text("version"), vorn: text("vorn"), api: text("api") };
+                let init = Init {
+                    id: text("id"),
+                    version: text("version"),
+                    vorn: text("vorn"),
+                    api: text("api"),
+                };
                 E::init(&init, &mut io).map(|e| {
                     ext = Some(e);
                     Value::Null
@@ -43,7 +55,10 @@ pub fn serve_on<E: Extension>(input: impl BufRead, out: impl Write) {
             "guest.handle" => match ext.as_mut() {
                 Some(ext) => {
                     let ctx = Ctx {
-                        caller: params["ctx"]["caller"].as_str().unwrap_or_default().to_owned(),
+                        caller: params["ctx"]["caller"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_owned(),
                         project: params["ctx"]["project"].as_str().map(str::to_owned),
                     };
                     let method = params["method"].as_str().unwrap_or_default();
@@ -57,7 +72,10 @@ pub fn serve_on<E: Extension>(input: impl BufRead, out: impl Write) {
                         .as_array()
                         .into_iter()
                         .flatten()
-                        .map(|e| Event { name: e["name"].as_str().unwrap_or_default().to_owned(), data: e["data"].clone() })
+                        .map(|e| Event {
+                            name: e["name"].as_str().unwrap_or_default().to_owned(),
+                            data: e["data"].clone(),
+                        })
                         .collect();
                     ext.on_events(&mut io, batch);
                 }
@@ -117,7 +135,9 @@ impl<R: BufRead, W: Write> Stdio<R, W> {
         let id = format!("h{}", self.asked);
         self.send(&json!({ "id": id, "method": method, "params": params }));
         loop {
-            let message = self.read().ok_or_else(|| Error::new("closed", "Vorn closed the pipe"))?;
+            let message = self
+                .read()
+                .ok_or_else(|| Error::new("closed", "Vorn closed the pipe"))?;
             if message.get("method").is_some() {
                 self.waiting.push_back(message);
                 continue;
@@ -153,7 +173,10 @@ impl<R: BufRead, W: Write> Host for Stdio<R, W> {
 
     fn publish(&mut self, collection: &str, ops: Vec<Op>) {
         let ops: Vec<Value> = ops.into_iter().map(op).collect();
-        self.notify("host.publish", json!({ "collection": collection, "ops": ops }));
+        self.notify(
+            "host.publish",
+            json!({ "collection": collection, "ops": ops }),
+        );
     }
 
     fn log(&mut self, level: Level, message: &str) {
@@ -175,7 +198,8 @@ impl<R: BufRead, W: Write> Host for Stdio<R, W> {
 
     fn fetch(&mut self, req: &Request, connection: Option<&str>) -> Result<Response, Error> {
         let answer = self.ask("net.fetch", json!({ "req": req, "connection": connection }))?;
-        serde_json::from_value(answer).map_err(|e| Error::new("failed", format!("net.fetch answered {e}")))
+        serde_json::from_value(answer)
+            .map_err(|e| Error::new("failed", format!("net.fetch answered {e}")))
     }
 }
 
@@ -190,7 +214,13 @@ mod tests {
             Ok(Echo)
         }
 
-        fn handle(&mut self, host: &mut dyn Host, method: &str, args: Value, _: &Ctx) -> Result<Value, Error> {
+        fn handle(
+            &mut self,
+            host: &mut dyn Host,
+            method: &str,
+            args: Value,
+            _: &Ctx,
+        ) -> Result<Value, Error> {
             match method {
                 "ask" => host.call("x.y", args),
                 _ => Err(Error::unknown(method)),

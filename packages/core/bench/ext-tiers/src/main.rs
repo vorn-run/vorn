@@ -62,7 +62,11 @@ fn cpu(child: Option<u32>) -> f64 {
 /// Waits until the world has seen more than `before` publishes; how long that took.
 async fn published_after(rig: &Rig, before: u64, t: Instant) -> f64 {
     while rig.world.published() <= before {
-        assert!(t.elapsed() < Duration::from_secs(10), "{} never published", rig.ext.name);
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "{} never published",
+            rig.ext.name
+        );
         tokio::task::yield_now().await;
     }
     ms(t.elapsed())
@@ -71,11 +75,17 @@ async fn published_after(rig: &Rig, before: u64, t: Instant) -> f64 {
 /// An event that makes `ext` publish, the `i`th of a burst.
 fn event(ext: Ext, i: usize) -> Option<(&'static str, Value)> {
     match ext.id {
-        "bench.widget" => Some(("session.status", json!({ "id": format!("s{}", i % TERMINALS) }))),
+        "bench.widget" => Some((
+            "session.status",
+            json!({ "id": format!("s{}", i % TERMINALS) }),
+        )),
         "bench.worktrees" => {
             let w = (i % 20) | 1;
             let p = project(w);
-            Some(("worktree.idle", json!({ "worktreePath": format!("{p}/.worktrees/w{w}"), "projectPath": p })))
+            Some((
+                "worktree.idle",
+                json!({ "worktreePath": format!("{p}/.worktrees/w{w}"), "projectPath": p }),
+            ))
         }
         _ => None,
     }
@@ -84,9 +94,15 @@ fn event(ext: Ext, i: usize) -> Option<(&'static str, Value)> {
 /// The extension's typical action, timed apart from the bare round trip.
 fn work(ext: Ext) -> (&'static str, Value) {
     match ext.id {
-        "bench.widget" => ("ui.event", json!({ "point": "widget", "event": { "id": "suggest:r1:0", "kind": "click" } })),
+        "bench.widget" => (
+            "ui.event",
+            json!({ "point": "widget", "event": { "id": "suggest:r1:0", "kind": "click" } }),
+        ),
         "bench.worktrees" => ("scan", Value::Null),
-        "bench.rss" => ("readFeed", json!({ "url": scenario::feed("rss2.xml"), "limit": 20 })),
+        "bench.rss" => (
+            "readFeed",
+            json!({ "url": scenario::feed("rss2.xml"), "limit": 20 }),
+        ),
         _ => ("echo", json!({ "said": "hello" })),
     }
 }
@@ -102,7 +118,8 @@ fn points(ext: Ext) -> &'static [&'static str] {
 
 /// One repetition of `ext` in `tier`, in this process.
 async fn run(ext: Ext, tier: Tier, cache: &Path, feeds: SocketAddr) -> Value {
-    let rig = Rig::new(ext, tier, Bench::new(Some(feeds)), Some(cache)).unwrap_or_else(|e| panic!("{e}"));
+    let rig =
+        Rig::new(ext, tier, Bench::new(Some(feeds)), Some(cache)).unwrap_or_else(|e| panic!("{e}"));
     tokio::time::sleep(Duration::from_millis(200)).await;
     let base = sys::memory(me()).unwrap_or(0.0);
     let t = Instant::now();
@@ -132,7 +149,12 @@ async fn run(ext: Ext, tier: Tier, cache: &Path, feeds: SocketAddr) -> Value {
                 let t = Instant::now();
                 rig.emit(name, data.clone());
                 let took = published_after(&rig, before, t).await;
-                if stopped { &mut cold_event } else { &mut warm_event }.push(took);
+                if stopped {
+                    &mut cold_event
+                } else {
+                    &mut warm_event
+                }
+                .push(took);
             }
         }
     }
@@ -156,7 +178,9 @@ async fn run(ext: Ext, tier: Tier, cache: &Path, feeds: SocketAddr) -> Value {
     let mut worked = Vec::new();
     for _ in 0..300 {
         let t = Instant::now();
-        rig.call(action, args.clone()).await.unwrap_or_else(|e| panic!("{action}: {}", e.message));
+        rig.call(action, args.clone())
+            .await
+            .unwrap_or_else(|e| panic!("{action}: {}", e.message));
         worked.push(us(t.elapsed()));
     }
     let mut trees = serde_json::Map::new();
@@ -175,7 +199,10 @@ async fn run(ext: Ext, tier: Tier, cache: &Path, feeds: SocketAddr) -> Value {
                 bytes = drawn.to_string().len();
             }
         }
-        trees.insert((*point).to_owned(), json!({ "us": stats::summary(&took), "bytes": bytes }));
+        trees.insert(
+            (*point).to_owned(),
+            json!({ "us": stats::summary(&took), "bytes": bytes }),
+        );
     }
     let busy = busy(&rig).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -198,7 +225,10 @@ async fn run(ext: Ext, tier: Tier, cache: &Path, feeds: SocketAddr) -> Value {
 /// A burst: 5000 events for an extension that takes them, else 200 reads of every feed.
 async fn busy(rig: &Rig) -> Value {
     let pid = rig.pid();
-    let (cpu0, calls0) = (cpu(pid), rig.world.calls.load(std::sync::atomic::Ordering::Relaxed));
+    let (cpu0, calls0) = (
+        cpu(pid),
+        rig.world.calls.load(std::sync::atomic::Ordering::Relaxed),
+    );
     let t = Instant::now();
     let n = if event(rig.ext, 0).is_some() {
         for i in 0..EVENTS {
@@ -211,7 +241,9 @@ async fn busy(rig: &Rig) -> Value {
     } else {
         let args = json!({ "urls": scenario::feeds().join("\n"), "perFeed": 5 });
         for _ in 0..200 {
-            rig.call("readFeeds", args.clone()).await.unwrap_or_else(|e| panic!("readFeeds: {}", e.message));
+            rig.call("readFeeds", args.clone())
+                .await
+                .unwrap_or_else(|e| panic!("readFeeds: {}", e.message));
         }
         200
     };
@@ -257,7 +289,9 @@ async fn run_node(node: &Path, feeds: SocketAddr) -> Value {
     let mut worked = Vec::new();
     for _ in 0..300 {
         let t = Instant::now();
-        rss.action(action, &args).await.unwrap_or_else(|e| panic!("{action}: {e}"));
+        rss.action(action, &args)
+            .await
+            .unwrap_or_else(|e| panic!("{action}: {e}"));
         worked.push(us(t.elapsed()));
     }
     let pid = node::pid();
@@ -265,7 +299,9 @@ async fn run_node(node: &Path, feeds: SocketAddr) -> Value {
     let args = json!({ "urls": scenario::feeds().join("\n"), "perFeed": 5 });
     let t = Instant::now();
     for _ in 0..200 {
-        rss.action("readFeeds", &args).await.unwrap_or_else(|e| panic!("readFeeds: {e}"));
+        rss.action("readFeeds", &args)
+            .await
+            .unwrap_or_else(|e| panic!("readFeeds: {e}"));
     }
     let took = t.elapsed();
     let spent = cpu(pid) - cpu0;
@@ -293,7 +329,7 @@ async fn timed(rig: &Rig, action: &str, args: Value) -> Value {
     json!({
         "ms": stats::round(ms(t.elapsed())),
         "answer": match answer {
-            Ok(v) => json!({ "ok": v.to_string().len() > 0 }),
+            Ok(_) => json!({ "ok": true }),
             Err(e) => json!({ "error": e.code, "message": e.message }),
         },
     })
@@ -303,8 +339,10 @@ async fn timed(rig: &Rig, action: &str, args: Value) -> Value {
 /// a call that never returns, and a grab of 128 MB, each followed by a
 /// call that starts it again; the Widget beside it keeps answering.
 async fn crash(tier: Tier, sibling: Tier, cache: &Path) -> Value {
-    let rig = Rig::new(CRASH, tier, Bench::new(None), Some(cache)).unwrap_or_else(|e| panic!("{e}"));
-    let neighbour = Rig::new(WIDGET, sibling, Bench::new(None), Some(cache)).unwrap_or_else(|e| panic!("{e}"));
+    let rig =
+        Rig::new(CRASH, tier, Bench::new(None), Some(cache)).unwrap_or_else(|e| panic!("{e}"));
+    let neighbour =
+        Rig::new(WIDGET, sibling, Bench::new(None), Some(cache)).unwrap_or_else(|e| panic!("{e}"));
     let echo = json!({ "said": "hello" });
     let _ = rig.call("echo", echo.clone()).await;
     let _ = neighbour.call(BARRIER, Value::Null).await;
@@ -352,11 +390,15 @@ async fn crash(tier: Tier, sibling: Tier, cache: &Path) -> Value {
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1).cloned())
 }
 
 fn ext_named(id: &str) -> Ext {
-    ALL.into_iter().find(|e| e.id == id).unwrap_or_else(|| panic!("no extension {id}"))
+    ALL.into_iter()
+        .find(|e| e.id == id)
+        .unwrap_or_else(|| panic!("no extension {id}"))
 }
 
 fn tier_from(args: &[String]) -> Tier {
@@ -383,8 +425,18 @@ fn child(args: &[String], rt: &tokio::runtime::Runtime) -> Value {
             _ => {
                 let feeds = fixtures::serve().await.expect("the fixture server");
                 match flag(args, "--tier").as_deref() {
-                    Some("node") => run_node(&PathBuf::from(flag(args, "--path").expect("--path")), feeds).await,
-                    _ => run(ext_named(&flag(args, "--ext").expect("--ext")), tier_from(args), &cache, feeds).await,
+                    Some("node") => {
+                        run_node(&PathBuf::from(flag(args, "--path").expect("--path")), feeds).await
+                    }
+                    _ => {
+                        run(
+                            ext_named(&flag(args, "--ext").expect("--ext")),
+                            tier_from(args),
+                            &cache,
+                            feeds,
+                        )
+                        .await
+                    }
                 }
             }
         }
@@ -413,7 +465,9 @@ fn loc(dir: &Path) -> usize {
             n += loc(&path);
             continue;
         }
-        if path.extension().is_none_or(|e| e != "rs") || path.file_name().is_some_and(|f| f == "tests.rs") {
+        if path.extension().is_none_or(|e| e != "rs")
+            || path.file_name().is_some_and(|f| f == "tests.rs")
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap_or_default();
@@ -435,7 +489,10 @@ struct Column {
 }
 
 fn median(runs: &[Value], pointer: &str) -> Option<f64> {
-    let mut v: Vec<f64> = runs.iter().filter_map(|r| r.pointer(pointer)?.as_f64()).collect();
+    let mut v: Vec<f64> = runs
+        .iter()
+        .filter_map(|r| r.pointer(pointer)?.as_f64())
+        .collect();
     if v.is_empty() {
         return None;
     }
@@ -445,9 +502,18 @@ fn median(runs: &[Value], pointer: &str) -> Option<f64> {
 
 const ROWS: [(&str, &str); 22] = [
     ("cold start: first call (ms)", "/cold_start_ms"),
-    ("warm start: call after a stop, p50 (ms)", "/warm_start_ms/p50"),
-    ("cold start: event → first publish, p50 (ms)", "/cold_event_to_publish_ms/p50"),
-    ("event → publish while running, p50 (ms)", "/warm_event_to_publish_ms/p50"),
+    (
+        "warm start: call after a stop, p50 (ms)",
+        "/warm_start_ms/p50",
+    ),
+    (
+        "cold start: event → first publish, p50 (ms)",
+        "/cold_event_to_publish_ms/p50",
+    ),
+    (
+        "event → publish while running, p50 (ms)",
+        "/warm_event_to_publish_ms/p50",
+    ),
     ("call round trip p50 (µs)", "/call_us/p50"),
     ("call round trip p99 (µs)", "/call_us/p99"),
     ("typical action p50 (µs)", "/work/us/p50"),
@@ -489,7 +555,10 @@ fn table(columns: &[Column], runs: &[Vec<Value>]) -> String {
     for (label, pointer) in ROWS {
         out.push_str(&format!("| {label} |"));
         for (c, r) in columns.iter().zip(runs) {
-            let normal: Vec<Value> = r.iter().map(|v| normalise(c.ext, v.clone(), &c.sizes)).collect();
+            let normal: Vec<Value> = r
+                .iter()
+                .map(|v| normalise(c.ext, v.clone(), &c.sizes))
+                .collect();
             let cell = match normal.first().and_then(|v| v.pointer(pointer)) {
                 Some(Value::String(s)) => s.clone(),
                 _ => median(&normal, pointer).map_or("—".to_owned(), |n| {
@@ -519,20 +588,35 @@ fn crash_table(probes: &[(&str, Value)]) -> String {
         Some(code) => format!("{} in {} ms", code.as_str().unwrap_or("error"), v["ms"]),
         None => format!("answered in {} ms", v["ms"]),
     };
-    let rows: [(&str, Box<dyn Fn(&Value) -> String>); 8] = [
-        ("panic", Box::new(|p| said(&p["panic"]))),
-        ("next call (restart)", Box::new(|p| said(&p["restart_after_panic"]))),
-        ("endless loop", Box::new(|p| said(&p["spin"]))),
-        ("neighbour p50 during the loop (µs)", Box::new(|p| format!("{}", p["neighbour_during_spin_us"]["p50"]))),
-        ("next call (restart)", Box::new(|p| said(&p["restart_after_spin"]))),
-        ("grab 128 MB", Box::new(|p| said(&p["grow_128mb"]))),
-        ("held after the grab (MB)", Box::new(|p| format!("{}", p["memory_after_grow"]["total_mb"]))),
-        ("neighbour round trip after all three (ms)", Box::new(|p| format!("{}", p["neighbour_after"]["ms"]))),
+    // Each row: its label, where it sits in a probe, and whether it is a timed answer.
+    let rows = [
+        ("panic", "/panic", true),
+        ("next call (restart)", "/restart_after_panic", true),
+        ("endless loop", "/spin", true),
+        (
+            "neighbour p50 during the loop (µs)",
+            "/neighbour_during_spin_us/p50",
+            false,
+        ),
+        ("next call (restart)", "/restart_after_spin", true),
+        ("grab 128 MB", "/grow_128mb", true),
+        (
+            "held after the grab (MB)",
+            "/memory_after_grow/total_mb",
+            false,
+        ),
+        (
+            "neighbour round trip after all three (ms)",
+            "/neighbour_after/ms",
+            false,
+        ),
     ];
-    for (label, cell) in rows {
+    for (label, pointer, answer) in rows {
         out.push_str(&format!("| {label} |"));
         for (_, probe) in probes {
-            out.push_str(&format!(" {} |", cell(probe)));
+            let v = probe.pointer(pointer).unwrap_or(&Value::Null);
+            let cell = if answer { said(v) } else { v.to_string() };
+            out.push_str(&format!(" {cell} |"));
         }
         out.push('\n');
     }
@@ -541,12 +625,17 @@ fn crash_table(probes: &[(&str, Value)]) -> String {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime");
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
     if matches!(args.get(1).map(String::as_str), Some("run" | "crash")) {
         println!("{}", child(&args, &rt));
         return;
     }
-    let reps: usize = flag(&args, "--reps").and_then(|n| n.parse().ok()).unwrap_or(5);
+    let reps: usize = flag(&args, "--reps")
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(5);
     let out = flag(&args, "--out").map(PathBuf::from);
     let here = std::env::current_exe().expect("own path");
     let bins = here.parent().expect("the target dir").to_path_buf();
@@ -554,13 +643,15 @@ fn main() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR"));
     // The tier glue: the SDK's component exports, or the stdio host and a two-line main.
     let glue_wasm = loc_file(&crates.join("../../crates/extension-sdk/src/guest.rs"));
-    let glue_program = loc_file(&crates.join("src/program.rs")) + loc_file(&crates.join("src/bin/tier-rss.rs"));
+    let glue_program =
+        loc_file(&crates.join("src/program.rs")) + loc_file(&crates.join("src/bin/tier-rss.rs"));
     let mut columns = Vec::new();
     let mut compiled = serde_json::Map::new();
     for ext in [WIDGET, WORKTREES, RSS, CRASH] {
         let wasm = vorn_guest_build::component(ext.package).unwrap_or_else(|e| panic!("{e}"));
         let t = Instant::now();
-        let cwasm = vorn_extensions::wasm::precompile(&wasm, cache.path()).unwrap_or_else(|e| panic!("{e}"));
+        let cwasm = vorn_extensions::wasm::precompile(&wasm, cache.path())
+            .unwrap_or_else(|e| panic!("{e}"));
         compiled.insert(ext.id.to_owned(), json!(stats::round(ms(t.elapsed()))));
         let source = match ext.id {
             "bench.widget" => crates.join("../../extensions/widget/src"),
@@ -603,21 +694,29 @@ fn main() {
             }
         }
     }
-    let (probes, measured): (Vec<&Column>, Vec<&Column>) = columns.iter().partition(|c| c.ext.id == CRASH.id);
+    let (probes, measured): (Vec<&Column>, Vec<&Column>) =
+        columns.iter().partition(|c| c.ext.id == CRASH.id);
     let cache_arg = cache.path().display().to_string();
     let mut runs: Vec<Vec<Value>> = Vec::new();
     for c in &measured {
         let mut these = Vec::with_capacity(reps);
         for rep in 0..reps {
             let path = c.path.display().to_string();
-            these.push(spawn(&["run", "--ext", c.ext.id, "--tier", c.tier, "--path", &path, "--cache", &cache_arg]));
+            these.push(spawn(&[
+                "run", "--ext", c.ext.id, "--tier", c.tier, "--path", &path, "--cache", &cache_arg,
+            ]));
             eprintln!("{} ({}) run {}/{reps}", c.ext.name, c.tier, rep + 1);
         }
         runs.push(these);
     }
     let measured: Vec<Column> = measured
         .into_iter()
-        .map(|c| Column { ext: c.ext, tier: c.tier, path: c.path.clone(), sizes: c.sizes.clone() })
+        .map(|c| Column {
+            ext: c.ext,
+            tier: c.tier,
+            path: c.path.clone(),
+            sizes: c.sizes.clone(),
+        })
         .collect();
     let mut crashes = Vec::new();
     for probe in probes {
@@ -627,7 +726,17 @@ fn main() {
             .map(|c| c.path.display().to_string())
             .expect("the Widget in the same tier");
         let path = probe.path.display().to_string();
-        let ran = spawn(&["crash", "--tier", probe.tier, "--path", &path, "--sibling", &sibling, "--cache", &cache_arg]);
+        let ran = spawn(&[
+            "crash",
+            "--tier",
+            probe.tier,
+            "--path",
+            &path,
+            "--sibling",
+            &sibling,
+            "--cache",
+            &cache_arg,
+        ]);
         eprintln!("crash probe ({}) done", probe.tier);
         crashes.push((probe.tier, ran));
     }
@@ -645,7 +754,10 @@ fn main() {
             .zip(&runs)
             .map(|(c, r)| json!({ "ext": c.ext.id, "tier": c.tier, "size": c.sizes, "runs": r }))
             .collect();
-        let crashes: Value = crashes.into_iter().map(|(t, v)| (t.to_owned(), v)).collect();
+        let crashes: Value = crashes
+            .into_iter()
+            .map(|(t, v)| (t.to_owned(), v))
+            .collect();
         let all = json!({ "columns": raw, "compile_ms": compiled, "crash": crashes });
         std::fs::write(dir.join("results.json"), format!("{all:#}\n")).expect("written");
         std::fs::write(dir.join("summary.md"), md).expect("written");

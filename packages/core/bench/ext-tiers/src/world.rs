@@ -26,7 +26,11 @@ fn guard<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Worktree `i`: every fifth has a session, every third has changes, number 7 is gone from disk.
 pub fn worktree(i: usize) -> Value {
     let project = project(i);
-    let sessions: Vec<String> = if i.is_multiple_of(5) { vec![format!("s{i}")] } else { Vec::new() };
+    let sessions: Vec<String> = if i.is_multiple_of(5) {
+        vec![format!("s{i}")]
+    } else {
+        Vec::new()
+    };
     json!({
         "path": format!("{project}/.worktrees/w{i}"),
         "projectPath": project,
@@ -85,7 +89,10 @@ impl Bench {
 
     /// As [`Bench::new`], logging every call and publish.
     pub fn logged(fixtures: Option<SocketAddr>) -> Bench {
-        Bench { logging: true, ..Bench::new(fixtures) }
+        Bench {
+            logging: true,
+            ..Bench::new(fixtures)
+        }
     }
 
     /// The calls and publishes logged so far, and forgets them.
@@ -105,7 +112,11 @@ impl Bench {
             "worktrees.list" => {
                 let project = args["project"].as_str();
                 Ok(Value::Array(
-                    worktrees.iter().filter(|w| project.is_none_or(|p| w["projectPath"] == p)).cloned().collect(),
+                    worktrees
+                        .iter()
+                        .filter(|w| project.is_none_or(|p| w["projectPath"] == p))
+                        .cloned()
+                        .collect(),
                 ))
             }
             "worktrees.remove" | "worktrees.prune" => {
@@ -114,7 +125,10 @@ impl Bench {
                 worktrees.retain(|w| w["path"] != path);
                 Ok(json!({ "removed": worktrees.len() < before }))
             }
-            other => Err(ExtError::new("unknown-method", format!("the bench has no {other}"))),
+            other => Err(ExtError::new(
+                "unknown-method",
+                format!("the bench has no {other}"),
+            )),
         }
     }
 }
@@ -133,12 +147,17 @@ impl World for Bench {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let fixtures = self.fixtures;
         Box::pin(async move {
-            let addr = fixtures.ok_or_else(|| ExtError::new("network", "the bench serves no feeds"))?;
+            let addr =
+                fixtures.ok_or_else(|| ExtError::new("network", "the bench serves no feeds"))?;
             let path = request
                 .url
                 .strip_prefix(&format!("https://{FEED_HOST}"))
-                .ok_or_else(|| ExtError::new("network", format!("the bench serves no {}", request.url)))?;
-            get(addr, path, &request.headers).await.map_err(|e| ExtError::new("network", e.to_string()))
+                .ok_or_else(|| {
+                    ExtError::new("network", format!("the bench serves no {}", request.url))
+                })?;
+            get(addr, path, &request.headers)
+                .await
+                .map_err(|e| ExtError::new("network", e.to_string()))
         })
     }
 
@@ -168,10 +187,21 @@ async fn get(addr: SocketAddr, path: &str, headers: &[Header]) -> std::io::Resul
     let text = String::from_utf8_lossy(&raw);
     let (head, body) = text.split_once("\r\n\r\n").unwrap_or((&text, ""));
     let mut lines = head.lines();
-    let status = lines.next().and_then(|l| l.split(' ').nth(1)).and_then(|s| s.parse().ok()).unwrap_or(502);
+    let status = lines
+        .next()
+        .and_then(|l| l.split(' ').nth(1))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(502);
     let headers = lines
         .filter_map(|l| l.split_once(':'))
-        .map(|(n, v)| Header { name: n.trim().to_ascii_lowercase(), value: v.trim().to_owned() })
+        .map(|(n, v)| Header {
+            name: n.trim().to_ascii_lowercase(),
+            value: v.trim().to_owned(),
+        })
         .collect();
-    Ok(Response { status, headers, body: body.to_owned() })
+    Ok(Response {
+        status,
+        headers,
+        body: body.to_owned(),
+    })
 }

@@ -12,7 +12,13 @@ impl Extension for Crash {
         Ok(Crash)
     }
 
-    fn handle(&mut self, _: &mut dyn Host, method: &str, args: Value, _: &Ctx) -> Result<Value, Error> {
+    fn handle(
+        &mut self,
+        _: &mut dyn Host,
+        method: &str,
+        args: Value,
+        _: &Ctx,
+    ) -> Result<Value, Error> {
         match method {
             "echo" => Ok(args),
             "crash" => panic!("asked to crash"),

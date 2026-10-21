@@ -29,13 +29,16 @@ pub fn seen_key(id: &str) -> String {
 /// Per-feed state from a cursor; anything unreadable starts afresh.
 pub fn read_cursor(raw: Option<&str>) -> BTreeMap<String, FeedState> {
     let mut states = BTreeMap::new();
-    let Some(parsed) = raw.and_then(|r| vorn_extension_sdk::serde_json::from_str::<Value>(r).ok()) else {
+    let Some(parsed) = raw.and_then(|r| vorn_extension_sdk::serde_json::from_str::<Value>(r).ok())
+    else {
         return states;
     };
     if parsed["v"] != json!(1) {
         return states;
     }
-    let Some(feeds) = parsed["feeds"].as_object() else { return states };
+    let Some(feeds) = parsed["feeds"].as_object() else {
+        return states;
+    };
     for (url, state) in feeds {
         if !state.is_object() {
             continue;
@@ -80,8 +83,14 @@ pub fn write_cursor(states: &[(String, FeedState)]) -> String {
 }
 
 /// The items of one feed to fire and the state to keep: newer than `t`, or on `t` with an unseen id; dateless ones once.
-pub fn select_new(items: &[Item], previous: Option<&FeedState>, floor_ms: f64) -> (Vec<Item>, FeedState) {
-    let seen: HashSet<&str> = previous.map(|p| p.seen.iter().map(String::as_str).collect()).unwrap_or_default();
+pub fn select_new(
+    items: &[Item],
+    previous: Option<&FeedState>,
+    floor_ms: f64,
+) -> (Vec<Item>, FeedState) {
+    let seen: HashSet<&str> = previous
+        .map(|p| p.seen.iter().map(String::as_str).collect())
+        .unwrap_or_default();
     let t = previous.map_or("", |p| p.t.as_str());
     let mut fired = HashSet::new();
     let mut fire = Vec::new();
@@ -102,7 +111,11 @@ pub fn select_new(items: &[Item], previous: Option<&FeedState>, floor_ms: f64) -
             fire.push(item.clone());
         }
     }
-    let carried = if newest == t { previous.map(|p| p.seen.as_slice()).unwrap_or_default() } else { &[] };
+    let carried = if newest == t {
+        previous.map(|p| p.seen.as_slice()).unwrap_or_default()
+    } else {
+        &[]
+    };
     let mut kept: Vec<String> = Vec::new();
     let keys = items
         .iter()
@@ -115,7 +128,14 @@ pub fn select_new(items: &[Item], previous: Option<&FeedState>, floor_ms: f64) -
         }
     }
     kept.truncate(SEEN_CAP);
-    (fire, FeedState { t: newest, seen: kept, ..FeedState::default() })
+    (
+        fire,
+        FeedState {
+            t: newest,
+            seen: kept,
+            ..FeedState::default()
+        },
+    )
 }
 
 /// Oldest first, dateless last.
@@ -135,10 +155,20 @@ pub fn oldest_first(items: &mut [Item]) {
 pub fn to_connector_item(item: &Item) -> Value {
     let mut o = vorn_extension_sdk::serde_json::Map::new();
     let at = item.time();
-    o.insert("externalId".into(), json!(format!("{} {}", item.feed_url, item.id)));
+    o.insert(
+        "externalId".into(),
+        json!(format!("{} {}", item.feed_url, item.id)),
+    );
     let title = [&item.title, &item.url].into_iter().find(|s| !s.is_empty());
-    o.insert("title".into(), json!(title.map_or("Untitled item", String::as_str)));
-    for (key, value) in [("url", &item.url), ("description", &item.summary), ("assignee", &item.author)] {
+    o.insert(
+        "title".into(),
+        json!(title.map_or("Untitled item", String::as_str)),
+    );
+    for (key, value) in [
+        ("url", &item.url),
+        ("description", &item.summary),
+        ("assignee", &item.author),
+    ] {
         if !value.is_empty() {
             o.insert(key.into(), json!(value));
         }
@@ -156,7 +186,11 @@ mod tests {
     use super::*;
 
     fn item(id: &str, t: &str) -> Item {
-        Item { id: id.into(), published_at: t.into(), ..Item::default() }
+        Item {
+            id: id.into(),
+            published_at: t.into(),
+            ..Item::default()
+        }
     }
 
     #[test]
@@ -164,9 +198,16 @@ mod tests {
         let first = [item("a", "2024-01-01T00:00:00.000Z"), item("b", "")];
         let (fire, state) = select_new(&first, None, 0.0);
         assert_eq!(fire.len(), 1, "the dateless item waits for a known feed");
-        let second = [item("c", "2024-01-02T00:00:00.000Z"), item("a", "2024-01-01T00:00:00.000Z"), item("b", "")];
+        let second = [
+            item("c", "2024-01-02T00:00:00.000Z"),
+            item("a", "2024-01-01T00:00:00.000Z"),
+            item("b", ""),
+        ];
         let (fire, state) = select_new(&second, Some(&state), 0.0);
-        assert_eq!(fire.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["c"]);
+        assert_eq!(
+            fire.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
+            ["c"]
+        );
         assert_eq!(state.t, "2024-01-02T00:00:00.000Z");
         let cursor = write_cursor(&[("u".into(), state.clone())]);
         assert_eq!(read_cursor(Some(&cursor)).get("u"), Some(&state));

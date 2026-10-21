@@ -64,16 +64,25 @@ fn get<'a>(attrs: &'a [(String, String)], name: &str) -> &'a str {
 /// The feeds a page declares, absolute and in document order; plain JSON only without a feed+json link.
 pub fn discover_feeds(html: &str, page_url: &str) -> Vec<Discovered> {
     let page = COMMENT.replace_all(html, "");
-    let base_attrs = attributes_of(BASE.captures(&page).map_or("", |m| m.get(1).map_or("", |g| g.as_str())));
+    let base_attrs = attributes_of(
+        BASE.captures(&page)
+            .map_or("", |m| m.get(1).map_or("", |g| g.as_str())),
+    );
     let base = resolve_url(get(&base_attrs, "href"), page_url);
-    let base = if base.is_empty() { page_url.to_owned() } else { base };
+    let base = if base.is_empty() {
+        page_url.to_owned()
+    } else {
+        base
+    };
     let mut links = Vec::new();
     for m in LINK.captures_iter(&page) {
         let attrs = attributes_of(&m[1]);
         let rel = get(&attrs, "rel").to_lowercase();
         let kind = js_trim(get(&attrs, "type").split(';').next().unwrap_or("")).to_lowercase();
         let href = get(&attrs, "href");
-        let Some(format) = feed_type(&kind) else { continue };
+        let Some(format) = feed_type(&kind) else {
+            continue;
+        };
         if !rel.split_whitespace().any(|r| r == "alternate") || href.is_empty() {
             continue;
         }
@@ -104,6 +113,9 @@ mod tests {
         let found = discover_feeds(html, "https://e.com/page");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].url, "https://e.com/b/f");
-        assert_eq!((found[0].title.as_str(), found[0].format), ("F", Format::Json));
+        assert_eq!(
+            (found[0].title.as_str(), found[0].format),
+            ("F", Format::Json)
+        );
     }
 }

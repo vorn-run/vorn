@@ -208,7 +208,12 @@ impl<'s> Doc<'s> {
                 i = after(source, "-->", i + 4);
             } else if rest.starts_with("<![CDATA[") {
                 let end = source[i + 9..].find("]]>").map(|at| i + 9 + at);
-                add_text(&mut els, &stack, source[i + 9..end.unwrap_or(n)].to_owned(), true);
+                add_text(
+                    &mut els,
+                    &stack,
+                    source[i + 9..end.unwrap_or(n)].to_owned(),
+                    true,
+                );
                 i = end.map_or(n, |e| e + 3);
             } else if rest.starts_with("<?") {
                 i = after(source, "?>", i + 2);
@@ -395,7 +400,10 @@ mod tests {
         assert_eq!(text_of(root.child("title", ns::ATOM)), "T & <b>");
         let entries: Vec<_> = root.elements("entry", ns::ATOM).collect();
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].child("subject", ns::DC).map(|s| s.text()), Some("s".into()));
+        assert_eq!(
+            entries[0].child("subject", ns::DC).map(|s| s.text()),
+            Some("s".into())
+        );
         assert!(!entries[1].truncated());
         assert_eq!(resolve_url("x", entries[0].base()), "https://e.com/a/x");
     }

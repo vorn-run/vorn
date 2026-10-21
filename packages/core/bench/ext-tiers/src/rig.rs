@@ -123,7 +123,10 @@ impl Ext {
 pub const BARRIER: &str = "bench.barrier";
 
 pub fn ctx() -> CallCtx {
-    CallCtx { caller: "client".into(), project: None }
+    CallCtx {
+        caller: "client".into(),
+        project: None,
+    }
 }
 
 /// One extension in one tier, linked into a store of its own.
@@ -144,7 +147,8 @@ impl Rig {
         let store = root.path().join("store");
         let folder = root.path().join("pack");
         std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-        std::fs::write(folder.join("vorn-extension.toml"), ext.manifest_for(&tier)).map_err(|e| e.to_string())?;
+        std::fs::write(folder.join("vorn-extension.toml"), ext.manifest_for(&tier))
+            .map_err(|e| e.to_string())?;
         if let Tier::Wasm(wasm) = &tier {
             std::fs::copy(wasm, folder.join(ext.component())).map_err(|e| e.to_string())?;
         }
@@ -154,8 +158,12 @@ impl Rig {
             Some(cache) => {
                 let compiled = store.join(COMPILED);
                 std::fs::create_dir_all(&compiled).map_err(|e| e.to_string())?;
-                for entry in std::fs::read_dir(cache).map_err(|e| e.to_string())?.flatten() {
-                    std::fs::copy(entry.path(), compiled.join(entry.file_name())).map_err(|e| e.to_string())?;
+                for entry in std::fs::read_dir(cache)
+                    .map_err(|e| e.to_string())?
+                    .flatten()
+                {
+                    std::fs::copy(entry.path(), compiled.join(entry.file_name()))
+                        .map_err(|e| e.to_string())?;
                 }
                 // Nothing compiles here: a run loads what the cache holds, as vornd does.
                 Compiler::None
@@ -173,7 +181,13 @@ impl Rig {
             vorn_extensions::events::Bus::new(),
         );
         router.reindex();
-        Ok(Rig { router, world, ext, tier, _root: root })
+        Ok(Rig {
+            router,
+            world,
+            ext,
+            tier,
+            _root: root,
+        })
     }
 
     pub async fn call(&self, action: &str, args: Value) -> Result<Value, ExtError> {

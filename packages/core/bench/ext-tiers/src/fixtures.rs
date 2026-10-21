@@ -46,7 +46,11 @@ async fn answer(mut stream: TcpStream, root: Arc<PathBuf>) {
     }
     let head = String::from_utf8_lossy(&raw);
     let path = head.split(' ').nth(1).unwrap_or("/");
-    let name = path.trim_start_matches('/').split('?').next().unwrap_or_default();
+    let name = path
+        .trim_start_matches('/')
+        .split('?')
+        .next()
+        .unwrap_or_default();
     let asked = head
         .lines()
         .filter_map(|l| l.split_once(':'))
@@ -61,7 +65,8 @@ async fn answer(mut stream: TcpStream, root: Arc<PathBuf>) {
         Some(body) => {
             let etag = format!("\"{}-{}\"", name, body.len());
             if asked.as_deref() == Some(etag.as_str()) {
-                format!("HTTP/1.1 304 Not Modified\r\nETag: {etag}\r\nConnection: close\r\n\r\n").into_bytes()
+                format!("HTTP/1.1 304 Not Modified\r\nETag: {etag}\r\nConnection: close\r\n\r\n")
+                    .into_bytes()
             } else {
                 let mut r = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nETag: {etag}\r\nConnection: close\r\n\r\n",
@@ -73,7 +78,9 @@ async fn answer(mut stream: TcpStream, root: Arc<PathBuf>) {
                 r
             }
         }
-        None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        None => {
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec()
+        }
     };
     let _ = stream.write_all(&reply).await;
     let _ = stream.shutdown().await;

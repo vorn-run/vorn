@@ -30,7 +30,10 @@ pub struct FeedError {
 
 impl FeedError {
     pub fn new(url: &str, reason: impl Into<String>) -> FeedError {
-        FeedError { url: url.to_owned(), reason: reason.into() }
+        FeedError {
+            url: url.to_owned(),
+            reason: reason.into(),
+        }
     }
 
     pub fn message(&self) -> String {
@@ -57,9 +60,13 @@ pub fn feed_address(raw: &str) -> Result<String, FeedError> {
     } else {
         format!("https://{trimmed}")
     };
-    let url = parse_url(&with_scheme, "").ok_or_else(|| FeedError::new(trimmed, "not a valid address"))?;
+    let url = parse_url(&with_scheme, "")
+        .ok_or_else(|| FeedError::new(trimmed, "not a valid address"))?;
     if !(url.starts_with("http:") || url.starts_with("https:")) {
-        return Err(FeedError::new(trimmed, "refused, only http and https feeds are read"));
+        return Err(FeedError::new(
+            trimmed,
+            "refused, only http and https feeds are read",
+        ));
     }
     Ok(url)
 }
@@ -129,44 +136,81 @@ pub fn send(
     let etag = validators.etag.filter(|v| !v.is_empty());
     let last_modified = validators.last_modified.filter(|v| !v.is_empty());
     let mut headers = vec![
-        Header { name: "accept".into(), value: accept.into() },
-        Header { name: "user-agent".into(), value: user_agent.into() },
+        Header {
+            name: "accept".into(),
+            value: accept.into(),
+        },
+        Header {
+            name: "user-agent".into(),
+            value: user_agent.into(),
+        },
     ];
     if let Some(v) = etag {
-        headers.push(Header { name: "if-none-match".into(), value: v.into() });
+        headers.push(Header {
+            name: "if-none-match".into(),
+            value: v.into(),
+        });
     }
     if let Some(v) = last_modified {
-        headers.push(Header { name: "if-modified-since".into(), value: v.into() });
+        headers.push(Header {
+            name: "if-modified-since".into(),
+            value: v.into(),
+        });
     }
-    let req = Request { method: "GET".into(), url: url.into(), headers, body: None };
-    let res = host.fetch(&req, None).map_err(|e| FeedError::new(url, e.message))?;
+    let req = Request {
+        method: "GET".into(),
+        url: url.into(),
+        headers,
+        body: None,
+    };
+    let res = host
+        .fetch(&req, None)
+        .map_err(|e| FeedError::new(url, e.message))?;
     if res.status == 304 && (etag.is_some() || last_modified.is_some()) {
         return Ok(None);
     }
     if !(200..300).contains(&res.status) {
         return Err(FeedError::new(url, format!("HTTP {}", res.status)));
     }
-    let declared = header(&res.headers, "content-length").and_then(|v| v.trim().parse::<usize>().ok());
+    let declared =
+        header(&res.headers, "content-length").and_then(|v| v.trim().parse::<usize>().ok());
     if declared.unwrap_or(0) > MAX_BYTES || res.body.len() > MAX_BYTES {
         return Err(FeedError::new(url, "larger than 5 MB"));
     }
     Ok(Some(Fetched {
         etag: header(&res.headers, "etag").unwrap_or("").to_owned(),
-        last_modified: header(&res.headers, "last-modified").unwrap_or("").to_owned(),
-        body: res.body.strip_prefix('\u{feff}').map_or(res.body.clone(), str::to_owned),
+        last_modified: header(&res.headers, "last-modified")
+            .unwrap_or("")
+            .to_owned(),
+        body: res
+            .body
+            .strip_prefix('\u{feff}')
+            .map_or(res.body.clone(), str::to_owned),
         url: url.to_owned(),
     }))
 }
 
 /// One unconditional GET; a 304 is a failure like any other status.
-pub fn fetch_body(host: &mut dyn Host, url: &str, user_agent: &str, accept: &str) -> Result<Fetched, FeedError> {
+pub fn fetch_body(
+    host: &mut dyn Host,
+    url: &str,
+    user_agent: &str,
+    accept: &str,
+) -> Result<Fetched, FeedError> {
     send(host, url, user_agent, accept, &Validators::default())?
         .ok_or_else(|| FeedError::new(url, "HTTP 304"))
 }
 
 /// A fetched body as a feed, or the reason it is not one against its address.
 pub fn parse_fetched(url: &str, got: &Fetched) -> Result<Parsed, FeedError> {
-    parse_feed(&got.body, &Source { feed_url: url, final_url: &got.url }).map_err(|e| FeedError::new(url, e))
+    parse_feed(
+        &got.body,
+        &Source {
+            feed_url: url,
+            final_url: &got.url,
+        },
+    )
+    .map_err(|e| FeedError::new(url, e))
 }
 
 /// Fetch and parse one feed, unconditionally.
@@ -181,12 +225,24 @@ mod tests {
 
     #[test]
     fn addresses_assume_https_and_refuse_other_schemes() {
-        assert_eq!(feed_address(" e.com/feed ").as_deref(), Ok("https://e.com/feed"));
-        assert_eq!(feed_address("localhost:8080/x").as_deref(), Ok("https://localhost:8080/x"));
+        assert_eq!(
+            feed_address(" e.com/feed ").as_deref(),
+            Ok("https://e.com/feed")
+        );
+        assert_eq!(
+            feed_address("localhost:8080/x").as_deref(),
+            Ok("https://localhost:8080/x")
+        );
         assert_eq!(feed_address("http://e.com").as_deref(), Ok("http://e.com/"));
         let refused = feed_address("ftp://e.com").expect_err("refused");
-        assert_eq!(refused.reason, "refused, only http and https feeds are read");
-        assert_eq!(feed_address("https://").expect_err("invalid").reason, "not a valid address");
+        assert_eq!(
+            refused.reason,
+            "refused, only http and https feeds are read"
+        );
+        assert_eq!(
+            feed_address("https://").expect_err("invalid").reason,
+            "not a valid address"
+        );
     }
 
     #[test]

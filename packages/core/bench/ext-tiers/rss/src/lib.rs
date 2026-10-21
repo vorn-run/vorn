@@ -24,10 +24,12 @@ use vorn_extension_sdk::{json, Ctx, Error, Extension, Host, Init, Level, Value};
 use crate::dates::{iso_ms, now_ms};
 use crate::feed::{is_json_feed, newest_first, within_hours, Item, Parsed};
 use crate::http::{
-    feed_address, feed_list, fetch_body, js_string, page_accept, parse_fetched, read_feed_at, send, unique_feeds,
-    FeedError, Fetched, Validators,
+    feed_address, feed_list, fetch_body, js_string, page_accept, parse_fetched, read_feed_at, send,
+    unique_feeds, FeedError, Fetched, Validators,
 };
-use crate::poll::{oldest_first, read_cursor, select_new, to_connector_item, write_cursor, FeedState};
+use crate::poll::{
+    oldest_first, read_cursor, select_new, to_connector_item, write_cursor, FeedState,
+};
 use crate::text::{js_trim, js_trim_start};
 
 pub const MAX_ITEMS: f64 = 100.0;
@@ -55,14 +57,26 @@ fn number(value: &Value) -> f64 {
 }
 
 /// A whole number in range, the fallback when empty, else an error naming the field.
-fn whole_number(value: &Value, name: &str, min: f64, max: f64, fallback: f64) -> Result<f64, Error> {
+fn whole_number(
+    value: &Value,
+    name: &str,
+    min: f64,
+    max: f64,
+    fallback: f64,
+) -> Result<f64, Error> {
     if blank(value) {
         return Ok(fallback);
     }
     let parsed = number(value);
     if parsed.fract() != 0.0 || !parsed.is_finite() || parsed < min || parsed > max {
-        let to = if max.is_infinite() { " up".to_owned() } else { format!(" to {max}") };
-        return Err(failed(format!("{name} must be a whole number from {min}{to}")));
+        let to = if max.is_infinite() {
+            " up".to_owned()
+        } else {
+            format!(" to {max}")
+        };
+        return Err(failed(format!(
+            "{name} must be a whole number from {min}{to}"
+        )));
     }
     Ok(parsed)
 }
@@ -81,7 +95,12 @@ fn optional_hours(value: &Value, name: &str) -> Result<Option<f64>, Error> {
 
 fn user_agent(args: &Value) -> String {
     let given = js_trim(args["userAgent"].as_str().unwrap_or(""));
-    if given.is_empty() { DEFAULT_USER_AGENT } else { given }.to_owned()
+    if given.is_empty() {
+        DEFAULT_USER_AGENT
+    } else {
+        given
+    }
+    .to_owned()
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -89,7 +108,8 @@ fn count(n: f64) -> usize {
     n as usize
 }
 
-static ALNUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}]$").expect("a valid pattern"));
+static ALNUM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[\p{L}\p{N}]$").expect("a valid pattern"));
 
 /// A keyword matched as a whole word or phrase, ignoring case.
 struct Keyword(Regex);
@@ -122,19 +142,30 @@ fn keyword_filter(value: &Value) -> Vec<Keyword> {
         .split(',')
         .map(js_trim)
         .filter(|w| !w.is_empty())
-        .filter_map(|w| Regex::new(&format!("(?i){}", regex::escape(w))).ok().map(Keyword))
+        .filter_map(|w| {
+            Regex::new(&format!("(?i){}", regex::escape(w)))
+                .ok()
+                .map(Keyword)
+        })
         .collect()
 }
 
 fn passes(keywords: &[Keyword], item: &Item) -> bool {
-    keywords.is_empty() || keywords.iter().any(|k| k.matches(&item.title) || k.matches(&item.summary))
+    keywords.is_empty()
+        || keywords
+            .iter()
+            .any(|k| k.matches(&item.title) || k.matches(&item.summary))
 }
 
 /// One copy per address, the newest; an item with no address is keyed by its feed and id.
 fn dedupe_by_url(items: Vec<Item>) -> Vec<Item> {
     let mut kept: Vec<(String, Item)> = Vec::new();
     for item in items {
-        let key = if item.url.is_empty() { format!("{} {}", item.feed_url, item.id) } else { item.url.clone() };
+        let key = if item.url.is_empty() {
+            format!("{} {}", item.feed_url, item.id)
+        } else {
+            item.url.clone()
+        };
         match kept.iter_mut().find(|(k, _)| *k == key) {
             Some((_, held)) if item.time() > held.time() => *held = item,
             Some(_) => {}
@@ -151,8 +182,8 @@ fn items_json(items: &[Item]) -> Value {
 fn read_feed(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
     let limit = whole_number(&args["limit"], "limit", 1.0, MAX_ITEMS, DEFAULT_ITEMS)?;
     let hours = optional_hours(&args["sinceHours"], "sinceHours")?;
-    let Parsed { feed, items } =
-        read_feed_at(host, &js_string(&args["url"]), &user_agent(args)).map_err(|e| failed(e.message()))?;
+    let Parsed { feed, items } = read_feed_at(host, &js_string(&args["url"]), &user_agent(args))
+        .map_err(|e| failed(e.message()))?;
     let mut recent = match hours {
         Some(h) => within_hours(items, h, now_ms()),
         None => items,
@@ -168,9 +199,15 @@ fn read_feeds(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
     let hours = optional_hours(&args["sinceHours"], "sinceHours")?;
     let keywords = keyword_filter(&args["keywords"]);
     let given = feed_list(&args["urls"]);
-    let raws = if given.is_empty() { feed_list(&args["feeds"]) } else { given };
+    let raws = if given.is_empty() {
+        feed_list(&args["feeds"])
+    } else {
+        given
+    };
     if raws.is_empty() {
-        return Err(failed("Give feed URLs in urls, or add them to the connection's feeds"));
+        return Err(failed(
+            "Give feed URLs in urls, or add them to the connection's feeds",
+        ));
     }
     let agent = user_agent(args);
     let now = now_ms();
@@ -184,7 +221,10 @@ fn read_feeds(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
                     Some(h) => within_hours(parsed.items, h, now),
                     None => parsed.items,
                 };
-                let mut matching: Vec<Item> = recent.into_iter().filter(|i| passes(&keywords, i)).collect();
+                let mut matching: Vec<Item> = recent
+                    .into_iter()
+                    .filter(|i| passes(&keywords, i))
+                    .collect();
                 newest_first(&mut matching);
                 matching.truncate(count(per_feed));
                 picked.extend(matching);
@@ -204,7 +244,9 @@ fn read_feeds(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
     let mut items = dedupe_by_url(picked);
     newest_first(&mut items);
     let failed_json: Vec<Value> = failures.iter().map(FeedError::to_json).collect();
-    Ok(json!({ "items": items_json(&items), "count": items.len(), "feedsOk": feeds_ok, "feedsFailed": failed_json }))
+    Ok(
+        json!({ "items": items_json(&items), "count": items.len(), "feedsOk": feeds_ok, "feedsFailed": failed_json }),
+    )
 }
 
 /// The body as a feed when it is one; a JSON body has to say so with a version or an items list.
@@ -217,13 +259,17 @@ fn as_feed(url: &str, got: &Fetched) -> Option<Parsed> {
 
 fn find_feeds(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
     let url = feed_address(&js_string(&args["url"])).map_err(|e| failed(e.message()))?;
-    let got = fetch_body(host, &url, &user_agent(args), &page_accept()).map_err(|e| failed(e.message()))?;
+    let got = fetch_body(host, &url, &user_agent(args), &page_accept())
+        .map_err(|e| failed(e.message()))?;
     if let Some(parsed) = as_feed(&url, &got) {
         let f = parsed.feed;
         let found = json!({ "url": url, "title": f.title, "type": f.format.mime(), "format": f.format.name() });
         return Ok(json!({ "feeds": [found], "count": 1, "isFeed": true }));
     }
-    let feeds: Vec<Value> = discover::discover_feeds(&got.body, &got.url).iter().map(|d| d.to_json()).collect();
+    let feeds: Vec<Value> = discover::discover_feeds(&got.body, &got.url)
+        .iter()
+        .map(|d| d.to_json())
+        .collect();
     Ok(json!({ "count": feeds.len(), "feeds": feeds, "isFeed": false }))
 }
 
@@ -233,7 +279,13 @@ fn poll_feeds(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
     if raws.is_empty() {
         return Err(failed("Add feed URLs to the connection's feeds"));
     }
-    let hours = whole_number(&args["lookbackHours"], "lookbackHours", 1.0, MAX_LOOKBACK_HOURS, DEFAULT_LOOKBACK_HOURS)?;
+    let hours = whole_number(
+        &args["lookbackHours"],
+        "lookbackHours",
+        1.0,
+        MAX_LOOKBACK_HOURS,
+        DEFAULT_LOOKBACK_HOURS,
+    )?;
     let agent = user_agent(args);
     let previous = read_cursor(args["cursor"].as_str());
     #[allow(clippy::cast_precision_loss)]
@@ -251,8 +303,10 @@ fn poll_feeds(host: &mut dyn Host, args: &Value) -> Result<Value, Error> {
             etag: before.and_then(|b| b.etag.as_deref()),
             last_modified: before.and_then(|b| b.lm.as_deref()),
         };
-        let polled = send(host, url, &agent, http::FEED_ACCEPT, &validators)
-            .and_then(|got| got.map(|g| parse_fetched(url, &g).map(|p| (p, g))).transpose());
+        let polled = send(host, url, &agent, http::FEED_ACCEPT, &validators).and_then(|got| {
+            got.map(|g| parse_fetched(url, &g).map(|p| (p, g)))
+                .transpose()
+        });
         match polled {
             Ok(None) => next.extend(before.map(|b| (url.clone(), b.clone()))),
             Ok(Some((parsed, got))) => {
@@ -287,7 +341,13 @@ impl Extension for Rss {
         Ok(Rss)
     }
 
-    fn handle(&mut self, host: &mut dyn Host, method: &str, args: Value, _: &Ctx) -> Result<Value, Error> {
+    fn handle(
+        &mut self,
+        host: &mut dyn Host,
+        method: &str,
+        args: Value,
+        _: &Ctx,
+    ) -> Result<Value, Error> {
         match method {
             "readFeed" => read_feed(host, &args),
             "readFeeds" => read_feeds(host, &args),
@@ -307,18 +367,31 @@ mod tests {
     #[test]
     fn keywords_match_whole_words_only() {
         let k = keyword_filter(&json!("AI, c++"));
-        let item = |title: &str| Item { title: title.into(), ..Item::default() };
+        let item = |title: &str| Item {
+            title: title.into(),
+            ..Item::default()
+        };
         assert!(passes(&k, &item("New AI agents")));
         assert!(!passes(&k, &item("she said so")));
         assert!(passes(&k, &item("Learn C++ today")));
-        assert!(passes(&k, &item("said AI")), "a later match is tried after an inner one");
+        assert!(
+            passes(&k, &item("said AI")),
+            "a later match is tried after an inner one"
+        );
     }
 
     #[test]
     fn whole_numbers_name_their_range() {
-        assert_eq!(whole_number(&json!(""), "limit", 1.0, 100.0, 20.0), Ok(20.0));
-        assert_eq!(whole_number(&json!("7"), "limit", 1.0, 100.0, 20.0), Ok(7.0));
-        let err = whole_number(&json!(1.5), "minFeedsOk", 0.0, f64::INFINITY, 1.0).expect_err("not whole");
+        assert_eq!(
+            whole_number(&json!(""), "limit", 1.0, 100.0, 20.0),
+            Ok(20.0)
+        );
+        assert_eq!(
+            whole_number(&json!("7"), "limit", 1.0, 100.0, 20.0),
+            Ok(7.0)
+        );
+        let err = whole_number(&json!(1.5), "minFeedsOk", 0.0, f64::INFINITY, 1.0)
+            .expect_err("not whole");
         assert_eq!(err.message, "minFeedsOk must be a whole number from 0 up");
     }
 }

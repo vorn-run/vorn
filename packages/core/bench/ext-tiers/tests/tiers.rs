@@ -56,14 +56,20 @@ async fn the_widget_behaves_the_same_in_both_tiers() {
     same("widget", &wasm, &program);
     let text = wasm.to_string();
     assert!(text.contains("cargo test"), "the ask was drawn");
-    assert!(text.contains("permissions.resolve"), "a click answered the agent");
+    assert!(
+        text.contains("permissions.resolve"),
+        "a click answered the agent"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn worktree_cleanup_behaves_the_same_in_both_tiers() {
     let (wasm, program) = both(WORKTREES).await;
     same("worktrees", &wasm, &program);
-    assert!(wasm.to_string().contains("worktrees.remove"), "a worktree was removed");
+    assert!(
+        wasm.to_string().contains("worktrees.remove"),
+        "a worktree was removed"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -82,20 +88,39 @@ async fn the_crash_probe_answers_in_both_tiers() {
 /// A poll as the connector protocol carries it: the Node SDK lifts each
 /// item's `data` into the item and fills in what the item leaves out.
 fn wire(poll: &Value) -> Value {
-    const RESERVED: [&str; 8] = ["externalId", "title", "url", "description", "status", "labels", "assignee", "updatedAt"];
+    const RESERVED: [&str; 8] = [
+        "externalId",
+        "title",
+        "url",
+        "description",
+        "status",
+        "labels",
+        "assignee",
+        "updatedAt",
+    ];
     let mut poll = scenario::poll_shape(poll.clone());
     if let Some(items) = poll["items"].as_array_mut() {
         for item in items {
             let mut framed = Map::new();
             if let Some(data) = item["data"].as_object() {
-                framed.extend(data.iter().filter(|(k, _)| !RESERVED.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())));
+                framed.extend(
+                    data.iter()
+                        .filter(|(k, _)| !RESERVED.contains(&k.as_str()))
+                        .map(|(k, v)| (k.clone(), v.clone())),
+                );
             }
             framed.insert("externalId".into(), item["externalId"].clone());
             framed.insert("title".into(), item["title"].clone());
             framed.insert("url".into(), item.get("url").cloned().unwrap_or(json!("")));
-            framed.insert("description".into(), item.get("description").cloned().unwrap_or(json!("")));
+            framed.insert(
+                "description".into(),
+                item.get("description").cloned().unwrap_or(json!("")),
+            );
             framed.insert("status".into(), json!("open"));
-            framed.insert("labels".into(), item.get("labels").cloned().unwrap_or(json!([])));
+            framed.insert(
+                "labels".into(),
+                item.get("labels").cloned().unwrap_or(json!([])),
+            );
             if let Some(a) = item.get("assignee") {
                 framed.insert("assignee".into(), a.clone());
             }
@@ -114,8 +139,16 @@ async fn the_rust_feed_reader_answers_as_the_node_connector() {
         return;
     };
     let feeds = fixtures::serve().await.expect("the fixture server");
-    let connector = NodeRss::open(&node, feeds, &scenario::feeds()).await.expect("the connector");
-    let rig = Rig::new(RSS, Tier::Program(program(RSS)), Bench::new(Some(feeds)), None).expect("a rig");
+    let connector = NodeRss::open(&node, feeds, &scenario::feeds())
+        .await
+        .expect("the connector");
+    let rig = Rig::new(
+        RSS,
+        Tier::Program(program(RSS)),
+        Bench::new(Some(feeds)),
+        None,
+    )
+    .expect("a rig");
     for (action, args) in scenario::rss_calls() {
         let ported = rig.call(action, args.clone()).await.map_err(|e| e.message);
         let shipped = connector.action(action, &args).await;
@@ -125,11 +158,20 @@ async fn the_rust_feed_reader_answers_as_the_node_connector() {
             _ => panic!("{action} {args}: {ported:?} / {shipped:?}"),
         }
     }
-    let ported = rig.call("poll", scenario::poll_args(&Value::Null)).await.expect("a poll");
+    let ported = rig
+        .call("poll", scenario::poll_args(&Value::Null))
+        .await
+        .expect("a poll");
     let shipped = connector.poll(None).await.expect("a poll");
     assert_eq!(wire(&ported), scenario::poll_shape(shipped.clone()));
-    let again = rig.call("poll", scenario::poll_args(&ported["nextCursor"])).await.expect("a poll");
-    let shipped = connector.poll(shipped["nextCursor"].as_str()).await.expect("a poll");
+    let again = rig
+        .call("poll", scenario::poll_args(&ported["nextCursor"]))
+        .await
+        .expect("a poll");
+    let shipped = connector
+        .poll(shipped["nextCursor"].as_str())
+        .await
+        .expect("a poll");
     assert_eq!(wire(&again), scenario::poll_shape(shipped));
     connector.close().await;
     rig.stop().await;

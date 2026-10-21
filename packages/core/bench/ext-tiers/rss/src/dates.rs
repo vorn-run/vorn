@@ -48,9 +48,7 @@ fn offset_minutes(zone: Option<&str>) -> i64 {
     }
     // RFC 822 §5.2 military zones: A to M (no J) are -1 to -12, N to Y are +1 to +12.
     match upper.as_bytes() {
-        [c @ (b'A'..=b'I' | b'K'..=b'M')] => {
-            -(i64::from(*c) - 64 - i64::from(*c > b'J')) * 60
-        }
+        [c @ (b'A'..=b'I' | b'K'..=b'M')] => -(i64::from(*c) - 64 - i64::from(*c > b'J')) * 60,
         [c @ b'N'..=b'Y'] => (i64::from(*c) - 77) * 60,
         _ => 0,
     }
@@ -100,7 +98,9 @@ pub fn iso(ms: i64) -> String {
 /// An ISO string this module wrote, back in milliseconds since the epoch.
 pub fn iso_ms(value: &str) -> Option<i64> {
     let m = RFC3339.captures(value)?;
-    let ms = m.get(7).map_or(0, |f| num(&format!("{:0<3}", &f.as_str()[..f.len().min(3)])));
+    let ms = m.get(7).map_or(0, |f| {
+        num(&format!("{:0<3}", &f.as_str()[..f.len().min(3)]))
+    });
     Some(
         days_from_civil(num(&m[1]), num(&m[2]), num(&m[3])) * 86_400_000
             + m.get(4).map_or(0, |h| num(h.as_str())) * 3_600_000
@@ -111,8 +111,22 @@ pub fn iso_ms(value: &str) -> Option<i64> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn utc(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64, ms: i64, offset: i64) -> String {
-    if !(0..=11).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+fn utc(
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+    ms: i64,
+    offset: i64,
+) -> String {
+    if !(0..=11).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
         return String::new();
     }
     let (_, m, _) = civil_from_days(days_from_civil(year, month + 1, day));
@@ -130,8 +144,13 @@ fn utc(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64, ms:
 
 fn from_rfc3339(value: &str) -> Option<String> {
     let m = RFC3339.captures(value)?;
-    let ms = m.get(7).map_or(0, |f| num(&format!("{:0<3}", &f.as_str()[..f.len().min(3)])));
-    let zone = m.get(8).map(|z| z.as_str()).filter(|z| !z.eq_ignore_ascii_case("z"));
+    let ms = m.get(7).map_or(0, |f| {
+        num(&format!("{:0<3}", &f.as_str()[..f.len().min(3)]))
+    });
+    let zone = m
+        .get(8)
+        .map(|z| z.as_str())
+        .filter(|z| !z.eq_ignore_ascii_case("z"));
     let part = |i: usize| m.get(i).map_or(0, |v| num(v.as_str()));
     Some(utc(
         num(&m[1]),
@@ -153,7 +172,11 @@ fn from_rfc822(value: &str) -> Option<String> {
     };
     let year = if m[3].len() == 2 {
         let short = num(&m[3]);
-        if short < 50 { 2000 + short } else { 1900 + short }
+        if short < 50 {
+            2000 + short
+        } else {
+            1900 + short
+        }
     } else {
         num(&m[3])
     };
@@ -193,10 +216,22 @@ mod tests {
 
     #[test]
     fn reads_both_forms_into_utc() {
-        assert_eq!(parse_date("Fri, 21 Jul 2023 09:04 EDT"), "2023-07-21T13:04:00.000Z");
-        assert_eq!(parse_date("2000-08-09T09:30-05:00"), "2000-08-09T14:30:00.000Z");
-        assert_eq!(parse_date("2026-09-09T16:03:05.12Z"), "2026-09-09T16:03:05.120Z");
-        assert_eq!(parse_date("Sat, 12 Sep 26 10:00:00 A"), "2026-09-12T11:00:00.000Z");
+        assert_eq!(
+            parse_date("Fri, 21 Jul 2023 09:04 EDT"),
+            "2023-07-21T13:04:00.000Z"
+        );
+        assert_eq!(
+            parse_date("2000-08-09T09:30-05:00"),
+            "2000-08-09T14:30:00.000Z"
+        );
+        assert_eq!(
+            parse_date("2026-09-09T16:03:05.12Z"),
+            "2026-09-09T16:03:05.120Z"
+        );
+        assert_eq!(
+            parse_date("Sat, 12 Sep 26 10:00:00 A"),
+            "2026-09-12T11:00:00.000Z"
+        );
         assert_eq!(parse_date("31 Feb 2024 10:00"), "");
         assert_eq!(parse_date("yesterday"), "");
     }
