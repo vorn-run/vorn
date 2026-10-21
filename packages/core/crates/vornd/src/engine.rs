@@ -1946,38 +1946,48 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_session_with_a_remote_login_anywhere_under_it_is_not_local() {
+    fn a_session_with_a_remote_login_or_multiplexer_anywhere_under_it_is_not_local() {
         let dir = std::env::temp_dir().join(format!("vd-tree-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        // A program by a remote login's name that only waits: this test binary, renamed.
-        let ssh = dir.join("ssh");
-        std::fs::copy(std::env::current_exe().unwrap(), &ssh).unwrap();
         let sh = |script: String| {
             vorn_spawn::command("/bin/sh")
                 .args(["-c", &script])
                 .spawn()
                 .unwrap()
         };
-        let mut plain = sh("sleep 5; true".into());
-        let mut nested = sh(format!(
-            "/bin/sh -c '{} --ignored --exact engine::tests::waits_a_while >/dev/null; true'; true",
-            ssh.display()
-        ));
         let settled = |pid: u32, want: bool| {
             (0..100).any(|_| {
                 std::thread::sleep(Duration::from_millis(20));
                 local_session(Some(Placed::Here(pid))) == Some(want)
             })
         };
+        let mut plain = sh("sleep 5; true".into());
         assert!(settled(plain.id(), true));
-        assert!(settled(nested.id(), false));
+        let exe = std::env::current_exe().unwrap();
+        let mut nested = Vec::new();
+        for name in ["ssh", "tmux", "screen", "zellij", "dtach", "abduco"] {
+            // A program by a client's name that only waits: this test binary, renamed.
+            let stand_in = dir.join(name);
+            std::fs::hard_link(&exe, &stand_in)
+                .or_else(|_| std::fs::copy(&exe, &stand_in).map(drop))
+                .unwrap();
+            let child = sh(format!(
+                "/bin/sh -c '{} --ignored --exact engine::tests::waits_a_while >/dev/null; true'; true",
+                stand_in.display()
+            ));
+            assert!(settled(child.id(), false), "{name}");
+            nested.push(child);
+        }
         std::thread::sleep(Duration::from_millis(500));
-        assert_eq!(local_session(Some(Placed::Here(nested.id()))), Some(false));
+        assert_eq!(
+            local_session(Some(Placed::Here(nested[0].id()))),
+            Some(false)
+        );
         assert_eq!(local_session(Some(Placed::Remote)), Some(false));
         // Not started, or not known: refused for now.
         assert_eq!(local_session(Some(Placed::Here(0))), None);
         assert_eq!(local_session(None), None);
-        for child in [&mut plain, &mut nested] {
+        for child in std::iter::once(&mut plain).chain(&mut nested) {
             child.kill().unwrap();
             child.wait().unwrap();
         }

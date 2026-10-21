@@ -12,9 +12,28 @@ pub mod options;
 
 pub use options::Refused;
 
-/// Programs that log in to another machine from a terminal. A session
-/// running one of them, at any depth, is not treated as local.
-pub const CLIENTS: &[&str] = &["ssh", "mosh", "mosh-client", "et", "autossh", "telnet"];
+/// Programs that log in to another machine from a terminal, or attach it to
+/// a terminal multiplexer whose panes may be anywhere. A session running one
+/// of them, at any depth, is not treated as local.
+pub const CLIENTS: &[&str] = &[
+    "ssh",
+    "mosh",
+    "mosh-client",
+    "et",
+    "autossh",
+    "telnet",
+    "rsh",
+    "rlogin",
+    "dbclient",
+    "tmux",
+    "tmate",
+    "screen",
+    "zellij",
+    "dtach",
+    "abduco",
+    "dvtm",
+    "byobu",
+];
 
 /// A remote host as the configuration keeps it (`RemoteHost`).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

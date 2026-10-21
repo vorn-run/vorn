@@ -325,6 +325,9 @@ mod tests {
             check_hosts(&none, &keyed("-oProxyCommand=x")),
             Err("Could not save host box: ssh key path \"-oProxyCommand=x\" is not allowed".into())
         );
+        for bad in ["/k/a\nb", "/k/a\"b", "/k/\u{201c}k\u{201d}"] {
+            assert!(check_hosts(&none, &keyed(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

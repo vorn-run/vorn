@@ -49,8 +49,9 @@ struct State {
     trusted: BTreeMap<PathBuf, String>,
     /// Each file's content hash as last read or written.
     hashes: BTreeMap<PathBuf, String>,
-    /// What each file's workflow runs, for the user to see before turning it on.
-    runs: HashMap<PathBuf, Vec<String>>,
+    /// Each file's workflow as checked, for the user to see what it runs
+    /// before turning it on.
+    runs: HashMap<PathBuf, Value>,
 }
 
 impl State {
@@ -126,55 +127,89 @@ fn enabled_as(mut wf: Value, from: &Value) -> Value {
     wf
 }
 
-/// The settings shown for each node type Vorn knows: everything in its
-/// config that decides what it runs or sends.
-const SHOWN: &[(&str, &[&str])] = &[
-    // A trigger shows every setting; these are the ones its types take.
-    ("trigger", &["method", "connectionId"]),
-    ("condition", &[]),
-    ("approval", &[]),
-    ("loop", &[]),
-    (
-        "launchAgent",
-        &["agentType", "prompt", "args", "model", "remoteHostId"],
-    ),
-    (
-        "script",
-        &["scriptType", "scriptContent", "args", "cwd", "secretsFrom"],
-    ),
-    ("command", &["command", "cwd"]),
-    (
-        "httpRequest",
-        &["method", "url", "headers", "body", "profileConnectionId"],
-    ),
-    ("callConnectorAction", &["action", "connectionId", "args"]),
-];
+/// A built-in node type's settings: those listed for the user, then those
+/// that change only how a step is named or timed. A file holding any other
+/// setting on a step of the type does not read.
+struct Kind {
+    id: &'static str,
+    shown: &'static [&'static str],
+    quiet: &'static [&'static str],
+}
 
-/// Config keys that run or send something for some node type: a known type
-/// that does not show one refuses its file.
-const RUNS_OR_SENDS: &[&str] = &[
-    "agentType",
-    "prompt",
-    "args",
-    "model",
-    "remoteHostId",
-    "scriptType",
-    "scriptContent",
-    "script",
-    "command",
-    "cmd",
-    "exec",
-    "shell",
-    "cwd",
-    "env",
-    "secretsFrom",
-    "method",
-    "url",
-    "headers",
-    "body",
-    "profileConnectionId",
-    "action",
-    "connectionId",
+/// Every node type the runner knows but extensions' and triggers' (which
+/// list every setting they hold), with every setting it reads.
+const KINDS: &[Kind] = &[
+    Kind {
+        id: "condition",
+        shown: &[],
+        quiet: &["variable", "operator", "value"],
+    },
+    Kind {
+        id: "approval",
+        shown: &[],
+        quiet: &["message", "timeoutMs", "view", "feedback", "edit"],
+    },
+    Kind {
+        id: "loop",
+        shown: &[],
+        quiet: &[
+            "nodeType",
+            "mode",
+            "items",
+            "bodyNodeIds",
+            "maxIterations",
+            "until",
+        ],
+    },
+    Kind {
+        id: "launchAgent",
+        shown: &[
+            "agentType",
+            "prompt",
+            "args",
+            "model",
+            "projectName",
+            "projectPath",
+            "useWorktree",
+            "worktreeMode",
+            "worktreeFromStepSlug",
+            "existingWorktreePath",
+            "branch",
+            "taskId",
+            "taskFromQueue",
+            "headless",
+            "outputSchema",
+        ],
+        quiet: &["displayName", "promptDelayMs", "timeoutMs"],
+    },
+    Kind {
+        id: "script",
+        shown: &[
+            "scriptType",
+            "scriptContent",
+            "args",
+            "cwd",
+            "projectName",
+            "projectPath",
+            "secretsFrom",
+        ],
+        quiet: &["runId"],
+    },
+    Kind {
+        id: "createTaskFromItem",
+        shown: &["project", "initialStatus"],
+        quiet: &["nodeType"],
+    },
+    Kind {
+        id: "callConnectorAction",
+        shown: &["action", "connectionId", "args"],
+        quiet: &["nodeType", "actionLabel", "connectorId"],
+    },
+    Kind {
+        id: "httpRequest",
+        shown: &["method", "url", "headers", "body", "profileConnectionId"],
+        quiet: &["nodeType"],
+    },
 ];
 
 /// A setting's value as the list shows it: text as it is, the rest as JSON.
@@ -185,11 +220,31 @@ fn shown_value(v: &Value) -> String {
     }
 }
 
+/// The remote host an agent step in project `name` runs on, from `projects`
+/// as `dbListProjects` lists them.
+fn remote_line(name: &str, projects: &[Value]) -> String {
+    let project = (!name.is_empty() && !name.contains("{{"))
+        .then(|| {
+            projects
+                .iter()
+                .find(|p| p.get("name").and_then(Value::as_str) == Some(name))
+        })
+        .flatten();
+    match project {
+        Some(p) => match vorn_workflows::agent::remote_host_of(p) {
+            Some(host) => format!("  remote host: {host}"),
+            None => "  remote host: none, this computer".to_owned(),
+        },
+        None => "  remote host: its project's, when it runs".to_owned(),
+    }
+}
+
 /// What a workflow does when it runs, one line per node and one per setting
 /// that decides what it runs or sends, for the user to read before turning
-/// it on. Refuses a node of a known type that holds such a setting the type
-/// does not have.
-pub fn runs(wf: &Value) -> Result<Vec<String>, String> {
+/// it on; an agent step also names the remote host its project runs on, from
+/// `projects`. Refuses a step of a built-in type with a setting the type
+/// does not read.
+pub fn runs(wf: &Value, projects: &[Value]) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for node in wf
         .get("nodes")
@@ -198,7 +253,6 @@ pub fn runs(wf: &Value) -> Result<Vec<String>, String> {
         .flatten()
     {
         let kind = node.get("type").and_then(Value::as_str).unwrap_or("step");
-        let config = node.get("config").and_then(Value::as_object);
         let label = node
             .get("label")
             .and_then(Value::as_str)
@@ -206,47 +260,53 @@ pub fn runs(wf: &Value) -> Result<Vec<String>, String> {
             .filter(|l| !l.is_empty())
             .or_else(|| node.get("id").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_else(|| kind.to_owned());
-        let setting = |key: &str| config.and_then(|c| c.get(key)).filter(|v| !v.is_null());
-        match SHOWN.iter().find(|(k, _)| *k == kind) {
-            Some((_, shown)) => {
-                if let Some(key) = config
-                    .into_iter()
-                    .flat_map(|c| c.keys())
-                    .find(|k| RUNS_OR_SENDS.contains(&k.as_str()) && !shown.contains(&k.as_str()))
-                {
-                    return Err(format!("{label}: {key} is not a setting of a {kind} step"));
-                }
-                if kind == "trigger" {
-                    let on = setting("triggerType")
-                        .and_then(Value::as_str)
-                        .unwrap_or("manual");
-                    out.push(format!("Trigger: {on}"));
-                    for (key, v) in config.into_iter().flatten() {
-                        if key != "triggerType" && !v.is_null() {
-                            out.push(format!("  {key}: {}", shown_value(v)));
-                        }
-                    }
-                    continue;
-                }
-                if shown.is_empty() {
-                    continue;
-                }
-                out.push(format!("{label} ({kind})"));
-                for key in *shown {
-                    if let Some(v) = setting(key) {
-                        out.push(format!("  {key}: {}", shown_value(v)));
-                    }
-                }
+        let config = match node.get("config") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(c)) => Some(c),
+            Some(_) => return Err(format!("{label}: its settings are not a table")),
+        };
+        let settings = || config.into_iter().flatten().filter(|(_, v)| !v.is_null());
+        if kind == "trigger" {
+            let on = config
+                .and_then(|c| c.get("triggerType"))
+                .and_then(Value::as_str)
+                .unwrap_or("manual");
+            out.push(format!("Trigger: {on}"));
+            for (key, v) in settings().filter(|(k, _)| *k != "triggerType") {
+                out.push(format!("  {key}: {}", shown_value(v)));
             }
+            continue;
+        }
+        let Some(known) = KINDS.iter().find(|k| k.id == kind) else {
             // An extension's step: the action is its type, and every setting an input.
-            None => {
-                out.push(format!("{label} ({kind})"));
-                for (key, v) in config.into_iter().flatten() {
-                    if !v.is_null() {
-                        out.push(format!("  {key}: {}", shown_value(v)));
-                    }
-                }
+            out.push(format!("{label} ({kind})"));
+            for (key, v) in settings() {
+                out.push(format!("  {key}: {}", shown_value(v)));
             }
+            continue;
+        };
+        if let Some(key) = config
+            .into_iter()
+            .flat_map(|c| c.keys())
+            .find(|k| !known.shown.contains(&k.as_str()) && !known.quiet.contains(&k.as_str()))
+        {
+            return Err(format!("{label}: {key} is not a setting of a {kind} step"));
+        }
+        if known.shown.is_empty() {
+            continue;
+        }
+        out.push(format!("{label} ({kind})"));
+        for key in known.shown {
+            if let Some(v) = config.and_then(|c| c.get(*key)).filter(|v| !v.is_null()) {
+                out.push(format!("  {key}: {}", shown_value(v)));
+            }
+        }
+        if kind == "launchAgent" {
+            let project = config
+                .and_then(|c| c.get("projectName"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            out.push(remote_line(project, projects));
         }
     }
     Ok(out)
@@ -357,8 +417,8 @@ impl Files {
     }
 
     /// Every file, whether it is on and what it runs, and what is wrong
-    /// with the ones that do not read.
-    pub fn listed(&self) -> Value {
+    /// with the ones that do not read; agent steps' hosts from `projects`.
+    pub fn listed(&self, projects: &[Value]) -> Value {
         let s = self.lock();
         let files: Vec<Value> = s
             .by_id
@@ -369,7 +429,7 @@ impl Files {
                     "path": path,
                     "trusted": s.trusts(path),
                     "hash": s.hashes.get(path),
-                    "runs": s.runs.get(path).cloned().unwrap_or_default(),
+                    "runs": s.runs.get(path).map(|wf| runs(wf, projects).unwrap_or_default()).unwrap_or_default(),
                 })
             })
             .collect();
@@ -400,14 +460,20 @@ async fn connections(work: &Work) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Each project's name and path.
-async fn projects(work: &Work) -> Vec<(String, String)> {
+/// Every project, as `dbListProjects` lists it.
+async fn project_rows(work: &Work) -> Vec<Value> {
     work.db
         .run(|s| s.call("dbListProjects", json!([])).ok())
         .await
         .flatten()
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default()
+}
+
+/// Each project's name and path.
+async fn projects(work: &Work) -> Vec<(String, String)> {
+    project_rows(work)
+        .await
         .iter()
         .filter_map(|p| {
             Some((
@@ -609,22 +675,19 @@ impl Work {
             }
             None => theirs.clone(),
         };
-        let ran = match runs(&met) {
-            Ok(ran) => ran,
-            Err(why) => {
-                warn!(file = %file.display(), %why, "a workflow file does not read");
-                let mut s = self.files.lock();
-                s.refuse(file, at, vec![format!("{}: {why}", file.display())]);
-                self.files.keep(&s);
-                return false;
-            }
-        };
+        if let Err(why) = runs(&met, &[]) {
+            warn!(file = %file.display(), %why, "a workflow file does not read");
+            let mut s = self.files.lock();
+            s.refuse(file, at, vec![format!("{}: {why}", file.display())]);
+            self.files.keep(&s);
+            return false;
+        }
         // Known as this file's before it is stored, so it is held off from the first moment.
         {
             let mut s = self.files.lock();
             s.by_id.insert(id.clone(), file.to_owned());
             s.hashes.insert(file.to_owned(), hash.clone());
-            s.runs.insert(file.to_owned(), ran.clone());
+            s.runs.insert(file.to_owned(), met.clone());
             s.errors.remove(file);
             self.files.keep(&s);
         }
@@ -671,7 +734,6 @@ impl Work {
                 s.trusted.insert(file.to_owned(), hash.clone());
             }
             s.hashes.insert(file.to_owned(), hash);
-            s.runs.insert(file.to_owned(), ran);
             if let Some(at) = at {
                 s.stamps.insert(file.to_owned(), at);
             }
@@ -730,9 +792,14 @@ impl Work {
                 trusted,
             )
         };
+        // Off in the store only: the file keeps its own setting, and one that does not read is left alone.
         let ours = match (&base, trusted) {
+            (_, true) => as_file(row),
             (Some(base), false) => enabled_as(as_file(row), base),
-            _ => as_file(row),
+            (None, false) => match vorn_workflow_file::read(&old, &bindings) {
+                Ok(file) => enabled_as(as_file(row), &file.workflow),
+                Err(_) => return,
+            },
         };
         let mut next = ours.clone();
         if known != stamp(&file) {
@@ -761,8 +828,8 @@ impl Work {
         }
         let hash = digest(&text);
         let mut s = self.files.lock();
-        match runs(&next) {
-            Ok(ran) => {
+        match runs(&next, &[]) {
+            Ok(_) => {
                 if let Some(at) = stamp(&file) {
                     s.stamps.insert(file.clone(), at);
                 }
@@ -770,7 +837,7 @@ impl Work {
                     s.trusted.insert(file.clone(), hash.clone());
                 }
                 s.hashes.insert(file.clone(), hash);
-                s.runs.insert(file.clone(), ran);
+                s.runs.insert(file.clone(), next.clone());
             }
             Err(why) => {
                 let shown = format!("{}: {why}", file.display());
@@ -779,6 +846,11 @@ impl Work {
         }
         s.base.insert(file, next);
         self.files.keep(&s);
+    }
+
+    /// `workflow:files`: [`Files::listed`] with each agent step's host as its project has it now.
+    pub(crate) async fn files_listed(&self) -> Value {
+        self.files.listed(&project_rows(self).await)
     }
 
     /// Removes the file of workflow `id`, as the workflow was deleted.
@@ -851,7 +923,9 @@ impl Work {
             s.stamps.insert(file.clone(), at);
         }
         if let Some(read) = read {
-            s.runs.insert(file.clone(), runs(&read).unwrap_or_default());
+            if runs(&read, &[]).is_ok() {
+                s.runs.insert(file.clone(), read.clone());
+            }
             s.base.insert(file.clone(), read);
         }
         self.files.keep(&s);
@@ -968,9 +1042,16 @@ mod tests {
     use super::*;
 
     fn one(kind: &str, config: Value) -> Result<Vec<String>, String> {
-        runs(&json!({ "nodes": [
-            { "id": "s", "type": kind, "label": "Do\nit", "config": config }
-        ] }))
+        let projects = [
+            json!({ "name": "far", "path": "/f", "hostIds": ["local", "box"] }),
+            json!({ "name": "near", "path": "/n", "hostIds": ["local"] }),
+        ];
+        runs(
+            &json!({ "nodes": [
+                { "id": "s", "type": kind, "label": "Do\nit", "config": config }
+            ] }),
+            &projects,
+        )
     }
 
     #[test]
@@ -979,7 +1060,9 @@ mod tests {
             one(
                 "launchAgent",
                 json!({ "agentType": "claude", "prompt": "fix it", "args": ["--x"],
-                        "model": "m", "remoteHostId": "box", "projectName": "p" })
+                        "model": "m", "projectName": "far", "projectPath": "/f",
+                        "useWorktree": true, "existingWorktreePath": "/f/w",
+                        "displayName": "d", "timeoutMs": 5 })
             )
             .unwrap(),
             [
@@ -988,32 +1071,44 @@ mod tests {
                 "  prompt: fix it",
                 "  args: [\"--x\"]",
                 "  model: m",
-                "  remoteHostId: box",
+                "  projectName: far",
+                "  projectPath: /f",
+                "  useWorktree: true",
+                "  existingWorktreePath: /f/w",
+                "  remote host: box",
             ]
+        );
+        assert_eq!(
+            one("launchAgent", json!({ "projectName": "near" })).unwrap()[2..],
+            ["  remote host: none, this computer"]
+        );
+        assert_eq!(
+            one(
+                "launchAgent",
+                json!({ "projectName": "{{context.projectName}}" })
+            )
+            .unwrap()[2..],
+            ["  remote host: its project's, when it runs"]
         );
         assert_eq!(
             one(
                 "script",
                 json!({ "scriptType": "bash", "scriptContent": "a\nb", "args": ["1"],
-                        "cwd": "/w", "secretsFrom": "c1" })
+                        "projectPath": "/p", "secretsFrom": "c1", "runId": "r" })
             )
             .unwrap()[2..],
             [
                 "  scriptContent: a\nb",
                 "  args: [\"1\"]",
-                "  cwd: /w",
+                "  projectPath: /p",
                 "  secretsFrom: c1",
             ]
         );
         assert_eq!(
-            one("command", json!({ "command": "make", "cwd": "/w" })).unwrap()[1..],
-            ["  command: make", "  cwd: /w"]
-        );
-        assert_eq!(
             one(
                 "httpRequest",
-                json!({ "method": "POST", "url": "https://x", "headers": { "a": "b" },
-                        "body": "{}", "profileConnectionId": "c" })
+                json!({ "nodeType": "httpRequest", "method": "POST", "url": "https://x",
+                        "headers": { "a": "b" }, "body": "{}", "profileConnectionId": "c" })
             )
             .unwrap()[1..],
             [
@@ -1027,7 +1122,8 @@ mod tests {
         assert_eq!(
             one(
                 "callConnectorAction",
-                json!({ "connectionId": "c", "action": "send", "args": { "to": "x" } })
+                json!({ "connectionId": "c", "action": "send", "args": { "to": "x" },
+                        "actionLabel": "Send" })
             )
             .unwrap()[1..],
             [
@@ -1036,10 +1132,18 @@ mod tests {
                 "  args: {\"to\":\"x\"}"
             ]
         );
+        assert_eq!(
+            one(
+                "createTaskFromItem",
+                json!({ "project": "fromConnection", "initialStatus": "todo" })
+            )
+            .unwrap()[1..],
+            ["  project: fromConnection", "  initialStatus: todo"]
+        );
         // An extension's step shows its type as the action and every input.
         assert_eq!(
-            one("some.ext/step", json!({ "anything": "goes" })).unwrap(),
-            ["Do it (some.ext/step)", "  anything: goes"]
+            one("some.ext/step", json!({ "command": "make", "cwd": "/w" })).unwrap(),
+            ["Do it (some.ext/step)", "  command: make", "  cwd: /w"]
         );
         assert_eq!(
             one(
@@ -1049,18 +1153,39 @@ mod tests {
             .unwrap(),
             ["Trigger: webhook", "  method: POST"]
         );
+        assert!(one("approval", json!({ "message": "ok?" }))
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
-    fn refuses_a_setting_that_runs_or_sends_where_its_step_has_none() {
+    fn refuses_a_setting_its_step_does_not_read() {
         for (kind, config) in [
             ("launchAgent", json!({ "command": "x" })),
+            ("launchAgent", json!({ "remoteHostId": "box" })),
             ("script", json!({ "prompt": "x" })),
+            ("script", json!({ "env": { "A": "1" } })),
             ("httpRequest", json!({ "scriptContent": "x" })),
+            ("callConnectorAction", json!({ "url": "x" })),
             ("condition", json!({ "url": "x" })),
+            ("approval", json!({ "anything": 1 })),
+            ("loop", json!({ "shell": "sh" })),
         ] {
             let why = one(kind, config).unwrap_err();
             assert!(why.contains(&format!("of a {kind} step")), "{why}");
+        }
+        assert!(one("script", json!("echo")).is_err());
+    }
+
+    #[test]
+    fn reads_the_workflows_vorn_ships() {
+        for (_, _, text) in vorn_workflows::SEEDS {
+            let bindings = Bindings {
+                connections: &[],
+                project: None,
+            };
+            let wf = vorn_workflow_file::read(text, &bindings).unwrap().workflow;
+            runs(&vorn_work::js_numbers(wf), &[]).unwrap();
         }
     }
 }

@@ -18,6 +18,13 @@ impl fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
+impl Refused {
+    /// A refusal that says `why`.
+    pub fn new(why: impl Into<String>) -> Refused {
+        Refused(why.into())
+    }
+}
+
 /// The `-o` keys a host may set, lowercase: ssh reads keys in any case.
 const KEYS: &[&str] = &[
     "addkeystoagent",
@@ -172,10 +179,12 @@ pub fn check_destination(user: &str, hostname: &str) -> Result<(), Refused> {
     Ok(())
 }
 
-/// Whether `path`, a key file for `-i`, is one ssh reads as a path: not
-/// empty and not starting with `-`.
+/// Whether `path`, a key file for `-i`, is one ssh reads as a path and a
+/// shell takes as one quoted word: not empty, not starting with `-`, and
+/// only printable ASCII other than `"`.
 pub fn check_key_path(path: &str) -> Result<(), Refused> {
-    if path.is_empty() || path.starts_with('-') {
+    let printable = |c: char| (' '..='~').contains(&c) && c != '"';
+    if path.is_empty() || path.starts_with('-') || !path.chars().all(printable) {
         return Err(Refused(format!("ssh key path {path:?} is not allowed")));
     }
     Ok(())
@@ -299,6 +308,21 @@ mod tests {
             "ssh key path \"-oProxyCommand=x\" is not allowed"
         );
         assert!(check_key_path("").is_err());
+        assert!(check_key_path(r"C:\Users\me\.ssh\id 1%").is_ok());
+        for bad in [
+            "/k/a\nb",
+            "/k/a\rb",
+            "/k/\u{1b}[2J",
+            "/k/a\u{7f}",
+            "/k/a\tb",
+            "/k/a\"b",
+            "/k/\u{201c}x\u{201d}",
+            "/k/\u{2018}x\u{2019}",
+            "/k/\u{ff02}",
+            "/k/é",
+        ] {
+            assert!(check_key_path(bad).is_err(), "{bad:?}");
+        }
         assert_eq!(port(22.0), Ok(22));
         assert_eq!(port(65535.0), Ok(65535));
         for bad in [0.0, -1.0, 22.5, 65536.0, f64::NAN, f64::INFINITY] {

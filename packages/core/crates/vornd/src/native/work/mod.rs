@@ -605,7 +605,7 @@ impl Work {
                     Err(e) => Answer::Error(e),
                 }
             }
-            "workflow:files" => Answer::Result(self.files.listed()),
+            "workflow:files" => Answer::Result(self.files_listed().await),
             "workflow:trust" => {
                 let id = text(params, "id").unwrap_or_default();
                 let hash = text(params, "hash").unwrap_or_default();
@@ -1486,12 +1486,57 @@ scriptContent = "echo built"
         }
     }
 
-    fn file_entry(work: &Work, id: &str) -> Value {
-        let listed = work.files.listed();
+    async fn file_entry(work: &Work, id: &str) -> Value {
+        let listed = work.files_listed().await;
         listed["files"]
             .as_array()
             .and_then(|f| f.iter().find(|f| f["workflowId"] == id).cloned())
             .unwrap_or_else(|| panic!("no file for {id}: {listed}"))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_file_not_turned_on_keeps_its_own_setting_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("build.toml");
+        std::fs::write(&file, BUILD).unwrap();
+        {
+            let (_native, w) = work(dir.path());
+            w.sync_types();
+            let path = project.to_string_lossy().into_owned();
+            w.db.run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+            w.look_at_files().await;
+            assert_eq!(row(&w, "build").await["enabled"], false);
+        }
+        let (_native, w) = work(dir.path());
+        w.sync_types();
+        let rename = |name: &str| json!({ "id": "build", "updates": { "name": name } });
+        assert!(matches!(
+            w.call("workflow:update", &rename("Build it")).await,
+            Answer::Result(_)
+        ));
+        let edited = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            edited.contains("Build it") && edited.contains("enabled = true"),
+            "{edited}"
+        );
+        assert_eq!(row(&w, "build").await["enabled"], false);
+        // A file that no longer reads is left as it is.
+        drop(w);
+        std::fs::write(&file, "name = [").unwrap();
+        let (_native, w) = work(dir.path());
+        w.sync_types();
+        w.call("workflow:update", &rename("Again")).await;
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "name = [");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1517,7 +1562,7 @@ scriptContent = "echo built"
 
         work.look_at_files().await;
         assert_eq!(row(&work, "build").await["enabled"], false);
-        let entry = file_entry(&work, "build");
+        let entry = file_entry(&work, "build").await;
         assert_eq!(entry["trusted"], false);
         assert_eq!(
             entry["runs"],
@@ -1572,20 +1617,20 @@ scriptContent = "echo built"
         assert_eq!(row(&work, "build").await["enabled"], false);
 
         // Turning on takes the content the user was shown, and only that.
-        let shown = file_entry(&work, "build")["hash"].clone();
+        let shown = file_entry(&work, "build").await["hash"].clone();
         assert!(shown.is_string());
         assert!(matches!(
             work.call("workflow:trust", &json!({ "id": "build", "hash": "other" })).await,
             Answer::Error(e) if e.contains("changed since it was shown")
         ));
-        assert_eq!(file_entry(&work, "build")["trusted"], false);
+        assert_eq!(file_entry(&work, "build").await["trusted"], false);
         assert!(matches!(
             work.call("workflow:trust", &json!({ "id": "build", "hash": shown }))
                 .await,
             Answer::Result(_)
         ));
         assert_eq!(row(&work, "build").await["enabled"], true);
-        assert_eq!(file_entry(&work, "build")["trusted"], true);
+        assert_eq!(file_entry(&work, "build").await["trusted"], true);
         assert!(work.files.refuses("build").is_none());
         // Kept across a restart.
         assert!(files::Files::new(dir.path()).refuses("build").is_none());
@@ -1605,14 +1650,14 @@ scriptContent = "echo built"
         std::fs::write(&file, &changed).unwrap();
         work.look_at_files().await;
         assert_eq!(row(&work, "build").await["enabled"], false);
-        assert_eq!(file_entry(&work, "build")["trusted"], false);
+        assert_eq!(file_entry(&work, "build").await["trusted"], false);
         assert!(work.files.refuses("build").is_some());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
 
         // Edited back as it was turned on, it is on with the file's own setting.
         std::fs::write(&file, &trusted).unwrap();
         work.look_at_files().await;
-        assert_eq!(file_entry(&work, "build")["trusted"], true);
+        assert_eq!(file_entry(&work, "build").await["trusted"], true);
         assert_eq!(row(&work, "build").await["enabled"], true);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), trusted);
 
@@ -1657,7 +1702,7 @@ scriptContent = "echo built"
             })
             .await;
         work.look_at_files().await;
-        let listed = work.files.listed();
+        let listed = work.files_listed().await;
         let errors = listed["errors"].to_string();
         assert!(
             errors.contains("command is not a setting of a script step"),
@@ -1711,8 +1756,8 @@ scriptContent = "echo built"
             assert_ne!(saved["path"], json!(link));
         }
         work.look_at_files().await;
-        assert_eq!(file_entry(&work, "mine")["trusted"], true);
-        assert!(file_entry(&work, "mine")["runs"]
+        assert_eq!(file_entry(&work, "mine").await["trusted"], true);
+        assert!(file_entry(&work, "mine").await["runs"]
             .as_array()
             .is_some_and(|r| !r.is_empty()));
         assert_eq!(row(&work, "mine").await["enabled"], true);
