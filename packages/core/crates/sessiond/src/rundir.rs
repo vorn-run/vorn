@@ -210,6 +210,7 @@ mod tests {
                 instance,
                 exe,
                 handoff: None,
+                draining: false,
             },
         )
         .unwrap();

@@ -560,7 +560,20 @@ impl Conn {
                 let reply = self.adopt(a).await;
                 return self.send(reply).await;
             }
-            ToSessiond::Drain(_) => self.d.draining.store(true, Ordering::SeqCst),
+            ToSessiond::Drain(_) => {
+                if !self.d.draining.swap(true, Ordering::SeqCst) {
+                    let (home, instance) = (self.d.cfg.home.clone(), self.d.cfg.instance);
+                    let said = tokio::task::spawn_blocking(move || {
+                        crate::launch::announce_draining(&home, instance)
+                    })
+                    .await
+                    .map_err(std::io::Error::other)
+                    .and_then(|r| r);
+                    if let Err(err) = said {
+                        eprintln!("vorn-sessiond: could not announce that it drains: {err}");
+                    }
+                }
+            }
             ToSessiond::Spawn(sp) => {
                 let reply = self.spawn(sp);
                 return self.send(reply).await;
@@ -904,6 +917,7 @@ pub fn bind(d: &Sessiond) -> std::io::Result<crate::os::Listener> {
             instance: d.cfg.instance,
             exe: std::env::current_exe().ok(),
             handoff: cfg!(unix).then_some(HANDOFF),
+            draining: false,
         },
     )?;
     Ok(listener)

@@ -306,13 +306,19 @@ async fn compile(
     }
 }
 
-/// Maps compiled code from Vorn's own cache.
+/// Loads compiled code from Vorn's own cache.
+///
+/// Read into memory rather than mapped from the file: macOS's hardened
+/// runtime only lets a file's pages run when they are signed like Vorn's own
+/// code, and the cache is not, so a mapping would need library validation
+/// off for the whole app.
 fn deserialize(rt: &Runtime, code: &Path) -> Result<Component, String> {
-    // SAFETY: compiled code is mapped as it is. `code` is in Vorn's own
-    // cache, written only by `compile_bytes` with `config()` from the bytes
-    // its name hashes; Wasmtime still refuses one built by another version
-    // or for another CPU, which `load` then compiles again.
-    unsafe { Component::deserialize_file(&rt.engine, code) }.map_err(|e| format!("{e:#}"))
+    let bytes = std::fs::read(code).map_err(|e| format!("{}: {e}", code.display()))?;
+    // SAFETY: the bytes are compiled code, run as they are. `code` is in
+    // Vorn's own cache, written only by `compile_bytes` with `config()` from
+    // the bytes its name hashes; Wasmtime still refuses one built by another
+    // version or for another CPU, which `load` then compiles again.
+    unsafe { Component::deserialize(&rt.engine, bytes) }.map_err(|e| format!("{e:#}"))
 }
 
 /// The bytes of `source`: borrowed when they are compiled into the host.

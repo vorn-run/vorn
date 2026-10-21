@@ -13,9 +13,13 @@
 //!
 //! On macOS the programs a sessiond starts count as the app that started it,
 //! for privacy permissions. It outlives that app, and once the app quits its
-//! programs count as no app at all, so a vornd started by an app replaces a
-//! sessiond of its build that counts as another one the same way, and new
-//! programs count as Vorn again.
+//! programs count as no app at all, so a vornd the Vorn app started
+//! (`--for-app`) replaces a sessiond of its build that counts as another app,
+//! and new programs count as Vorn again. A vornd started any other way keeps
+//! the sessiond it finds.
+//!
+//! A sessiond told to drain says so in its announcement and is never made
+//! the current one again.
 //!
 //! With the session engine built in, the connection to the current sessiond
 //! is also where every session it holds is attached and parsed (see
@@ -93,6 +97,9 @@ pub struct HolderConfig {
     pub home: PathBuf,
     /// The sessiond binary shipped with this build.
     pub bundled: PathBuf,
+    /// `--for-app`: the Vorn app started this vornd, so on macOS its
+    /// sessiond should count as that app too.
+    pub for_app: bool,
 }
 
 /// One running sessiond, as vornd last saw it.
@@ -290,14 +297,18 @@ async fn up(
     let home = cfg.home.clone();
     let bundled = cfg.bundled.clone();
     let version_owned = version.to_owned();
+    let for_app = cfg.for_app;
     // Resolving paths touches the disk, so the sorting happens off the runtime.
     let (installed, mine, others) = tokio::task::spawn_blocking(move || {
         let installed = launch::install(&bundled, &home, &version_owned)?;
-        let app = attribution::counts_as_an_app();
+        let reattribute = for_app && attribution::counts_as_an_app();
         let (mine, others): (Vec<Instance>, Vec<Instance>) =
             launch::running(&home).into_iter().partition(|i| {
-                let ours = i.build == version_owned && i.proto == PROTO && i.runs(&installed);
-                if ours && app && attribution::counts_as_another_app(i.pid) {
+                let ours = !i.draining
+                    && i.build == version_owned
+                    && i.proto == PROTO
+                    && i.runs(&installed);
+                if ours && reattribute && attribution::counts_as_another_app(i.pid) {
                     info!(
                         pid = i.pid,
                         "the session holder counts as another app; replacing it"
@@ -741,6 +752,7 @@ mod tests {
         let cfg = HolderConfig {
             home: home.path().to_owned(),
             bundled,
+            for_app: false,
         };
         (home, cfg, installed)
     }
@@ -755,6 +767,7 @@ mod tests {
             instance,
             exe: Some(installed.to_owned()),
             handoff: None,
+            draining: false,
         };
         launch::announce(&cfg.home, &i).unwrap();
         i

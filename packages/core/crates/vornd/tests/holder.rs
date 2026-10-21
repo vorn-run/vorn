@@ -72,6 +72,16 @@ impl Vornd {
 
     /// Started with `bundled` as the sessiond shipped with the app.
     fn start_with(home: &Path, bundled: &Path, env: &[(&str, &str)]) -> Vornd {
+        Vornd::launch(home, bundled, &[], env)
+    }
+
+    /// Started as the Vorn app starts it.
+    #[cfg(target_os = "macos")]
+    fn for_app(home: &Path) -> Vornd {
+        Vornd::launch(home, &sessiond_bin(), &["--for-app"], &[])
+    }
+
+    fn launch(home: &Path, bundled: &Path, args: &[&str], env: &[(&str, &str)]) -> Vornd {
         let log = home.join("vornd.log");
         let mut cmd = Command::new(VORND);
         cmd.env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string());
@@ -89,7 +99,8 @@ impl Vornd {
             .env("VORND_LOG", "debug")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::null())
+            .args(args);
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -419,6 +430,7 @@ fn an_incompatible_sessiond_is_left_alone() {
         instance: 0xf00,
         exe: None,
         handoff: None,
+        draining: false,
     };
     launch::announce(home.path(), &foreign).unwrap();
 
@@ -828,20 +840,35 @@ fn start_counting_as_itself(home: &Path) -> Instance {
     }
 }
 
+/// Whether this test run counts as an app, as under a terminal; a vornd it
+/// starts then does too. Not so under launchd, as on some CI runners.
+#[cfg(target_os = "macos")]
+fn counts_as_an_app() -> bool {
+    let yes = vorn_spawn::attribution::counts_as_an_app();
+    if !yes {
+        eprintln!("this test run counts as no app; skipping");
+    }
+    yes
+}
+
 /// A sessiond of this very build that counts as another app, as after the
-/// app that started it quit, is replaced by one counting as vornd's app, so
-/// the programs it starts ask for privacy permissions in Vorn's name.
+/// app that started it quit, is replaced by one counting as the app that
+/// started vornd, so the programs it starts ask for privacy permissions in
+/// Vorn's name.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_sessiond_counting_as_another_app_is_replaced() {
     use vorn_spawn::attribution::{counts_as_another_app, responsible_for};
+    if !counts_as_an_app() {
+        return;
+    }
     let home = tempfile::tempdir().unwrap();
     let mut reap = Reap::default();
     let old = start_counting_as_itself(home.path());
     reap.add(old.pid);
     assert_eq!(responsible_for(old.pid), Some(old.pid));
 
-    let v = Vornd::start(home.path(), &[]);
+    let v = Vornd::for_app(home.path());
     let holder = v.wait_for("the old one reported", |s| {
         s["current"].is_object() && s["older"].as_array().is_some_and(|o| !o.is_empty())
     });
@@ -864,8 +891,75 @@ fn a_sessiond_counting_as_another_app_is_replaced() {
     v.stop();
 
     // Started again, vornd keeps the one that counts as its app.
-    let v = Vornd::start(home.path(), &[]);
+    let v = Vornd::for_app(home.path());
     assert_eq!(v.current()["instance"], current["instance"]);
+    v.stop();
+}
+
+/// A vornd started from the CLI, not the app, keeps the sessiond it finds
+/// however macOS counts it: it never hands the app's sessions to a holder
+/// counting as whatever started the CLI.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_vornd_from_the_cli_keeps_the_sessiond_it_finds() {
+    use vorn_spawn::attribution::counts_as_another_app;
+    if !counts_as_an_app() {
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let old = start_counting_as_itself(home.path());
+    reap.add(old.pid);
+
+    let v = Vornd::start(home.path(), &[]);
+    let current = v.current();
+    reap.add(pid(&current));
+    assert!(counts_as_another_app(old.pid));
+    assert_eq!(pid(&current), old.pid, "{}", v.log_text());
+    assert_eq!(v.health()["sessiond"]["older"], serde_json::json!([]));
+    assert_eq!(launch::running(home.path()).len(), 1, "no second one");
+    v.stop();
+}
+
+/// A sessiond of this build told to drain, as after a handoff that failed,
+/// is never made the current one again: the next vornd starts another and
+/// has it take the drained one's sessions.
+#[cfg(unix)]
+#[test]
+fn a_draining_sessiond_is_never_made_current() {
+    use vorn_sessiond_wire::{Drain, ToSessiond};
+    let home = tempfile::tempdir().unwrap();
+    let mut reap = Reap::default();
+    let v = Vornd::start(home.path(), &[]);
+    let first = v.current();
+    reap.add(pid(&first));
+    v.stop();
+
+    let endpoint = launch::running(home.path())
+        .pop()
+        .expect("announced")
+        .endpoint;
+    let (mut c, _) = Client::hello(&endpoint);
+    let id = c.spawn_echo();
+    c.echo(&id, 1, "one");
+    c.send(&ToSessiond::Drain(Drain));
+    let t = Instant::now();
+    while !launch::running(home.path()).iter().any(|i| i.draining) {
+        assert!(t.elapsed() < PATIENCE, "the drain is announced");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let v = Vornd::start(home.path(), &[]);
+    let holder = v.wait_for("the drained one reported", |s| {
+        s["current"].is_object() && s["older"].as_array().is_some_and(|o| !o.is_empty())
+    });
+    let current = &holder["current"];
+    reap.add(pid(current));
+    assert_ne!(current["instance"], first["instance"], "{}", v.log_text());
+    let older = holder["older"].as_array().unwrap();
+    assert_eq!(older.len(), 1, "{holder}");
+    assert_eq!(older[0]["instance"], first["instance"]);
+    assert_eq!(older[0]["handedOff"], true, "{holder}");
     v.stop();
 }
 

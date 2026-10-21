@@ -427,8 +427,10 @@ async fn a_program_killed_in_a_terminal_leaves_its_session() {
     let mut out = String::new();
     let mut killed = false;
     while !out.contains("after=") {
-        let Some(ToVornd::Entries(e)) = v.recv().await else {
-            continue;
+        let e = match v.recv().await {
+            Some(ToVornd::Entries(e)) => e,
+            Some(_) => continue,
+            None => panic!("sessiond closed the connection: {out}"),
         };
         for x in e.entries {
             match x.rec {

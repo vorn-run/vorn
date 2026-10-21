@@ -37,6 +37,9 @@ pub struct Instance {
     /// whether it can hand its sessions to a newer holder rather than be
     /// drained. Absent from holders that cannot.
     pub handoff: Option<u16>,
+    /// Told to drain: it takes no new sessions, so a launcher never makes it
+    /// its current holder.
+    pub draining: bool,
 }
 
 impl Instance {
@@ -71,10 +74,26 @@ pub fn announce(home: &Path, i: &Instance) -> io::Result<()> {
     if let Some(v) = i.handoff {
         body.push_str(&format!("handoff={v}\n"));
     }
+    if i.draining {
+        body.push_str("draining=1\n");
+    }
     let path = info_path(home, i.instance);
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, body)?;
     fs::rename(tmp, path)
+}
+
+/// Mark this instance's announcement as draining, if it is still there.
+pub fn announce_draining(home: &Path, instance: u128) -> io::Result<()> {
+    let Some(mut i) = fs::read_to_string(info_path(home, instance))
+        .ok()
+        .as_deref()
+        .and_then(parse)
+    else {
+        return Ok(());
+    };
+    i.draining = true;
+    announce(home, &i)
 }
 
 /// Remove this instance's announcement.
@@ -90,6 +109,7 @@ pub(crate) fn parse(text: &str) -> Option<Instance> {
     let mut instance = None;
     let mut exe = None;
     let mut handoff = None;
+    let mut draining = false;
     for line in text.lines() {
         let (k, v) = line.split_once('=')?;
         match k {
@@ -100,6 +120,7 @@ pub(crate) fn parse(text: &str) -> Option<Instance> {
             "instance" => instance = u128::from_str_radix(v, 16).ok(),
             "exe" => exe = Some(PathBuf::from(v)),
             "handoff" => handoff = v.parse().ok(),
+            "draining" => draining = v == "1",
             _ => {}
         }
     }
@@ -111,6 +132,7 @@ pub(crate) fn parse(text: &str) -> Option<Instance> {
         instance: instance?,
         exe,
         handoff,
+        draining,
     })
 }
 
@@ -610,6 +632,7 @@ mod tests {
             instance,
             exe: Some(PathBuf::from(format!("/bin/s{instance}"))),
             handoff: (instance % 2 == 1).then_some(1),
+            draining: false,
         }
     }
 
@@ -766,6 +789,21 @@ mod tests {
         let i = inst(1, 2);
         announce(home.path(), &i).unwrap();
         assert_eq!(running(home.path()), vec![i]);
+    }
+
+    /// Marking an announcement as draining keeps the rest of it, and one
+    /// already withdrawn stays withdrawn.
+    #[test]
+    fn a_draining_holder_says_so_in_its_announcement() {
+        let home = tempfile::tempdir().unwrap();
+        let mut i = inst(1, 3);
+        announce(home.path(), &i).unwrap();
+        announce_draining(home.path(), 3).unwrap();
+        i.draining = true;
+        assert_eq!(running(home.path()), vec![i]);
+        withdraw(home.path(), 3);
+        announce_draining(home.path(), 3).unwrap();
+        assert!(running(home.path()).is_empty());
     }
 
     /// The files beside the bundled binary go with it, in the same layout;
