@@ -205,10 +205,11 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
         ],
         12.0,
     );
-    let mut rows_col = div().col().gap(4.0).child(colour_rows(s));
+    let mut rows_col = div().col().gap(4.0);
     if let Some(d) = s.term_drawing {
         rows_col = rows_col.child(drawing_row(s, d));
     }
+    rows_col = rows_col.child(colour_rows(s));
     div()
         .col()
         .child(header("Appearance", "Customize how Vorn looks", None))
