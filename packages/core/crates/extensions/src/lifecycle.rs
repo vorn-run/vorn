@@ -66,8 +66,10 @@ impl ServiceKey {
 
 /// How long services live and how many run at once.
 ///
-/// The defaults are placeholders until the 20-extension load test sets them:
-/// five idle minutes, eight services.
+/// The defaults come from the 20-extension load test
+/// (docs/extension-load-test.md). Twenty busy extensions peak at 21 running
+/// services with the built-ins, so a cap of 24 never evicts. One idle minute
+/// frees every program's memory, and the next call costs at most ~130 ms (Node).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Policy {
     /// Stopped after this long with no call in flight.
@@ -81,8 +83,8 @@ pub struct Policy {
 impl Default for Policy {
     fn default() -> Policy {
         Policy {
-            idle: Duration::from_secs(300),
-            cap: 8,
+            idle: Duration::from_secs(60),
+            cap: 24,
             max_crashes: 5,
             crash_window: Duration::from_secs(60),
         }

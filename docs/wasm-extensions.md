@@ -130,8 +130,8 @@ let click = json!({ "point": "page", "event": { "id": "hello", "kind": "click" }
 let done = dispatch(&mut hello, &mut host, tree::EVENT, click, &Ctx::default()).unwrap();
 ```
 
-Vorn stops an instance that sits idle and starts a fresh one on its next
-call, so keep what a person sees in published rows, storage or files, not
+Vorn stops an instance that sits idle for a minute and starts a fresh one on
+its next call, and runs at most 24 services at once, so keep what a person sees in published rows, storage or files, not
 only in `self`. Worktree cleanup keeps the worktree its dialog asks about in
 its `asked` row for that reason.
 

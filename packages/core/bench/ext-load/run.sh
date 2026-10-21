@@ -6,7 +6,7 @@
 #
 #   bench/ext-load/run.sh OUT_DIR
 #
-# Env: REPS (5), RUN_SECONDS (20), CAPS ("12 16 24"), IDLE_MS (60000),
+# Env: REPS (5), RUN_SECONDS (20), CAPS ("8 16 20"), IDLE_MS (60000),
 #      IDLE_CAP (unset: the default), IDLE_WAIT (120), JOBS (cargo's -j).
 set -euo pipefail
 
@@ -27,7 +27,7 @@ reps=${REPS:-5}
 
 echo "default idle time and cap"
 "$bench" "${common[@]}" --extensions 0,20 --reps "$reps" --out "$out/default.json" >"$out/default.md"
-for cap in ${CAPS:-12 16 24}; do
+for cap in ${CAPS:-8 16 20}; do
   echo "cap $cap"
   "$bench" "${common[@]}" --extensions 20 --reps 3 --ext-cap "$cap" --out "$out/cap-$cap.json" >"$out/cap-$cap.md"
 done
