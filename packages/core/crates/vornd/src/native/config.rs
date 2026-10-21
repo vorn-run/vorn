@@ -187,7 +187,13 @@ fn check_hosts(stored: &Value, sent: &Value) -> Result<(), String> {
             continue;
         }
         let [user, hostname, options] = now;
-        let refused = vorn_remote::options::check_destination(&user, &hostname)
+        // A host just added has no name yet; logging in still refuses that.
+        let named = if hostname.is_empty() {
+            "unnamed"
+        } else {
+            &hostname
+        };
+        let refused = vorn_remote::options::check_destination(&user, named)
             .and_then(|()| vorn_remote::options::parse(&options).map(drop));
         refused.map_err(|why| format!("Could not save host {hostname}: {why}"))?;
     }
@@ -305,6 +311,9 @@ mod tests {
         let kept = config("-o ProxyCommand=nc");
         assert_eq!(check_hosts(&kept, &kept), Ok(()));
         assert_eq!(check_hosts(&none, &json!({ "remoteHosts": [] })), Ok(()));
+        // A host just added in Settings saves before it has a name.
+        let added = json!({ "remoteHosts": [{ "id": "n", "hostname": "", "user": "" }] });
+        assert_eq!(check_hosts(&none, &added), Ok(()));
     }
 
     #[test]
