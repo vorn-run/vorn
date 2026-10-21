@@ -138,7 +138,8 @@ pub(crate) enum Swapchain {
 }
 
 /// Composited only when the window wants the OS material and DirectComposition
-/// found a hardware adapter (`composited`, `None` when it found none); anything
+/// found a hardware adapter (`composited`, `None` when its instance, surface or
+/// adapter failed); anything
 /// else keeps the default renderer, and the window stays solid.
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn swapchain(material: bool, composited: Option<wgpu::DeviceType>) -> Swapchain {
@@ -520,6 +521,12 @@ mod tests {
         );
         assert_eq!(swapchain(true, Some(DeviceType::Cpu)), Swapchain::Default);
         assert_eq!(swapchain(true, None), Swapchain::Default);
+    }
+
+    #[test]
+    fn a_failed_composited_instance_falls_back_to_the_default() {
+        let failed: Result<wgpu::DeviceType, String> = Err("no DX12".into());
+        assert_eq!(swapchain(true, failed.ok()), Swapchain::Default);
     }
 
     #[test]

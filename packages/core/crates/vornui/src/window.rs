@@ -239,6 +239,11 @@ impl<A: App, F: FnOnce(&mut Ui, Waker) -> A> Runner<A, F> {
         let mut cfg = self.cfg;
         cfg.scale = window.scale_factor() as f32;
         let (instance, surface, adapter, composited) = renderer(&window, o.os_material)?;
+        // A composited window launching solid still needs its frame extended to show.
+        #[cfg(windows)]
+        if composited {
+            os_material(&window, None);
+        }
         let mode = RenderMode::from_env();
         let (present, mut ui) = match adapter {
             Some(a) if mode.wants_device(&a) => {
@@ -576,9 +581,15 @@ fn renderer(window: &Arc<Window>, material: bool) -> Result<Renderer, String> {
     #[cfg(windows)]
     if material {
         use crate::gpu::{composited_desc, swapchain, Swapchain};
-        let (instance, surface, adapter, _) = open(composited_desc())?;
-        let kind = adapter.as_ref().map(|a| a.get_info().device_type);
-        if swapchain(material, kind) == Swapchain::Composited {
+        // A failed DX12 instance or surface falls through to the default too.
+        let tried = open(composited_desc()).ok();
+        let kind = tried
+            .as_ref()
+            .and_then(|r| r.2.as_ref())
+            .map(|a| a.get_info().device_type);
+        if let (Swapchain::Composited, Some((instance, surface, adapter, _))) =
+            (swapchain(material, kind), tried)
+        {
             return Ok((instance, surface, adapter, true));
         }
     }
