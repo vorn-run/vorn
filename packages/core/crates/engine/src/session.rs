@@ -562,7 +562,10 @@ pub struct Session {
 #[derive(Debug, Clone, Copy)]
 enum Where {
     /// The answer, kept for [`RESOLVE_EVERY`] after it was given.
-    Asked { local: bool, at: Instant },
+    Asked {
+        local: bool,
+        at: Instant,
+    },
     Never,
 }
 

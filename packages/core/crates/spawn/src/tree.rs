@@ -90,13 +90,7 @@ fn table() -> Option<Vec<Proc>> {
         let want = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
         // SAFETY: the buffer is one proc_bsdinfo, of the size given.
         let got = unsafe {
-            libc::proc_pidinfo(
-                pid,
-                libc::PROC_PIDTBSDINFO,
-                0,
-                (&raw mut info).cast(),
-                want,
-            )
+            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), want)
         };
         if got != want {
             // Gone, or not ours to read: it cannot be under a session's shell.
@@ -166,9 +160,14 @@ mod tests {
         // A name no other test runs, as tests run side by side.
         let dir = std::env::temp_dir().join(format!("vorn-tree-{me}"));
         std::fs::create_dir_all(&dir).unwrap();
+        // This test binary, renamed, running the test that only waits.
         let waits = dir.join("treewaiter");
-        std::fs::copy("/bin/sleep", &waits).unwrap();
-        let mut child = crate::command(&waits).arg("30").spawn().expect("it starts");
+        std::fs::copy(std::env::current_exe().unwrap(), &waits).unwrap();
+        let mut child = crate::command(&waits)
+            .args(["--ignored", "--exact", "tree::tests::waits_a_while"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .expect("it starts");
         // Until it execs, the child still has this binary's name.
         let named = (0..100).any(|_| {
             std::thread::sleep(std::time::Duration::from_millis(20));
@@ -180,6 +179,13 @@ mod tests {
         child.wait().unwrap();
         assert_eq!(runs_any(me, &["treewaiter"]), Some(false));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// What the renamed copy of this binary runs, above.
+    #[test]
+    #[ignore = "run only as a stand-in program"]
+    fn waits_a_while() {
+        std::thread::sleep(std::time::Duration::from_secs(30));
     }
 
     #[test]

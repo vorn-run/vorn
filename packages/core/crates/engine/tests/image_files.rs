@@ -142,7 +142,11 @@ fn asks_again_once_the_answer_is_old_and_never_for_images_sent_in_the_stream() {
     }));
     let (mut d, mut s, w) = run(Some(local), &[direct, file(1), file(2)], 1);
     assert_eq!(w, ["\x1b_Gi=3;OK\x1b\\"]);
-    assert_eq!(asked.load(Ordering::SeqCst), 0, "a direct image asks nothing");
+    assert_eq!(
+        asked.load(Ordering::SeqCst),
+        0,
+        "a direct image asks nothing"
+    );
 
     let records = d.records();
     let mut out = Vec::new();

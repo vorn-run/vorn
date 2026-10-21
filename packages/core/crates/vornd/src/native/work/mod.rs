@@ -1580,7 +1580,8 @@ scriptContent = "echo built"
         ));
         assert_eq!(file_entry(&work, "build")["trusted"], false);
         assert!(matches!(
-            work.call("workflow:trust", &json!({ "id": "build", "hash": shown })).await,
+            work.call("workflow:trust", &json!({ "id": "build", "hash": shown }))
+                .await,
             Answer::Result(_)
         ));
         assert_eq!(row(&work, "build").await["enabled"], true);
@@ -1626,7 +1627,8 @@ scriptContent = "echo built"
             Answer::Result(v) if v["ok"] == true
         ));
         assert!(matches!(
-            work.call("workflow:trust", &json!({ "id": "mine", "hash": "" })).await,
+            work.call("workflow:trust", &json!({ "id": "mine", "hash": "" }))
+                .await,
             Answer::Error(_)
         ));
     }

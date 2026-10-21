@@ -1937,14 +1937,21 @@ mod tests {
     use super::*;
     use crate::registry::{AgentStatus, HookStatus};
 
+    /// What the renamed copy of this binary runs, below.
+    #[test]
+    #[ignore = "run only as a stand-in program"]
+    fn waits_a_while() {
+        std::thread::sleep(Duration::from_secs(5));
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_session_with_a_remote_login_anywhere_under_it_is_not_local() {
         let dir = std::env::temp_dir().join(format!("vd-tree-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        // A program by a remote login's name that only waits.
+        // A program by a remote login's name that only waits: this test binary, renamed.
         let ssh = dir.join("ssh");
-        std::fs::copy("/bin/sleep", &ssh).unwrap();
+        std::fs::copy(std::env::current_exe().unwrap(), &ssh).unwrap();
         let sh = |script: String| {
             vorn_spawn::command("/bin/sh")
                 .args(["-c", &script])
@@ -1952,7 +1959,10 @@ mod tests {
                 .unwrap()
         };
         let mut plain = sh("sleep 5; true".into());
-        let mut nested = sh(format!("/bin/sh -c '{} 5; true'; true", ssh.display()));
+        let mut nested = sh(format!(
+            "/bin/sh -c '{} --ignored --exact engine::tests::waits_a_while >/dev/null; true'; true",
+            ssh.display()
+        ));
         let settled = |pid: u32, want: bool| {
             (0..100).any(|_| {
                 std::thread::sleep(Duration::from_millis(20));
@@ -1961,6 +1971,8 @@ mod tests {
         };
         assert!(settled(plain.id(), true));
         assert!(settled(nested.id(), false));
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(local_session(Some(Placed::Here(nested.id()))), Some(false));
         assert_eq!(local_session(Some(Placed::Remote)), Some(false));
         // Not started, or not known: refused for now.
         assert_eq!(local_session(Some(Placed::Here(0))), None);

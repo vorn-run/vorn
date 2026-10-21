@@ -319,9 +319,7 @@ mod tests {
         // A host just added in Settings saves before it has a name.
         let added = json!({ "remoteHosts": [{ "id": "n", "hostname": "", "user": "" }] });
         assert_eq!(check_hosts(&none, &added), Ok(()));
-        let keyed = |path: &str| {
-            json!({ "remoteHosts": [{ "id": "k", "hostname": "box", "sshKeyPath": path }] })
-        };
+        let keyed = |path: &str| json!({ "remoteHosts": [{ "id": "k", "hostname": "box", "sshKeyPath": path }] });
         assert_eq!(check_hosts(&none, &keyed("~/.ssh/my key")), Ok(()));
         assert_eq!(
             check_hosts(&none, &keyed("-oProxyCommand=x")),

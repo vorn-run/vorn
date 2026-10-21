@@ -191,7 +191,12 @@ fn shown_value(v: &Value) -> String {
 /// does not have.
 pub fn runs(wf: &Value) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
-    for node in wf.get("nodes").and_then(Value::as_array).into_iter().flatten() {
+    for node in wf
+        .get("nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let kind = node.get("type").and_then(Value::as_str).unwrap_or("step");
         let config = node.get("config").and_then(Value::as_object);
         let label = node
@@ -846,8 +851,7 @@ impl Work {
             s.stamps.insert(file.clone(), at);
         }
         if let Some(read) = read {
-            s.runs
-                .insert(file.clone(), runs(&read).unwrap_or_default());
+            s.runs.insert(file.clone(), runs(&read).unwrap_or_default());
             s.base.insert(file.clone(), read);
         }
         self.files.keep(&s);
@@ -1026,7 +1030,11 @@ mod tests {
                 json!({ "connectionId": "c", "action": "send", "args": { "to": "x" } })
             )
             .unwrap()[1..],
-            ["  action: send", "  connectionId: c", "  args: {\"to\":\"x\"}"]
+            [
+                "  action: send",
+                "  connectionId: c",
+                "  args: {\"to\":\"x\"}"
+            ]
         );
         // An extension's step shows its type as the action and every input.
         assert_eq!(
@@ -1034,7 +1042,11 @@ mod tests {
             ["Do it (some.ext/step)", "  anything: goes"]
         );
         assert_eq!(
-            one("trigger", json!({ "triggerType": "webhook", "method": "POST" })).unwrap(),
+            one(
+                "trigger",
+                json!({ "triggerType": "webhook", "method": "POST" })
+            )
+            .unwrap(),
             ["Trigger: webhook", "  method: POST"]
         );
     }
