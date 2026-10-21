@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use vorn_app::client::{Endpoint, Rpc};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Lang {
     Node,
     Python,

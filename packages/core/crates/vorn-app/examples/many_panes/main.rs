@@ -522,7 +522,14 @@ mod bench {
             let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
             std::fs::write(out, text + "\n").map_err(|e| format!("{out}: {e}"))?;
         }
-        Ok(())
+        // Calls that failed fail the run, once everything it measured is out.
+        match results
+            .iter()
+            .find_map(|r| r["ext_calls"]["first_error"].as_str())
+        {
+            Some(e) => Err(format!("an extension call failed: {e}")),
+            None => Ok(()),
+        }
     }
 
     fn run_all(opts: &Opts) -> Result<Vec<Value>, String> {
@@ -883,7 +890,8 @@ mod bench {
     }
 
     fn round(x: f64) -> f64 {
-        (x * 100.0).round() / 100.0
+        // An empty sum is -0.0; adding 0.0 shows it as 0.
+        (x * 100.0).round() / 100.0 + 0.0
     }
 
     /// The nearest-rank percentile, 0 for no samples.
@@ -1022,12 +1030,13 @@ mod bench {
     }
 
     /// The measures the summary gives, as JSON pointers into a result.
-    const MEASURES: [(&str, &str); 12] = [
+    const MEASURES: [(&str, &str); 13] = [
         ("Frame p50 ms", "/frame_ms/p50"),
         ("Frame p99 ms", "/frame_ms/p99"),
         ("Input p50 ms", "/input_to_pixel_ms/p50"),
         ("Input p99 ms", "/input_to_pixel_ms/p99"),
         ("Call p50 ms", "/ext_calls/p50"),
+        ("Call errors", "/ext_calls/errors"),
         ("RSS vornd MB", "/rss_mb/daemons"),
         ("RSS programs MB", "/rss_mb/programs"),
         ("Running peak", "/running_peak/bench"),
