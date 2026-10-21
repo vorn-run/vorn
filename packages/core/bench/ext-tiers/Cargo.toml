@@ -5,19 +5,41 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "Measures Worktree cleanup as the Wasm component Vorn ships: start, restart, calls, events and memory, through the router vornd runs"
+description = "Measures three extensions as a Wasm component and as a program on the same manifest: start, calls, trees, events, memory, size and crash isolation, through the router vornd runs"
 
 [[bin]]
 name = "ext-tiers"
 path = "src/main.rs"
 
+# The program tier: each extension's own source served on stdio.
+[[bin]]
+name = "tier-widget"
+path = "src/bin/tier-widget.rs"
+
+[[bin]]
+name = "tier-worktrees"
+path = "src/bin/tier-worktrees.rs"
+
+[[bin]]
+name = "tier-rss"
+path = "src/bin/tier-rss.rs"
+
+[[bin]]
+name = "tier-crash"
+path = "src/bin/tier-crash.rs"
+
 [dependencies]
 serde_json = "1"
 tempfile = "3"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util", "fs"] }
 # The compiler too: the bench compiles the component vornd only loads.
 vorn-extensions = { path = "../../crates/extensions", features = ["wasm-compile"] }
+vorn-extension-sdk = { path = "../../crates/extension-sdk" }
 vorn-guest-build = { path = "../../crates/guest-build" }
+vorn-ext-widget = { path = "../../extensions/widget" }
+vorn-bench-worktrees = { path = "worktrees" }
+vorn-bench-rss = { path = "rss" }
+vorn-bench-crash = { path = "crash" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

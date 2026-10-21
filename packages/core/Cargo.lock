@@ -7059,6 +7059,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-bench-crash"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-bench-ext-tiers"
 version = "0.8.0-beta.20"
 dependencies = [
@@ -7066,8 +7073,30 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "vorn-bench-crash",
+ "vorn-bench-rss",
+ "vorn-bench-worktrees",
+ "vorn-ext-widget",
+ "vorn-extension-sdk",
  "vorn-extensions",
  "vorn-guest-build",
+]
+
+[[package]]
+name = "vorn-bench-rss"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "sha2 0.10.9",
+ "url",
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-bench-worktrees"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
 ]
 
 [[package]]

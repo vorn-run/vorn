@@ -1,0 +1,8 @@
+id = "bench.crash"
+name = "Crash"
+version = "0.0.0"
+api = "vorn:extension@1.0"
+description = "Misbehaves when asked, for the extension-tiers bench."
+
+[service]
+component = "crash.wasm"

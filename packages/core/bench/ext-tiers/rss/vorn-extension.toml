@@ -1,0 +1,11 @@
+id = "bench.rss"
+name = "RSS"
+version = "0.1.3"
+api = "vorn:extension@1.0"
+description = "Reads RSS, Atom and JSON Feed feeds, and finds the feeds a page declares, for the extension-tiers bench."
+
+[declares]
+network = ["feeds.bench"]
+
+[service]
+component = "rss.wasm"

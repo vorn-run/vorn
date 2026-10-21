@@ -1,0 +1,139 @@
+id = "rss"
+name = "RSS"
+version = "0.1.3"
+api = "vorn:extension@0.9"
+publisher = "Vorn"
+description = "Trigger workflows from new items in RSS, Atom and JSON Feed feeds, and read feeds or find the feeds a web page declares from a step."
+
+[icon]
+view_box = "0 0 24 24"
+paths = ["M5.5 16a2.5 2.5 0 1 1 0 5a2.5 2.5 0 1 1 0-5z", "M3 13a8 8 0 0 1 8 8h3A11 11 0 0 0 3 10z", "M3 6a15 15 0 0 1 15 15h3A18 18 0 0 0 3 3z"]
+
+[service]
+command = ["node", "index.js"]
+
+[checks]
+command = ["node", "index.js", "--check"]
+
+[declares]
+network_from = ["RSS_FEEDS"]
+
+[connector]
+
+[connector.auth]
+rung = "none"
+
+[[connector.triggers]]
+type = "newItem"
+label = "New item"
+description = "An item appears in any of the connection's feeds. The first poll of a feed fires only for items inside the look-back, an item with no date fires once, and an item dated before the newest one already seen never fires."
+
+[[connector.actions]]
+type = "readFeed"
+label = "Read a feed"
+description = "The newest items of one RSS, Atom or JSON Feed feed, up to 100, newest first with dateless items last."
+outputs = [{ key = "feed", description = "The feed as { title, url, siteUrl, format }, format one of rss2, rss1, atom, json" }, { key = "items", description = "Items as { id, title, url, author, publishedAt, updatedAt, summary, html, categories, feedTitle, feedUrl }" }, { key = "count", type = "number", description = "How many items came back, in `items`" }]
+
+[[connector.actions.inputs]]
+key = "url"
+label = "Feed URL"
+required = true
+description = "The feed's address; https:// is assumed when there is no scheme."
+
+[[connector.actions.inputs]]
+key = "limit"
+label = "Items"
+type = "number"
+description = "How many of the newest items, a whole number from 1 to 100; 20 when empty."
+
+[[connector.actions.inputs]]
+key = "sinceHours"
+label = "Within hours"
+type = "number"
+description = "Only items published within this many hours; items with no date are left out when set."
+
+[[connector.actions]]
+type = "readFeeds"
+label = "Read feeds"
+description = "Items from several feeds at once, filtered by age and keywords, one copy per address, newest first. A feed that fails is listed with its reason and never loses the others' items."
+outputs = [{ key = "items", description = "Items as { id, title, url, author, publishedAt, updatedAt, summary, html, categories, feedTitle, feedUrl }" }, { key = "count", type = "number", description = "How many items came back, in `items`" }, { key = "feedsOk", type = "number", description = "How many feeds answered" }, { key = "feedsFailed", description = "The feeds that did not answer, as [{ url, error }]" }]
+
+[[connector.actions.inputs]]
+key = "urls"
+label = "Feed URLs"
+description = "Feed addresses, one per line or comma separated; the connection's feeds when empty."
+
+[[connector.actions.inputs]]
+key = "sinceHours"
+label = "Within hours"
+type = "number"
+description = "Only items published within this many hours; items with no date are left out when set."
+
+[[connector.actions.inputs]]
+key = "perFeed"
+label = "Items per feed"
+type = "number"
+description = "The newest items kept from each feed, a whole number from 1 to 100; 20 when empty."
+
+[[connector.actions.inputs]]
+key = "keywords"
+label = "Keywords"
+description = "Comma separated; an item passes when any one matches its title or summary as a whole word or phrase, ignoring case. Empty keeps everything."
+
+[[connector.actions.inputs]]
+key = "minFeedsOk"
+label = "Feeds that must answer"
+type = "number"
+description = "The action fails, naming every failed feed, when fewer feeds than this answer; 1 when empty."
+
+[[connector.actions]]
+type = "saveFeeds"
+label = "Save feeds to a file"
+description = "Read feeds exactly as Read feeds does, then write the items to a JSON file instead of returning them, so a large read never has to pass through a template."
+outputs = [{ key = "path", type = "string", description = "The absolute path written, holding { generatedAt, feedsOk, feedsFailed, count, items }" }, { key = "count", type = "number", description = "How many items came back, in `items`" }, { key = "feedsOk", type = "number", description = "How many feeds answered" }, { key = "feedsFailed", description = "The feeds that did not answer, as [{ url, error }]" }]
+
+[[connector.actions.inputs]]
+key = "path"
+label = "File"
+required = true
+description = "Where to write, as an absolute path or one starting with ~/; its folder is created when missing."
+
+[[connector.actions.inputs]]
+key = "urls"
+label = "Feed URLs"
+description = "Feed addresses, one per line or comma separated; the connection's feeds when empty."
+
+[[connector.actions.inputs]]
+key = "sinceHours"
+label = "Within hours"
+type = "number"
+description = "Only items published within this many hours; items with no date are left out when set."
+
+[[connector.actions.inputs]]
+key = "perFeed"
+label = "Items per feed"
+type = "number"
+description = "The newest items kept from each feed, a whole number from 1 to 100; 20 when empty."
+
+[[connector.actions.inputs]]
+key = "keywords"
+label = "Keywords"
+description = "Comma separated; an item passes when any one matches its title or summary as a whole word or phrase, ignoring case. Empty keeps everything."
+
+[[connector.actions.inputs]]
+key = "minFeedsOk"
+label = "Feeds that must answer"
+type = "number"
+description = "The action fails, naming every failed feed, when fewer feeds than this answer; 1 when empty."
+
+[[connector.actions]]
+type = "findFeeds"
+label = "Find feeds"
+description = "The RSS, Atom and JSON Feed feeds a web page declares in its link rel=\"alternate\" tags, as absolute addresses with their titles; the address itself when it already is a feed."
+outputs = [{ key = "feeds", description = "The feeds found, as [{ url, title, type, format }]" }, { key = "count", type = "number", description = "How many feeds were found" }, { key = "isFeed", type = "boolean", description = "Whether the address given is itself a feed" }]
+
+[[connector.actions.inputs]]
+key = "url"
+label = "Page URL"
+required = true
+description = "A web page's address, or a feed's; https:// is assumed when there is no scheme."

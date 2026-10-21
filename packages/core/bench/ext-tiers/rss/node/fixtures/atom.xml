@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/nodejs/node/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/nodejs/node/releases"/>
+  <link type="application/atom+xml" rel="self" href="https://github.com/nodejs/node/releases.atom"/>
+  <title>Release notes from node</title>
+  <updated>2026-09-09T16:03:05Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/27193779/v26.8.2</id>
+    <updated>2026-09-09T16:07:48Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/nodejs/node/releases/tag/v26.8.2"/>
+    <title>2026-09-09, Version 26.8.2 (Current), @aduh95</title>
+    <content type="html">&lt;h3&gt;Notable Changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;a href=&quot;https://github.com/nodejs/node/commit/616bd3fa26&quot;&gt;&lt;code&gt;616bd3fa26&lt;/code&gt;&lt;/a&gt;] - &lt;strong&gt;doc&lt;/strong&gt;: deprecate &lt;code&gt;Server.prototype._listen2&lt;/code&gt; in &lt;code&gt;node:net&lt;/code&gt; (Antoine du Hamel) &lt;a href=&quot;https://github.com/nodejs/node/pull/65593&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/nodejs/node/pull/65593/hovercard&quot;&gt;#65593&lt;/a&gt;&lt;/li&gt;</content>
+    <author>
+      <name>aduh95</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/14309773?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/27193779/v24.21.0</id>
+    <updated>2026-09-08T21:51:09Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/nodejs/node/releases/tag/v24.21.0"/>
+    <title>2026-09-08, Version 24.21.0 &#39;Krypton&#39; (LTS), @aduh95</title>
+    <content type="html">&lt;h3&gt;Notable Changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;a href=&quot;https://github.com/nodejs/node/commit/71106e1f17&quot;&gt;&lt;code&gt;71106e1f17&lt;/code&gt;&lt;/a&gt;] - &lt;strong&gt;crypto&lt;/strong&gt;: update root certificates to NSS 3.126 (Node.js GitHub Bot) &lt;a href=&quot;https://github.com/nodejs/node/pull/65495&quot; data-hovercard-type=&quot;pull_request&quot; data-hovercard-url=&quot;/nodejs/node/pull/65495/hovercard&quot;&gt;#65495&lt;/a&gt;&lt;/li&gt;</content>
+    <author>
+      <name>aduh95</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/14309773?s=60&amp;v=4"/>
+  </entry>
+  <entry xml:base="https://example.org/blog/">
+    <id>urn:uuid:1225c695-cfb8-4ebb-aaaa-80da344efa6a</id>
+    <title type="html">Bases &amp;lt;and&amp;gt; links</title>
+    <link rel="self" href="entries/1.atom"/>
+    <link href="entries/1-no-rel.xhtml" type="application/xhtml+xml"/>
+    <link rel="alternate" type="text/html" href="entries/1.html"/>
+    <published>2026-09-08T09:30:00+02:00</published>
+    <updated>2026-09-10T12:00:00Z</updated>
+    <author><name>Ada Example</name></author>
+    <category term="notes"/>
+    <category term="atom"/>
+    <summary>An entry written by hand for the tests.</summary>
+    <content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><p>An <em>xhtml</em> body &amp; a <a href="more.html">link</a>.</p></div></content>
+  </entry>
+</feed>
