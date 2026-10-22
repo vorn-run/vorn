@@ -91,6 +91,7 @@ impl Emulator {
         }
         rebuilt.carry_counters(self);
         rebuilt.set_images(self.images);
+        rebuilt.set_image_files(self.image_files);
         *self = rebuilt;
         Ok(cp)
     }

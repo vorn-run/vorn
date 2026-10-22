@@ -5,6 +5,10 @@
 //! made in Vorn saved to a project's folder in one call; and the workflows
 //! installed extensions ship (`[[contributes.workflows]]`), added once.
 //!
+//! A project's file runs nothing until the user turns it on: trust is kept
+//! per file as the hash of the content turned on, so a file edited outside
+//! Vorn is off again until turned on again.
+//!
 //! Which stored workflow came from which file is kept in
 //! `vornd/workflow-files.json` beside the database, so a file removed while
 //! vornd was down still takes its workflow with it.
@@ -18,6 +22,10 @@ use serde_json::{json, Map, Value};
 use tracing::{info, warn};
 use vorn_workflow_file::{Bindings, FileError, RUNTIME_FIELDS};
 
+use vorn_work::model::NodeKind;
+use vorn_workflow::Registry;
+
+use super::host::VorndHost;
 use super::Work;
 
 /// How often the projects' workflow folders are looked at.
@@ -41,6 +49,40 @@ struct State {
     /// Each file's workflow as last read or written: what an edit of the
     /// file and an edit in the editor made apart both started from.
     base: HashMap<PathBuf, Value>,
+    /// Each file's content hash as the user turned it on.
+    trusted: BTreeMap<PathBuf, String>,
+    /// Each file's content hash as last read or written.
+    hashes: BTreeMap<PathBuf, String>,
+    /// Each file's workflow as checked, for the user to see what it runs
+    /// before turning it on.
+    runs: HashMap<PathBuf, Value>,
+}
+
+impl State {
+    /// Whether `file` is as the user turned it on.
+    fn trusts(&self, file: &Path) -> bool {
+        matches!((self.trusted.get(file), self.hashes.get(file)), (Some(t), Some(h)) if t == h)
+    }
+
+    /// `file` does not read, for `errors`: nothing of it shows or turns on
+    /// until it reads again.
+    fn refuse(&mut self, file: &Path, at: Option<Stamp>, errors: Vec<String>) {
+        if let Some(at) = at {
+            self.stamps.insert(file.to_owned(), at);
+        }
+        self.hashes.remove(file);
+        self.runs.remove(file);
+        self.errors.insert(file.to_owned(), errors);
+    }
+
+    fn forget(&mut self, file: &Path) {
+        self.stamps.remove(file);
+        self.errors.remove(file);
+        self.base.remove(file);
+        self.trusted.remove(file);
+        self.hashes.remove(file);
+        self.runs.remove(file);
+    }
 }
 
 /// The workflow files vornd knows.
@@ -58,6 +100,232 @@ struct Kept {
     files: BTreeMap<String, PathBuf>,
     #[serde(default)]
     seeded: BTreeSet<String>,
+    #[serde(default)]
+    trusted: BTreeMap<PathBuf, String>,
+    #[serde(default)]
+    hashes: BTreeMap<PathBuf, String>,
+}
+
+/// A file's content hash, as trust is kept.
+fn digest(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// `wf` with `enabled` as `from` has it: an untrusted file's own setting,
+/// never the off the store holds for it.
+fn enabled_as(mut wf: Value, from: &Value) -> Value {
+    if let Some(map) = wf.as_object_mut() {
+        match from.get("enabled") {
+            Some(v) => {
+                map.insert("enabled".into(), v.clone());
+            }
+            None => {
+                map.shift_remove("enabled");
+            }
+        }
+    }
+    wf
+}
+
+/// A built-in node type's settings: those listed for the user, then those
+/// that change only how a step is named or timed. A file holding any other
+/// setting on a step of the type does not read.
+struct Kind {
+    id: &'static str,
+    shown: &'static [&'static str],
+    quiet: &'static [&'static str],
+}
+
+/// Every node type the runner knows but extensions' and triggers' (which
+/// list every setting they hold), with every setting it reads.
+const KINDS: &[Kind] = &[
+    Kind {
+        id: "condition",
+        shown: &[],
+        quiet: &["variable", "operator", "value"],
+    },
+    Kind {
+        id: "approval",
+        shown: &[],
+        quiet: &["message", "timeoutMs", "view", "feedback", "edit"],
+    },
+    Kind {
+        id: "loop",
+        shown: &[],
+        quiet: &[
+            "nodeType",
+            "mode",
+            "items",
+            "bodyNodeIds",
+            "maxIterations",
+            "until",
+            "parallel",
+            "concurrency",
+        ],
+    },
+    Kind {
+        id: "launchAgent",
+        shown: &[
+            "agentType",
+            "prompt",
+            "args",
+            "model",
+            "projectName",
+            "projectPath",
+            "useWorktree",
+            "worktreeMode",
+            "worktreeFromStepSlug",
+            "existingWorktreePath",
+            "branch",
+            "taskId",
+            "taskFromQueue",
+            "headless",
+            "outputSchema",
+        ],
+        quiet: &["displayName", "promptDelayMs", "timeoutMs"],
+    },
+    Kind {
+        id: "script",
+        shown: &[
+            "scriptType",
+            "scriptContent",
+            "args",
+            "cwd",
+            "projectName",
+            "projectPath",
+            "secretsFrom",
+        ],
+        quiet: &["runId"],
+    },
+    Kind {
+        id: "createTaskFromItem",
+        shown: &["project", "initialStatus"],
+        quiet: &["nodeType"],
+    },
+    Kind {
+        id: "callConnectorAction",
+        shown: &["action", "connectionId", "args"],
+        quiet: &["nodeType", "actionLabel", "connectorId"],
+    },
+    Kind {
+        id: "httpRequest",
+        shown: &["method", "url", "headers", "body", "profileConnectionId"],
+        quiet: &["nodeType"],
+    },
+];
+
+/// A setting's value as the list shows it: text as it is, the rest as JSON.
+fn shown_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// The remote host an agent step in project `name` runs on, from `projects`
+/// as `dbListProjects` lists them.
+fn remote_line(name: &str, projects: &[Value]) -> String {
+    let project = (!name.is_empty() && !name.contains("{{"))
+        .then(|| {
+            projects
+                .iter()
+                .find(|p| p.get("name").and_then(Value::as_str) == Some(name))
+        })
+        .flatten();
+    match project {
+        Some(p) => match vorn_workflows::agent::remote_host_of(p) {
+            Some(host) => format!("  remote host: {host}"),
+            None => "  remote host: none, this computer".to_owned(),
+        },
+        None => "  remote host: its project's, when it runs".to_owned(),
+    }
+}
+
+/// What a workflow does when it runs, one line per node and one per setting
+/// that decides what it runs or sends, for the user to read before turning
+/// it on; an agent step also names the remote host its project runs on, from
+/// `projects`. Refuses a step of a built-in type with a setting the type
+/// does not read. A step runs as `types` resolves it, so one of a type no
+/// extension declares is listed and checked as the fallback it runs as.
+pub fn runs(
+    wf: &Value,
+    projects: &[Value],
+    types: &Registry<VorndHost>,
+) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for node in wf
+        .get("nodes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let raw = node.get("type").and_then(Value::as_str).unwrap_or("");
+        let kind = match NodeKind::parse(raw).step() {
+            Some(step) => types.runs_as(step).unwrap_or_else(|| step.to_owned()),
+            None => raw.to_owned(),
+        };
+        let kind = kind.as_str();
+        let label = node
+            .get("label")
+            .and_then(Value::as_str)
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|l| !l.is_empty())
+            .or_else(|| node.get("id").and_then(Value::as_str).map(str::to_owned))
+            .unwrap_or_else(|| kind.to_owned());
+        let config = match node.get("config") {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(c)) => Some(c),
+            Some(_) => return Err(format!("{label}: its settings are not a table")),
+        };
+        let settings = || config.into_iter().flatten().filter(|(_, v)| !v.is_null());
+        if kind == "trigger" {
+            let on = config
+                .and_then(|c| c.get("triggerType"))
+                .and_then(Value::as_str)
+                .unwrap_or("manual");
+            out.push(format!("Trigger: {on}"));
+            for (key, v) in settings().filter(|(k, _)| *k != "triggerType") {
+                out.push(format!("  {key}: {}", shown_value(v)));
+            }
+            continue;
+        }
+        let Some(known) = KINDS.iter().find(|k| k.id == kind) else {
+            // An extension's step: the action is its type, and every setting an input.
+            out.push(format!("{label} ({kind})"));
+            for (key, v) in settings() {
+                out.push(format!("  {key}: {}", shown_value(v)));
+            }
+            continue;
+        };
+        if let Some(key) = config
+            .into_iter()
+            .flat_map(|c| c.keys())
+            .find(|k| !known.shown.contains(&k.as_str()) && !known.quiet.contains(&k.as_str()))
+        {
+            return Err(format!("{label}: {key} is not a setting of a {kind} step"));
+        }
+        if known.shown.is_empty() {
+            continue;
+        }
+        out.push(format!("{label} ({kind})"));
+        for key in known.shown {
+            if let Some(v) = config.and_then(|c| c.get(*key)).filter(|v| !v.is_null()) {
+                out.push(format!("  {key}: {}", shown_value(v)));
+            }
+        }
+        if kind == "launchAgent" {
+            let project = config
+                .and_then(|c| c.get("projectName"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            out.push(remote_line(project, projects));
+        }
+    }
+    Ok(out)
 }
 
 fn stamp(path: &Path) -> Option<Stamp> {
@@ -95,6 +363,8 @@ impl Files {
             state: Mutex::new(State {
                 by_id: kept.files,
                 seeded: kept.seeded,
+                trusted: kept.trusted,
+                hashes: kept.hashes,
                 ..State::default()
             }),
             record,
@@ -109,6 +379,8 @@ impl Files {
         let kept = Kept {
             files: state.by_id.clone(),
             seeded: state.seeded.clone(),
+            trusted: state.trusted.clone(),
+            hashes: state.hashes.clone(),
         };
         let written = self
             .record
@@ -130,13 +402,52 @@ impl Files {
         self.lock().by_id.get(id).cloned()
     }
 
-    /// Every file and what is wrong with the ones that do not read.
-    pub fn listed(&self) -> Value {
+    /// Why workflow `id` may not run: it came from a file not turned on.
+    pub fn refuses(&self, id: &str) -> Option<String> {
+        let s = self.lock();
+        let file = s.by_id.get(id)?;
+        (!s.trusts(file)).then(|| {
+            format!(
+                "{} is off until you turn it on from its row in Workflows",
+                file.display()
+            )
+        })
+    }
+
+    /// Turns on workflow `id`'s file as the user saw it: `hash` is the
+    /// content listed to them, and a file that changed since is refused.
+    pub fn trust(&self, id: &str, hash: &str) -> Result<(), String> {
+        let mut s = self.lock();
+        let Some(file) = s.by_id.get(id).cloned() else {
+            return Err(format!("Workflow {id} is not from a project's file"));
+        };
+        if s.hashes.get(&file).map(String::as_str) != Some(hash) {
+            return Err(format!(
+                "{} changed since it was shown; look at it again before turning it on",
+                file.display()
+            ));
+        }
+        s.trusted.insert(file, hash.to_owned());
+        self.keep(&s);
+        Ok(())
+    }
+
+    /// Every file, whether it is on and what it runs, and what is wrong
+    /// with the ones that do not read; agent steps' hosts from `projects`.
+    pub fn listed(&self, projects: &[Value], types: &Registry<VorndHost>) -> Value {
         let s = self.lock();
         let files: Vec<Value> = s
             .by_id
             .iter()
-            .map(|(id, path)| json!({ "workflowId": id, "path": path }))
+            .map(|(id, path)| {
+                json!({
+                    "workflowId": id,
+                    "path": path,
+                    "trusted": s.trusts(path),
+                    "hash": s.hashes.get(path),
+                    "runs": s.runs.get(path).map(|wf| runs(wf, projects, types).unwrap_or_default()).unwrap_or_default(),
+                })
+            })
             .collect();
         let errors: Vec<Value> = s
             .errors
@@ -165,14 +476,20 @@ async fn connections(work: &Work) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Each project's name and path.
-async fn projects(work: &Work) -> Vec<(String, String)> {
+/// Every project, as `dbListProjects` lists it.
+async fn project_rows(work: &Work) -> Vec<Value> {
     work.db
         .run(|s| s.call("dbListProjects", json!([])).ok())
         .await
         .flatten()
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default()
+}
+
+/// Each project's name and path.
+async fn projects(work: &Work) -> Vec<(String, String)> {
+    project_rows(work)
+        .await
         .iter()
         .filter_map(|p| {
             Some((
@@ -253,9 +570,7 @@ impl Work {
             {
                 let mut s = self.files.lock();
                 s.by_id.remove(&id);
-                s.stamps.remove(&path);
-                s.errors.remove(&path);
-                s.base.remove(&path);
+                s.forget(&path);
                 self.files.keep(&s);
             }
             let w = id.clone();
@@ -278,6 +593,12 @@ impl Work {
         let Ok(text) = std::fs::read_to_string(file) else {
             return false;
         };
+        let hash = digest(&text);
+        // `was`: the stored workflow holds its file's setting, not an off of Vorn's.
+        let (trusted, was) = {
+            let s = self.files.lock();
+            (s.trusted.get(file) == Some(&hash), s.trusts(file))
+        };
         let conns = connections(self).await;
         let bindings = Bindings {
             connections: &conns,
@@ -289,10 +610,8 @@ impl Work {
                 let lines = shown(file, &errors);
                 warn!(file = %file.display(), errors = %lines.join("; "), "a workflow file does not read");
                 let mut s = self.files.lock();
-                if let Some(at) = at {
-                    s.stamps.insert(file.to_owned(), at);
-                }
-                s.errors.insert(file.to_owned(), lines);
+                s.refuse(file, at, lines);
+                self.files.keep(&s);
                 return false;
             }
         };
@@ -334,16 +653,15 @@ impl Work {
         };
         if let Some(other) = taken {
             let mut s = self.files.lock();
-            s.errors.insert(
-                file.to_owned(),
+            s.refuse(
+                file,
+                at,
                 vec![format!(
                     "{}: its id {id} is the workflow of {other} already",
                     file.display(),
                 )],
             );
-            if let Some(at) = at {
-                s.stamps.insert(file.to_owned(), at);
-            }
+            self.files.keep(&s);
             return false;
         }
         // An edit in the editor not yet in the file meets the file's edit.
@@ -358,7 +676,14 @@ impl Work {
                     .await
                     .flatten()
                     .filter(Value::is_object)
-                    .map(as_file);
+                    .map(as_file)
+                    .map(|ours| {
+                        if trusted && was {
+                            ours
+                        } else {
+                            enabled_as(ours, &base)
+                        }
+                    });
                 match ours {
                     Some(ours) if ours != base => vorn_workflow_file::meet(&base, &ours, &theirs),
                     _ => theirs.clone(),
@@ -366,7 +691,27 @@ impl Work {
             }
             None => theirs.clone(),
         };
-        let (stored, w) = (met.clone(), id.clone());
+        if let Err(why) = runs(&met, &[], self.engine.registry()) {
+            warn!(file = %file.display(), %why, "a workflow file does not read");
+            let mut s = self.files.lock();
+            s.refuse(file, at, vec![format!("{}: {why}", file.display())]);
+            self.files.keep(&s);
+            return false;
+        }
+        // Known as this file's before it is stored, so it is held off from the first moment.
+        {
+            let mut s = self.files.lock();
+            s.by_id.insert(id.clone(), file.to_owned());
+            s.hashes.insert(file.to_owned(), hash.clone());
+            s.runs.insert(file.to_owned(), met.clone());
+            s.errors.remove(file);
+            self.files.keep(&s);
+        }
+        let mut stored = met.clone();
+        if !trusted {
+            stored["enabled"] = json!(false);
+        }
+        let w = id.clone();
         let (changed, row) = self
             .db
             .run(move |s| {
@@ -375,15 +720,20 @@ impl Work {
             })
             .await
             .unwrap_or((false, None));
-        let mut at = at;
+        let (mut at, mut hash) = (at, hash);
         if met != theirs {
             let text = vorn_workflow_file::update(&text, &met, &bindings);
-            if std::fs::write(file, text).is_ok() {
+            if std::fs::write(file, &text).is_ok() {
                 at = stamp(file);
+                hash = digest(&text);
             }
         }
         // The base is the row as stored, defaults and all, so a plain edit of the file meets nothing.
-        let base = row.filter(Value::is_object).map(as_file).unwrap_or(met);
+        let base = row
+            .filter(Value::is_object)
+            .map(as_file)
+            .map(|b| if trusted { b } else { enabled_as(b, &met) })
+            .unwrap_or(met);
         let renamed: Vec<String> = {
             let mut s = self.files.lock();
             let renamed: Vec<String> = s
@@ -395,8 +745,11 @@ impl Work {
             for other in &renamed {
                 s.by_id.remove(other);
             }
-            s.by_id.insert(id.clone(), file.to_owned());
             s.base.insert(file.to_owned(), base);
+            if trusted {
+                s.trusted.insert(file.to_owned(), hash.clone());
+            }
+            s.hashes.insert(file.to_owned(), hash);
             if let Some(at) = at {
                 s.stamps.insert(file.to_owned(), at);
             }
@@ -445,11 +798,24 @@ impl Work {
             project: project.as_ref().map(|(n, p)| (n.as_str(), p.as_str())),
         };
         let old = std::fs::read_to_string(&file).unwrap_or_default();
-        let ours = as_file(row);
         // The file changed since it was last read: both edits meet.
-        let (known, base) = {
+        let (known, base, trusted) = {
             let s = self.files.lock();
-            (s.stamps.get(&file).copied(), s.base.get(&file).cloned())
+            let trusted = s.trusts(&file) && s.hashes.get(&file) == Some(&digest(&old));
+            (
+                s.stamps.get(&file).copied(),
+                s.base.get(&file).cloned(),
+                trusted,
+            )
+        };
+        // Off in the store only: the file keeps its own setting, and one that does not read is left alone.
+        let ours = match (&base, trusted) {
+            (_, true) => as_file(row),
+            (Some(base), false) => enabled_as(as_file(row), base),
+            (None, false) => match vorn_workflow_file::read(&old, &bindings) {
+                Ok(file) => enabled_as(as_file(row), &file.workflow),
+                Err(_) => return,
+            },
         };
         let mut next = ours.clone();
         if known != stamp(&file) {
@@ -460,7 +826,10 @@ impl Work {
                 }
                 next = vorn_workflow_file::meet(&base, &ours, &theirs);
                 if next != ours {
-                    let stored = next.clone();
+                    let mut stored = next.clone();
+                    if !trusted {
+                        stored["enabled"] = json!(false);
+                    }
                     self.db.run(move |s| upsert(s, &stored)).await;
                     self.workflows_changed();
                 }
@@ -473,11 +842,32 @@ impl Work {
                 return;
             }
         }
+        let hash = digest(&text);
         let mut s = self.files.lock();
-        if let Some(at) = stamp(&file) {
-            s.stamps.insert(file.clone(), at);
+        match runs(&next, &[], self.engine.registry()) {
+            Ok(_) => {
+                if let Some(at) = stamp(&file) {
+                    s.stamps.insert(file.clone(), at);
+                }
+                if trusted {
+                    s.trusted.insert(file.clone(), hash.clone());
+                }
+                s.hashes.insert(file.clone(), hash);
+                s.runs.insert(file.clone(), next.clone());
+            }
+            Err(why) => {
+                let shown = format!("{}: {why}", file.display());
+                s.refuse(&file, stamp(&file), vec![shown]);
+            }
         }
         s.base.insert(file, next);
+        self.files.keep(&s);
+    }
+
+    /// `workflow:files`: [`Files::listed`] with each agent step's host as its project has it now.
+    pub(crate) async fn files_listed(&self) -> Value {
+        self.files
+            .listed(&project_rows(self).await, self.engine.registry())
     }
 
     /// Removes the file of workflow `id`, as the workflow was deleted.
@@ -489,7 +879,7 @@ impl Work {
         if let Err(err) = std::fs::remove_file(&file) {
             warn!(%err, file = %file.display(), "could not remove a deleted workflow's file");
         }
-        s.stamps.remove(&file);
+        s.forget(&file);
         self.files.keep(&s);
     }
 
@@ -518,7 +908,8 @@ impl Work {
         let stem = base.trim_end_matches(&ext).to_owned();
         let mut file = dir.join(&base);
         let mut n = 2;
-        while file.exists() {
+        // A link, even one to nothing, is taken too: it is never written through.
+        while std::fs::symlink_metadata(&file).is_ok() {
             file = dir.join(format!("{stem}-{n}{ext}"));
             n += 1;
         }
@@ -530,19 +921,29 @@ impl Work {
         let text = vorn_workflow_file::write(&as_file(row), &bindings);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("Could not make {}: {e}", dir.display()))?;
-        std::fs::write(&file, text)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
             .map_err(|e| format!("Could not write {}: {e}", file.display()))?;
+        let read = vorn_workflow_file::read(&text, &bindings)
+            .ok()
+            .map(|r| vorn_work::js_numbers(r.workflow));
         let mut s = self.files.lock();
         s.by_id.insert(id.to_owned(), file.clone());
+        // Made in Vorn, so it stays on as it is.
+        let hash = digest(&text);
+        s.trusted.insert(file.clone(), hash.clone());
+        s.hashes.insert(file.clone(), hash);
         if let Some(at) = stamp(&file) {
             s.stamps.insert(file.clone(), at);
         }
-        if let Ok(read) = vorn_workflow_file::read(
-            &std::fs::read_to_string(&file).unwrap_or_default(),
-            &bindings,
-        ) {
-            s.base
-                .insert(file.clone(), vorn_work::js_numbers(read.workflow));
+        if let Some(read) = read {
+            if runs(&read, &[], self.engine.registry()).is_ok() {
+                s.runs.insert(file.clone(), read.clone());
+            }
+            s.base.insert(file.clone(), read);
         }
         self.files.keep(&s);
         info!(file = %file.display(), workflow = %id, "a workflow was saved to a file");
@@ -651,4 +1052,202 @@ fn upsert(s: &mut vorn_store::Store, wf: &Value) -> Option<bool> {
     }
     s.call("dbUpdateWorkflow", json!([id, updates])).ok()?;
     Some(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vorn_workflow::NodeType;
+
+    /// The built-in steps and one extension's, with the agent step as the fallback, as vornd declares them.
+    fn types() -> Registry<VorndHost> {
+        let types = Registry::default();
+        let builtin = KINDS
+            .iter()
+            .filter(|k| NodeKind::parse(k.id).step().is_some())
+            .map(|k| (k.id, vorn_workflows::ID));
+        for (id, provider) in builtin.chain([("some.ext/step", "some.ext")]) {
+            let node = NodeType {
+                id: id.to_owned(),
+                provider: provider.to_owned(),
+                provider_name: provider.to_owned(),
+                doc: Value::Null,
+            };
+            types.add_node(node, None);
+        }
+        types.set_fallback(Some(vorn_workflows::FALLBACK));
+        types
+    }
+
+    fn node(node: Value) -> Result<Vec<String>, String> {
+        let projects = [
+            json!({ "name": "far", "path": "/f", "hostIds": ["local", "box"] }),
+            json!({ "name": "near", "path": "/n", "hostIds": ["local"] }),
+        ];
+        runs(&json!({ "nodes": [node] }), &projects, &types())
+    }
+
+    fn one(kind: &str, config: Value) -> Result<Vec<String>, String> {
+        node(json!({ "id": "s", "type": kind, "label": "Do\nit", "config": config }))
+    }
+
+    #[test]
+    fn lists_everything_a_step_runs_or_sends() {
+        assert_eq!(
+            one(
+                "launchAgent",
+                json!({ "agentType": "claude", "prompt": "fix it", "args": ["--x"],
+                        "model": "m", "projectName": "far", "projectPath": "/f",
+                        "useWorktree": true, "existingWorktreePath": "/f/w",
+                        "displayName": "d", "timeoutMs": 5 })
+            )
+            .unwrap(),
+            [
+                "Do it (launchAgent)",
+                "  agentType: claude",
+                "  prompt: fix it",
+                "  args: [\"--x\"]",
+                "  model: m",
+                "  projectName: far",
+                "  projectPath: /f",
+                "  useWorktree: true",
+                "  existingWorktreePath: /f/w",
+                "  remote host: box",
+            ]
+        );
+        assert_eq!(
+            one("launchAgent", json!({ "projectName": "near" })).unwrap()[2..],
+            ["  remote host: none, this computer"]
+        );
+        assert_eq!(
+            one(
+                "launchAgent",
+                json!({ "projectName": "{{context.projectName}}" })
+            )
+            .unwrap()[2..],
+            ["  remote host: its project's, when it runs"]
+        );
+        assert_eq!(
+            one(
+                "script",
+                json!({ "scriptType": "bash", "scriptContent": "a\nb", "args": ["1"],
+                        "projectPath": "/p", "secretsFrom": "c1", "runId": "r" })
+            )
+            .unwrap()[2..],
+            [
+                "  scriptContent: a\nb",
+                "  args: [\"1\"]",
+                "  projectPath: /p",
+                "  secretsFrom: c1",
+            ]
+        );
+        assert_eq!(
+            one(
+                "httpRequest",
+                json!({ "nodeType": "httpRequest", "method": "POST", "url": "https://x",
+                        "headers": { "a": "b" }, "body": "{}", "profileConnectionId": "c" })
+            )
+            .unwrap()[1..],
+            [
+                "  method: POST",
+                "  url: https://x",
+                "  headers: {\"a\":\"b\"}",
+                "  body: {}",
+                "  profileConnectionId: c",
+            ]
+        );
+        assert_eq!(
+            one(
+                "callConnectorAction",
+                json!({ "connectionId": "c", "action": "send", "args": { "to": "x" },
+                        "actionLabel": "Send" })
+            )
+            .unwrap()[1..],
+            [
+                "  action: send",
+                "  connectionId: c",
+                "  args: {\"to\":\"x\"}"
+            ]
+        );
+        assert_eq!(
+            one(
+                "createTaskFromItem",
+                json!({ "project": "fromConnection", "initialStatus": "todo" })
+            )
+            .unwrap()[1..],
+            ["  project: fromConnection", "  initialStatus: todo"]
+        );
+        // An extension's step shows its type as the action and every input.
+        assert_eq!(
+            one("some.ext/step", json!({ "command": "make", "cwd": "/w" })).unwrap(),
+            ["Do it (some.ext/step)", "  command: make", "  cwd: /w"]
+        );
+        assert_eq!(
+            one(
+                "trigger",
+                json!({ "triggerType": "webhook", "method": "POST" })
+            )
+            .unwrap(),
+            ["Trigger: webhook", "  method: POST"]
+        );
+        assert!(one("approval", json!({ "message": "ok?" }))
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn refuses_a_setting_its_step_does_not_read() {
+        for (kind, config) in [
+            ("launchAgent", json!({ "command": "x" })),
+            ("launchAgent", json!({ "remoteHostId": "box" })),
+            ("script", json!({ "prompt": "x" })),
+            ("script", json!({ "env": { "A": "1" } })),
+            ("httpRequest", json!({ "scriptContent": "x" })),
+            ("callConnectorAction", json!({ "url": "x" })),
+            ("condition", json!({ "url": "x" })),
+            ("approval", json!({ "anything": 1 })),
+            ("loop", json!({ "shell": "sh" })),
+            ("agent", json!({ "command": "x" })),
+        ] {
+            let why = one(kind, config).unwrap_err();
+            let runs_as = if kind == "agent" { "launchAgent" } else { kind };
+            assert!(why.contains(&format!("of a {runs_as} step")), "{why}");
+        }
+        let untyped = node(json!({ "id": "s", "config": { "command": "x" } }));
+        assert!(untyped.unwrap_err().contains("of a launchAgent step"));
+        assert!(one("script", json!("echo")).is_err());
+    }
+
+    #[test]
+    fn lists_a_step_of_a_type_nothing_declares_as_the_agent_it_runs_as() {
+        let config = json!({ "prompt": "go", "projectName": "far" });
+        let shown = [
+            "Do it (launchAgent)",
+            "  prompt: go",
+            "  projectName: far",
+            "  remote host: box",
+        ];
+        assert_eq!(one("agent", config.clone()).unwrap(), shown);
+        let untyped = node(json!({ "id": "s", "label": "Do it", "config": config }));
+        assert_eq!(untyped.unwrap(), shown);
+    }
+
+    #[test]
+    fn reads_a_loop_that_runs_its_items_side_by_side() {
+        let config = json!({ "mode": "forEach", "items": "a", "bodyNodeIds": ["b"],
+                             "parallel": true, "concurrency": 2 });
+        assert!(one("loop", config).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reads_the_workflows_vorn_ships() {
+        for (_, _, text) in vorn_workflows::SEEDS {
+            let bindings = Bindings {
+                connections: &[],
+                project: None,
+            };
+            let wf = vorn_workflow_file::read(text, &bindings).unwrap().workflow;
+            runs(&vorn_work::js_numbers(wf), &[], &types()).unwrap();
+        }
+    }
 }

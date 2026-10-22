@@ -56,8 +56,8 @@ enum Outcome {
     Stopped,
 }
 
-/// A project's first host that is not this machine.
-fn remote_host_of(project: &Value) -> Option<String> {
+/// A project's first host that is not this machine: where its agent steps run.
+pub fn remote_host_of(project: &Value) -> Option<String> {
     let ids = project
         .get("hostIds")
         .and_then(Value::as_array)

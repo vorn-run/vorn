@@ -25,6 +25,7 @@ impl<H: Host> Engine<H> {
         workflows_of(&config)
             .into_iter()
             .filter(|w| w.enabled && w.trigger_type() == Some(kind))
+            .filter(|w| self.inner.host.refuses(w).is_none())
             .filter_map(|w| {
                 let config = w.trigger()?.config.clone();
                 Some((w, config))

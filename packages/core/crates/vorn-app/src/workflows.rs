@@ -186,6 +186,47 @@ impl Draft {
     }
 }
 
+/// A workflow from a project's file, as `workflow:files` lists it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FromFile {
+    pub path: String,
+    /// Turned on as the file is now; vornd runs nothing of it otherwise.
+    pub trusted: bool,
+    /// Its trigger and each step, then each setting that decides what the
+    /// step runs or sends, indented by two spaces.
+    pub runs: Vec<String>,
+    /// The content `runs` was read from: what turning it on approves.
+    /// `None` while the file does not read.
+    pub hash: Option<String>,
+}
+
+impl FromFile {
+    /// `workflow:files`' entries, by workflow id.
+    pub fn listed(v: &Value) -> HashMap<String, FromFile> {
+        v.get("files")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|f| {
+                let runs = f
+                    .get("runs")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten();
+                Some((
+                    s(f, "workflowId")?.to_owned(),
+                    FromFile {
+                        path: s(f, "path").unwrap_or("").to_owned(),
+                        trusted: f.get("trusted").and_then(Value::as_bool) == Some(true),
+                        runs: runs.filter_map(Value::as_str).map(str::to_owned).collect(),
+                        hash: s(f, "hash").map(str::to_owned),
+                    },
+                ))
+            })
+            .collect()
+    }
+}
+
 /// What the workflow surfaces hold between frames.
 #[derive(Debug, Default)]
 pub struct Workflows {
@@ -245,9 +286,16 @@ pub struct Workflows {
     pub follow_armed: Option<f64>,
     /// The followed run's key: its running step opens as it starts.
     pub follow: Option<String>,
+    /// The workflows from a project's file, by id.
+    pub files: HashMap<String, FromFile>,
 }
 
 impl Workflows {
+    /// Workflow `id`'s file, while it is not turned on.
+    pub fn held_off(&self, id: &str) -> Option<&FromFile> {
+        self.files.get(id).filter(|f| !f.trusted)
+    }
+
     /// The canvas's unbound steps and an import's leftovers,
     /// when no selection, library, history or start-from holds the slot.
     pub fn still_needed(&self) -> Vec<crate::templates::Need> {
@@ -1928,6 +1976,10 @@ pub enum WfAct {
     Export(String),
     /// Written to its project's `.vorn/workflows/` and kept there from then on.
     SaveToFile(String),
+    /// What a workflow from a project's file runs, asked before it is turned on.
+    TurnOn(String),
+    /// The ask answered: the file turned on as listed, by id and content hash.
+    ConfirmTurnOn(String, String),
     Import,
     Delete(String),
     /// The editor's controls.
@@ -2002,6 +2054,26 @@ pub enum WfAct {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_file_workflow_not_turned_on_is_held_off() {
+        let listed = json!({ "files": [
+            { "workflowId": "a", "path": "/p/.vorn/workflows/a.json", "trusted": false,
+              "hash": "h1", "runs": ["Trigger: manual", "Build: make"] },
+            { "workflowId": "b", "path": "/p/.vorn/workflows/b.json", "trusted": true, "runs": [] },
+            { "path": "/p/.vorn/workflows/broken.json" },
+        ]});
+        let w = Workflows {
+            files: FromFile::listed(&listed),
+            ..Workflows::default()
+        };
+        let a = w.held_off("a").expect("a is held off");
+        assert_eq!(a.runs, ["Trigger: manual", "Build: make"]);
+        assert_eq!(a.hash.as_deref(), Some("h1"));
+        assert!(w.held_off("b").is_none());
+        assert!(w.held_off("made-in-vorn").is_none());
+        assert_eq!(w.files.len(), 2);
+    }
 
     fn wf(nodes: Value, edges: Value) -> Draft {
         Draft {

@@ -77,6 +77,7 @@ pub const METHODS: &[&str] = &[
     "workflow:nodeTypes",
     "workflow:saveToFile",
     "workflow:files",
+    "workflow:trust",
     "workflowRun:list",
     "workflowRun:listByTask",
     "workflowRun:listWaiting",
@@ -120,7 +121,7 @@ pub struct Work {
     /// Review batches waiting for their agent's prompt.
     queue: Mutex<Queue>,
     /// The workflows that are files in a project.
-    pub(crate) files: files::Files,
+    pub(crate) files: Arc<files::Files>,
 }
 
 fn param<'a>(params: &'a Value, key: &str) -> Option<&'a Value> {
@@ -151,13 +152,14 @@ impl Work {
             .parent()
             .map_or_else(|| PathBuf::from("."), PathBuf::from);
         let drain = Arc::new(Notify::new());
-        let workflow_files = files::Files::new(&data_dir);
+        let workflow_files = Arc::new(files::Files::new(&data_dir));
         let host = VorndHost::new(
             db.clone(),
             data_dir,
             Arc::downgrade(native),
             loopback,
             Arc::clone(&drain),
+            Arc::clone(&workflow_files),
         );
         Arc::new(Work {
             engine: Engine::new(host),
@@ -436,6 +438,11 @@ impl Work {
                 else {
                     return Answer::Error("workflow:update needs an id and updates".into());
                 };
+                if vorn_work::is_truthy(updates.get("enabled")) {
+                    if let Some(why) = self.files.refuses(&id) {
+                        return Answer::Error(why);
+                    }
+                }
                 let written = id.clone();
                 let changed = self
                     .db
@@ -496,6 +503,11 @@ impl Work {
                 let id = text(params, "id").unwrap_or_default();
                 let written = id.clone();
                 let enabled = params.get("enabled").cloned().unwrap_or(Value::Null);
+                if vorn_work::is_truthy(Some(&enabled)) {
+                    if let Some(why) = self.files.refuses(&id) {
+                        return Answer::Error(why);
+                    }
+                }
                 let changed = self
                     .db
                     .run(move |s| {
@@ -514,6 +526,10 @@ impl Work {
                 }
             }
             "workflow:run" => {
+                let id = text(params, "workflowId").unwrap_or_default();
+                if let Some(why) = self.files.refuses(&id) {
+                    return Answer::Error(why);
+                }
                 let Some(workflow) = self.workflow_named(params, "workflowId").await else {
                     return Answer::Result(Value::Null);
                 };
@@ -531,6 +547,9 @@ impl Work {
                 else {
                     return Answer::Result(Value::Null);
                 };
+                if let Some(why) = self.files.refuses(&run.workflow_id) {
+                    return Answer::Error(why);
+                }
                 let Some(workflow) = self
                     .workflow_row(&run.workflow_id)
                     .await
@@ -549,6 +568,9 @@ impl Work {
                 let Some(row) = self.workflow_row(&id).await else {
                     return Answer::Error(format!("Workflow {id} not found"));
                 };
+                if let Some(why) = self.files.refuses(&id) {
+                    return Answer::Error(why);
+                }
                 let workflow = Workflow::from_json(&row);
                 if workflow.as_ref().is_none_or(|w| w.trigger().is_none()) {
                     let name = row["name"].as_str().unwrap_or("");
@@ -583,7 +605,30 @@ impl Work {
                     Err(e) => Answer::Error(e),
                 }
             }
-            "workflow:files" => Answer::Result(self.files.listed()),
+            "workflow:files" => Answer::Result(self.files_listed().await),
+            "workflow:trust" => {
+                let id = text(params, "id").unwrap_or_default();
+                let hash = text(params, "hash").unwrap_or_default();
+                if let Err(why) = self.files.trust(&id, &hash) {
+                    return Answer::Error(why);
+                }
+                let w = id.clone();
+                let on = self
+                    .db
+                    .run(move |s| {
+                        s.call("dbUpdateWorkflow", json!([w, { "enabled": true }]))
+                            .map_err(|e| e.to_string())
+                    })
+                    .await;
+                match on {
+                    Some(Ok(_)) => {
+                        self.workflows_changed();
+                        self.write_back(&id).await;
+                        Answer::Result(json!({ "ok": true }))
+                    }
+                    other => stored(other),
+                }
+            }
             "workflow:nodeTypes" => Answer::Result(types::listed(self.engine.registry())),
             "workflow:executionComplete" => {
                 use vorn_workflow::Host;
@@ -1417,6 +1462,400 @@ mod tests {
             .fire_api(vorn_ext_tasks::ID, &json!({ "trigger": "nothing" }))
             .await
             .is_err());
+    }
+
+    const BUILD: &str = r#"name = "Build"
+id = "build"
+enabled = true
+
+[trigger]
+type = "manual"
+id = "start"
+
+[[step]]
+id = "make"
+type = "script"
+scriptType = "bash"
+scriptContent = "echo built"
+"#;
+
+    async fn row(work: &Arc<Work>, id: &str) -> Value {
+        match work.call("workflow:get", &json!({ "id": id })).await {
+            Answer::Result(v) => v,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    async fn file_entry(work: &Work, id: &str) -> Value {
+        let listed = work.files_listed().await;
+        listed["files"]
+            .as_array()
+            .and_then(|f| f.iter().find(|f| f["workflowId"] == id).cloned())
+            .unwrap_or_else(|| panic!("no file for {id}: {listed}"))
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_file_not_turned_on_keeps_its_own_setting_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("build.toml");
+        std::fs::write(&file, BUILD).unwrap();
+        {
+            let (_native, w) = work(dir.path());
+            w.sync_types();
+            let path = project.to_string_lossy().into_owned();
+            w.db.run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+            w.look_at_files().await;
+            assert_eq!(row(&w, "build").await["enabled"], false);
+        }
+        let (_native, w) = work(dir.path());
+        w.sync_types();
+        let rename = |name: &str| json!({ "id": "build", "updates": { "name": name } });
+        assert!(matches!(
+            w.call("workflow:update", &rename("Build it")).await,
+            Answer::Result(_)
+        ));
+        let edited = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            edited.contains("Build it") && edited.contains("enabled = true"),
+            "{edited}"
+        );
+        assert_eq!(row(&w, "build").await["enabled"], false);
+        // A file that no longer reads is left as it is.
+        drop(w);
+        std::fs::write(&file, "name = [").unwrap();
+        let (_native, w) = work(dir.path());
+        w.sync_types();
+        w.call("workflow:update", &rename("Again")).await;
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "name = [");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_workflow_runs_nothing_until_turned_on_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let project = dir.path().join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("build.toml");
+        std::fs::write(&file, BUILD).unwrap();
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+
+        work.look_at_files().await;
+        assert_eq!(row(&work, "build").await["enabled"], false);
+        let entry = file_entry(&work, "build").await;
+        assert_eq!(entry["trusted"], false);
+        assert_eq!(
+            entry["runs"],
+            json!([
+                "Trigger: manual",
+                "make (script)",
+                "  scriptType: bash",
+                "  scriptContent: echo built"
+            ])
+        );
+        // The file keeps its own setting; only Vorn holds it off.
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), BUILD);
+
+        let refused = |a: Answer| matches!(a, Answer::Error(e) if e.contains("turn it on"));
+        assert!(refused(
+            work.call(
+                "workflow:setEnabled",
+                &json!({ "id": "build", "enabled": true })
+            )
+            .await
+        ));
+        assert!(refused(
+            work.call(
+                "workflow:update",
+                &json!({ "id": "build", "updates": { "enabled": true } })
+            )
+            .await
+        ));
+        for method in ["workflow:runManual", "workflow:run"] {
+            assert!(refused(
+                work.call(method, &json!({ "workflowId": "build" })).await
+            ));
+        }
+        let workflow = Workflow::from_json(&row(&work, "build").await).unwrap();
+        assert!(work
+            .engine
+            .execute(&workflow, None, Options::default())
+            .await
+            .is_err());
+        assert!(runs(&work, "build").await.is_empty());
+        // An edit in Vorn of a file not turned on writes the file's own setting back.
+        assert!(matches!(
+            work.call(
+                "workflow:update",
+                &json!({ "id": "build", "updates": { "name": "Build it" } })
+            )
+            .await,
+            Answer::Result(_)
+        ));
+        let edited = std::fs::read_to_string(&file).unwrap();
+        assert!(edited.contains("Build it") && edited.contains("enabled = true"));
+        assert_eq!(row(&work, "build").await["enabled"], false);
+
+        // Turning on takes the content the user was shown, and only that.
+        let shown = file_entry(&work, "build").await["hash"].clone();
+        assert!(shown.is_string());
+        assert!(matches!(
+            work.call("workflow:trust", &json!({ "id": "build", "hash": "other" })).await,
+            Answer::Error(e) if e.contains("changed since it was shown")
+        ));
+        assert_eq!(file_entry(&work, "build").await["trusted"], false);
+        assert!(matches!(
+            work.call("workflow:trust", &json!({ "id": "build", "hash": shown }))
+                .await,
+            Answer::Result(_)
+        ));
+        assert_eq!(row(&work, "build").await["enabled"], true);
+        assert_eq!(file_entry(&work, "build").await["trusted"], true);
+        assert!(work.files.refuses("build").is_none());
+        // Kept across a restart.
+        assert!(files::Files::new(dir.path()).refuses("build").is_none());
+        // Turned off and on again in Vorn, it stays trusted.
+        for on in [false, true] {
+            assert!(matches!(
+                work.call("workflow:setEnabled", &json!({ "id": "build", "enabled": on }))
+                    .await,
+                Answer::Result(v) if v["ok"] == true
+            ));
+        }
+        assert!(work.files.refuses("build").is_none());
+
+        // Edited outside Vorn, it is off again until turned on again.
+        let trusted = std::fs::read_to_string(&file).unwrap();
+        let changed = trusted.replace("echo built", "echo changed and longer");
+        std::fs::write(&file, &changed).unwrap();
+        work.look_at_files().await;
+        assert_eq!(row(&work, "build").await["enabled"], false);
+        assert_eq!(file_entry(&work, "build").await["trusted"], false);
+        assert!(work.files.refuses("build").is_some());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), changed);
+
+        // Edited back as it was turned on, it is on with the file's own setting.
+        std::fs::write(&file, &trusted).unwrap();
+        work.look_at_files().await;
+        assert_eq!(file_entry(&work, "build").await["trusted"], true);
+        assert_eq!(row(&work, "build").await["enabled"], true);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), trusted);
+
+        // A workflow made in Vorn is not held off.
+        let mine = conditional("mine", json!({ "triggerType": "manual" }));
+        work.call("workflow:create", &json!({ "workflow": mine }))
+            .await;
+        assert!(work.files.refuses("mine").is_none());
+        assert!(matches!(
+            work.call("workflow:setEnabled", &json!({ "id": "mine", "enabled": true }))
+                .await,
+            Answer::Result(v) if v["ok"] == true
+        ));
+        assert!(matches!(
+            work.call("workflow:trust", &json!({ "id": "mine", "hash": "" }))
+                .await,
+            Answer::Error(_)
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_file_with_a_setting_its_step_does_not_have_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let project = dir.path().join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("odd.toml");
+        let odd = BUILD
+            .replace("id = \"build\"", "id = \"odd\"")
+            .replace("scriptContent", "command");
+        std::fs::write(&file, odd).unwrap();
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+        work.look_at_files().await;
+        let listed = work.files_listed().await;
+        let errors = listed["errors"].to_string();
+        assert!(
+            errors.contains("command is not a setting of a script step"),
+            "{listed}"
+        );
+        assert!(matches!(
+            work.call("workflow:get", &json!({ "id": "odd" })).await,
+            Answer::Result(Value::Null)
+        ));
+    }
+
+    /// A project `p` at `dir/p` on remote host `box`, holding the workflow files `files`.
+    async fn project_with(work: &Work, dir: &std::path::Path, files: &[(&str, &str)]) {
+        let project = dir.join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        for (name, text) in files {
+            std::fs::write(folder.join(name), text).unwrap();
+        }
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [], "hostIds": ["local", "box"] }]),
+                )
+                .unwrap();
+            })
+            .await;
+        work.look_at_files().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_file_with_a_parallel_loop_reads_and_is_written_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let each = BUILD.replace("id = \"build\"", "id = \"each\"")
+            + "\n[[step]]\nid = \"loop\"\ntype = \"loop\"\nmode = \"forEach\"\nitems = \"a,b\"\n\
+               bodyNodeIds = [\"body\"]\nparallel = true\nconcurrency = 2\n\n\
+               [[step]]\nid = \"body\"\ntype = \"script\"\nscriptContent = \"echo {{loop.item}}\"\n";
+        project_with(&work, dir.path(), &[("each.toml", &each)]).await;
+        assert_eq!(work.files_listed().await["errors"], json!([]));
+        assert!(row(&work, "each").await.is_object());
+        assert!(matches!(
+            work.call(
+                "workflow:update",
+                &json!({ "id": "each", "updates": { "name": "Each" } })
+            )
+            .await,
+            Answer::Result(_)
+        ));
+        let file = dir.path().join("p").join(files::FOLDER).join("each.toml");
+        let edited = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            edited.contains("Each") && edited.contains("parallel = true"),
+            "{edited}"
+        );
+        work.look_at_files().await;
+        assert_eq!(work.files_listed().await["errors"], json!([]));
+        assert_eq!(row(&work, "each").await["name"], "Each");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_step_of_no_declared_type_is_listed_as_the_agent_it_runs_as() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let agent = |id: &str, kind: &str, setting: &str| {
+            format!(
+                "name = \"{id}\"\nid = \"{id}\"\n\n[trigger]\ntype = \"manual\"\nid = \"start\"\n\n\
+                 [[step]]\nid = \"go\"\n{kind}{setting} = \"x\"\nprojectName = \"p\"\n"
+            )
+        };
+        let typed = agent("typed", "type = \"agent\"\n", "prompt");
+        let untyped = agent("untyped", "", "prompt");
+        let odd = agent("odd", "", "command");
+        project_with(
+            &work,
+            dir.path(),
+            &[
+                ("typed.toml", &typed),
+                ("untyped.toml", &untyped),
+                ("odd.toml", &odd),
+            ],
+        )
+        .await;
+        for id in ["typed", "untyped"] {
+            assert_eq!(
+                file_entry(&work, id).await["runs"],
+                json!([
+                    "Trigger: manual",
+                    "go (launchAgent)",
+                    "  prompt: x",
+                    "  projectName: p",
+                    "  remote host: box"
+                ])
+            );
+        }
+        let errors = work.files_listed().await["errors"].to_string();
+        assert!(
+            errors.contains("command is not a setting of a launchAgent step"),
+            "{errors}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_workflow_saved_to_a_file_from_vorn_stays_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let project = dir.path().join("p");
+        std::fs::create_dir_all(&project).unwrap();
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+        let mine = conditional("mine", json!({ "triggerType": "manual" }));
+        work.call("workflow:create", &json!({ "workflow": mine }))
+            .await;
+        // A link where the file would go, even to nothing, is left alone.
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        let elsewhere = dir.path().join("elsewhere.toml");
+        let link = folder.join(vorn_workflow_file::file_name("mine"));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let saved = work
+            .call(
+                "workflow:saveToFile",
+                &json!({ "id": "mine", "projectName": "p" }),
+            )
+            .await;
+        let Answer::Result(saved) = saved else {
+            panic!("{saved:?}");
+        };
+        #[cfg(unix)]
+        {
+            assert!(!elsewhere.exists());
+            assert_ne!(saved["path"], json!(link));
+        }
+        work.look_at_files().await;
+        assert_eq!(file_entry(&work, "mine").await["trusted"], true);
+        assert!(file_entry(&work, "mine").await["runs"]
+            .as_array()
+            .is_some_and(|r| !r.is_empty()));
+        assert_eq!(row(&work, "mine").await["enabled"], true);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

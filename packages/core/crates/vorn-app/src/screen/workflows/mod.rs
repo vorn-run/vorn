@@ -1141,7 +1141,8 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> E
     } else {
         c(look::GRAY_300)
     };
-    let small = |bid: Id, a: Act, icon: &str, size: f32, label: &str| {
+    let held = s.st.wf.held_off(&id).is_some();
+    let small = |bid: Id, a: Act, icon: &str, size: f32, label: &str, shown: bool| {
         s.acts.bind(bid, a);
         let h = s.ui.hover(bid);
         let b = div()
@@ -1149,7 +1150,7 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> E
             .on(Action::Click)
             .p(2.0)
             .rounded(4.0)
-            .opacity(if hot { 1.0 } else { 0.0 })
+            .opacity(if hot || shown { 1.0 } else { 0.0 })
             .bg(white(0.0).mix(white(0.08), h))
             .role(Role::Button, label)
             .child(ico(
@@ -1186,19 +1187,32 @@ fn side_row(s: &Screen<'_>, w: &Value, status: Option<&str>, reorder: bool) -> E
                 .min_w0()
                 .child(text(name, 13.0, fg).line_height(19.5).truncate().silent()),
         )
-        .child(small(
-            run_id,
-            act(WfAct::Run(id.clone())),
-            "play",
-            11.0,
-            &format!("Run workflow {name}"),
-        ))
+        .child(if held {
+            small(
+                run_id,
+                act(WfAct::TurnOn(id.clone())),
+                "power",
+                11.0,
+                &format!("Turn on {name}"),
+                true,
+            )
+        } else {
+            small(
+                run_id,
+                act(WfAct::Run(id.clone())),
+                "play",
+                11.0,
+                &format!("Run workflow {name}"),
+                false,
+            )
+        })
         .child(small(
             more_id,
             Act::Open(menu.clone()),
             "ellipsis",
             12.0,
             &format!("More options for {name}"),
+            false,
         ));
     if reorder {
         row = row.sense(Sense::MOVE);
@@ -1240,12 +1254,21 @@ pub fn menu_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
             let Some(w) = workflow(s, id) else {
                 return Vec::new();
             };
-            let mut out = vec![Item::new(
+            let held = s.st.wf.held_off(id).is_some();
+            let mut out = Vec::new();
+            if held {
+                out.push(Item::new(
+                    "power",
+                    "Turn On\u{2026}",
+                    act(WfAct::TurnOn(id.clone())),
+                ));
+            }
+            out.push(Item::new(
                 "pencil",
                 "Edit Workflow",
                 act(WfAct::Edit(id.clone())),
-            )];
-            if wf::is_scheduled(w) {
+            ));
+            if wf::is_scheduled(w) && !held {
                 let on = w.get("enabled").and_then(Value::as_bool) != Some(false);
                 let label = if on {
                     "Disable Schedule"

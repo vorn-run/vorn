@@ -12,6 +12,7 @@ description = "What Vorn reads about the coding agents without starting one: whi
 vorn-spawn = { path = "../spawn" }
 # The screen rules each agent's status is read with.
 vorn-analysis = { path = "../analysis" }
+vorn-remote = { path = "../remote" }
 # Local time for the dates an agent records without an offset, as `new Date` reads them.
 jiff = "0.2"
 # The agents keep their sessions in SQLite files of their own, read here read-only.

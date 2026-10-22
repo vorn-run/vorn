@@ -136,6 +136,8 @@ async fn write(
     let _order = native.config_order.lock().await;
     let after = blocking("config:save", move || {
         let mut sent = with_store(&n, make)?;
+        let stored = with_store(&n, |store| store.load_config())?;
+        check_hosts(&stored, &sent)?;
         let passwords = super::credential::take_host_passwords(&mut sent);
         for (id, password) in &passwords {
             n.secrets.put_item(Kind::HostPassword, id, password)?;
@@ -149,6 +151,57 @@ async fn write(
     .await?;
     native.broadcast("config:changed", after);
     native.config_changed();
+    Ok(())
+}
+
+/// Refuses a save that adds a remote host, or changes one's user, host name,
+/// ssh options or key path, to ones `vorn_remote::options` does not allow, naming
+/// what it refused. Hosts saved unchanged are left to be refused at login.
+fn check_hosts(stored: &Value, sent: &Value) -> Result<(), String> {
+    let Some(hosts) = sent.get("remoteHosts").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let text = |host: &Value, key: &str| {
+        host.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let login = |host: &Value| {
+        [
+            text(host, "user"),
+            text(host, "hostname"),
+            text(host, "sshOptions"),
+            text(host, "sshKeyPath"),
+        ]
+    };
+    let was = |id: &Value| {
+        stored
+            .get("remoteHosts")
+            .and_then(Value::as_array)
+            .and_then(|old| old.iter().find(|h| h.get("id") == Some(id)))
+            .map(login)
+    };
+    for host in hosts {
+        let now = login(host);
+        if host.get("id").and_then(&was) == Some(now.clone()) {
+            continue;
+        }
+        let [user, hostname, options, key_path] = now;
+        // A host just added has no name yet; logging in still refuses that.
+        let named = if hostname.is_empty() {
+            "unnamed"
+        } else {
+            &hostname
+        };
+        let refused = vorn_remote::options::check_destination(&user, named)
+            .and_then(|()| vorn_remote::options::parse(&options).map(drop))
+            .and_then(|()| match key_path.as_str() {
+                "" => Ok(()),
+                path => vorn_remote::options::check_key_path(path),
+            });
+        refused.map_err(|why| format!("Could not save host {hostname}: {why}"))?;
+    }
     Ok(())
 }
 
@@ -233,6 +286,49 @@ fn save(store: &mut Store, config: &Value, viewer: Option<&str>) -> vorn_store::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refuses_saving_a_host_with_an_option_it_does_not_allow() {
+        let config = |options: &str| {
+            json!({ "remoteHosts": [
+                { "id": "h", "hostname": "box", "user": "me", "sshOptions": options }
+            ] })
+        };
+        let none = json!({});
+        assert_eq!(
+            check_hosts(&none, &config("-A -o ServerAliveInterval=30")),
+            Ok(())
+        );
+        assert_eq!(
+            check_hosts(&none, &config("-o ProxyCommand=nc %h %p")),
+            Err("Could not save host box: ssh option ProxyCommand is not allowed".into())
+        );
+        assert_eq!(
+            check_hosts(&config("-A"), &config("-oLocalCommand=x")),
+            Err("Could not save host box: ssh option LocalCommand is not allowed".into())
+        );
+        let dashed = json!({ "remoteHosts": [{ "id": "h", "hostname": "-oX=y", "user": "me" }] });
+        assert_eq!(
+            check_hosts(&none, &dashed),
+            Err("Could not save host -oX=y: host name \"-oX=y\" is not allowed".into())
+        );
+        // A host saved before, unchanged, does not stop the rest of the configuration saving.
+        let kept = config("-o ProxyCommand=nc");
+        assert_eq!(check_hosts(&kept, &kept), Ok(()));
+        assert_eq!(check_hosts(&none, &json!({ "remoteHosts": [] })), Ok(()));
+        // A host just added in Settings saves before it has a name.
+        let added = json!({ "remoteHosts": [{ "id": "n", "hostname": "", "user": "" }] });
+        assert_eq!(check_hosts(&none, &added), Ok(()));
+        let keyed = |path: &str| json!({ "remoteHosts": [{ "id": "k", "hostname": "box", "sshKeyPath": path }] });
+        assert_eq!(check_hosts(&none, &keyed("~/.ssh/my key")), Ok(()));
+        assert_eq!(
+            check_hosts(&none, &keyed("-oProxyCommand=x")),
+            Err("Could not save host box: ssh key path \"-oProxyCommand=x\" is not allowed".into())
+        );
+        for bad in ["/k/a\nb", "/k/a\"b", "/k/\u{201c}k\u{201d}"] {
+            assert!(check_hosts(&none, &keyed(bad)).is_err(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn tells_viewers_apart_by_their_credential() {

@@ -88,6 +88,14 @@ struct Inner<H: Host> {
     fallback: Option<String>,
 }
 
+impl<H: Host> Inner<H> {
+    /// The entry a step of `node_type` runs by: its own, else the fallback's.
+    fn entry(&self, node_type: &str) -> Option<&Entry<Arc<NodeType>, Runner<H>>> {
+        let find = |id: &str| self.nodes.iter().find(|e| e.declared.id == id);
+        find(node_type).or_else(|| self.fallback.as_deref().and_then(find))
+    }
+}
+
 /// Every node type and trigger type declared so far.
 pub struct Registry<H: Host> {
     inner: RwLock<Inner<H>>,
@@ -211,12 +219,16 @@ impl<H: Host> Registry<H> {
         entry.map(|e| e.declared.provider.clone())
     }
 
+    /// The declared node type a step of `node_type` runs as: its own, else
+    /// the fallback; `None` when neither is declared.
+    pub fn runs_as(&self, node_type: &str) -> Option<String> {
+        self.read().entry(node_type).map(|e| e.declared.id.clone())
+    }
+
     /// How a step of `node_type` runs.
     pub fn resolve(&self, node_type: &str) -> Resolved<H> {
         let inner = self.read();
-        let find = |id: &str| inner.nodes.iter().find(|e| e.declared.id == id);
-        let entry = find(node_type).or_else(|| inner.fallback.as_deref().and_then(find));
-        match entry {
+        match inner.entry(node_type) {
             Some(Entry {
                 declared,
                 runner: Some(runner),
