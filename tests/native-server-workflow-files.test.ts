@@ -429,7 +429,10 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
     it("refuses a project file whose id is in an extension's namespace", async () => {
       const file = path.join(folder, 'namespaced.toml')
       for (const id of ['Example.Shout:mine', 'vorn.workflows:mine']) {
-        fs.writeFileSync(file, `name = "Namespaced"\nid = "${id}"\n\n[trigger]\nid = "t"\ntype = "manual"\n`)
+        fs.writeFileSync(
+          file,
+          `name = "Namespaced"\nid = "${id}"\n\n[trigger]\nid = "t"\ntype = "manual"\n`
+        )
         await until(`${id} to be refused`, async () => {
           const files = await client.result<{ errors: Array<{ errors: string[] }> }>(
             'workflow:files'
