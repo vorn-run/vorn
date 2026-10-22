@@ -173,6 +173,19 @@ fn script(lang: Lang, service: bool) -> &'static str {
     }
 }
 
+/// Builds what the first `n` of the mix need from the workspace, before the
+/// bench moves HOME (cargo and rustup find their caches under the real one).
+pub fn prepare(n: usize) -> Result<(), String> {
+    let langs: HashSet<Lang> = MIX.iter().take(n).map(|&(lang, _)| lang).collect();
+    if langs.contains(&Lang::Wasm) {
+        component()?;
+    }
+    if langs.contains(&Lang::Rust) {
+        program()?;
+    }
+    Ok(())
+}
+
 /// The Rust template built as a component, once a run.
 fn component() -> Result<PathBuf, String> {
     static BUILT: OnceLock<Result<PathBuf, String>> = OnceLock::new();

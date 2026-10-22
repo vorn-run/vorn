@@ -30,18 +30,26 @@ bench=target/ci/examples/many_panes
 common=(--panes 32 --cases agent --seconds "${RUN_SECONDS:-20}" --ext-period 2)
 reps=${REPS:-5}
 
-echo "default idle time and cap"
-"$bench" "${common[@]}" --extensions 0,20 --reps "$reps" --out "$out/default.json" >"$out/default.md"
+# A step that fails is reported and the rest still run; the script then fails.
+failed=0
+step() {
+  local name=$1
+  shift
+  echo "$name"
+  "$bench" "${common[@]}" "$@" --out "$out/$name.json" >"$out/$name.md" 2>"$out/$name.err" || {
+    echo "$name failed: $(tail -n 1 "$out/$name.err")"
+    failed=1
+  }
+}
+
+step default --extensions 0,20 --reps "$reps"
 for cap in ${CAPS:-16 20 32}; do
-  echo "cap $cap"
-  "$bench" "${common[@]}" --extensions 20 --reps 3 --ext-cap "$cap" --out "$out/cap-$cap.json" >"$out/cap-$cap.md"
+  step "cap-$cap" --extensions 20 --reps 3 --ext-cap "$cap"
 done
-echo "idle phase"
 idle_cap=${IDLE_CAP:+--ext-cap $IDLE_CAP}
 idle_ms=${IDLE_MS:+--ext-idle-ms $IDLE_MS}
 # shellcheck disable=SC2086
-"$bench" "${common[@]}" --extensions 0,20 --reps 3 $idle_cap $idle_ms \
-  --idle-wait "${IDLE_WAIT:-150}" --out "$out/idle.json" >"$out/idle.md"
+step idle --extensions 0,20 --reps 3 $idle_cap $idle_ms --idle-wait "${IDLE_WAIT:-150}"
 {
   uname -a
   nproc
@@ -49,3 +57,4 @@ idle_ms=${IDLE_MS:+--ext-idle-ms $IDLE_MS}
   free -m
 } >"$out/machine.txt"
 echo "done"
+exit "$failed"

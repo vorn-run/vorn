@@ -364,7 +364,7 @@ mod bench {
 
     use super::extensions;
     use super::flag;
-    use super::support::{connect, wait_for, TestVornd};
+    use super::support::{connect, wait_for, TestVornd, PATIENCE};
 
     /// The frame clock: a 60 Hz display.
     const FRAME: Duration = Duration::from_micros(16_667);
@@ -497,6 +497,7 @@ mod bench {
 
     pub fn run(args: &[String]) -> Result<(), String> {
         let opts = Opts::parse(args)?;
+        extensions::prepare(opts.extensions.iter().copied().max().unwrap_or(0))?;
         // The bench's own HOME is a temporary one too, so nothing it starts
         // reads or writes the user's.
         let home = std::env::temp_dir().join(format!("vorn-many-panes-{}", std::process::id()));
@@ -592,10 +593,23 @@ mod bench {
         for id in &ids {
             grid.attach(id, 80, 24, (0, 0), 0);
         }
-        wait_for("every pane's first screen", || {
+        let t = Instant::now();
+        loop {
             draw(&mut app, &mut ui, &target, opts.size);
-            ids.iter().all(|id| app.pane(id).is_some()).then_some(())
-        });
+            if ids.iter().all(|id| app.pane(id).is_some()) {
+                break;
+            }
+            if t.elapsed() > PATIENCE {
+                let log = v.log();
+                let tail: Vec<&str> = log.lines().rev().take(60).collect();
+                let tail: Vec<&str> = tail.into_iter().rev().collect();
+                return Err(format!(
+                    "timed out waiting for every pane's first screen; vornd's log ends:\n{}",
+                    tail.join("\n")
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
         let on_screen = |ui: &Ui, id: &String| ui.rect_of(term_id(id)).is_some();
         // The probe is a pane on screen; it goes first so it gets the echo feed.
         let mut ids = ids;
