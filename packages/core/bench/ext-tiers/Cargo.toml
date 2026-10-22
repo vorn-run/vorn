@@ -28,6 +28,11 @@ path = "src/bin/tier-rss.rs"
 name = "tier-crash"
 path = "src/bin/tier-crash.rs"
 
+# The extension load test's Rust program (bench/ext-load).
+[[bin]]
+name = "tier-load"
+path = "src/bin/tier-load.rs"
+
 [dependencies]
 serde_json = "1"
 tempfile = "3"
@@ -41,6 +46,7 @@ vorn-bench-widget = { path = "widget" }
 vorn-bench-worktrees = { path = "worktrees" }
 vorn-bench-rss = { path = "rss" }
 vorn-bench-crash = { path = "crash" }
+vorn-bench-load = { path = "../ext-load/templates/rust" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

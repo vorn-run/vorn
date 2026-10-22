@@ -7057,6 +7057,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "vorn-bench-crash",
+ "vorn-bench-load",
  "vorn-bench-rss",
  "vorn-bench-widget",
  "vorn-bench-worktrees",
@@ -7064,6 +7065,13 @@ dependencies = [
  "vorn-extensions",
  "vorn-guest-build",
  "vorn-spawn",
+]
+
+[[package]]
+name = "vorn-bench-load"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
 ]
 
 [[package]]
