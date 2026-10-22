@@ -40,6 +40,7 @@ pub mod page;
 pub mod points;
 pub mod polls;
 pub mod preferences;
+pub mod reach;
 pub mod router;
 pub mod sandbox;
 pub mod shipped;

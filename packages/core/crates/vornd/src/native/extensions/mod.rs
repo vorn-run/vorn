@@ -36,6 +36,7 @@ use vorn_extensions::install::Installs;
 use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
+use vorn_extensions::reach::Given;
 use vorn_extensions::router::{Hook, Router};
 use vorn_extensions::{points, token};
 use vorn_git::repo::Git;
@@ -216,6 +217,18 @@ struct Bands {
     pollers: HashMap<Key, JoinHandle<()>>,
 }
 
+/// An extension answering a person's click, counted until it drops.
+struct Acting<'a> {
+    given: &'a Mutex<Given>,
+    id: String,
+}
+
+impl Drop for Acting<'_> {
+    fn drop(&mut self) {
+        guard(self.given).end(&self.id);
+    }
+}
+
 /// The extension host: its processes, panes and bands.
 pub struct Extensions {
     hosts: Arc<Hosts>,
@@ -231,6 +244,8 @@ pub struct Extensions {
     ancestors: Vec<String>,
     home: PathBuf,
     grants: Mutex<Grants>,
+    /// What a person handed each extension, the sessions each started, and who answers a click now.
+    given: Mutex<Given>,
     bands: Mutex<Bands>,
     /// Each open pane keeps its extension's host running: a pane's program holds that host's token.
     pane_hosts: Mutex<HashMap<String, Lease<Host>>>,
@@ -328,6 +343,7 @@ impl Extensions {
             ancestors,
             home,
             grants: Mutex::default(),
+            given: Mutex::default(),
             bands: Mutex::default(),
             pane_hosts: Mutex::default(),
             syncs: Mutex::default(),
@@ -540,6 +556,10 @@ impl Extensions {
                 };
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
                 let (id, action) = (text(params, "id"), text(params, "action"));
+                if let Some(picked) = params.get("picked").and_then(Value::as_str) {
+                    self.hand(id, picked).await;
+                }
+                let _acting = (action != vorn_tree::RENDER).then(|| self.acting(id));
                 let answer = match self.builtins.call(id, action, args.clone()).await {
                     Some(answered) => answered.map_err(|e| e.message),
                     None => self
@@ -750,6 +770,7 @@ impl Extensions {
             return Err(format!("No extension \"{id}\" is installed"));
         }
         let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
+        guard(&self.given).forget(id);
         self.kill_terminals(&closed);
         self.router.call_hook(id, Hook::Stop).await;
         self.hosts.stop_extension(id).await;
@@ -822,10 +843,42 @@ impl Extensions {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         };
+        let _acting = self.acting(id);
         match self.call(id, action, params, ctx).await {
             Ok(value) => Answer::Result(value),
             Err(ExtError { message, .. }) => Answer::Error(message),
         }
+    }
+
+    /// A person chose `path` for extension `id`, in a file dialog or a form:
+    /// it may read that file from now on.
+    pub async fn hand(&self, id: &str, path: &str) {
+        let path = PathBuf::from(home_path(path));
+        let Ok(Ok(real)) =
+            tokio::task::spawn_blocking(move || vorn_extensions::reach::resolve(&path)).await
+        else {
+            return;
+        };
+        guard(&self.given).hand(id, real);
+    }
+
+    /// Counts extension `id` as answering a person's click until the guard drops.
+    fn acting(&self, id: &str) -> Acting<'_> {
+        guard(&self.given).begin(id);
+        Acting {
+            given: &self.given,
+            id: id.to_owned(),
+        }
+    }
+
+    /// What a person handed each extension and the sessions each started.
+    pub(crate) fn given(&self) -> MutexGuard<'_, Given> {
+        guard(&self.given)
+    }
+
+    /// Whether extension `id` has a pane open on session `session`.
+    pub(crate) fn paned(&self, id: &str, session: &str) -> bool {
+        guard(&self.grants).open_on(id, session, now_ms())
     }
 
     /// The manifest of built-in or installed extension `id`.

@@ -209,9 +209,87 @@ pub enum StorageCall {
     Transaction(Vec<(String, Vec<Value>)>),
 }
 
-/// `host.start-session` and `sessions.launch`: refused unless the manifest declares `sessions.launch`.
+/// `host.start-session` and `sessions.launch`: refused unless the manifest
+/// declares `sessions.launch` and `process.run`, since a session runs a program.
 pub fn admit_start(manifest: &Manifest) -> Result<(), ExtError> {
     admit_call(manifest, "sessions.launch").map(drop)
+}
+
+/// The core methods that also need `process.run`: what they start runs commands.
+const RUNS_COMMANDS: &[&str] = &["sessions.launch"];
+
+/// `permissions.resolve`: answering an agent's request is answering for the
+/// person, so it is allowed while the extension answers a person's own click
+/// (`by_person`), and otherwise only with `process.run`.
+pub fn admit_resolve(caller: &Caller, by_person: bool) -> Result<(), ExtError> {
+    if by_person || caller.runs_commands {
+        return Ok(());
+    }
+    Err(ExtError::new(
+        "denied",
+        format!(
+            "{} answers an agent's request only as a person clicks; on its own that needs process.run",
+            caller.extension
+        ),
+    ))
+}
+
+/// `terminal.read`, `terminal.send` and `terminal.selection` on a session:
+/// one the caller `started`; any other only with `process.run` and a pane of
+/// its own open on that session (`paned`).
+pub fn admit_terminal(
+    caller: &Caller,
+    method: &str,
+    started: bool,
+    paned: bool,
+) -> Result<(), ExtError> {
+    if started || (caller.runs_commands && paned) {
+        return Ok(());
+    }
+    let why = if caller.runs_commands {
+        "it has no pane open on it"
+    } else {
+        "it does not declare process.run"
+    };
+    Err(ExtError::new(
+        "denied",
+        format!(
+            "{} reaches with {method} only the sessions it started; not this one, as {why}",
+            caller.extension
+        ),
+    ))
+}
+
+/// The page ops `web.call` passes to the client: reading, finding and acting
+/// on what the page shows. None runs a script of the extension's own.
+pub const WEB_OPS: &[&str] = &[
+    "load", "history", "read", "text", "find", "act", "console", "network",
+];
+
+/// The simulator ops `video.call` passes to the client.
+pub const VIDEO_OPS: &[&str] = &[
+    "list",
+    "boot",
+    "shutdown",
+    "launch",
+    "terminate",
+    "openUrl",
+    "install",
+    "screenshot",
+    "save",
+];
+
+/// `web.call` and `video.call`: only an op its permission lists.
+pub fn admit_op(method: &str, op: &str) -> Result<(), ExtError> {
+    let ops = match method {
+        "web.call" => WEB_OPS,
+        "video.call" => VIDEO_OPS,
+        _ => &[],
+    };
+    if ops.contains(&op) {
+        return Ok(());
+    }
+    Err(ExtError::new("denied", format!("{method} has no op {op}")))
 }
 
 /// `storage.*` and `blobs.*`: refused unless the manifest declares `storage`.
@@ -232,7 +310,9 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
 /// permission none of these needs (`network.tcp`, `auth.borrow`,
 /// `http.routes`) is declared and shown, not enforced: `storage` is held at
 /// `storage.*`, the network at `net.fetch`, and `process.run` at the
-/// workflows it seeds and runs ([`admit_seed`], [`admit_run`]).
+/// workflows it seeds and runs ([`admit_seed`], [`admit_run`]), the sessions
+/// it starts, and what it reaches beyond its own ([`admit_resolve`],
+/// [`admit_terminal`], [`crate::reach`]).
 ///
 /// The board, the workflows, their inbox and the sign-in windows are what a
 /// connector feeds: items become tasks through `task.importItems`, polled
@@ -339,6 +419,15 @@ pub fn admit_call(manifest: &Manifest, method: &str) -> Result<Permission, ExtEr
                 "{} does not declare {}, which {method} needs",
                 manifest.id,
                 permission.name()
+            ),
+        ));
+    }
+    if RUNS_COMMANDS.contains(&method) && !declares(manifest, Permission::ProcessRun) {
+        return Err(ExtError::new(
+            "denied",
+            format!(
+                "{} does not declare process.run, which {method} needs",
+                manifest.id
             ),
         ));
     }
@@ -709,6 +798,86 @@ header = "Authorization: Bearer {token}"
         assert!(enforced(Permission::GitWrite));
         assert!(enforced(Permission::ProcessRun));
         assert!(!enforced(Permission::NetworkTcp));
+    }
+
+    #[test]
+    fn starting_a_session_needs_process_run_and_closing_one_does_not() {
+        let mut m = manifest();
+        m.permissions = Some(vec![Permission::SessionsLaunch]);
+        let err = admit_start(&m).unwrap_err();
+        assert_eq!(
+            (err.code.as_str(), err.message.as_str()),
+            (
+                "denied",
+                "x does not declare process.run, which sessions.launch needs"
+            )
+        );
+        assert_eq!(
+            admit_call(&m, "sessions.close"),
+            Ok(Permission::SessionsLaunch)
+        );
+        m.permissions
+            .get_or_insert_with(Vec::new)
+            .push(Permission::ProcessRun);
+        assert_eq!(admit_start(&m), Ok(()));
+    }
+
+    #[test]
+    fn answers_an_agents_request_only_as_a_person_clicks_or_with_process_run() {
+        let x = caller();
+        assert_eq!(admit_resolve(&x, true), Ok(()));
+        let err = admit_resolve(&x, false).unwrap_err();
+        assert_eq!(err.code, "denied");
+        assert!(err.message.contains("process.run"), "{}", err.message);
+        let commands = Caller {
+            runs_commands: true,
+            ..caller()
+        };
+        assert_eq!(admit_resolve(&commands, false), Ok(()));
+    }
+
+    #[test]
+    fn reaches_the_terminals_of_sessions_it_started_or_has_a_pane_on_with_process_run() {
+        let x = caller();
+        assert_eq!(admit_terminal(&x, "terminal.send", true, false), Ok(()));
+        for paned in [false, true] {
+            let err = admit_terminal(&x, "terminal.read", false, paned).unwrap_err();
+            assert_eq!(err.code, "denied");
+            assert!(err.message.contains("process.run"), "{}", err.message);
+        }
+        let commands = Caller {
+            runs_commands: true,
+            ..caller()
+        };
+        assert_eq!(
+            admit_terminal(&commands, "terminal.send", false, true),
+            Ok(())
+        );
+        let err = admit_terminal(&commands, "terminal.send", false, false).unwrap_err();
+        assert!(err.message.contains("no pane"), "{}", err.message);
+    }
+
+    #[test]
+    fn passes_only_the_ops_each_permission_lists() {
+        for op in WEB_OPS {
+            assert_eq!(admit_op("web.call", op), Ok(()));
+        }
+        for op in VIDEO_OPS {
+            assert_eq!(admit_op("video.call", op), Ok(()));
+        }
+        for (method, op) in [
+            ("web.call", "eval"),
+            ("web.call", "evaluate"),
+            ("web.call", "list"),
+            ("video.call", "load"),
+            ("video.call", "erase"),
+        ] {
+            let err = admit_op(method, op).unwrap_err();
+            assert_eq!(
+                (err.code.as_str(), err.message),
+                ("denied", format!("{method} has no op {op}"))
+            );
+        }
     }
 
     #[test]
