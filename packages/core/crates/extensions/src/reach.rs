@@ -185,16 +185,19 @@ impl Places {
             dir.parent().is_none() || self.home.as_deref().is_some_and(|h| h.starts_with(dir))
         };
         let inside = |set: &[PathBuf]| set.iter().any(|r| !holds_home(r) && path.starts_with(r));
-        let beside_here = path
-            .parent()
-            .is_some_and(|p| self.here.iter().any(|h| h == p));
+        // A shell in the home folder still shows what is below it; above home, only its own files.
+        let above_home = |dir: &Path| holds_home(dir) && self.home.as_deref() != Some(dir);
+        let reads_here = self.here.iter().any(|h| {
+            if above_home(h) {
+                path.parent() == Some(h.as_path())
+            } else {
+                path.starts_with(h)
+            }
+        });
         let open = match access {
             Access::Look => true,
             Access::Read => {
-                inside(&self.roots)
-                    || inside(&self.here)
-                    || beside_here
-                    || self.handed.iter().any(|h| h == path)
+                inside(&self.roots) || reads_here || self.handed.iter().any(|h| h == path)
             }
             Access::Write => inside(&self.roots) || inside(&self.here),
         };
@@ -517,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn reaches_the_folder_its_sessions_shell_is_in_but_not_the_home_folder() {
+    fn reaches_the_folder_its_sessions_shell_is_in_and_writes_below_home_only() {
         let d = disk();
         let mut p = places(&d);
         p.here = vec![d.home.join("elsewhere")];
@@ -535,7 +538,16 @@ mod tests {
             admit(&p, &d.home.join("notes.txt"), Access::Read, false),
             Ok(())
         );
-        assert!(admit(&p, &d.home.join("notes.txt"), Access::Write, false).is_err());
+        assert_eq!(admit(&p, &b, Access::Read, false), Ok(()));
+        for path in [d.home.join("notes.txt"), b.clone()] {
+            assert!(admit(&p, &path, Access::Write, false).is_err());
+        }
+        assert!(admit(&p, &d.home.join(".ssh/id_ed25519"), Access::Read, false).is_err());
+        p.here = vec![d.root.clone()];
+        assert_eq!(
+            admit(&p, &d.root.join("top.txt"), Access::Read, false),
+            Ok(())
+        );
         assert!(admit(&p, &b, Access::Read, false).is_err());
     }
 
@@ -588,7 +600,7 @@ mod tests {
         p.here = vec![d.home.clone()];
         let pkg = d.home.join("package.json");
         assert_eq!(admit(&p, &pkg, Access::Read, false), Ok(()));
-        assert!(admit(&p, &b, Access::Read, false).is_err());
+        assert!(admit(&p, &pkg, Access::Write, false).is_err());
         assert!(admit(&p, &d.home.join(".zshrc"), Access::Read, false).is_err());
     }
 

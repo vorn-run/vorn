@@ -218,7 +218,8 @@ async fn reached(
                 roots.push(t.project_path.clone());
                 roots.extend(t.worktree_path.clone());
                 if host.paned(&caller.extension, &t.id) {
-                    here.extend(t.shell_cwd.clone());
+                    let folder = t.shell_cwd.as_ref().or(t.worktree_path.as_ref());
+                    here.push(folder.unwrap_or(&t.project_path).clone());
                 }
             }
         });

@@ -437,9 +437,9 @@ folder that is not there, or a link that leads nowhere, is refused. An
 extension reads and writes the folders of Vorn's projects and their
 worktrees, its own files' folder, and the folder (and below) that the shell
 of a session it started or has a pane on is in; it reads a file a person
-chose for it in a file dialog, and the files directly in that shell's
-folder. The home folder, and any folder above it, never counts as a project
-or a shell's folder. `files.list` and `files.stat` answer names, sizes and
+chose for it in a file dialog. The home folder, and any folder above it,
+never counts as a project; a shell in the home folder lets the extension read
+below it but not write, and one above it only its own files. `files.list` and `files.stat` answer names, sizes and
 times anywhere. Reading or writing anywhere else needs `process.run`. Vorn's
 data, `~/.ssh` and other credential files and folders (cloud, registry and
 git credentials), what runs at login, and the shell's startup files
