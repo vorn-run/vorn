@@ -1864,6 +1864,44 @@ scriptContent = "echo built"
             .as_array()
             .is_some_and(|r| !r.is_empty()));
         assert_eq!(row(&work, "mine").await["enabled"], true);
+        let left: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| crate::atomic::is_temp(p))
+            .collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_watcher_passes_over_a_file_still_being_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let project = dir.path().join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        for name in [".build.toml.1-0.vorn-tmp", ".build.toml.vorn-tmp"] {
+            let tmp = folder.join(name);
+            assert!(crate::atomic::is_temp(&tmp), "{name}");
+            std::fs::write(&tmp, BUILD).unwrap();
+        }
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [] }]),
+                )
+                .unwrap();
+            })
+            .await;
+        work.look_at_files().await;
+        let listed = work.files_listed().await;
+        assert_eq!(listed, json!({ "files": [], "errors": [] }));
+        assert!(matches!(
+            work.call("workflow:get", &json!({ "id": "build" })).await,
+            Answer::Result(Value::Null) | Answer::Error(_)
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

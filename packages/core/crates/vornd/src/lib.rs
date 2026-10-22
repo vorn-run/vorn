@@ -2,6 +2,7 @@
 
 pub mod adapters;
 pub mod applink;
+mod atomic;
 pub mod boot;
 pub mod bridge;
 pub mod carry;
