@@ -20,8 +20,8 @@ fn every_tool_has_a_schema_entry_and_every_ref_resolves() {
             "{name} has no schema entry"
         );
     }
-    // The rest are the tools built-in extensions add, checked here before they get them.
-    assert_eq!(registry().tools.len(), listed.len() + hosted.len() + 14);
+    // The rest are the tools Connectors adds, checked here before it gets them.
+    assert_eq!(registry().tools.len(), listed.len() + hosted.len() + 7);
 }
 
 #[test]

@@ -115,8 +115,8 @@ fn owner_name() -> String {
         .unwrap_or_else(|| "owner".to_owned())
 }
 
-/// The workflows every install is given once: those the Workflows built-in
-/// ships as files.
+/// The workflows every install is given once, kept as files beside the
+/// workflow steps (`vorn_workflows::SEEDS`).
 fn seed_workflows() -> Vec<vorn_store::SeedWorkflow> {
     vorn_workflows::SEEDS
         .iter()

@@ -680,8 +680,11 @@ impl Extensions {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        if let Some(answered) = self.builtins.mcp_call(name, arguments).await {
+        if let Some(answered) = self.builtins.mcp_call(name, arguments.clone()).await {
             return Ok(answered);
+        }
+        if hosted::tasks::offers(name) && self.router.program(hosted::tasks::ID).is_some() {
+            return Ok(hosted::tasks::mcp_call(self, name, arguments).await);
         }
         let found = self
             .listed_tools()
@@ -1478,10 +1481,7 @@ impl Around for Wired {
         let Some(native) = self.native.upgrade() else {
             return Vec::new();
         };
-        builtin::Started::ALL
-            .into_iter()
-            .filter_map(|s| s.entry(&native))
-            .collect()
+        builtin::started(&native).into_iter().collect()
     }
 
     fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {

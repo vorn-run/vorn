@@ -1443,13 +1443,21 @@ mod tests {
             "effectId": "task-status/t1/todo/in_progress/now", "kind": "taskStatusChanged",
             "task": { "id": "t1", "title": "Moved", "projectName": "p" }, "from": "todo", "to": "in_progress"
         });
-        let args = vorn_ext_tasks::triggers::fire_args(&trigger).unwrap();
+        let args = json!({
+            "trigger": "taskStatusChanged",
+            "effectId": trigger["effectId"],
+            "fields": { "projectFilter": "p", "fromStatus": "todo", "toStatus": "in_progress" },
+            "context": {
+                "task": trigger["task"],
+                "trigger": { "type": "taskStatusChanged", "fromStatus": "todo", "toStatus": "in_progress" },
+            },
+        });
         assert_eq!(
-            work.fire_api(vorn_ext_tasks::ID, &args).await,
+            work.fire_api(vorn_workflows::TASKS_ID, &args).await,
             Ok(json!({ "started": 1 }))
         );
         assert_eq!(
-            work.fire_api(vorn_ext_tasks::ID, &args).await,
+            work.fire_api(vorn_workflows::TASKS_ID, &args).await,
             Ok(json!({ "started": 0, "repeat": true }))
         );
         let done = settled(&work, "moved", 1).await;
@@ -1459,7 +1467,7 @@ mod tests {
         // Only the extension that declares a trigger type fires it.
         assert!(work.fire_api("someone.else", &args).await.is_err());
         assert!(work
-            .fire_api(vorn_ext_tasks::ID, &json!({ "trigger": "nothing" }))
+            .fire_api(vorn_workflows::TASKS_ID, &json!({ "trigger": "nothing" }))
             .await
             .is_err());
     }

@@ -190,16 +190,6 @@ impl Daemon {
     pub fn start_work(&self) {
         use crate::native::work::{db::Db, host::TOPICS, Work};
         let native = &self.native;
-        if let Some(dir) = native.database().and_then(std::path::Path::parent) {
-            use crate::native::extensions::builtin::{switched_on, tasks::TasksBuiltin};
-            // The extension host's registry keeps the switch; until it starts, the file says.
-            let on = switched_on(
-                &dir.join("builtins.json"),
-                crate::native::extensions::builtin::tasks::ID,
-                true,
-            );
-            native.set_tasks(TasksBuiltin::new(native, on));
-        }
         let (Some(db_path), Some(addr)) = (
             native.database().map(std::path::Path::to_path_buf),
             self.listen.get().copied(),
@@ -330,8 +320,8 @@ impl Daemon {
         router_settings.blobs = Some(db_dir.join("extension-files"));
         // Tasks keeps its images where the board always kept them.
         router_settings.placed_blobs = vec![(
-            crate::native::extensions::builtin::tasks::ID.to_owned(),
-            db_dir.join(crate::native::extensions::builtin::tasks::IMAGES),
+            crate::native::extensions::hosted::tasks::ID.to_owned(),
+            db_dir.join(crate::native::extensions::hosted::tasks::IMAGES),
         )];
         router_settings.compiler = wasm_compiler();
         router_settings.preferences = Some(db_dir.join("extension-preferences.json"));
@@ -366,7 +356,6 @@ impl Daemon {
         }
         native.set_extensions(Arc::clone(&extensions));
         extensions.start();
-        crate::native::extensions::builtin::precompile(extensions.router());
     }
 
     /// Answers `vornd:spawn` from clients from now on, for tests.

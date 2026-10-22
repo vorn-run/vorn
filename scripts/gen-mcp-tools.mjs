@@ -6,9 +6,9 @@
 //                        a built-in extension adds, which go to its own
 //                        `generated/tools.json` (each built-in's manifest names
 //                        them under `[mcp.<name>]`)
-// - hosted.json          the tools of each extension the core routes to
-//                        (`browser:*`, `device:*`), by its id: vornd lists
-//                        them only while that extension is installed
+// - hosted.json          the tools of each extension Vorn ships as an install
+//                        (Browser, Device, Tasks, Workflows), by its id:
+//                        vornd lists them only while that extension is installed
 // - schemas.json         each tool's argument schema as the zod it is checked
 //                        with, so vornd can check arguments the same way and
 //                        word a refusal as zod does (JSON Schema keeps neither
@@ -16,7 +16,7 @@
 // - the reference describe_workflow_nodes answers with, split by who owns
 //   each part: the workflow format and the four kinds the engine walks
 //   itself in the workflow crate's `generated/reference.json`, and each node
-//   type's doc in `generated/nodes.json` of the built-in that declares it
+//   type's doc in the file of the extension that declares it
 //
 //   node scripts/gen-mcp-tools.mjs           write the files
 //   node scripts/gen-mcp-tools.mjs --check   fail if any is out of date
@@ -33,21 +33,29 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(root, 'packages/core/crates/mcp/generated')
 
 /** The built-ins that add tools: the crate each lives in, whose manifest names them. */
-const BUILTINS = ['packages/core/crates/connectors', 'packages/core/extensions/tasks']
+const BUILTINS = ['packages/core/crates/connectors']
 
-/** The extensions the core routes to, by id: the module that registers their tools and its function. */
+/**
+ * The extensions Vorn ships as installs, by id: each module that registers
+ * their tools, its function, and any tool it registers that stays the core's.
+ */
 const HOSTED = {
-  'vorn.browser': ['packages/mcp/src/tools/browser.ts', 'registerBrowserTools'],
-  'vorn.device': ['packages/mcp/src/tools/device.ts', 'registerDeviceTools']
+  'vorn.browser': [['packages/mcp/src/tools/browser.ts', 'registerBrowserTools']],
+  'vorn.device': [['packages/mcp/src/tools/device.ts', 'registerDeviceTools']],
+  'vorn.tasks': [['packages/mcp/src/tools/tasks.ts', 'registerTaskTools', ['get_my_context']]],
+  'vorn.workflows': [
+    ['packages/mcp/src/tools/workflows.ts', 'registerWorkflowTools'],
+    ['packages/mcp/src/tools/describe-nodes.ts', 'registerDescribeNodesTool']
+  ]
 }
 
-/** The built-in crate that declares each node type, from `crates/`; the rest are the engine's own. */
+/** The file, from `crates/`, each node type's doc goes to; the rest are the engine's own. */
 const NODE_OWNERS = {
-  launchAgent: 'workflows',
-  script: 'workflows',
-  httpRequest: 'workflows',
-  createTaskFromItem: '../extensions/tasks',
-  callConnectorAction: 'connectors'
+  launchAgent: 'workflows/generated/nodes.json',
+  script: 'workflows/generated/nodes.json',
+  httpRequest: 'workflows/generated/nodes.json',
+  createTaskFromItem: 'workflows/generated/tasks-nodes.json',
+  callConnectorAction: 'connectors/generated/nodes.json'
 }
 
 /** The reference, split: the engine's part with every type's place in the list, and each built-in's types. */
@@ -61,7 +69,7 @@ function splitReference(reference) {
       core[type] = doc
       continue
     }
-    const file = path.join('..', '..', owner, 'generated', 'nodes.json')
+    const file = path.join('..', '..', owner)
     out[file] = { ...(out[file] ?? {}), [type]: doc }
   }
   out[path.join('..', '..', 'workflow', 'generated', 'reference.json')] = {
@@ -309,10 +317,16 @@ async function generate() {
     own = own.filter((t) => !names.has(t.name))
   }
   const hosted = {}
-  for (const [id, [file, register]] of Object.entries(HOSTED)) {
+  for (const [id, modules] of Object.entries(HOSTED)) {
     const only = new McpServer({ name: 'vorn', version: '0.0.0' }, { capabilities: { tools: {} } })
-    ;(await load(file))[register](only)
-    const names = new Set((await listTools(only)).map((t) => t.name))
+    const kept = new Set()
+    for (const [file, register, core = []] of modules) {
+      ;(await load(file))[register](only)
+      for (const name of core) kept.add(name)
+    }
+    const names = new Set(
+      (await listTools(only)).map((t) => t.name).filter((name) => !kept.has(name))
+    )
     hosted[id] = own.filter((t) => names.has(t.name))
     own = own.filter((t) => !names.has(t.name))
   }

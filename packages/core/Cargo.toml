@@ -44,8 +44,6 @@ members = [
   "crates/extension-sdk",
   "crates/guest-build",
   "crates/extensions/tests/probe",
-  "extensions/tasks",
-  "extensions/workflows",
   "../../examples/extensions/turns",
   "../../examples/extensions/agent-footer",
   "bench/scale",

@@ -1,15 +1,21 @@
 id = "vorn.workflows"
 name = "Workflows"
-version = "0.9.0"
+version = "1.0.0"
 api = "vorn:extension@1.0"
 publisher = "Vorn"
-description = "Workflows: the view with their runs and the editor, where each step is a card on a canvas; the steps and triggers they are built from (agents, scripts and HTTP requests; manual runs, schedules, webhooks and a session coming back); Run workflow in the grid's, a card's and a terminal's menus; and approval gates waiting for you beside agents asking. Off, a workflow stops at those steps and its schedules and webhooks do not fire; the workflows are kept."
+description = "Workflows: the view with their runs and the editor, where each step is a card on a canvas; the steps and triggers they are built from (agents, scripts and HTTP requests; manual runs, schedules, webhooks and a session coming back); Run workflow in the grid's, a card's and a terminal's menus; and approval gates waiting for you beside agents asking."
+
+[icon]
+view_box = "0 0 24 24"
+paths = ["M3 3h7v7H3z", "M14 14h7v7h-7z", "M5.5 10h2v4.5H14v2H5.5z"]
 
 [declares]
 uses = ["tasks.read", "tasks.write", "sessions.read", "sessions.launch", "workflows.read", "workflows.write", "process.run"]
 
 [service]
 component = "workflows.wasm"
+# Publishes the view's rows and the gates waiting as Vorn starts.
+start = "refresh"
 events = ["workflow.changed", "workflow.gates"]
 
 [[contributes.views]]
@@ -105,15 +111,3 @@ id = "webhook"
 title = "Webhook"
 icon = "globe"
 timing = "webhook"
-
-[[contributes.workflows]]
-id = "default-task-workflow"
-title = "Default Task Workflow"
-description = "An agent picks up a task moved to In Progress."
-file = "workflows/default-task.toml"
-
-[[contributes.workflows]]
-id = "dev-server-on-restore"
-title = "Bring the dev server back"
-description = "The dev server comes back with its session; off until you turn it on."
-file = "workflows/dev-server.toml"

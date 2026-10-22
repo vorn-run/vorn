@@ -1,13 +1,13 @@
 //! The node types and trigger types the engine's registry holds, as vornd
-//! fills it: the built-ins' (Workflow steps and triggers, Tasks and
-//! Connectors) and those of every installed extension that declares some,
-//! declared while each is on and unavailable while it is off. A step of an
-//! extension's type is run by a call to it: the built-ins answer in vornd,
-//! a program over its pipe.
+//! fills it: Connectors' (built in) and those of every installed extension
+//! that declares some (Workflows and Tasks among them), declared while each
+//! is on and unavailable while it is off or gone. A step of an extension's
+//! type is run by a call to it: Connectors answers in vornd, an install
+//! through the router.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use serde_json::{Map, Value};
 use tracing::warn;
@@ -19,11 +19,13 @@ use super::host::VorndHost;
 use crate::native::extensions::builtin::switched_on;
 use crate::native::Native;
 
-static WORKFLOWS: LazyLock<Manifest> = LazyLock::new(vorn_workflows::declare::manifest);
-
-/// The Workflows built-in's manifest, which its calls are held to.
-pub fn workflows_manifest() -> Manifest {
-    WORKFLOWS.clone()
+/// The installed Workflows extension's manifest, which its calls are held to.
+pub fn workflows_manifest(native: &Native) -> Result<Manifest, String> {
+    native
+        .extensions()
+        .and_then(|ext| ext.router().program(vorn_workflows::ID))
+        .map(|pack| (*pack.manifest).clone())
+        .ok_or_else(|| crate::native::extensions::hosted::not_installed("Workflows"))
 }
 
 /// One extension that may declare workflow types.
@@ -35,9 +37,10 @@ struct Provider {
     on: bool,
 }
 
-/// Whether built-in `id` is on: as the extension host's registry says, or
+/// Whether Connectors is on: as the extension host's registry says, or
 /// before it starts, as the switches file does.
-fn builtin_on(native: &Native, id: &str) -> bool {
+fn connectors_on(native: &Native) -> bool {
+    let id = vorn_connectors::builtin::ID;
     if let Some(ext) = native.extensions() {
         return ext.builtins().is_on(id);
     }
@@ -47,52 +50,60 @@ fn builtin_on(native: &Native, id: &str) -> bool {
         .is_none_or(|dir| switched_on(&dir.join("builtins.json"), id, true))
 }
 
-fn docs(text: &str) -> Map<String, Value> {
-    serde_json::from_str(text).unwrap_or_default()
-}
-
-fn parsed(text: &str) -> Option<Manifest> {
-    file::parse_builtin(text)
-        .map_err(|err| warn!(%err, "a built-in's manifest does not read"))
-        .ok()
-}
-
-/// Every extension that declares workflow types, the built-ins first.
+/// Every extension that declares workflow types: Connectors, then
+/// Workflows and Tasks, so the types Vorn ships stay theirs, then the rest.
 fn providers(native: &Native) -> Vec<Provider> {
     let mut out = Vec::new();
-    for (text, node_docs) in [
-        (vorn_workflows::MANIFEST, vorn_workflows::NODE_DOCS),
-        (
-            crate::native::extensions::builtin::tasks::MANIFEST,
-            crate::native::extensions::builtin::tasks::NODE_DOCS,
-        ),
-        (
-            vorn_connectors::builtin::MANIFEST,
-            vorn_connectors::builtin::NODE_DOCS,
-        ),
-    ] {
-        let Some(manifest) = parsed(text) else {
-            continue;
-        };
-        let on = builtin_on(native, &manifest.id);
-        out.push(Provider {
+    match file::parse_builtin(vorn_connectors::builtin::MANIFEST) {
+        Ok(manifest) => out.push(Provider {
             manifest,
-            docs: docs(node_docs),
+            docs: serde_json::from_str(vorn_connectors::builtin::NODE_DOCS).unwrap_or_default(),
             dir: None,
-            on,
-        });
+            on: connectors_on(native),
+        }),
+        Err(err) => warn!(%err, "Connectors' manifest does not read"),
+    }
+    #[cfg(test)]
+    if native.extensions().is_none() {
+        out.extend(shipped_for_tests());
     }
     if let Some(ext) = native.extensions() {
-        for (manifest, dir) in ext.workflow_providers() {
+        let mut installed = ext.workflow_providers();
+        let rank = |id: &str| [vorn_workflows::ID, vorn_workflows::TASKS_ID]
+            .iter()
+            .position(|first| *first == id)
+            .unwrap_or(usize::MAX);
+        installed.sort_by_key(|(m, _)| rank(&m.id));
+        for (manifest, dir) in installed {
             out.push(Provider {
+                docs: vorn_workflows::docs_of(&manifest.id),
                 manifest,
-                docs: Map::new(),
                 dir: Some(dir),
                 on: true,
             });
         }
     }
     out
+}
+
+/// Workflows and Tasks as if installed, for the engine's tests here, which run without an extension host.
+#[cfg(test)]
+fn shipped_for_tests() -> Vec<Provider> {
+    [
+        include_str!("../../../../workflows/tests/fixtures/workflows.toml"),
+        include_str!("../../../../workflows/tests/fixtures/tasks.toml"),
+    ]
+    .into_iter()
+    .map(|text| {
+        let manifest = file::parse_builtin(text).expect("a fixture manifest reads");
+        Provider {
+            docs: vorn_workflows::docs_of(&manifest.id),
+            manifest,
+            dir: None,
+            on: true,
+        }
+    })
+    .collect()
 }
 
 /// Declares every provider into `registry`, the built-ins first so their
@@ -137,10 +148,6 @@ pub async fn run_node(
     node_type: &str,
     request: Value,
 ) -> Result<Value, String> {
-    if provider == crate::native::extensions::builtin::tasks::ID {
-        let tasks = native.tasks().cloned().ok_or("this vornd keeps no tasks")?;
-        return tasks.run_node(node_type, &request).await;
-    }
     if provider == vorn_connectors::builtin::ID {
         let connectors = native
             .connectors()

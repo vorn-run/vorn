@@ -838,7 +838,7 @@ mod tests {
     #[test]
     fn paths_are_normalised_with_slashes() {
         assert_eq!(
-            normalize(Path::new("extensions/tasks/../../crates/mcp")),
+            normalize(Path::new("examples/x/../../crates/mcp")),
             "crates/mcp"
         );
     }

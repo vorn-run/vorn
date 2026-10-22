@@ -47,9 +47,17 @@ fn every_listed_tool_is_implemented() {
             "{name} is not implemented: {said}"
         );
     }
-    assert_eq!(crate::tool_count(), 35);
+    assert_eq!(crate::tool_count(), 23);
     let hosted: Vec<(&str, usize)> = crate::hosted_tools().map(|(id, t)| (id, t.len())).collect();
-    assert_eq!(hosted, [("vorn.browser", 11), ("vorn.device", 13)]);
+    assert_eq!(
+        hosted,
+        [
+            ("vorn.browser", 11),
+            ("vorn.device", 13),
+            ("vorn.tasks", 7),
+            ("vorn.workflows", 12)
+        ]
+    );
 }
 
 /// The task, workflow and config methods the calls so far wrote through.

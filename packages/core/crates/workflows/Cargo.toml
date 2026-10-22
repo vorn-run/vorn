@@ -6,7 +6,7 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 publish = false
-description = "The Workflows built-in for Vorn: the steps and triggers workflows are built from (agents, scripts, HTTP requests; manual runs, schedules, webhooks and restored sessions), declared on the public extension API and run by the core's engine"
+description = "The steps and triggers Vorn's workflows are built from (agents, scripts, HTTP requests; manual runs, schedules, webhooks and restored sessions), declared by the Workflows extension and run by the core's engine"
 
 [dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -23,6 +23,5 @@ regex = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "test-util"] }
 vorn-protocol = { path = "../protocol" }
 serde_json = { version = "1", features = ["preserve_order"] }
-# The node types Tasks and Connectors declare run in the reference cases beside the built-in's own.
+# The node types Connectors declares run in the reference cases beside Workflows' own.
 vorn-connectors = { path = "../connectors" }
-vorn-ext-tasks = { path = "../../extensions/tasks" }
