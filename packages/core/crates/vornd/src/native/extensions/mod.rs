@@ -1010,6 +1010,23 @@ impl Extensions {
         self.hosts.stop_extension(extension_id).await;
     }
 
+    /// Runs the start hook of `id` when it is installed and its service is not
+    /// running: an install from the catalog reaches vornd only as a changed pack.
+    fn start_if_stopped(&self, id: &str) {
+        if self.router.program(id).is_none()
+            || self
+                .router
+                .lifecycle()
+                .running()
+                .iter()
+                .any(|k| k.extension == id)
+        {
+            return;
+        }
+        let (router, id) = (Arc::clone(&self.router), id.to_owned());
+        tokio::spawn(async move { router.call_hook(&id, Hook::Start).await });
+    }
+
     fn kill_terminals(&self, closed: &[Grant]) {
         for terminal in closed.iter().filter_map(|g| g.terminal_id.as_deref()) {
             self.around.kill_terminal(terminal);
@@ -1241,6 +1258,7 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
         for id in &moved {
             debug!("[extensions] pack {id} changed");
             extensions.pack_changed(id).await;
+            extensions.start_if_stopped(id);
         }
         reconcile(&extensions, &mut known, !moved.is_empty());
     }
