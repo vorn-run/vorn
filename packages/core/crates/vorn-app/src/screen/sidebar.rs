@@ -139,26 +139,6 @@ fn header(s: &Screen<'_>) -> El {
             false,
         ));
     let bar = draggable(s, div().col().shrink0().child(bar));
-    let modes = [
-        (
-            MainView::Sessions,
-            "monitor",
-            "Sessions",
-            format!("{m}S", m = mod_label()),
-        ),
-        (
-            MainView::Tasks,
-            "list-todo",
-            "Tasks",
-            format!("{m}T", m = mod_label()),
-        ),
-        (
-            MainView::Workflows,
-            "workflow",
-            "Workflows",
-            format!("{m}\u{21e7}W", m = mod_label()),
-        ),
-    ];
     let mut row = div()
         .row()
         .items_center()
@@ -166,9 +146,9 @@ fn header(s: &Screen<'_>) -> El {
         .px(12.0)
         .py(8.0)
         .role(Role::TabList, "View mode");
-    for (view, name, label, keys) in modes {
-        let on = s.st.view == view;
-        let id = s.acts.on("sidebar-mode", Act::View(view));
+    for b in super::chrome::top_buttons(s) {
+        let (on, name, label, keys) = (b.on, b.icon.as_str(), b.label.as_str(), b.keys);
+        let id = s.acts.on("sidebar-mode", b.act);
         let hot = s.ui.hover(id);
         let fg = if on {
             c(look::WHITE)
@@ -195,7 +175,7 @@ fn header(s: &Screen<'_>) -> El {
         if on {
             b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
         }
-        row = row.child(tooltip(s.ui, b, id, label, Some(&keys)));
+        row = row.child(tooltip(s.ui, b, id, label, keys.as_deref()));
     }
     // `border-b` under the whole header, the view pills included.
     div()
@@ -1691,7 +1671,7 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
     let body = match s.st.view {
         MainView::Workflows => super::workflows::sidebar(s),
         MainView::Tasks => tasks_projects(s),
-        MainView::Sessions => div()
+        MainView::Sessions | MainView::Extension => div()
             .col()
             .child(sessions(s))
             .child_if(super::points::sidebar(s)),

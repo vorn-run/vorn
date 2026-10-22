@@ -173,7 +173,9 @@ in, so their tree is asked for with that place as `surface.scope`: the
 session a pane or a shell's commands draw for, the row a card draws for. Its
 events carry the same `scope`, and the `width` its place drew at. A tree with
 a scope is asked for again when a row whose `id` is that scope changes, in
-any of the extension's collections.
+any of the extension's collections; a clear of any collection asks for
+every scoped tree again. A pane's tree is offered in its card's menu, and
+`sessions.get` on its scope gives the card's `projectName`.
 
 - `[[contributes.cards]]` names `rows`: each row of that collection is a
   card in the grid, after the session its `session` field names, called by
@@ -294,12 +296,76 @@ a page at a time, windows them, drags them between columns and opens them.
 
 `examples/extensions/turns` draws a tree in every place, and
 `examples/extensions/agent-footer` a card footer. Vorn's own Tasks
-(`packages/core/extensions/tasks`) and Workflow editor
-(`packages/core/extensions/workflow-editor`) draw their main views this way;
+(`packages/core/extensions/tasks`) and Workflows
+(`packages/core/extensions/workflows`) draw their main views this way;
 Files (`packages/core/extensions/files`) draws its pane and cards, Shell
 blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
 (`packages/core/extensions/browser`) a session's tabs over its page, and
 the Device (`packages/core/extensions/device`) a session's simulator.
+
+## Top bar buttons
+
+`[[contributes.views]]` adds a button to the top bar, after Sessions, that
+opens the extension's own main view, drawn from its tree:
+
+```toml
+[[contributes.views]]
+id = "board"
+title = "Board"
+icon = "layout-grid"      # a Lucide icon name
+key = "Mod+Shift+B"       # optional: the key that opens it
+tree = true
+```
+
+The title is the button's tooltip, with its key. Vorn's own extensions'
+buttons come first, in a fixed order (Tasks, then Workflows), then each
+installed extension's, by extension name. The install sheet
+lists the button under Top bar. A button shows only while its extension is
+on: switching the extension off, or removing it, takes the button and its key
+away at once, and switching it on brings them back, without a restart. A
+`when` rule applies to it as to any contribution.
+
+`button = { setting = ["top_bar"] }` lets the user hide the button alone,
+through one of the extension's `bool` preferences (below): the button shows
+while any of them is on. Hidden, the view still opens from its key and from
+the command palette, which lists every view as "Open <title> View". Tasks
+and Workflows each offer "Show in the top bar", on by default, this way.
+
+## Preferences
+
+An extension declares its own settings under `[[contributes.preferences]]`.
+Each has an `id` unique in the manifest, a `title`, an optional
+`description`, a `type` and a `default`:
+
+```toml
+[[contributes.preferences]]
+id = "top_bar"
+title = "Show in the top bar"
+description = "Shows the Board button in the top bar."
+type = "bool"
+default = true
+
+[[contributes.preferences]]
+id = "sort"
+title = "Sort by"
+type = "choice"
+default = "age"
+options = [{ id = "age", title = "Age" }, { id = "name", title = "Name" }]
+```
+
+`bool` is a switch; `choice` is one of its `options`, and its `default` is
+one of their ids. They show under Settings on the extension's page, with
+their titles and descriptions, and a change applies at once, without a
+restart. An extension reads its values with `rows("preferences")`: one row
+`{id, value}` per preference, the default until the user changes it. When
+one changes, its trees are asked for again and its contributions listed
+again, as when any of its collections changes.
+
+A contribution shows only while the `bool` preferences it names are on:
+`when = { setting = ["compact"] }` (any of them, if it names several). Settings
+are not activation rules, so `[activates]` has no `setting`; a `when.setting`
+or `button.setting` that names no `bool` preference is refused at install
+with its field.
 
 ## The new API
 

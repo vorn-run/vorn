@@ -854,7 +854,8 @@ pub fn describe_contributions(contributes: Option<&Value>) -> String {
 
 /// Where each place an extension adds to is grouped on its page, with the
 /// noun an untitled or titled entry reads with (none for a sidebar section or a command).
-const PLACES: [(&str, &str, &str); 14] = [
+const PLACES: [(&str, &str, &str); 15] = [
+    ("Top bar", "views", "button"),
     ("Sidebar", "sidebar", ""),
     ("Cards", "badges", "badge"),
     ("Cards", "cardFooters", "footer"),

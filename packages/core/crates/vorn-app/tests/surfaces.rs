@@ -17,9 +17,7 @@ use support::{add_project, connect, key, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::screen::menus::MENU;
-use vorn_app::screen::{
-    intent_id, term_id, MainView, PROJECT_NAME, PROJECT_PATH, VIEWS, VIEW_ORDER,
-};
+use vorn_app::screen::{intent_id, term_id, MainView, PROJECT_NAME, PROJECT_PATH, VIEWS};
 use vorn_app::state::{Dialog, Filter, LayoutMode, MenuKind};
 use vorn_app::system::Pick;
 use vorn_app::ui::{item_id, mods, Id};
@@ -560,7 +558,8 @@ fn cards_minimize_to_the_dock_expand_and_switch_views() {
     // With the sidebar closed, the top bar's view pills switch the view.
     shot.click(&mut app, control("sidebar", Act::ToggleSidebar));
     assert!(!app.st.sidebar);
-    for (i, view) in VIEW_ORDER.iter().enumerate().rev() {
+    let order = [MainView::Sessions, MainView::Tasks, MainView::Workflows];
+    for (i, view) in order.iter().enumerate().rev() {
         shot.click(&mut app, item_id(VIEWS, i));
         assert_eq!(app.st.view, *view);
     }

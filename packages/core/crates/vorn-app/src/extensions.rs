@@ -150,6 +150,24 @@ impl Extensions {
         out
     }
 
+    /// The card menu's rows for the built-ins' tree panes the host does not
+    /// place itself, as listed now: a setting or switch turned off takes its row away.
+    pub fn builtin_items(&self, session: &str, points: &crate::points::Points) -> Vec<PaneItem> {
+        let showing = self.panes.get(session);
+        (points.all.iter())
+            .filter(|p| p.builtin && p.tree && p.kind == crate::points::kind::PANES)
+            .filter(|p| !crate::panes::PLACED.contains(&(p.extension.as_str(), p.id.as_str())))
+            .map(|p| PaneItem {
+                extension_id: p.extension.clone(),
+                pane_id: p.id.clone(),
+                title: p.title.clone(),
+                extension_name: p.extension_name.clone(),
+                icon: None,
+                open: showing.is_some_and(|o| o.extension_id == p.extension && o.pane_id == p.id),
+            })
+            .collect()
+    }
+
     /// Whether `session` may keep its pane under activation `states`: the
     /// host drops the grants of an extension that no longer shows there.
     pub fn still_shown(&self, session: &str, states: &[Value]) -> bool {
@@ -185,7 +203,7 @@ impl Extensions {
 /// What a template pane's nonce starts with: the client draws it, so vornd holds no grant.
 pub const VIEW_NONCE: &str = "view:";
 
-/// The point key of a template pane, when `p` is one.
+/// The key of a template pane's tree, drawn for its card's session, when `p` is one.
 pub fn view_key(p: &OpenPane) -> Option<String> {
     p.nonce.strip_prefix(VIEW_NONCE).map(str::to_owned)
 }

@@ -26,7 +26,7 @@ use vorn_workflow::{Host, Step};
 pub const ID: &str = "vorn.workflows";
 
 /// Its manifest: the node types and trigger types it declares.
-pub const MANIFEST: &str = include_str!("../vorn-extension.toml");
+pub const MANIFEST: &str = include_str!("../../../extensions/workflows/vorn-extension.toml");
 
 /// What `describe_workflow_nodes` tells of its node types, by id.
 pub const NODE_DOCS: &str = include_str!("../generated/nodes.json");
@@ -37,12 +37,12 @@ pub const SEEDS: &[(&str, &str, &str)] = &[
     (
         "workflows/default-task.toml",
         "hasSeededDefaultTaskWorkflow",
-        include_str!("../workflows/default-task.toml"),
+        include_str!("../../../extensions/workflows/workflows/default-task.toml"),
     ),
     (
         "workflows/dev-server.toml",
         "hasSeededDevServerWorkflow",
-        include_str!("../workflows/dev-server.toml"),
+        include_str!("../../../extensions/workflows/workflows/dev-server.toml"),
     ),
 ];
 

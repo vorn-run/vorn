@@ -78,7 +78,7 @@ fn a_theme_installs_from_git_and_is_listed() {
         theme.get(vorn_theme::Token::Accent),
         vorn_theme::Rgba8::rgb(0xd08770)
     );
-    let listed = points::listed(&pack.manifest);
+    let listed = points::listed(&pack.manifest, &serde_json::Map::new());
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["kind"], "themes");
     assert_eq!(listed[0]["appearance"], "dark");

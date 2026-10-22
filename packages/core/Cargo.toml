@@ -48,7 +48,7 @@ members = [
   "extensions/worktrees",
   "extensions/widget",
   "extensions/tasks",
-  "extensions/workflow-editor",
+  "extensions/workflows",
   "extensions/blocks",
   "extensions/files",
   "extensions/browser",

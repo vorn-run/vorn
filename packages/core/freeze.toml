@@ -65,7 +65,7 @@
 # Feature crates still in the workspace, each to move to the extensions repo.
 [exceptions.crates]
 "crates/connectors" = "the Connectors built-in on the public API; it starts before the extension host and serves the app from the first moment"
-"crates/workflows" = "the Workflows built-in's node and trigger types; its steps run in vornd by the engine"
+"crates/workflows" = "the Workflows built-in's node and trigger types and seeds; its steps run in vornd by the engine"
 "crates/adapters" = "the agent adapter packages, data only, read by vornd's adapters"
 
 # Modules a host keeps for a built-in: its registry entry and route.
@@ -78,7 +78,6 @@
 "crates/vornd/src/native/extensions/builtin/ssh.rs" = "the SSH component's route; hosts and keys stay the core's"
 "crates/vornd/src/native/extensions/builtin/tasks.rs" = "the Tasks component's routes for clients' writes, MCP tools and its workflow step"
 "crates/vornd/src/native/extensions/builtin/wasm.rs" = "the shipped components compiled into vornd"
-"crates/vornd/src/native/extensions/builtin/workflows.rs" = "the Workflows built-in's switch over the engine's registry"
 "crates/vornd/src/native/extensions/builtin/widget_tiers.rs" = "a measurement of the Widget built-in, ignored by default"
 
 # Built-ins whose Cargo.toml reaches past the SDK.
@@ -97,13 +96,14 @@
 "crates/vorn-app/src/plugins.rs#vorn.worktrees" = "switching Worktrees off says the worktrees stay"
 "crates/vorn-app/src/prompt.rs#vorn.blocks" = "the prompt's menu is answered by Shell blocks"
 "crates/vorn-app/src/screen/tasks/board.rs#vorn.tasks" = "the board is the Tasks built-in's main view"
-"crates/vorn-app/src/workflows.rs#vorn.workflow-editor" = "the editor's view, menu items and waiting gates are drawn here"
+"crates/vorn-app/src/workflows.rs#vorn.workflows" = "Workflows' view, menu items and waiting gates are drawn here"
 "crates/vornd/src/endpoint.rs#builtin::tasks" = "Tasks' switch decides whether its images are served before the host starts"
 "crates/vornd/src/endpoint.rs#vorn_connectors" = "Connectors starts before the extension host, so its switch is read first"
 "crates/vornd/src/native/credential.rs#vorn_connectors" = "credentials kept in the vault are marked as Connectors marks them"
+"crates/vornd/src/native/extensions/builtin/mod.rs#vorn_workflows" = "the old Workflow editor's switch folds into Workflows' once"
 "crates/vornd/src/native/extensions/mod.rs#builtin::connectors" = "the registry starts the Connectors built-in"
 "crates/vornd/src/native/extensions/mod.rs#builtin::tasks" = "the registry starts the Tasks built-in"
-"crates/vornd/src/native/extensions/mod.rs#builtin::wasm" = "the registry starts the Workflow editor in its Settings place"
+"crates/vornd/src/native/extensions/mod.rs#builtin::wasm" = "the registry starts Workflows in its Settings place"
 "crates/vornd/src/native/extensions/mod.rs#builtin::agents" = "the registry starts the agent adapters' switches"
 "crates/vornd/src/native/extensions/world.rs#vorn_connectors" = "the bridge's HTTP fetch is Connectors' client"
 "crates/vornd/src/native/extensions/world.rs#builtin::tasks" = "Tasks is lent the board's own tables"

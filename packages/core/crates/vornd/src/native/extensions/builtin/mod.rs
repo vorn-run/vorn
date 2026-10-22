@@ -13,7 +13,6 @@ pub mod device;
 pub mod ssh;
 pub mod tasks;
 pub mod wasm;
-pub mod workflows;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -52,9 +51,10 @@ impl Api {
         self.router.publish(&self.caller, collection, ops);
     }
 
-    /// The rows it published to `collection`.
+    /// The rows it published to `collection`, or its preferences for
+    /// [`vorn_extensions::preferences::COLLECTION`].
     pub fn rows(&self, collection: &str) -> Vec<Value> {
-        self.router.rows(&self.caller.extension, collection)
+        self.router.rows_of(&self.manifest, collection)
     }
 }
 
@@ -105,10 +105,7 @@ pub fn precompile(router: &Arc<Router>) {
     }
     let shipped: Vec<(&'static str, &'static [u8])> = [
         (tasks::MANIFEST, tasks::WASM),
-        (
-            wasm::workflow_editor().manifest,
-            wasm::workflow_editor().wasm,
-        ),
+        (wasm::workflows().manifest, wasm::workflows().wasm),
         (wasm::widget().manifest, wasm::widget().wasm),
         (wasm::worktrees().manifest, wasm::worktrees().wasm),
         (wasm::blocks().manifest, wasm::blocks().wasm),
@@ -146,6 +143,20 @@ pub fn switched_on(file: &std::path::Path, id: &str, default: bool) -> bool {
         .and_then(|b| serde_json::from_slice::<BTreeMap<String, bool>>(&b).ok())
         .and_then(|m| m.get(id).copied())
         .unwrap_or(default)
+}
+
+/// The id Workflows' view, menus and gates went by before they joined Workflows.
+const OLD_WORKFLOW_EDITOR: &str = "vorn.workflow-editor";
+
+/// Folds the old Workflow editor's switch into Workflows', once: the merged
+/// one is off only if both were off. Says whether `on` changed.
+fn merge_workflow_switches(on: &mut BTreeMap<String, bool>) -> bool {
+    let Some(editor) = on.remove(OLD_WORKFLOW_EDITOR) else {
+        return false;
+    };
+    let workflows = on.get(vorn_workflows::ID).copied().unwrap_or(true);
+    on.insert(vorn_workflows::ID.to_owned(), workflows || editor);
+    true
 }
 
 struct Entry {
@@ -192,7 +203,6 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
         Arc::new(wasm::blocks()),
         Arc::new(wasm::worktrees()),
         Arc::new(wasm::widget()),
-        Arc::new(workflows::Workflows),
         Arc::new(artifacts::Artifacts),
     ];
     all.extend(started);
@@ -232,10 +242,16 @@ impl Builtins {
                 })
             })
             .collect();
-        let on = std::fs::read(&file)
+        let mut on = std::fs::read(&file)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
+        if merge_workflow_switches(&mut on) {
+            let saved = serde_json::to_vec_pretty(&on).unwrap_or_default();
+            if let Err(err) = std::fs::write(&file, saved) {
+                warn!("[extensions] could not keep the built-ins' switches: {err}");
+            }
+        }
         Builtins {
             entries,
             on: Mutex::new(on),
@@ -260,6 +276,11 @@ impl Builtins {
     /// Whether `id` names a built-in, on or off.
     pub fn has(&self, id: &str) -> bool {
         self.entry(id).is_some()
+    }
+
+    /// Built-in `id`'s manifest, on or off.
+    pub fn manifest(&self, id: &str) -> Option<Arc<Manifest>> {
+        self.entry(id).map(|e| Arc::clone(&e.manifest))
     }
 
     /// Starts every built-in that is on.
@@ -352,6 +373,7 @@ impl Builtins {
                         "declares": m.declares,
                         "service": m.service,
                         "on": self.is_on(e.id()),
+                        "preferences": self.router.listed_preferences(m),
                         "running": running.iter().any(|k| k.extension == e.id()),
                     })
                 })
@@ -363,7 +385,8 @@ impl Builtins {
     pub fn contributions(&self) -> Vec<Value> {
         let mut out = Vec::new();
         for e in self.entries.iter().filter(|e| self.is_on(e.id())) {
-            for mut c in points::listed(&e.manifest) {
+            let settings = self.router.preferences(&e.manifest);
+            for mut c in points::listed(&e.manifest, &settings) {
                 c["extensionName"] = json!(e.manifest.name);
                 c["builtin"] = json!(true);
                 out.push(c);

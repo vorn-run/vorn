@@ -102,7 +102,7 @@ fn a_folder_of_ones_own_workflows_reads_back_unchanged() {
 fn every_shipped_and_documented_workflow_file_reads() {
     let mut files: Vec<(String, String)> = Vec::new();
     for dir in [
-        "packages/core/crates/workflows/workflows",
+        "packages/core/extensions/workflows/workflows",
         "examples/extensions/shout/workflows",
     ] {
         for entry in std::fs::read_dir(repo(dir)).unwrap().flatten() {

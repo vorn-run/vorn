@@ -46,11 +46,6 @@ pub const MIN_CARD: (f32, f32) = (320.0, 280.0);
 
 pub const PLACEHOLDER: &str = "Describe your task...";
 pub const PICK_PROJECT: &str = "Select a project to get started";
-pub const PILLS: [(&str, &str); 3] = [
-    ("monitor", "Sessions"),
-    ("list-todo", "Tasks"),
-    ("workflow", "Workflows"),
-];
 
 pub const LOGO_PNG: &[u8] = include_bytes!("../assets/vorn-logo.png");
 /// The logo's aspect, width over height.

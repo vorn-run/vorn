@@ -691,3 +691,73 @@ async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
     until(|| s.core.shut_down() == ["u1", "u2", "u3"]).await;
     assert!(s.router.rows(device::ID, "open").is_empty());
 }
+
+#[test]
+fn the_old_workflow_editor_switch_folds_into_workflows_once() {
+    // (Workflows as kept, the old editor as kept, Workflows after.)
+    let cases = [
+        (Some(true), true, true),
+        (Some(false), true, true),
+        (Some(true), false, true),
+        (Some(false), false, false),
+        (None, false, true),
+    ];
+    for (workflows, editor, merged) in cases {
+        let s = setup();
+        let file = s.dir.path().join("builtins.json");
+        let mut kept = serde_json::Map::new();
+        if let Some(on) = workflows {
+            kept.insert(vorn_workflows::ID.into(), json!(on));
+        }
+        kept.insert(OLD_WORKFLOW_EDITOR.into(), json!(editor));
+        std::fs::write(&file, Value::Object(kept).to_string()).unwrap();
+
+        let started: Vec<Arc<dyn Builtin>> = vec![Arc::new(wasm::workflows())];
+        let b = Builtins::new(Arc::clone(&s.router), file.clone(), started);
+        assert_eq!(
+            b.is_on(vorn_workflows::ID),
+            merged,
+            "{workflows:?} {editor}"
+        );
+        let saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(saved.get(OLD_WORKFLOW_EDITOR), None);
+        assert_eq!(saved[vorn_workflows::ID], json!(merged));
+    }
+}
+
+#[test]
+fn tasks_and_workflows_buttons_follow_their_top_bar_setting() {
+    let workflows = vorn_extensions::manifest::file::parse_builtin(wasm::workflows().manifest())
+        .expect("the Workflows manifest");
+    let s = setup();
+    for (m, view) in [(tasks::manifest(), "board"), (workflows, "workflows")] {
+        let listed = |on: bool| {
+            let settings = serde_json::Map::from_iter([("top_bar".to_owned(), json!(on))]);
+            vorn_extensions::points::listed(&m, &settings)
+        };
+        let button = |list: &[Value]| {
+            let v = list
+                .iter()
+                .find(|p| p["kind"] == "views" && p["id"] == view);
+            v.map(|v| v["button"].clone())
+        };
+        assert_eq!(button(&listed(true)), Some(json!(true)), "{view}");
+        assert_eq!(
+            button(&listed(false)),
+            Some(json!(false)),
+            "{view} stays a view"
+        );
+        let defaults = s.router.preferences(&m);
+        assert_eq!(
+            defaults.get("top_bar"),
+            Some(&json!(true)),
+            "{view} on by default"
+        );
+    }
+    // The Tasks pane is in the card menu whatever the top bar shows.
+    let m = tasks::manifest();
+    let off = serde_json::Map::from_iter([("top_bar".to_owned(), json!(false))]);
+    assert!(vorn_extensions::points::listed(&m, &off)
+        .iter()
+        .any(|p| p["kind"] == "panes" && p["id"] == "tasks"));
+}

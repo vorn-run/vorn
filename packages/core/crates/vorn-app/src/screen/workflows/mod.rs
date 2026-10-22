@@ -303,7 +303,7 @@ fn dot_status(run: &Value) -> &str {
     }
 }
 
-/// The Workflows view: the Workflow editor's tree, its `graph` the view the
+/// The Workflows view: Workflows' tree, its `graph` the view the
 /// app draws; the view itself until the tree has come, or when it cannot be
 /// drawn, as the canvas is the app's whatever the extension answers.
 pub fn view(s: &Screen<'_>) -> El {
@@ -333,7 +333,7 @@ pub fn view(s: &Screen<'_>) -> El {
     }
 
     let point = s.st.points.find(
-        crate::workflows::EDITOR,
+        crate::workflows::ID,
         crate::points::kind::VIEWS,
         "workflows",
     );
@@ -355,43 +355,6 @@ pub fn view(s: &Screen<'_>) -> El {
         }
         Some(Err(_)) | None => landing(s),
     }
-}
-
-/// Whether the Workflow editor is switched off, as the built-ins list says; unknown is not off.
-pub fn is_off(s: &Screen<'_>) -> bool {
-    s.st.points.builtins.iter().any(|b| {
-        b.get("id").and_then(Value::as_str) == Some(crate::workflows::EDITOR)
-            && b.get("on") == Some(&Value::Bool(false))
-    })
-}
-
-/// What the view says while the Workflow editor is switched off: the
-/// workflows are kept and still run.
-pub fn off() -> El {
-    let faint = || crate::ui::theme::bright(0.45);
-    div()
-        .col()
-        .grow()
-        .w_full()
-        .items_center()
-        .justify_center()
-        .child(div().pb(12.0).child(ico("workflow", 40.0, 1.0, faint())))
-        .child(
-            div().pb(4.0).child(
-                text("The workflow editor is off", 14.0, faint())
-                    .line_height(20.0)
-                    .silent(),
-            ),
-        )
-        .child(
-            text(
-                "Your workflows are kept and still run. Turn the Workflow editor on in Settings \u{203a} Extensions.",
-                12.0,
-                faint(),
-            )
-            .line_height(16.0)
-            .silent(),
-        )
 }
 
 /// The view under the top bar: the run list and the selected run.

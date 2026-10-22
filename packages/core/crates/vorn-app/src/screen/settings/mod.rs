@@ -383,16 +383,16 @@ pub(in crate::screen) fn toggle(
 }
 
 /// One option of a [`segmented`] control.
-pub(super) struct Seg<'a> {
+pub(in crate::screen) struct Seg<'a> {
     pub label: &'a str,
     pub icon: Option<El>,
-    pub act: SetAct,
+    pub act: Act,
     pub on: bool,
     pub disabled: bool,
 }
 
 /// `bg-white/[0.04] rounded-lg p-0.5 gap-0.5`.
-pub(super) fn segmented(s: &Screen<'_>, place: &str, opts: Vec<Seg<'_>>, px: f32) -> El {
+pub(in crate::screen) fn segmented(s: &Screen<'_>, place: &str, opts: Vec<Seg<'_>>, px: f32) -> El {
     let mut row = div()
         .row()
         .shrink0()
@@ -402,7 +402,7 @@ pub(super) fn segmented(s: &Screen<'_>, place: &str, opts: Vec<Seg<'_>>, px: f32
         .bg(white(0.04))
         .role(Role::RadioGroup, place);
     for o in opts {
-        let id = s.acts.on(place, set(o.act));
+        let id = s.acts.on(place, o.act);
         let hot = s.ui.hover(id);
         let fg = if o.disabled {
             c(look::GRAY_600)

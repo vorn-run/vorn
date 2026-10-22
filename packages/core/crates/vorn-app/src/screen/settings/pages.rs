@@ -4,6 +4,7 @@
 use serde_json::Value;
 
 use super::{button, header, row, segmented, set, svg, toggle, Seg};
+use crate::act::Act;
 use crate::look;
 use crate::screen::menus::Item;
 use crate::screen::{agent_icon, c, ico, white, Screen};
@@ -31,6 +32,10 @@ fn num(s: &Screen<'_>, key: &str) -> Option<f64> {
 
 fn default_act(key: &str, v: impl ToString) -> SetAct {
     SetAct::Default(key.to_owned(), v.to_string())
+}
+
+fn seg_act(key: &str, v: impl ToString) -> Act {
+    set(default_act(key, v))
 }
 
 /// A toggle row writing `defaults[key]`.
@@ -163,7 +168,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
                     true,
                     r#"<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>"#,
                 )),
-                act: default_act("layoutMode", "\"grid\""),
+                act: seg_act("layoutMode", "\"grid\""),
                 on: layout == "grid",
                 disabled: false,
             },
@@ -173,7 +178,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
                     true,
                     r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/>"#,
                 )),
-                act: default_act("layoutMode", "\"tabs\""),
+                act: seg_act("layoutMode", "\"tabs\""),
                 on: layout == "tabs",
                 disabled: false,
             },
@@ -189,7 +194,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
                 icon: Some(small_svg(
                     r#"<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>"#,
                 )),
-                act: default_act("taskViewMode", "\"list\""),
+                act: seg_act("taskViewMode", "\"list\""),
                 on: task_view == "list",
                 disabled: false,
             },
@@ -198,7 +203,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
                 icon: Some(small_svg(
                     r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/>"#,
                 )),
-                act: default_act("taskViewMode", "\"kanban\""),
+                act: seg_act("taskViewMode", "\"kanban\""),
                 on: task_view == "kanban",
                 disabled: false,
             },
@@ -262,7 +267,7 @@ fn text_seg(s: &Screen<'_>, key: &str, fallback: &str, opts: &[(&'static str, &s
         .map(|(label, v)| Seg {
             label,
             icon: None,
-            act: default_act(key, format!("\"{v}\"")),
+            act: seg_act(key, format!("\"{v}\"")),
             on: chosen == *v,
             disabled: false,
         })
@@ -516,7 +521,7 @@ fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {
     let seg = |label, v: &str, disabled| Seg {
         label,
         icon: None,
-        act: default_act("tuiDrawing", format!("\"{v}\"")),
+        act: seg_act("tuiDrawing", format!("\"{v}\"")),
         on: chosen == v,
         disabled,
     };
@@ -1218,14 +1223,14 @@ pub(super) fn updates(s: &Screen<'_>) -> El {
             Seg {
                 label: "Stable",
                 icon: None,
-                act: default_act("updateChannel", "\"stable\""),
+                act: seg_act("updateChannel", "\"stable\""),
                 on: channel == "stable",
                 disabled: false,
             },
             Seg {
                 label: "Beta",
                 icon: None,
-                act: default_act("updateChannel", "\"beta\""),
+                act: seg_act("updateChannel", "\"beta\""),
                 on: channel == "beta",
                 disabled: false,
             },

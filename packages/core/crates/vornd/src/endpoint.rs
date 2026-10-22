@@ -289,6 +289,7 @@ impl Daemon {
             db_dir.join(crate::native::extensions::builtin::tasks::IMAGES),
         )];
         router_settings.compiler = wasm_compiler();
+        router_settings.preferences = Some(db_dir.join("extension-preferences.json"));
         let router = Router::new(
             store.clone(),
             lifecycle,

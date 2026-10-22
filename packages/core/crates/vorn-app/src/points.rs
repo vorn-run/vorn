@@ -111,6 +111,10 @@ pub struct Point {
     /// A built-in's settings page: the app's own page it follows in the
     /// sidebar, as `agents`; `None` lists it under Extensions.
     pub after: Option<String>,
+    /// Shipped with Vorn, so it comes before what installed extensions add.
+    pub builtin: bool,
+    /// A view's top bar button shows: its extension's setting can hide it.
+    pub button: bool,
 }
 
 impl Point {
@@ -140,6 +144,8 @@ impl Point {
             deny: text("deny"),
             tree: v.get("tree").and_then(Value::as_bool) == Some(true),
             after: text("after"),
+            builtin: v.get("builtin").and_then(Value::as_bool) == Some(true),
+            button: v.get("button").and_then(Value::as_bool) != Some(false),
         })
     }
 
@@ -202,6 +208,18 @@ pub fn apply(rows: &mut Vec<Row>, op: &Value) {
     }
 }
 
+/// Sets preference `key` of the extension `id` in `list` (built-ins or packs) to `value`.
+pub fn set_preference(list: &mut [Value], id: &str, key: &str, value: &Value) {
+    let prefs = list
+        .iter_mut()
+        .filter(|e| e.get("id").and_then(Value::as_str) == Some(id))
+        .filter_map(|e| e.get_mut("preferences").and_then(Value::as_array_mut))
+        .flatten();
+    for p in prefs.filter(|p| p.get("id").and_then(Value::as_str) == Some(key)) {
+        p["value"] = value.clone();
+    }
+}
+
 /// What the screens' extension controls do.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PointAct {
@@ -233,6 +251,12 @@ pub enum PointAct {
     Builtin {
         id: String,
         on: bool,
+    },
+    /// Sets extension `id`'s preference `key` to `value`, written as JSON.
+    Preference {
+        id: String,
+        key: String,
+        value: String,
     },
     /// Tells tree point `key`'s extension `event` happened.
     Tree {
@@ -325,6 +349,27 @@ impl Points {
     /// The contributions placed at `kind`, in order.
     pub fn at<'a>(&'a self, kind: &'a str) -> impl Iterator<Item = &'a Point> + 'a {
         self.all.iter().filter(move |p| p.kind == kind)
+    }
+
+    /// Every extension view: built-ins first, each group in the order vornd
+    /// lists them.
+    pub fn views(&self) -> Vec<&Point> {
+        let mut views: Vec<&Point> = self.at(kind::VIEWS).collect();
+        views.sort_by_key(|p| !p.builtin);
+        views
+    }
+
+    /// The top bar's extension buttons after Sessions: the views whose
+    /// button their extension's setting shows.
+    pub fn top_bar(&self) -> Vec<&Point> {
+        let mut views = self.views();
+        views.retain(|p| p.button);
+        views
+    }
+
+    /// Shows extension `id`'s preference `key` as `value` on the built-ins' pages.
+    pub fn set_preference(&mut self, id: &str, key: &str, value: &Value) {
+        set_preference(&mut self.builtins, id, key, value);
     }
 
     /// Shows built-in `id` as on or off, ahead of vornd's answer.

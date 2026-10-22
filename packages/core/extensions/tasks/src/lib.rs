@@ -1,7 +1,8 @@
 //! Tasks: the board's writes (`task:*` but the reads, which are the core's
 //! paged list), each task's images, the workflow triggers a write fires, the
 //! tasks connectors import, the MCP task tools, the badge of the task a
-//! session works on, and the board's tree.
+//! session works on, the board's tree, and the pane beside a card that
+//! lists its project's tasks.
 //!
 //! Vorn ships it as a Wasm component (`vorn-extension.toml` beside this
 //! crate). The rows stay in `vorn.db` under the names they have always had
@@ -11,7 +12,7 @@
 //! clients the rows it changed (`task.changed`), and a task created or moved
 //! is a public event and a `workflow.fire`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use vorn_extension_sdk::tree::{self, Surface};
 use vorn_extension_sdk::{arg, json, Ctx, Error, Event, Extension, Host, Init, Op, Value};
@@ -21,6 +22,7 @@ pub mod db;
 pub mod images;
 pub mod js;
 pub mod nodes;
+pub mod pane;
 pub mod sources;
 pub mod tools;
 pub mod triggers;
@@ -101,6 +103,8 @@ impl Change {
 #[derive(Debug, Default)]
 pub struct Tasks {
     badges: Option<BTreeMap<String, Value>>,
+    /// The tasks opened in each card's pane, by session.
+    open: BTreeMap<String, BTreeSet<String>>,
 }
 
 fn failed(message: impl Into<String>) -> Error {
@@ -144,6 +148,53 @@ impl Tasks {
         }
         if self.touches_badges(host, change) {
             self.badges(host);
+        }
+        host.publish(pane::REDRAW, vec![Op::Clear]);
+    }
+
+    /// The pane beside session `scope`'s card: the tasks of its project.
+    fn pane(&self, host: &mut dyn Host, scope: Option<&str>) -> Result<tree::Node, Error> {
+        let Some(session) = scope else {
+            return Ok(pane::unknown());
+        };
+        // An ended session is not found; its card still shows the notice.
+        let Ok(found) = host.call("sessions.get", json!({ "sessionId": session })) else {
+            return Ok(pane::unknown());
+        };
+        let Some(project) = found.get("projectName").and_then(Value::as_str) else {
+            return Ok(pane::unknown());
+        };
+        let tasks = HostDb::new(host)
+            .call("dbListTasks", json!([project, null]))
+            .map_err(failed)?;
+        let open = self.open.get(session).cloned().unwrap_or_default();
+        Ok(pane::pane(
+            project,
+            tasks.as_array().map_or(&[], Vec::as_slice),
+            &open,
+        ))
+    }
+
+    /// What a click, a disclosure or a status chosen in a card's pane does.
+    fn pane_event(&mut self, host: &mut dyn Host, e: &tree::Event) -> Result<Value, Error> {
+        let asked = pane::asked(&e.id, e.kind, &e.value)
+            .ok_or_else(|| Error::new("unknown-action", format!("the pane has no {}", e.id)))?;
+        match asked {
+            pane::Asked::Open(task, open) => {
+                let scope = e.scope.clone().unwrap_or_default();
+                let opened = self.open.entry(scope).or_default();
+                if open {
+                    opened.insert(task);
+                } else {
+                    opened.remove(&task);
+                }
+                Ok(json!({}))
+            }
+            pane::Asked::Focus(session) => Ok(json!({ "focus": session })),
+            pane::Asked::Action(action, args) => {
+                self.board_action(host, action, &args)?;
+                Ok(json!({}))
+            }
         }
     }
 
@@ -393,10 +444,11 @@ impl Extension for Tasks {
         &mut self,
         host: &mut dyn Host,
         point: &str,
-        _: Surface,
+        surface: Surface,
     ) -> Result<tree::Node, Error> {
         match point {
             "board" => Ok(view::board()),
+            pane::PANE => self.pane(host, surface.scope.as_deref()),
             "task" => {
                 let shown = self.shown(host);
                 Ok(view::badges(shown.values()))
@@ -406,6 +458,16 @@ impl Extension for Tasks {
                 format!("nothing draws {other}"),
             )),
         }
+    }
+
+    fn event(&mut self, host: &mut dyn Host, point: &str, e: tree::Event) -> Result<Value, Error> {
+        if point != pane::PANE {
+            return Err(Error::new(
+                "unknown-action",
+                format!("{point} has no {}", e.id),
+            ));
+        }
+        self.pane_event(host, &e)
     }
 }
 

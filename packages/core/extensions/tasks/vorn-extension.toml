@@ -3,7 +3,7 @@ name = "Tasks"
 version = "0.9.0"
 api = "vorn:extension@1.0"
 publisher = "Vorn"
-description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, and the MCP task tools. Off, the tasks are kept as they are."
+description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, a pane beside a card listing its project's tasks, and the MCP task tools. Off, the tasks are kept as they are."
 
 [declares]
 uses = ["tasks.read", "tasks.write", "sessions.read", "workflows.write", "storage", "files.read"]
@@ -15,8 +15,23 @@ events = ["agent.conversation"]
 [[contributes.views]]
 id = "board"
 title = "Tasks"
+description = "The board of each project's tasks: a queue of todos for you and your agents."
 icon = "list-todo"
+key = "Mod+T"
 tree = true
+button = { setting = ["top_bar"] }
+
+[[contributes.panes]]
+id = "tasks"
+title = "Tasks"
+tree = true
+
+[[contributes.preferences]]
+id = "top_bar"
+title = "Show in the top bar"
+description = "Shows the Tasks button in the top bar. Off, Tasks still opens from its key, the command palette and a card's pane menu."
+type = "bool"
+default = true
 
 [[contributes.badges]]
 id = "task"

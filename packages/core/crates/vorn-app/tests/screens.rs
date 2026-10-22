@@ -431,6 +431,7 @@ fn the_tasks_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Tasks);
     park(&mut shot, &mut app);
@@ -464,6 +465,7 @@ fn the_workflows_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     park(&mut shot, &mut app);

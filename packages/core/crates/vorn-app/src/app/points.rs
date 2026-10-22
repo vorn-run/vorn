@@ -18,6 +18,7 @@ use crate::act::Act;
 use crate::client::RpcError;
 use crate::points::{self, kind, unscope, PointAct, Request};
 use crate::runs::s;
+use crate::screen::MainView;
 use crate::ui::{Id, Ui, WindowRequest};
 
 /// A contributions call on its way.
@@ -38,6 +39,12 @@ pub(super) enum PointCall {
     SetBuiltin {
         id: String,
         was: bool,
+    },
+    /// A preference was set; it goes back to `was` if vornd refuses.
+    SetPreference {
+        id: String,
+        key: String,
+        was: Value,
     },
 }
 
@@ -80,8 +87,8 @@ impl App {
                 let Some(p) = self.st.points.get(&key).cloned() else {
                     return;
                 };
-                // The Workflow editor's Run asks for a run's inputs and session here, as it always did.
-                if p.extension == crate::workflows::EDITOR && p.call.as_deref() == Some("run") {
+                // Workflows' Run asks for a run's inputs and session here, as it always did.
+                if p.extension == crate::workflows::ID && p.call.as_deref() == Some("run") {
                     let args: Value = serde_json::from_str(&args).unwrap_or_default();
                     let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
                     if let Some(id) = text("id") {
@@ -196,7 +203,68 @@ impl App {
                     json!({ "id": id, "on": on }),
                 );
             }
+            PointAct::Preference { id, key, value } => {
+                let Ok(value) = serde_json::from_str::<Value>(&value) else {
+                    return;
+                };
+                let was = self.preference(&id, &key);
+                self.show_preference(&id, &key, &value);
+                self.call(
+                    Call::Point(PointCall::SetPreference {
+                        id: id.clone(),
+                        key: key.clone(),
+                        was,
+                    }),
+                    "extension:setPreference",
+                    json!({ "id": id, "key": key, "value": value }),
+                );
+            }
         }
+    }
+
+    /// Back to Sessions when the view showing lost its button, as its extension went off.
+    fn keep_view(&mut self) {
+        let st = &mut self.st;
+        if st.view != MainView::Sessions
+            && crate::screen::view_point(&st.points, st.view, st.ext_view.as_deref()).is_none()
+        {
+            st.view = MainView::Sessions;
+            st.ext_view = None;
+        }
+    }
+
+    /// Closes the cards' tree panes whose contribution went, as its extension or setting went off.
+    fn keep_panes(&mut self) {
+        let points = &self.st.points;
+        let gone: Vec<String> = (self.st.ext.panes.iter())
+            .filter(|(_, p)| {
+                crate::extensions::view_key(p).is_some_and(|k| points.get(&k).is_none())
+            })
+            .map(|(session, _)| session.clone())
+            .collect();
+        for session in gone {
+            self.ext_close(&session);
+        }
+    }
+
+    /// What preference `key` of extension `id` holds now, as its page shows it.
+    fn preference(&self, id: &str, key: &str) -> Value {
+        let lists = [&self.st.points.builtins, &self.st.plugins.packs];
+        lists
+            .into_iter()
+            .flatten()
+            .filter(|e| e.get("id").and_then(Value::as_str) == Some(id))
+            .filter_map(|e| e.get("preferences").and_then(Value::as_array))
+            .flatten()
+            .find(|p| p.get("id").and_then(Value::as_str) == Some(key))
+            .and_then(|p| p.get("value").cloned())
+            .unwrap_or(Value::Null)
+    }
+
+    fn show_preference(&mut self, id: &str, key: &str, value: &Value) {
+        self.st.points.set_preference(id, key, value);
+        crate::points::set_preference(&mut self.st.plugins.packs, id, key, value);
+        self.st.plugins.rebuild();
     }
 
     /// A tree field that submits on blur lost focus: what it holds is told
@@ -238,15 +306,19 @@ impl App {
 
     pub(super) fn point_answered(&mut self, call: PointCall, answer: Result<Value, RpcError>) {
         match call {
-            PointCall::List => match answer {
-                Ok(Value::Array(list)) => {
-                    self.st.settings.appearance.listed(&list);
-                    self.st.points.listed(&list);
+            PointCall::List => {
+                match answer {
+                    Ok(Value::Array(list)) => {
+                        self.st.settings.appearance.listed(&list);
+                        self.st.points.listed(&list);
+                    }
+                    Ok(_) => self.st.points.listed(&[]),
+                    // An older vornd has no contributions; ask no more.
+                    Err(_) => self.st.points.listed(&[]),
                 }
-                Ok(_) => self.st.points.listed(&[]),
-                // An older vornd has no contributions; ask no more.
-                Err(_) => self.st.points.listed(&[]),
-            },
+                self.keep_view();
+                self.keep_panes();
+            }
             PointCall::NodeTypes => {
                 self.st.points.node_types = match answer {
                     Ok(v) => v
@@ -295,6 +367,12 @@ impl App {
                     pts.set_builtin(&id, was);
                     pts.off_note = None;
                     pts.switch_error = Some((id, e.to_string()));
+                }
+            }
+            PointCall::SetPreference { id, key, was } => {
+                if let Err(e) = answer {
+                    self.show_preference(&id, &key, &was);
+                    self.st.toast(e.to_string(), true);
                 }
             }
             PointCall::Builtins => match answer {
@@ -346,7 +424,7 @@ impl App {
             Some(id) if unscope(key).1.is_some() => self.st.selected = Some(id),
             Some(id) => {
                 if self.store.session(&id).is_some() {
-                    self.st.view = crate::screen::MainView::Sessions;
+                    self.st.view = MainView::Sessions;
                     self.st.selected = Some(id);
                 }
                 self.come_forward = true;
@@ -434,7 +512,7 @@ impl App {
             );
         }
         let palette = self.st.dialog == Some(crate::state::Dialog::Palette);
-        let workflows = self.st.view == crate::screen::MainView::Workflows;
+        let workflows = self.st.view == MainView::Workflows;
         if !self.st.points.builtins_loaded && (self.st.settings.open || palette || workflows) {
             self.st.points.builtins_loaded = true;
             self.call(
@@ -642,7 +720,7 @@ impl App {
                 Request::Focus(id) => {
                     ui.request(WindowRequest::Focus);
                     if self.store.session(&id).is_some() {
-                        self.st.view = crate::screen::MainView::Sessions;
+                        self.st.view = MainView::Sessions;
                         self.st.selected = Some(id);
                     }
                 }

@@ -375,6 +375,10 @@ pub struct Contributions {
     /// Workflows it ships, each a file under `workflows/`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflows: Option<Vec<workflows::WorkflowDecl>>,
+    /// Its settings: typed, each with a label and a default, shown on its
+    /// page in Settings and read at run time as its `preferences` rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferences: Option<Vec<Preference>>,
     /// What it draws from templates, by where it shows.
     #[serde(flatten)]
     pub points: BTreeMap<Place, Vec<Point>>,
@@ -407,6 +411,10 @@ impl Contributions {
 
     pub fn workflows(&self) -> &[workflows::WorkflowDecl] {
         self.workflows.as_deref().unwrap_or_default()
+    }
+
+    pub fn preferences(&self) -> &[Preference] {
+        self.preferences.as_deref().unwrap_or_default()
     }
 
     pub fn points(&self, place: Place) -> &[Point] {
@@ -545,7 +553,7 @@ impl Place {
             Place::Windows => "Window",
             Place::Menus => "Menu item",
             Place::Dialogs => "Dialog",
-            Place::Views => "Main view",
+            Place::Views => "Top bar button",
             Place::Shell => "Shell commands",
             Place::Cards => "Card",
             Place::Attention => "Waiting for you",
@@ -612,6 +620,11 @@ pub struct Point {
     /// one of [`SETTINGS_PAGES`]; without it the page stays under Extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
+    /// For a top bar view: the on-off preferences its button shows under,
+    /// any of them; without the button the view still opens from its key
+    /// and the command palette.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub button: Option<Activation>,
 }
 
 /// The app's own settings pages a settings contribution can follow.
@@ -695,6 +708,60 @@ pub struct LinkHandler {
     pub example: Option<String>,
 }
 
+/// A setting an extension declares (`[[contributes.preferences]]`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Preference {
+    #[serde(flatten)]
+    pub base: Contribution,
+    #[serde(flatten)]
+    pub kind: PreferenceKind,
+}
+
+/// What a setting holds, and what it holds until the person changes it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum PreferenceKind {
+    /// On or off, drawn as a switch.
+    Bool { default: bool },
+    /// One of `options` by id, drawn as a picker.
+    Choice {
+        default: String,
+        options: Vec<PreferenceOption>,
+    },
+}
+
+/// One choice of a [`PreferenceKind::Choice`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreferenceOption {
+    pub id: String,
+    pub title: String,
+}
+
+impl Preference {
+    /// What it holds until the person changes it.
+    pub fn default_value(&self) -> Value {
+        match &self.kind {
+            PreferenceKind::Bool { default } => Value::Bool(*default),
+            PreferenceKind::Choice { default, .. } => Value::String(default.clone()),
+        }
+    }
+
+    /// Whether `value` is one it can hold.
+    pub fn accepts(&self, value: &Value) -> bool {
+        match (&self.kind, value) {
+            (PreferenceKind::Bool { .. }, Value::Bool(_)) => true,
+            (PreferenceKind::Choice { options, .. }, Value::String(v)) => {
+                options.iter().any(|o| &o.id == v)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn is_bool(&self) -> bool {
+        matches!(self.kind, PreferenceKind::Bool { .. })
+    }
+}
+
 /// Where a contribution shows: every declared field must hold, and any one
 /// value of a field satisfies it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -708,6 +775,9 @@ pub struct Activation {
     pub agent: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub platform: Vec<String>,
+    /// The extension's own on-off preferences, by id: it shows while any is on.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub setting: Vec<String>,
 }
 
 /// What a package may ask the bridge for.
@@ -900,6 +970,11 @@ pattern!(view_box, r"^-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+\s+-?[\d.]+$");
 pattern!(layout_entry, r"^layouts\/[A-Za-z0-9._/-]+\.toml$");
 pattern!(web_entry, r"^web\/[A-Za-z0-9._/-]+\.html$");
 pattern!(contribution_id, r"^[a-zA-Z][a-zA-Z0-9_-]*$");
+
+/// Letters, digits, `-` and `_`, starting with a letter, as every contribution's id.
+pub(crate) fn is_contribution_id(id: &str) -> bool {
+    js::test(contribution_id(), id)
+}
 pattern!(group_open, r"^\((\?(:|=|!|<=|<!|<[A-Za-z_$][\w$]*>))?");
 pattern!(
     origin_pattern,
@@ -1423,6 +1498,10 @@ pub fn activation(value: Option<&Value>) -> Option<Activation> {
             .into_iter()
             .filter(|p| PLATFORMS.contains(&p.as_str()))
             .collect(),
+        setting: bounded_names(value.get("setting"))
+            .into_iter()
+            .filter(|p| js::test(contribution_id(), p))
+            .collect(),
     };
     (activation != Activation::default()).then_some(activation)
 }
@@ -1530,6 +1609,16 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
     let nodes = workflows::nodes(raw_of("nodes"));
     let triggers = workflows::triggers(raw_of("triggers"));
     let flows = workflows::workflows(raw_of("workflows"));
+    let mut preferences: Vec<Preference> = Vec::new();
+    for (mut base, raw) in declared("preferences") {
+        base.when = None;
+        if preferences.iter().any(|p| p.base.id == base.id) {
+            continue;
+        }
+        if let Some(kind) = preference_kind(raw) {
+            preferences.push(Preference { base, kind });
+        }
+    }
 
     let mut points: BTreeMap<Place, Vec<Point>> = BTreeMap::new();
     // `ui.render` names a tree by its id alone, so a tree pane's id is taken too.
@@ -1571,6 +1660,7 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         && nodes.is_empty()
         && triggers.is_empty()
         && flows.is_empty()
+        && preferences.is_empty()
     {
         return None;
     }
@@ -1582,8 +1672,47 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         nodes: (!nodes.is_empty()).then_some(nodes),
         triggers: (!triggers.is_empty()).then_some(triggers),
         workflows: (!flows.is_empty()).then_some(flows),
+        preferences: (!preferences.is_empty()).then_some(preferences),
         points,
     })
+}
+
+/// A preference's type and default, or `None` when it could not be shown:
+/// a choice needs options, and a default that is not one of them is the first.
+fn preference_kind(raw: &Map<String, Value>) -> Option<PreferenceKind> {
+    match raw.get("type").and_then(Value::as_str)? {
+        "bool" => Some(PreferenceKind::Bool {
+            default: raw.get("default").and_then(Value::as_bool).unwrap_or(false),
+        }),
+        "choice" => {
+            let mut options: Vec<PreferenceOption> = Vec::new();
+            for o in raw
+                .get("options")
+                .and_then(Value::as_array)
+                .map(|a| &a[..a.len().min(MAX_CONTRIBUTIONS)])
+                .unwrap_or_default()
+                .iter()
+                .filter_map(Value::as_object)
+            {
+                let id = js::trim(js::str_of(o.get("id")));
+                if !js::test(contribution_id(), id) || options.iter().any(|x| x.id == id) {
+                    continue;
+                }
+                options.push(PreferenceOption {
+                    title: text(o.get("title"), id),
+                    id: id.to_owned(),
+                });
+            }
+            let first = options.first()?.id.clone();
+            let default = raw
+                .get("default")
+                .and_then(Value::as_str)
+                .filter(|d| options.iter().any(|o| o.id == *d))
+                .map_or(first, str::to_owned);
+            Some(PreferenceKind::Choice { default, options })
+        }
+        _ => None,
+    }
 }
 
 /// `Mod+Shift+W`: modifiers, then one key; at least one of Mod, Ctrl and Alt.
@@ -1779,6 +1908,20 @@ fn read_point(
     if place != Place::Attention && deny.is_some() {
         return Err(("deny", "belongs to attention".into()));
     }
+    let button = activation(raw.get("button"));
+    if raw.contains_key("button") && place != Place::Views {
+        return Err(("button", "belongs to a top bar view".into()));
+    }
+    if button.as_ref().is_some_and(|b| {
+        b.setting.is_empty()
+            || *b
+                != Activation {
+                    setting: b.setting.clone(),
+                    ..Activation::default()
+                }
+    }) {
+        return Err(("button", "names only settings: { setting = [...] }".into()));
+    }
     match after.as_deref() {
         Some(_) if place != Place::Settings => {
             return Err(("after", "belongs to a settings page".into()));
@@ -1792,6 +1935,7 @@ fn read_point(
         rows,
         deny,
         after,
+        button,
         base,
         tree,
         icon,

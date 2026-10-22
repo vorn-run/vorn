@@ -33,6 +33,13 @@ pub const DEVICE: &str = "vorn.device";
 pub const DEVICE_PANE: &str = "device";
 pub const DEVICE_OPEN: &str = "open";
 
+/// The panes the app places itself, each with its own control on the card, by extension and pane.
+pub const PLACED: [(&str, &str); 3] = [
+    (BROWSER, BROWSER_PANE),
+    (DEVICE, DEVICE_PANE),
+    (crate::app::FILES, "files"),
+];
+
 /// The Device's pane tree for `session`, while the Device is on.
 pub fn device_key(points: &Points, session: &str) -> Option<String> {
     let p = points.find(DEVICE, kind::PANES, DEVICE_PANE)?;
