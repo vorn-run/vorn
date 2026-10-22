@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -244,7 +244,8 @@ impl Child {
         name: String,
         inbox: Option<Inbox>,
     ) -> Result<Child, String> {
-        let mut command = vorn_spawn::tokio_command(&launch.program);
+        let program = on_path(&launch.program, &launch.env, &launch.cwd);
+        let mut command = vorn_spawn::tokio_command(program.as_deref().unwrap_or(&launch.program));
         command
             .args(&launch.args)
             .current_dir(&launch.cwd)
@@ -503,6 +504,37 @@ fn send_signal(child: &mut tokio::process::Child, pid: Option<u32>, sig: Signal)
 }
 
 /// Why a start failed, as `spawn <program> ENOENT` and the like.
+/// Where a bare program name (`node`) is on the `PATH` in `env`, which the
+/// child runs with, rather than this process's.
+///
+/// Starting a bare name with its own `PATH` makes std fork the whole daemon
+/// (copying its page tables while every other thread that touches memory
+/// waits) to search that `PATH` in the child; a full path lets it use
+/// `posix_spawn`, which shares the parent's memory until the child execs.
+/// `None` when `program` is a path already, or is not found; the spawn then
+/// searches as before, and says ENOENT for a missing one.
+#[cfg(unix)]
+fn on_path(program: &Path, env: &[(String, String)], cwd: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    if program.is_absolute() || program.components().count() != 1 {
+        return None;
+    }
+    // The last PATH wins, as it does in the child's environment.
+    let (_, path) = env.iter().rev().find(|(k, _)| k == "PATH")?;
+    std::env::split_paths(path)
+        .map(|dir| cwd.join(dir).join(program))
+        .find(|candidate| {
+            std::fs::metadata(candidate)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
+/// Windows starts no process by forking, so there is nothing to spare.
+#[cfg(not(unix))]
+fn on_path(_: &Path, _: &[(String, String)], _: &Path) -> Option<PathBuf> {
+    None
+}
+
 fn spawn_reason(program: &std::path::Path, err: &std::io::Error) -> String {
     let program = program.display();
     match err.kind() {
@@ -734,5 +766,62 @@ mod tests {
         assert_eq!(Exit::Code(Some(3)).to_string(), "code 3");
         assert_eq!(Exit::Signal("SIGKILL".into()).to_string(), "signal SIGKILL");
         assert_eq!(Exit::Code(None).to_string(), "code null");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_bare_program_on_the_childs_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().expect("temp dir");
+        let (first, second, cwd) = (
+            root.path().join("a"),
+            root.path().join("b"),
+            root.path().join("c"),
+        );
+        for dir in [&first, &second, &cwd] {
+            std::fs::create_dir(dir).expect("dir");
+        }
+        let put = |path: &Path, mode: u32| {
+            std::fs::write(path, "#!/bin/sh\n").expect("write");
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("chmod");
+        };
+        // Not executable in the first directory, so the second's is the one run.
+        put(&first.join("tool"), 0o644);
+        put(&second.join("tool"), 0o755);
+        put(&cwd.join("local"), 0o755);
+        let path = std::env::join_paths([&first, &second, Path::new(".")]).expect("PATH");
+        let env = vec![
+            ("PATH".to_owned(), "/nowhere".to_owned()),
+            ("PATH".to_owned(), path.to_string_lossy().into_owned()),
+        ];
+        let found = |p: &str| on_path(Path::new(p), &env, &cwd);
+        assert_eq!(found("tool"), Some(second.join("tool")));
+        // A relative PATH entry is searched from the child's working directory.
+        assert_eq!(found("local"), Some(cwd.join(".").join("local")));
+        assert_eq!(found("missing"), None);
+        assert_eq!(found("./tool"), None);
+        assert_eq!(found("/bin/sh"), None);
+        assert_eq!(on_path(Path::new("tool"), &[], &cwd), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn starts_a_bare_program_from_the_childs_path() {
+        let launch = Launch {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                r#"read line; echo '{"jsonrpc":"2.0","id":1,"result":"ok"}'"#.into(),
+            ],
+            cwd: std::env::temp_dir(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        };
+        let child = Child::start(&launch, "sh".into()).expect("starts");
+        let answer = child
+            .request("ping", json!({}), Duration::from_secs(10))
+            .await
+            .expect("answered");
+        assert_eq!(answer, json!("ok"));
+        child.close().await;
     }
 }
