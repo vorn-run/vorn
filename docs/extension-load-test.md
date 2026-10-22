@@ -34,6 +34,8 @@ none. The numbers set the default idle time and service cap
 ## Results
 
 Each cell is the median over the repetitions, with the range in brackets.
+These are the runs after extension programs stopped forking vornd (below);
+the runs before it are under "Input latency, before and after".
 
 ### 0 against 20 extensions
 
@@ -41,14 +43,14 @@ At the default idle time and cap, 5 runs a side:
 
 | Measure                      |     A: 0 extensions |        A: 20 extensions |     B: 0 extensions |        B: 20 extensions |
 | ---------------------------- | ------------------: | ----------------------: | ------------------: | ----------------------: |
-| Frame p50, ms                | 11.19 (10.91–11.29) |     11.25 (11.16–11.42) |    9.56 (9.42–9.79) |        9.73 (9.57–9.84) |
-| Frame p99, ms                | 13.71 (13.61–14.05) |     14.18 (13.92–14.78) | 11.76 (11.58–11.94) |     12.20 (11.77–12.62) |
-| Input p50, ms                | 16.37 (16.28–16.42) |     16.34 (16.19–16.44) | 16.21 (15.96–16.26) |     16.16 (16.12–16.18) |
-| Input p99, ms                | 29.40 (28.48–30.19) |     37.77 (32.92–39.60) | 27.25 (26.28–27.39) |     30.08 (25.19–32.39) |
-| Extension call p50, ms       |                   – |        1.47 (1.43–1.49) |                   – |        1.18 (1.14–1.26) |
-| Extension call p99, ms       |                   – |           159 (154–172) |                   – |           139 (134–148) |
-| RSS vornd, MB                |               292.2 |                   288.0 |               293.4 |                   289.6 |
-| RSS programs, MB             |                   0 |                   231.9 |                   0 |                   231.7 |
+| Frame p50, ms                | 11.23 (11.07–11.31) |     11.25 (11.10–11.33) | 12.33 (12.26–12.44) |     12.24 (12.13–12.45) |
+| Frame p99, ms                | 13.79 (13.54–14.02) |     13.91 (13.69–14.23) | 15.52 (15.30–16.00) |     15.40 (15.13–15.45) |
+| Input p50, ms                | 16.47 (16.39–16.51) |     16.39 (16.32–16.44) | 16.40 (16.34–16.53) |     16.54 (16.38–16.57) |
+| Input p99, ms                | 29.37 (28.43–30.19) |     28.69 (28.45–29.27) | 31.33 (29.88–56.88) |     31.67 (30.28–35.28) |
+| Extension call p50, ms       |                   – |        1.33 (1.32–1.36) |                   – |        1.47 (1.45–1.48) |
+| Extension call p99, ms       |                   – |           149 (143–151) |                   – |           169 (159–174) |
+| RSS vornd, MB                |               291.3 |                   291.3 |               291.4 |                   288.2 |
+| RSS programs, MB             |                   0 |                   231.6 |                   0 |                   230.4 |
 | Running at peak              |          4 (Vorn's) | 19 (15 bench, 4 Vorn's) |          4 (Vorn's) | 19 (15 bench, 4 Vorn's) |
 | Restarts, crashes, cap stops |             0, 0, 0 |                 0, 0, 0 |             0, 0, 0 |                 0, 0, 0 |
 
@@ -56,101 +58,130 @@ The idle phase below repeats the pair (3 runs a side), so each VM gives two
 comparisons. Δ is the 20-extension median minus the baseline's, against the
 noise band:
 
-| Measure       |       A, default |    A, idle phase |   B, default |    B, idle phase |
-| ------------- | ---------------: | ---------------: | -----------: | ---------------: |
-| Frame p50, ms |     +0.06 / 0.38 |     +0.10 / 0.21 | +0.17 / 0.37 |     +0.09 / 0.29 |
-| Frame p99, ms |     +0.47 / 0.86 |     +0.10 / 0.75 | +0.44 / 0.85 | **+0.58 / 0.50** |
-| Input p50, ms |     −0.03 / 0.25 |     −0.06 / 0.23 | −0.05 / 0.30 |     −0.14 / 0.18 |
-| Input p99, ms | **+8.37 / 6.68** | **+6.61 / 2.59** | +2.83 / 7.20 |     +5.79 / 6.39 |
+| Measure       |   A, default | A, idle phase |   B, default | B, idle phase |
+| ------------- | -----------: | ------------: | -----------: | ------------: |
+| Frame p50, ms | +0.02 / 0.24 |  +0.17 / 1.14 | −0.09 / 0.32 |  −0.03 / 0.27 |
+| Frame p99, ms | +0.12 / 0.54 |  +0.47 / 1.58 | −0.12 / 0.70 |  −0.14 / 0.50 |
+| Input p50, ms | −0.08 / 0.12 |   0.00 / 0.08 | +0.14 / 0.19 |  −0.05 / 0.28 |
+| Input p99, ms | −0.68 / 1.76 |  −0.13 / 4.17 | +0.34 / 27.0 |  −0.30 / 1.30 |
 
-- Frame p50 and input p50 are within noise in all four comparisons.
-- Frame p99 is within noise in three; in the fourth it is 0.08 ms past the
-  band.
-- Input p99 rises in all four, by 2.8 to 8.4 ms, and is outside noise in
-  both comparisons on VM A. On A every 20-extension run is slower at p99
-  than every run without extensions.
-- VM A was the slower host (frame p50 11.2 ms without extensions, against
-  9.6 ms on B).
+- Every measure is within noise in all four comparisons.
+- B's input p99 band is wide because one run without extensions had a
+  56.88 ms p99; without that run the band is 5.40 ms.
+- A press is late when its echo misses the frame it would have made (over
+  25 ms). Late presses are 3.1% (A) and 4.9% (B) with 20 extensions, against
+  3.5% and 3.9% without. With about 225 presses a run, the p99 is the third
+  slowest press, which is one of these late presses.
 
-### Where the slow presses wait
+### Input latency, before and after
 
-Each press is put down to the extension call in flight while it waited (the
-first, when it spans two). On VM B, 18 of the 1130 presses in the
-20-extension runs were slower than the pooled p99 of the runs without
-extensions (27.4 ms):
+**Before.** In the first runs (same VM type, same bench) input p99 rose in
+all four comparisons: +8.37 ms (band 6.68) and +6.61 ms (band 2.59) on VM A,
+outside noise, and +2.83 ms (band 7.20) and +5.79 ms (band 6.39) on B. On A
+every 20-extension run was slower at p99 than every run without. 12 of the
+18 slow presses on B overlapped a one-shot call.
 
-| In flight       | Share of presses |                  Slow presses |
-| --------------- | ---------------: | ----------------------------: |
-| No call         |            75.5% |                             3 |
-| A one-shot call |            12.3% | 12 (6 Node, 4 Bash, 2 Python) |
-| A service call  |            12.2% |                  3 (all Bash) |
+**Cause.** vornd started each extension program by forking itself. A
+manifest names its program bare (`node`, `python3`, `bash`), and the child
+gets its own `PATH`. In that case Rust's standard library cannot use
+`posix_spawn`: it forks vornd and searches the `PATH` in the child. Forking a
+290 MB, many-threaded vornd copies its page tables while holding its
+memory-map lock, so every vornd thread that faults a page waits. That
+includes the threads that carry a key press to the session and its echo
+back to the app. A one-shot extension starts a process on every call, so it
+forks vornd on every call.
 
-- The tail follows the one-shots. A one-shot starts a process per call. A
-  Node one-shot call takes 140–160 ms (the calls' p99 above, against
-  1.2–1.5 ms p50), and presses waiting while one-shots run make two-thirds of
-  the slow ones.
-- Calls to Wasm, Rust, Python and Node services account for none.
-- The three slow presses during Bash service calls are not explained by
-  these runs.
+Measured with bpftrace on one VM, one 20 s run each, with the old start
+("forking") and the fixed one:
+
+| vornd, per 20 s run                    | 0, forking | 20, forking | 0, fixed | 20, fixed |
+| -------------------------------------- | ---------: | ----------: | -------: | --------: |
+| Forks (`clone` syscalls)               |         10 |          58 |       10 |        10 |
+| Forks over 4 ms                        |          0 |          22 |        1 |         0 |
+| Waits on the memory-map lock over 1 ms |        110 |         289 |      125 |       185 |
+| Run-queue waits over 2 ms, all threads |        107 |         149 |       97 |       122 |
+
+- Fixed, extension programs start with `clone3` (vfork) in 0.1–0.5 ms. The
+  10 forks left are other things vornd starts, the same with no extensions.
+- CPU is not the cause. The app and the daemons together use about 230% of
+  the 16 vCPUs. Starting extension programs at nice 10 changed nothing: over
+  5 interleaved rounds, 4.0% of presses were late, against 3.7–3.8% without
+  it.
+
+**Fix.** vornd looks a bare program name up on the child's own `PATH` and
+starts the full path (`Child::start_with` in `vorn-extensions`). The standard
+library then uses `posix_spawn`, which shares vornd's memory until the child
+execs and takes no page-table copy. A program it cannot find starts as
+before and fails with the same ENOENT.
+
+**After.** The tables above: every measure within noise on both VMs. On VM A,
+the slower host, input p99 went from +8.37 ms (outside noise) to −0.68 ms.
+Of the four comparisons, input p99 now moves −0.68 to +0.34 ms.
+
+**Attribution.** The bench names the call in flight while a press waited
+(`input_to_pixel_ms.during`). That favours long calls and long presses: a
+30 ms press overlaps more calls than a 16 ms one, so slow presses land
+during calls more often whatever the cause. The three slow presses "during
+Bash service calls" in the first runs were 100–150 ms presses. Presses that
+long happen as often with no extensions (one or two a run), and they span
+several calls, so the first one named is arbitrary.
 
 ### Service cap, 20 extensions
 
-VM B, 3 runs a cap (the default's row is the 5 runs above):
+3 runs a cap (the default's row is the 5 runs above):
 
-| Cap          |    Frame p50, ms | Call p50, ms | Restarts | Cap stops |
-| ------------ | ---------------: | -----------: | -------: | --------: |
-| 16           | 9.95 (9.82–9.99) |         1.26 |  6 (5–6) |   9 (8–9) |
-| 20           | 9.90 (9.79–9.99) |         1.24 |        0 |         0 |
-| 24 (default) | 9.73 (9.57–9.84) |         1.18 |        0 |         0 |
-| 32           | 9.80 (9.71–9.85) |         1.17 |        0 |         0 |
+| Cap          |    A: frame p50, ms |    B: frame p50, ms | Call p50, ms |   Restarts |  Cap stops |
+| ------------ | ------------------: | ------------------: | -----------: | ---------: | ---------: |
+| 16           | 11.37 (11.13–11.42) | 12.26 (12.24–12.54) |   1.34, 1.53 | 5 (4–6), 5 | 8 (7–9), 8 |
+| 20           | 11.40 (11.16–11.53) | 12.27 (12.25–12.33) |   1.32, 1.50 |          0 |          0 |
+| 24 (default) | 11.25 (11.10–11.33) | 12.24 (12.13–12.45) |   1.33, 1.47 |          0 |          0 |
+| 32           | 11.26 (11.12–11.37) | 12.30 (12.25–12.35) |   1.35, 1.47 |          0 |          0 |
 
 At cap 16, under the 19 that run at peak, the least recently used services
-are stopped and started again. On VM A the same cap gave 5 restarts and 8
-cap stops a run.
+are stopped and started again.
 
 ### Idle phase
 
 At the default 60 s idle time, after the busy run the bench keeps drawing
-until every service has stopped (VM B, 3 runs a side):
+until every service has stopped (3 runs a side):
 
-| Measure                     |        0 extensions |           20 extensions |
-| --------------------------- | ------------------: | ----------------------: |
-| Time until all stopped, s   |    49.6 (49.4–49.8) |        64.8 (64.7–64.9) |
-| Running after idle          |                   0 |                       0 |
-| Idle stops                  |          4 (Vorn's) | 19 (15 bench, 4 Vorn's) |
-| RSS programs after idle, MB |                   0 |                       0 |
-| RSS vornd after idle, MB    | 375.2 (362.9–383.2) |     399.7 (399.0–414.4) |
+| Measure                     |     A: 0 extensions |    A: 20 extensions |     B: 0 extensions |    B: 20 extensions |
+| --------------------------- | ------------------: | ------------------: | ------------------: | ------------------: |
+| Time until all stopped, s   |    49.6 (49.5–49.7) |    64.3 (64.0–64.9) |    49.5 (49.2–49.5) |    64.4 (64.3–64.7) |
+| Running after idle          |                   0 |                   0 |                   0 |                   0 |
+| Idle stops                  |          4 (Vorn's) |                  19 |          4 (Vorn's) |                  19 |
+| RSS programs after idle, MB |                   0 |                   0 |                   0 |                   0 |
+| RSS vornd after idle, MB    | 380.8 (377.8–381.8) | 399.4 (382.1–409.9) | 377.1 (370.7–392.3) | 399.3 (388.2–402.7) |
 
-- Every extension program exits, so their 232 MB is returned.
-- vornd keeps 24.5 MB more than the baseline. On VM A the figures were 394.7
-  against 383.2 MB (11.5 MB more), with all stopped at 64.6 s.
+- Every extension program exits, so their 231 MB is returned.
+- vornd keeps 19–22 MB more than the baseline.
 - Without extensions, the time is how long Vorn's own services, started by
   the panes' events, take to stop.
 
 ### Starting again after idle, by language
 
-VM B, medians:
+VM B, medians (cold call before the fix in brackets):
 
 | Language     | Cold call, ms | Warm call, ms | RSS per process, MB |
 | ------------ | ------------: | ------------: | ------------------: |
-| Node         |         140.6 |          1.25 |                46.6 |
-| Python       |          38.8 |          1.43 |                10.9 |
-| Bash         |          18.1 |          0.54 |                 3.6 |
-| Rust program |           2.3 |          0.84 |                 2.7 |
-| Rust Wasm    |           2.7 |          0.54 |      (inside vornd) |
+| Node         | 147.7 (140.6) |          1.37 |                46.6 |
+| Python       |   26.2 (38.8) |          1.24 |                10.9 |
+| Bash         |    2.7 (18.1) |          0.55 |                 3.6 |
+| Rust program |     2.4 (2.3) |          1.02 |                 2.7 |
+| Rust Wasm    |     3.1 (2.7) |          0.77 |      (inside vornd) |
+
+- Bash and Python start faster now that vornd no longer forks for them.
+- RSS per process is from the first runs.
 
 ## Against the bar
 
-- **Frame time and input latency within noise of the run with none: not
-  met at the tail.**
-  - Frame p50, frame p99 and input p50 hold, apart from one frame p99
-    comparison 0.08 ms past its band.
-  - Input p99 rises 2.8–8.4 ms and leaves the noise band on VM A. The slow
-    presses wait behind one-shot calls, Node's most (above).
+- **Frame time and input latency within noise of the run with none: met.**
+  Frame p50, frame p99, input p50 and input p99 are within noise in all four
+  comparisons, on both VMs.
 - **Idle memory recorded and within the cap: met.**
   - 60 s after the last call no service runs (0 of the cap of 24), the
-    extension programs hold nothing, and vornd holds 399.7 MB against 375.2
-    without extensions.
+    extension programs hold nothing, and vornd holds about 399 MB against
+    377–381 without extensions.
 
 ## The defaults
 
