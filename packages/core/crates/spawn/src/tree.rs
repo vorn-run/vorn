@@ -6,13 +6,11 @@
 //! answer is needed, not per byte.
 
 /// Whether process `root`, or any process under it, runs a program named
-/// one of `names` (the file name, without `.exe` on Windows, in any case).
+/// one of `names` (the file name, without `.exe` on Windows, in any case,
+/// or as it renames itself: the name then `:`, as `tmux: client`).
 /// `None` when the process table cannot be read or `root` is not running.
 pub fn runs_any(root: u32, names: &[&str]) -> Option<bool> {
-    let named = |name: &str| {
-        let name = name.strip_suffix(".exe").unwrap_or(name);
-        names.iter().any(|n| n.eq_ignore_ascii_case(name))
-    };
+    let named = |name: &str| is_named(name, names);
     let table = table()?;
     if !table.iter().any(|p| p.pid == root) {
         return None;
@@ -31,6 +29,16 @@ pub fn runs_any(root: u32, names: &[&str]) -> Option<bool> {
         }
     }
     Some(false)
+}
+
+/// Whether a process named `name` runs one of `names`.
+fn is_named(name: &str, names: &[&str]) -> bool {
+    let name = name.strip_suffix(".exe").unwrap_or(name);
+    names.iter().any(|n| {
+        name.get(..n.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(n))
+            && matches!(name.as_bytes().get(n.len()), None | Some(b':'))
+    })
 }
 
 /// One row of the process table.
@@ -146,6 +154,29 @@ fn table() -> Option<Vec<Proc>> {
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn table() -> Option<Vec<Proc>> {
     None
+}
+
+#[cfg(test)]
+mod names {
+    use super::is_named;
+
+    #[test]
+    fn matches_a_name_or_the_name_a_program_gives_itself() {
+        let names = ["tmux", "ssh"];
+        for name in [
+            "tmux",
+            "TMUX",
+            "tmux: client",
+            "tmux: server",
+            "ssh.exe",
+            "ssh:",
+        ] {
+            assert!(is_named(name, &names), "{name}");
+        }
+        for name in ["tmuxinator", "sshd", "tmu", "", "xtmux", "tmux client", "é"] {
+            assert!(!is_named(name, &names), "{name}");
+        }
+    }
 }
 
 #[cfg(all(test, unix))]
