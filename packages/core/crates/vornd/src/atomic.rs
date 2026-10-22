@@ -46,12 +46,28 @@ pub fn replace(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// Writes `bytes` to `path` only when nothing, not even a link, is there:
 /// [`io::ErrorKind::AlreadyExists`] when something is.
 pub fn create(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    create_with(path, bytes, |tmp, path| std::fs::hard_link(tmp, path))
+}
+
+/// [`create`] through `link`. Where links fail (FAT, some network shares)
+/// the target is written in place, still never over what is there.
+fn create_with(
+    path: &Path,
+    bytes: &[u8],
+    link: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     let dir = folder(path)?;
     let (tmp, file) = temp(&dir, path)?;
     // A hard link never replaces what is there, as a rename would.
-    let done = fill(file, bytes).and_then(|()| std::fs::hard_link(&tmp, path));
+    let linked = fill(file, bytes).map(|()| link(&tmp, path));
     let _ = std::fs::remove_file(&tmp);
-    done
+    match linked? {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
+            let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+            fill(file, bytes)
+        }
+        done => done,
+    }
 }
 
 fn folder(path: &Path) -> io::Result<PathBuf> {
@@ -140,6 +156,19 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read(&path).unwrap(), b"first");
         assert_eq!(entries(&dir.path().join("sub")), ["w.toml"]);
+    }
+
+    #[test]
+    fn create_writes_in_place_where_links_fail_and_still_never_replaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("w.toml");
+        let no_links = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::Unsupported));
+        create_with(&path, b"first", no_links).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        let err = create_with(&path, b"second", no_links).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&path).unwrap(), b"first");
+        assert_eq!(entries(dir.path()), ["w.toml"]);
     }
 
     #[cfg(unix)]
