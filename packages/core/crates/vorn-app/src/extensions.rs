@@ -130,7 +130,9 @@ impl Extensions {
             }
             let pack = self.packs.iter().find(|p| s(p, "id") == Some(ext));
             for pane in panes_of(pack) {
-                let Some(id) = s(pane, "id").filter(|id| offered.contains(id)) else {
+                let Some(id) = s(pane, "id")
+                    .filter(|id| offered.contains(id) && !OWN_PLACE.contains(&(ext, *id)))
+                else {
                     continue;
                 };
                 out.push(PaneItem {
@@ -202,6 +204,14 @@ impl Extensions {
 
 /// What a template pane's nonce starts with: the client draws it, so vornd holds no grant.
 pub const VIEW_NONCE: &str = "view:";
+
+/// Panes the app opens from places of their own (the card's globe and phone,
+/// the side's Files), so the card menu does not offer them twice.
+const OWN_PLACE: [(&str, &str); 3] = [
+    (crate::panes::BROWSER, crate::panes::BROWSER_PANE),
+    (crate::panes::DEVICE, crate::panes::DEVICE_PANE),
+    (crate::app::FILES, "files"),
+];
 
 /// The key of a template pane's tree, drawn for its card's session, when `p` is one.
 pub fn view_key(p: &OpenPane) -> Option<String> {
@@ -284,6 +294,27 @@ mod tests {
         x.panes.insert("s".into(), open);
         assert!(x.items("s")[1].open);
         assert!(!x.still_shown("s", &[json!({ "extensionId": "rep", "active": false })]));
+    }
+
+    #[test]
+    fn panes_with_a_place_of_their_own_are_not_in_the_menu() {
+        let mut x = Extensions {
+            packs: vec![json!({ "id": crate::panes::BROWSER,
+                "contributes": { "panes": [{ "id": "browser" }, { "id": "other" }] } })],
+            ..Extensions::default()
+        };
+        x.activation.insert(
+            "s".into(),
+            vec![
+                json!({ "extensionId": crate::panes::BROWSER, "active": true,
+                         "panes": ["browser", "other"] }),
+            ],
+        );
+        let rows = x.items("s");
+        assert_eq!(
+            rows.iter().map(|r| r.pane_id.as_str()).collect::<Vec<_>>(),
+            ["other"]
+        );
     }
 
     #[test]

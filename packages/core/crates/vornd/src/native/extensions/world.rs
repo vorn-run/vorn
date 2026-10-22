@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tracing::info;
 use vorn_connectors::fetch::{Http, Request as HttpRequest};
-use vorn_extensions::api::types::{Header, Request, Response, SessionStart};
+use vorn_extensions::api::types::{CallCtx, Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{self, Answer, Caller, StorageCall, World};
 use vorn_store::extension::{ExtensionTables, Grant};
@@ -343,7 +343,11 @@ async fn remote_test(native: &Arc<Native>, caller: &str, args: &Value) -> Result
             Err(e) => json!({ "success": false, "message": e, "durationMs": 0 }),
         };
         let told = json!({ "key": key, "result": result });
-        if let Some(Err(e)) = ext.builtins().call(&caller, &then, told).await {
+        let ctx = CallCtx {
+            caller: "client".to_owned(),
+            project: None,
+        };
+        if let Err(e) = ext.call(&caller, &then, told, ctx).await {
             info!(
                 "[extensions] {caller} did not take its test's result: {}",
                 e.message

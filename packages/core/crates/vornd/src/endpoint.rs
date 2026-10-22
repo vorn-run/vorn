@@ -335,6 +335,8 @@ impl Daemon {
         )];
         router_settings.compiler = wasm_compiler();
         router_settings.preferences = Some(db_dir.join("extension-preferences.json"));
+        let installs = native.installs(&db_dir);
+        router_settings.trust = installs.trust().clone();
         let router = Router::new(
             store.clone(),
             lifecycle,
@@ -342,7 +344,6 @@ impl Daemon {
             router_settings,
             Arc::clone(native.events()),
         );
-        let installs = native.installs(&db_dir);
         let around = Wired {
             native: Arc::downgrade(native),
             loopback: Arc::new(crate::mcp::Loopback::new(addr, &token)),
@@ -782,7 +783,7 @@ fn health(daemon: &Daemon) -> Response<Body> {
         "registry": registry_report(daemon),
         "hooks": daemon.native.hooks_activity(),
         "mcp": daemon.mcp.get().map(|mcp| json!({ "sessions": mcp.sessions() })),
-        "extensions": daemon.native.extensions().map(|e| json!({ "hosts": e.hosts(), "panes": e.panes() })),
+        "extensions": daemon.native.extensions().map(|e| json!({ "hosts": e.hosts(), "services": e.services(), "panes": e.panes() })),
     });
     let mut res = Response::new(full(body.to_string()));
     res.headers_mut().insert(

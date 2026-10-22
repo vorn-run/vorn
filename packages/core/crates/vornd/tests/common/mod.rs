@@ -25,7 +25,7 @@ pub struct Served {
     child: Child,
     pub port: u16,
     pub data: tempfile::TempDir,
-    _home: tempfile::TempDir,
+    pub home: tempfile::TempDir,
 }
 
 impl Drop for Served {
@@ -41,7 +41,11 @@ pub fn serve() -> Served {
 
 /// vornd serving `data`, which the test may have filled first.
 pub fn serve_in(data: tempfile::TempDir) -> Served {
-    let home = tempfile::tempdir().unwrap();
+    serve_at(data, tempfile::tempdir().unwrap())
+}
+
+/// vornd serving `data` with `home` as its home, which the test may have filled first.
+pub fn serve_at(data: tempfile::TempDir, home: tempfile::TempDir) -> Served {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vornd"))
         .env(vorn_spawn::watch::EXIT_WITH, std::process::id().to_string())
         .env("VORN_TAILSCALE", "none")
@@ -53,6 +57,7 @@ pub fn serve_in(data: tempfile::TempDir) -> Served {
         .env("SECRET_VORN_BOOTSTRAP_TOKEN", CREDENTIAL)
         .env("VORND_KEYCHAIN", "0")
         .env_remove("VORN_ALLOW_DEFAULT_DATA_DIR")
+        .env("NO_PROXY", "127.0.0.1,localhost")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -67,7 +72,7 @@ pub fn serve_in(data: tempfile::TempDir) -> Served {
         child,
         port,
         data,
-        _home: home,
+        home,
     }
 }
 
@@ -164,14 +169,7 @@ impl Vornd {
     pub fn holder(&self) -> u32 {
         let t = Instant::now();
         loop {
-            let mut s = std::net::TcpStream::connect(("127.0.0.1", self.port)).unwrap();
-            s.write_all(
-                b"GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            )
-            .unwrap();
-            let mut res = String::new();
-            s.read_to_string(&mut res).unwrap();
-            let body: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let body = health(self.port);
             if let Some(pid) = body["sessiond"]["current"]["pid"].as_u64() {
                 return u32::try_from(pid).unwrap();
             }
@@ -183,6 +181,65 @@ impl Vornd {
     pub fn log(&self) -> String {
         std::fs::read_to_string(self.home.path().join("vornd.log")).unwrap_or_default()
     }
+}
+
+/// What vornd on `port` answers at `/vornd/health`.
+pub fn health(port: u16) -> Value {
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(b"GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut res = String::new();
+    s.read_to_string(&mut res).unwrap();
+    serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+/// The pack `pinned.toml` pins for `id`, as scripts/shipped.mjs fetched it
+/// into `shipped/catalog/`; `None` when it was not fetched.
+pub fn catalog_pack(id: &str) -> Option<(&'static str, &'static str, Vec<u8>)> {
+    let (_, version, sha256) = vornd::shipped::CATALOG.iter().find(|p| p.0 == id)?;
+    let dir = std::env::var_os("VORN_SHIPPED_DIR").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../shipped"),
+        PathBuf::from,
+    );
+    let bytes = std::fs::read(dir.join("catalog").join(format!("{id}-{version}.vorn.tgz"))).ok()?;
+    Some((version, sha256, bytes))
+}
+
+/// Lists `packs` (`id`, version, sha256, bytes) in the catalog vornd at
+/// `home` reads, each served from a loopback port of its own as the release
+/// would be.
+pub fn offer_in_catalog(home: &Path, packs: Vec<(&str, &str, &str, Vec<u8>)>) {
+    let mut entries = Vec::new();
+    for (id, version, sha256, bytes) in packs {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut req = Vec::new();
+                let mut byte = [0u8; 1];
+                while !req.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
+                    req.push(byte[0]);
+                }
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    bytes.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&bytes);
+            }
+        });
+        entries.push(serde_json::json!({
+            "id": id, "name": id, "kind": "extension", "version": version, "sha256": sha256,
+            "packUrl": format!("http://127.0.0.1:{port}/{id}-{version}.vorn.tgz"),
+        }));
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    let cache = serde_json::json!({ "connectors": entries, "fetchedAt": now as f64 });
+    std::fs::create_dir_all(home.join(".vorn")).unwrap();
+    std::fs::write(home.join(".vorn/connector-catalog.json"), cache.to_string()).unwrap();
 }
 
 /// Kills the session holder on drop, so a failing test leaves nothing running.

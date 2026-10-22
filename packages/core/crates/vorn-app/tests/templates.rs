@@ -1,7 +1,7 @@
 //! A real extension (examples/extensions/turns, a Wasm component) with an
 //! element tree for every place that takes one, drawn by the one renderer on
 //! each surface: the window (Pixels) and the terminal (Cells) at 120x36 and
-//! 80x24. The Widget built-in, a component too, draws the same way and
+//! 80x24. The Widget extension, a component too, draws the same way and
 //! answers an agent's real permission requests.
 //! `VORN_APP_SHOT=<prefix>` saves each state: a PNG, and the terminal's
 //! cells as HTML and text.
@@ -331,7 +331,7 @@ fn every_template_kind_draws_on_every_surface() {
         &mut app,
         "t-extensions-installed",
         Some(CONTENT),
-        &["INSTALLED", "Turns", "Linked from"],
+        &["Turns", "Linked from"],
         &["Turns", "Linked from"],
     );
 
@@ -623,20 +623,17 @@ fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
     assert!(!app.st.settings.open);
 }
 
-/// The Widget built-in, a Wasm component: an agent's real permission request
+/// The Widget extension, a Wasm component: an agent's real permission request
 /// with the rules it offers and a question it asks, answered from its window,
 /// which folds to a line of counts and back, on every surface.
 #[test]
 fn the_widget_answers_requests_and_folds_to_a_line_on_every_surface() {
-    let Some(v) = TestVornd::start() else {
+    const W: &str = "vorn.widget";
+    let Some(v) = TestVornd::start_with(&[W]) else {
         return;
     };
-    const W: &str = "vorn.widget";
     let mut app = connect(&v);
     let project = add_project(&mut app, &v, "api", json!({}));
-    app.rpc()
-        .call("extension:setBuiltin", json!({ "id": W, "on": true }))
-        .expect("the widget on");
     let (full, compact) = (
         format!("{W}/windows/widget"),
         format!("{W}/windows/compact"),

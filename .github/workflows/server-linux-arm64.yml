@@ -14,6 +14,7 @@ on:
       - '.github/workflows/server-linux-arm64.yml'
       - '.github/actions/shipped/**'
       - 'packages/core/shipped.toml'
+      - 'packages/core/pinned.toml'
 
 jobs:
   server:

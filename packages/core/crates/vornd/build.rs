@@ -1,7 +1,8 @@
 //! Builds the extensions Vorn still carries as built-ins as Wasm components
 //! ([`crate::native::extensions::builtin`]): each one's crate is built for
 //! wasm32-wasip2 and its `.wasm` copied into `OUT_DIR`. Then embeds the
-//! shipped set, the released packs `shipped.toml` pins ([`crate::shipped`]).
+//! shipped set, the released packs `shipped.toml` pins, and the pins of
+//! `pinned.toml`'s, which only the catalog offers ([`crate::shipped`]).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -9,19 +10,13 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 /// `(workspace package, its folder, the name it is kept under)`.
-const SHIPPED: [(&str, &str, &str); 8] = [
-    ("vorn-ext-widget", "extensions/widget", "widget.wasm"),
+const SHIPPED: [(&str, &str, &str); 2] = [
     ("vorn-ext-tasks", "extensions/tasks", "tasks.wasm"),
     (
         "vorn-ext-workflows",
         "extensions/workflows",
         "workflows.wasm",
     ),
-    ("vorn-ext-blocks", "extensions/blocks", "blocks.wasm"),
-    ("vorn-ext-files", "extensions/files", "files.wasm"),
-    ("vorn-ext-browser", "extensions/browser", "browser.wasm"),
-    ("vorn-ext-device", "extensions/device", "device.wasm"),
-    ("vorn-ext-ssh", "extensions/ssh", "ssh.wasm"),
 ];
 
 fn main() {
@@ -40,6 +35,38 @@ fn main() {
             .unwrap_or_else(|e| panic!("{}: {e}", built.display()));
     }
     embed_shipped(&workspace, &out);
+    embed_pinned(&workspace, &out);
+}
+
+/// Writes `pinned.rs`: each `(id, version, sha256)` `pinned.toml` pins. No
+/// pack is embedded; the catalog's is checked against these.
+fn embed_pinned(workspace: &Path, out: &Path) {
+    let lock = workspace.join("pinned.toml");
+    println!("cargo:rerun-if-changed={}", lock.display());
+    let text = std::fs::read_to_string(&lock).unwrap_or_else(|e| panic!("{}: {e}", lock.display()));
+    let mut code = String::from("&[\n");
+    for entry in extensions(&text, "pinned.toml") {
+        let field = |key: &str| {
+            entry
+                .get(key)
+                .and_then(toml::Value::as_str)
+                .unwrap_or_else(|| panic!("pinned.toml: an extension has no {key}"))
+        };
+        let (id, version, sha256) = (field("id"), field("version"), field("sha256"));
+        let _ = writeln!(code, "    ({id:?}, {version:?}, {sha256:?}),");
+    }
+    code.push(']');
+    std::fs::write(out.join("pinned.rs"), code).unwrap_or_else(|e| panic!("pinned.rs: {e}"));
+}
+
+/// The `[[extension]]` tables of the lock `name` reads as `text`.
+fn extensions(text: &str, name: &str) -> Vec<toml::Value> {
+    let table: toml::Table = toml::from_str(text).unwrap_or_else(|e| panic!("{name}: {e}"));
+    table
+        .get("extension")
+        .and_then(toml::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Writes `shipped.rs`: every pack `shipped.toml` pins, read from
@@ -57,14 +84,8 @@ fn embed_shipped(workspace: &Path, out: &Path) {
     println!("cargo:rerun-if-changed={}", dir.display());
     let required = std::env::var_os("VORN_SHIPPED_REQUIRED").is_some_and(|v| v != "0");
     let text = std::fs::read_to_string(&lock).unwrap_or_else(|e| panic!("{}: {e}", lock.display()));
-    let table: toml::Table = toml::from_str(&text).unwrap_or_else(|e| panic!("shipped.toml: {e}"));
     let mut code = String::from("&[\n");
-    for entry in table
-        .get("extension")
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
-    {
+    for entry in extensions(&text, "shipped.toml") {
         let field = |key: &str| {
             entry
                 .get(key)

@@ -29,6 +29,7 @@ on:
       - '.github/workflows/release.yml'
       - '.github/actions/shipped/**'
       - 'packages/core/shipped.toml'
+      - 'packages/core/pinned.toml'
 
 jobs:
   # The web client is WebAssembly, the same on every platform, so it is built once.

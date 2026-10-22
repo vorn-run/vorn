@@ -34,7 +34,8 @@ fn parsed(result: &Value) -> Value {
 #[test]
 fn every_listed_tool_is_implemented() {
     let rpc = FakeRpc::new(sample_config());
-    for tool in crate::tools_list().as_array().unwrap() {
+    let hosted = crate::hosted_tools().flat_map(|(_, tools)| tools);
+    for tool in crate::tools_list().as_array().unwrap().iter().chain(hosted) {
         let name = tool["name"].as_str().unwrap();
         let result = run(&rpc, name, json!({}));
         let said = result
@@ -46,7 +47,9 @@ fn every_listed_tool_is_implemented() {
             "{name} is not implemented: {said}"
         );
     }
-    assert_eq!(crate::tool_count(), 59);
+    assert_eq!(crate::tool_count(), 35);
+    let hosted: Vec<(&str, usize)> = crate::hosted_tools().map(|(id, t)| (id, t.len())).collect();
+    assert_eq!(hosted, [("vorn.browser", 11), ("vorn.device", 13)]);
 }
 
 /// The task, workflow and config methods the calls so far wrote through.
@@ -170,8 +173,8 @@ fn page_reads_are_fenced_and_failures_reported() {
         json!({ "content": [{ "type": "text", "text": "Error: No browser pane" }], "isError": true })
     );
 
-    // Switched off, vornd refuses every browser method and the tool says so.
-    let off = "Browser is off. Turn it on in Settings → Extensions.";
+    // Uninstalled, vornd refuses every browser method and the tool says so.
+    let off = "Browser is not installed. Install it in Settings → Extensions.";
     rpc.fail("browser:listTabs", off);
     assert_eq!(
         text(&run(&rpc, "browser_tabs", json!({ "action": "list" }))),
@@ -187,8 +190,8 @@ fn page_reads_are_fenced_and_failures_reported() {
         "Error: held by s2"
     );
 
-    // So do the device tools while the Device is off.
-    let off = "Device is off. Turn it on in Settings → Extensions.";
+    // So do the device tools while the Device is not installed.
+    let off = "Device is not installed. Install it in Settings → Extensions.";
     for (tool, method) in [
         ("device_list", "device:list"),
         ("device_screenshot", "device:screenshot"),

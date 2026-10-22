@@ -27,8 +27,9 @@ pub struct Caller {
     /// Declares `process.run`: a workflow it seeds may run commands and
     /// agents, and it may run workflows not its own.
     pub runs_commands: bool,
-    /// One Vorn ships, the only kind that may have a reserved id
-    /// ([`crate::pack::is_reserved`]) and own that namespace.
+    /// One Vorn ships, compiled in or installed as the pack this build pins:
+    /// the only kind that may have a reserved id ([`crate::pack::is_reserved`])
+    /// and own that namespace.
     pub builtin: bool,
 }
 

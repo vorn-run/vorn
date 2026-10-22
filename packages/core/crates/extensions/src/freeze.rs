@@ -10,9 +10,10 @@
 //! there too, so what is left to move out is a list, kept honest by
 //! [`check`] in the core's tests.
 //!
-//! The extensions that moved to their own repository and come back as the
-//! shipped set (`shipped.toml`) are held to the same rules there by
-//! [`check_extensions`], and no core or host crate may name them.
+//! The extensions that moved to their own repository, the shipped set
+//! (`shipped.toml`) and Vorn's own the catalog offers (`pinned.toml`), are
+//! held to the same rules there by [`check_extensions`], and no core or host
+//! crate may name them.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -31,6 +32,8 @@ pub const FILE: &str = "freeze.toml";
 const BUILTINS: &str = "extensions";
 /// The shipped set's lock, beside `freeze.toml`.
 const SHIPPED: &str = "shipped.toml";
+/// The lock of Vorn's own extensions the catalog offers, beside it.
+const PINNED: &str = "pinned.toml";
 /// The SDK's package, the one Vorn crate an extension elsewhere builds on.
 const SDK_PACKAGE: &str = "vorn-extension-sdk";
 /// The one Vorn crate a built-in builds on.
@@ -304,28 +307,34 @@ fn check_dependencies(report: &mut Report, root: &Path, dir: &str, freeze: &Free
 
 // ---- the extensions elsewhere ----
 
-/// Checks the shipped set's extensions in their repository's checkout at
+/// Checks the extensions Vorn pins in their repository's checkout at
 /// `checkout`, against the public API as [`check`] holds the built-ins: each
-/// folder `root`'s `shipped.toml` names has a manifest that reads as an
-/// installed one's, with the id and version the lock pins; its Rust builds on
-/// the SDK alone of Vorn's crates, uses none of its hidden modules and names
-/// only public bridge methods, events and permissions.
+/// folder `root`'s `shipped.toml` or `pinned.toml` names has a manifest that
+/// reads as an installed one's, with the id and version the lock pins; its
+/// Rust builds on the SDK alone of Vorn's crates, uses none of its hidden
+/// modules and names only public bridge methods, events and permissions.
 pub fn check_extensions(root: &Path, checkout: &Path) -> Result<(), Vec<Finding>> {
     let mut report = Report {
         root: checkout.to_path_buf(),
         found: Vec::new(),
     };
-    let lock_path = root.join(SHIPPED);
-    let lock: Lock = match read(&lock_path)
-        .and_then(|t| toml::from_str(&t).map_err(|e| format!("does not read: {}", e.message())))
-    {
-        Ok(lock) => lock,
-        Err(why) => {
-            report.at(&lock_path, 1, why);
-            return Err(report.found);
+    let mut pinned = Vec::new();
+    for (name, required) in [(SHIPPED, true), (PINNED, false)] {
+        let lock_path = root.join(name);
+        if !required && !lock_path.exists() {
+            continue;
         }
-    };
-    for locked in &lock.extension {
+        match read(&lock_path).and_then(|t| {
+            toml::from_str::<Lock>(&t).map_err(|e| format!("does not read: {}", e.message()))
+        }) {
+            Ok(lock) => pinned.extend(lock.extension.into_iter().map(|l| (name, l))),
+            Err(why) => report.at(&lock_path, 1, why),
+        }
+    }
+    if !report.found.is_empty() {
+        return Err(report.found);
+    }
+    for (lock, locked) in &pinned {
         let folder = checkout.join(&locked.path);
         if let Some(manifest) = check_manifest(&mut report, &folder) {
             if manifest.id != locked.id || manifest.version != locked.version {
@@ -333,7 +342,7 @@ pub fn check_extensions(root: &Path, checkout: &Path) -> Result<(), Vec<Finding>
                     &folder.join(file::FILE),
                     1,
                     format!(
-                        "is {}@{}, and {SHIPPED} pins {}@{}",
+                        "is {}@{}, and {lock} pins {}@{}",
                         manifest.id, manifest.version, locked.id, locked.version
                     ),
                 );
@@ -589,7 +598,7 @@ fn check_hooks(
     }
 }
 
-/// The ids of the built-ins, the exception crates' packages and the shipped set.
+/// The ids of the built-ins, the exception crates' packages and the extensions Vorn pins.
 fn builtin_ids(root: &Path, freeze: &Freeze, builtins: &[String]) -> BTreeSet<String> {
     let mut manifests: Vec<PathBuf> = builtins
         .iter()
@@ -600,16 +609,19 @@ fn builtin_ids(root: &Path, freeze: &Freeze, builtins: &[String]) -> BTreeSet<St
         let toml = root.join(module).with_extension("toml");
         manifests.push(toml);
     }
-    let shipped = fs::read_to_string(root.join(SHIPPED))
-        .ok()
-        .and_then(|t| toml::from_str::<Lock>(&t).ok())
-        .unwrap_or_default();
+    let pinned = [SHIPPED, PINNED].into_iter().flat_map(|name| {
+        fs::read_to_string(root.join(name))
+            .ok()
+            .and_then(|t| toml::from_str::<Lock>(&t).ok())
+            .unwrap_or_default()
+            .extension
+    });
     manifests
         .iter()
         .filter_map(|m| fs::read_to_string(m).ok())
         .filter_map(|t| toml::from_str::<toml::Table>(&t).ok())
         .filter_map(|t| t.get("id").and_then(toml::Value::as_str).map(str::to_owned))
-        .chain(shipped.extension.into_iter().map(|e| e.id))
+        .chain(pinned.map(|e| e.id))
         .collect()
 }
 

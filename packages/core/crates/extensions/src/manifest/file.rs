@@ -160,6 +160,10 @@ struct RawService {
     component: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     events: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stop: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -793,6 +797,17 @@ impl Raw {
                 }
                 Some(_) => {}
             }
+            for (field, action) in [
+                ("service.start", &service.start),
+                ("service.stop", &service.stop),
+            ] {
+                if action
+                    .as_deref()
+                    .is_some_and(|a| a.is_empty() || a.contains(char::is_whitespace))
+                {
+                    return Err(at(field, "names the action to call, like \"start\"".into()));
+                }
+            }
             for (i, event) in service.events.iter().enumerate() {
                 if !is_event(event) {
                     return Err(at(
@@ -1071,6 +1086,8 @@ impl Raw {
             command: s.command,
             component: s.component,
             events: s.events,
+            start: s.start,
+            stop: s.stop,
         });
         manifest.runs = self
             .actions
@@ -2037,6 +2054,8 @@ impl From<&Manifest> for Raw {
                 command: s.command.clone(),
                 component: s.component.clone(),
                 events: s.events.clone(),
+                start: s.start.clone(),
+                stop: s.stop.clone(),
             }),
             actions: m
                 .runs
@@ -2513,6 +2532,24 @@ after = "agents"
         let m = parse(&twice).unwrap();
         let c = m.contributes.as_ref().unwrap();
         assert!(c.points(super::super::Place::Sidebar).is_empty());
+    }
+
+    #[test]
+    fn a_service_names_the_actions_vorn_calls_as_it_starts_and_stops_it() {
+        let hooked = SERVICE.replace(
+            "events = [\"session.exited\"]",
+            "events = [\"session.exited\"]\nstart = \"start\"\nstop = \"let-go\"",
+        );
+        let m = parse(&hooked).unwrap();
+        let service = m.service.as_ref().unwrap();
+        assert_eq!(
+            (service.start.as_deref(), service.stop.as_deref()),
+            (Some("start"), Some("let-go"))
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+        let err = parse(&hooked.replace("\"let-go\"", "\"\"")).unwrap_err();
+        assert_eq!((err.line, err.field.as_str()), (11, "service.stop"));
+        assert_eq!(parse(SERVICE).unwrap().service.unwrap().start, None);
     }
 
     #[test]

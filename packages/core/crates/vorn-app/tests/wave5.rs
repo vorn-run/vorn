@@ -109,6 +109,8 @@ fn a_waiting_gate_badges_the_workflows_pill() {
     );
     // The badge's count is part of the pill's tooltip.
     let pill = vorn_app::ui::item_id(vorn_app::screen::VIEWS, 2);
+    // Workflows' pill shows once its extension's views are listed, which a slow start delays.
+    shot.until(&mut app, "the Workflows pill", |_, ui| ui.rect_of(pill));
     shot.hover(&mut app, pill);
     std::thread::sleep(std::time::Duration::from_millis(450));
     shot.save(&mut app, "badge");

@@ -56,11 +56,11 @@ pub struct Pinned {
     pub sha256: String,
 }
 
-/// What this build of Vorn vouches for, compiled into it: the packs of its
-/// shipped set, the only ones that may have an id in Vorn's own namespace,
-/// and the ids of the extensions it bundles, which no install may take.
-/// A catalog is not in it: its listing is not signed, so it vouches for
-/// nothing in Vorn's namespace.
+/// What this build of Vorn vouches for, compiled into it: the packs it pins
+/// (its shipped set, and Vorn's own the catalog offers), the only ones that
+/// may have an id in Vorn's own namespace, and the ids of the extensions it
+/// bundles, which no install may take. A catalog listing vouches for nothing
+/// in Vorn's namespace: it is not signed.
 #[derive(Debug, Clone, Default)]
 pub struct Trust {
     pub pins: Vec<Pinned>,
@@ -70,6 +70,14 @@ pub struct Trust {
 impl Trust {
     fn vouches(&self, pin: &Pinned) -> bool {
         self.pins.contains(pin)
+    }
+
+    /// Whether `pack` is installed as the very pack this build pins for its
+    /// id and version, which makes it Vorn's own: never a linked folder.
+    pub fn vouches_for(&self, pack: &InstalledPack) -> bool {
+        !pack.linked
+            && pin_of(&pack.id, &pack.version, pack.source.as_ref())
+                .is_some_and(|pin| self.vouches(&pin))
     }
 
     /// Whether only a pack this build pins may have `id`.
@@ -271,6 +279,11 @@ impl Installs {
     pub fn trusting(mut self, trust: Trust) -> Installs {
         self.trust = trust;
         self
+    }
+
+    /// What vouches for packs in Vorn's namespace, which the router lets own it too.
+    pub fn trust(&self) -> &Trust {
+        &self.trust
     }
 
     /// Refuses `pin` up front when it claims an id only this build's own

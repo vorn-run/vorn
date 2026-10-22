@@ -10,6 +10,7 @@
 //! its own endpoint and the clients it serves.
 
 pub mod builtin;
+pub mod hosted;
 pub mod routes;
 pub mod world;
 
@@ -35,7 +36,7 @@ use vorn_extensions::install::Installs;
 use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
-use vorn_extensions::router::Router;
+use vorn_extensions::router::{Hook, Router};
 use vorn_extensions::{points, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
@@ -344,6 +345,20 @@ impl Extensions {
         self.hosts.running().len()
     }
 
+    /// The extensions whose service runs now, as programs or components.
+    pub fn services(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .router
+            .lifecycle()
+            .running()
+            .into_iter()
+            .map(|k| k.extension)
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
     /// The router programs are called and woken through.
     pub fn router(&self) -> &Arc<Router> {
         &self.router
@@ -360,6 +375,8 @@ impl Extensions {
         self.router.reindex();
         self.sync_adapters();
         self.builtins.start();
+        let router = Arc::clone(&self.router);
+        tokio::spawn(async move { router.start_installed().await });
         self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
@@ -571,6 +588,7 @@ impl Extensions {
             }
             "extension:mcpTools" => self.listed_tools().await.map(|tools| {
                 let mut listed = self.builtins.mcp_tools();
+                listed.extend(hosted::mcp_tools(|id| self.router.program(id).is_some()));
                 listed.extend(tools.into_iter().map(|t| t.listed));
                 Value::Array(listed)
             }),
@@ -727,6 +745,7 @@ impl Extensions {
         }
         let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
         self.kill_terminals(&closed);
+        self.router.call_hook(id, Hook::Stop).await;
         self.hosts.stop_extension(id).await;
         self.router.forget(id).await;
         self.router.forget_preferences(id);
@@ -753,6 +772,7 @@ impl Extensions {
         if let Err(err) = self.router.prepare_installed(id).await {
             warn!("[extensions] {err}");
         }
+        self.router.call_hook(id, Hook::Start).await;
         self.around.pack_changed(id).await;
         self.relist.store(true, Ordering::Relaxed);
         self.contributions_changed(id);
@@ -768,6 +788,21 @@ impl Extensions {
             && (self.builtins.has(id) || self.router.program(id).is_some())
     }
 
+    /// Extension `id`'s `action`, built in or installed.
+    pub async fn call(
+        &self,
+        id: &str,
+        action: &str,
+        args: Value,
+        ctx: CallCtx,
+    ) -> Result<Value, ExtError> {
+        if self.builtins.has(id) {
+            let answered = self.builtins.call(id, action, args).await;
+            return answered.unwrap_or_else(|| Err(builtin::unknown(id, action)));
+        }
+        self.router.call(id, action, args, ctx).await
+    }
+
     /// A client's call to `<id>:<action>`, routed to the extension.
     pub async fn call_action(&self, method: &str, params: Value) -> Answer {
         let Some((id, action)) = method.split_once(':') else {
@@ -780,11 +815,7 @@ impl Extensions {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         };
-        let answered = match self.builtins.call(id, action, params.clone()).await {
-            Some(answered) => answered,
-            None => self.router.call(id, action, params, ctx).await,
-        };
-        match answered {
+        match self.call(id, action, params, ctx).await {
             Ok(value) => Answer::Result(value),
             Err(ExtError { message, .. }) => Answer::Error(message),
         }
@@ -977,6 +1008,23 @@ impl Extensions {
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
         self.hosts.stop_extension(extension_id).await;
+    }
+
+    /// Runs the start hook of `id` when it is installed and its service is not
+    /// running: an install from the catalog reaches vornd only as a changed pack.
+    fn start_if_stopped(&self, id: &str) {
+        if self.router.program(id).is_none()
+            || self
+                .router
+                .lifecycle()
+                .running()
+                .iter()
+                .any(|k| k.extension == id)
+        {
+            return;
+        }
+        let (router, id) = (Arc::clone(&self.router), id.to_owned());
+        tokio::spawn(async move { router.call_hook(&id, Hook::Start).await });
     }
 
     fn kill_terminals(&self, closed: &[Grant]) {
@@ -1210,6 +1258,7 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
         for id in &moved {
             debug!("[extensions] pack {id} changed");
             extensions.pack_changed(id).await;
+            extensions.start_if_stopped(id);
         }
         reconcile(&extensions, &mut known, !moved.is_empty());
     }

@@ -7058,8 +7058,8 @@ dependencies = [
  "tokio",
  "vorn-bench-crash",
  "vorn-bench-rss",
+ "vorn-bench-widget",
  "vorn-bench-worktrees",
- "vorn-ext-widget",
  "vorn-extension-sdk",
  "vorn-extensions",
  "vorn-guest-build",
@@ -7073,6 +7073,13 @@ dependencies = [
  "regex",
  "sha2 0.10.9",
  "url",
+ "vorn-extension-sdk",
+]
+
+[[package]]
+name = "vorn-bench-widget"
+version = "0.0.0"
+dependencies = [
  "vorn-extension-sdk",
 ]
 
@@ -7179,49 +7186,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vorn-ext-blocks"
-version = "0.0.0"
-dependencies = [
- "serde",
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-browser"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "url",
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-device"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-files"
-version = "0.0.0"
-dependencies = [
- "serde",
- "vorn-extension-sdk",
-]
-
-[[package]]
 name = "vorn-ext-probe"
-version = "0.0.0"
-dependencies = [
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-ssh"
 version = "0.0.0"
 dependencies = [
  "vorn-extension-sdk",
@@ -7239,13 +7204,6 @@ dependencies = [
  "vorn-extension-sdk",
  "vorn-mcp",
  "vorn-store",
-]
-
-[[package]]
-name = "vorn-ext-widget"
-version = "0.0.0"
-dependencies = [
- "vorn-extension-sdk",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
-//! `ssh:testConnection` end to end: the SSH built-in answers it with the
-//! core's test of the host, in the shape clients have always read, and
-//! refuses it while switched off.
+//! `ssh:testConnection` end to end: the installed SSH extension answers it
+//! with the core's test of the host, in the shape clients have always read,
+//! and it is refused once SSH is uninstalled.
 
 mod common;
 
@@ -17,8 +17,12 @@ async fn wanted(ws: &mut Socket, id: u64) -> Value {
     }
 }
 
-/// The built-ins are compiled by the `vorn` command beside vornd.
-fn compiler_beside_vornd() -> bool {
+/// Whether this build ships SSH, whose component the `vorn` command beside vornd compiles.
+fn runs_ssh() -> bool {
+    if !vornd::shipped::SET.iter().any(|s| s.id == "vorn.ssh") {
+        eprintln!("skipped: this build does not ship vorn.ssh (see packages/core/shipped.toml)");
+        return false;
+    }
     let vornd = std::path::Path::new(env!("CARGO_BIN_EXE_vornd"));
     let vorn = vornd.with_file_name(format!("vorn{}", std::env::consts::EXE_SUFFIX));
     if !vorn.exists() {
@@ -34,8 +38,8 @@ fn test_connection(id: u64) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_test_is_the_built_ins_and_refused_when_off() {
-    if !compiler_beside_vornd() {
+async fn a_test_is_the_installed_extensions_and_refused_once_uninstalled() {
+    if !runs_ssh() {
         return;
     }
     let served = serve();
@@ -53,15 +57,15 @@ async fn a_test_is_the_built_ins_and_refused_when_off() {
 
     send(
         &mut client,
-        json!({ "jsonrpc": "2.0", "id": 3, "method": "extension:setBuiltin",
-                "params": { "id": "vorn.ssh", "on": false } }),
+        json!({ "jsonrpc": "2.0", "id": 3, "method": "extension:remove",
+                "params": { "id": "vorn.ssh" } }),
     )
     .await;
-    let switched = wanted(&mut client, 3).await;
-    assert!(switched.get("error").is_none(), "{switched}");
+    let removed = wanted(&mut client, 3).await;
+    assert!(removed.get("error").is_none(), "{removed}");
     send(&mut client, test_connection(4)).await;
     assert_eq!(
         wanted(&mut client, 4).await["error"]["message"],
-        "SSH is off. Turn it on in Settings \u{2192} Extensions."
+        "SSH is not installed. Install it in Settings \u{2192} Extensions."
     );
 }

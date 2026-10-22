@@ -62,6 +62,7 @@
 "bench/ext-tiers" = "benchmark"
 "bench/ext-tiers/crash" = "the extension-tiers benchmark's crash probe"
 "bench/ext-tiers/rss" = "the extension-tiers benchmark's feed reader"
+"bench/ext-tiers/widget" = "the extension-tiers benchmark's copy of the Widget"
 "bench/ext-tiers/worktrees" = "the extension-tiers benchmark's copy of Worktree cleanup"
 
 # Feature crates still in the workspace, each to move to the extensions repo.
@@ -69,16 +70,15 @@
 "crates/connectors" = "the Connectors built-in on the public API; it starts before the extension host and serves the app from the first moment"
 "crates/workflows" = "the Workflows built-in's node and trigger types and seeds; its steps run in vornd by the engine"
 
-# Modules a host keeps for a built-in: its registry entry and route.
+# Modules a host keeps for a built-in or a shipped extension: its registry entry or route.
 [exceptions.modules]
 "crates/vornd/src/native/extensions/builtin/artifacts.rs" = "Artifacts' switch; its calls and pages are answered by the work model"
-"crates/vornd/src/native/extensions/builtin/browser.rs" = "the Browser component's route for agents' browser calls and MCP tools"
 "crates/vornd/src/native/extensions/builtin/connectors.rs" = "the Connectors built-in's host and switch"
-"crates/vornd/src/native/extensions/builtin/device.rs" = "the Device component's route for agents' device calls and MCP tools"
-"crates/vornd/src/native/extensions/builtin/ssh.rs" = "the SSH component's route; hosts and keys stay the core's"
 "crates/vornd/src/native/extensions/builtin/tasks.rs" = "the Tasks component's routes for clients' writes, MCP tools and its workflow step"
-"crates/vornd/src/native/extensions/builtin/wasm.rs" = "the shipped components compiled into vornd"
-"crates/vornd/src/native/extensions/builtin/widget_tiers.rs" = "a measurement of the Widget built-in, ignored by default"
+"crates/vornd/src/native/extensions/builtin/wasm.rs" = "the Workflows component compiled into vornd"
+"crates/vornd/src/native/extensions/hosted/browser.rs" = "the route of agents' browser calls and MCP tools to the installed Browser"
+"crates/vornd/src/native/extensions/hosted/device.rs" = "the route of agents' device calls and MCP tools to the installed Device, which boots a claimed simulator"
+"crates/vornd/src/native/extensions/hosted/ssh.rs" = "the route of the SSH page's calls to the installed SSH; hosts and keys stay the core's"
 
 # Built-ins whose Cargo.toml reaches past the SDK.
 [exceptions.dependencies]
@@ -102,9 +102,6 @@
 "crates/vornd/src/native/extensions/world.rs#builtin::tasks" = "Tasks is lent the board's own tables"
 "crates/vornd/src/native/extensions/world.rs#vorn_workflows" = "the Workflows built-in's steps run commands, so seeding them needs process.run"
 "crates/vornd/src/native/mod.rs#builtin::tasks" = "clients' task writes route to the Tasks component"
-"crates/vornd/src/native/mod.rs#builtin::browser" = "agents' browser calls route to the Browser component"
-"crates/vornd/src/native/mod.rs#builtin::device" = "agents' device calls route to the Device component"
-"crates/vornd/src/native/mod.rs#builtin::ssh" = "the SSH settings page's calls route to the SSH component"
 "crates/vornd/src/native/mod.rs#vorn_connectors" = "clients' connection calls route to the Connectors built-in"
 "crates/vornd/src/native/mod.rs#builtin::connectors" = "vornd holds the Connectors built-in once it has a database"
 "crates/vornd/src/native/work/files.rs#vorn_workflows" = "a project workflow's listing names the remote host the agent step resolves"
