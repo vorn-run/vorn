@@ -119,7 +119,8 @@ export const realServers: RealServer[] = []
 /**
  * @param dirs An earlier server's directories, to start again on what it left.
  * @param options.early Returns once vornd says where it is, as the app connects, without waiting for the holder.
- * @param options.installed Vorn's own catalog extensions installed too, from a catalog served on loopback, as a person installs one.
+ * @param options.installed Vorn's own catalog extensions installed too, from a catalog served
+ *   on loopback, as a person installs one.
  */
 export async function startRealServer(
   dirs?: RunDirs,
@@ -185,7 +186,10 @@ export async function startRealServer(
   if (options.installed?.length) {
     const client = await Watcher.open(server.vornd)
     for (const id of options.installed) {
-      const done = await client.result<{ ok?: boolean }>('connector:installPack', { kind: 'catalog', id })
+      const done = await client.result<{ ok?: boolean }>('connector:installPack', {
+        kind: 'catalog',
+        id
+      })
       if (done.ok !== true) throw new Error(`installing ${id}: ${JSON.stringify(done)}`)
     }
     client.close()
@@ -205,7 +209,7 @@ export function inCatalog(...ids: string[]): boolean {
   return ids.every((id) => names.some((n) => n.startsWith(`${id}-`)))
 }
 
-/** Lists `ids` in the catalog vornd at `home` reads, served from loopback as the release would be. */
+/** Lists `ids` in the catalog vornd at `home` reads, served on loopback as a release would be. */
 export async function offerInCatalog(home: string, ids: string[]): Promise<void> {
   const packs = ids.map((id) => {
     const name = fs.readdirSync(catalogPacks).find((n) => n.startsWith(`${id}-`))

@@ -411,7 +411,9 @@ async function both(name: string, args: Record<string, unknown> | undefined) {
 }
 
 // The Device's tools are listed while it is installed, from the catalog.
-describe.skipIf(!vornd || !inCatalog('vorn.device'))("vornd's MCP server answers as the TypeScript one does", () => {
+const runs = !!vornd && inCatalog('vorn.device')
+
+describe.runIf(runs)("vornd's MCP server answers as the TypeScript one does", () => {
   beforeAll(async () => {
     delete process.env.VORN_SESSION_ID
     store.dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-mcp-')))

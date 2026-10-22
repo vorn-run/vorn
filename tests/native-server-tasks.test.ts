@@ -38,6 +38,9 @@ interface Wrote {
   task?: TaskConfig
 }
 
+/** Whether the Widget's pack was fetched, to install from the catalog. */
+const widget = inCatalog('vorn.widget')
+
 describe.runIf(runnable)('the task board in vornd', () => {
   let server: RealServer
   let client: Watcher
@@ -66,9 +69,7 @@ describe.runIf(runnable)('the task board in vornd', () => {
   }
 
   beforeAll(async () => {
-    server = await startRealServer(undefined, {
-      installed: inCatalog('vorn.widget') ? ['vorn.widget'] : []
-    })
+    server = await startRealServer(undefined, { installed: widget ? ['vorn.widget'] : [] })
     client = await Watcher.open(server.vornd)
     project = 'board'
     await addProject(project, server.dirs.work)
@@ -258,7 +259,7 @@ describe.runIf(runnable)('the task board in vornd', () => {
     expect(all.length).toBeGreaterThan(0)
   })
 
-  it.runIf(inCatalog('vorn.widget'))('lists each terminal in the Widget installed from the catalog', async () => {
+  it.runIf(widget)('lists each terminal in the Widget installed from the catalog', async () => {
     type Agent = { id: string; name?: string; agent?: string; status?: string }
     const agents = (): Promise<Agent[]> =>
       call<Agent[]>('extension:rows', { id: 'vorn.widget', collection: 'agents' })
