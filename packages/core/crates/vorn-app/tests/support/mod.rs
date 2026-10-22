@@ -63,6 +63,12 @@ impl TestVornd {
     /// A started vornd with its holder connected, or `None` (said on
     /// stderr) when the binaries are not built.
     pub fn start() -> Option<TestVornd> {
+        TestVornd::start_with(&[])
+    }
+
+    /// [`TestVornd::start`] with these shipped extensions also installed,
+    /// as a first launch does for one whose built-in switch was on.
+    pub fn start_with(installed: &[&str]) -> Option<TestVornd> {
         let dir = bin_dir()?;
         let (vornd, sessiond) = (exe(&dir, "vornd"), exe(&dir, "vorn-sessiond"));
         if !vornd.is_file() || !sessiond.is_file() {
@@ -70,6 +76,17 @@ impl TestVornd {
             return None;
         }
         let home = temp_home().expect("temp dir");
+        let on: serde_json::Map<String, serde_json::Value> = installed
+            .iter()
+            .map(|id| ((*id).to_owned(), serde_json::Value::Bool(true)))
+            .collect();
+        if !on.is_empty() {
+            std::fs::write(
+                home.join("builtins.json"),
+                serde_json::Value::Object(on).to_string(),
+            )
+            .expect("the switches");
+        }
         Some(TestVornd::spawn(home))
     }
 

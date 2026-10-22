@@ -484,11 +484,8 @@ fn switching_ssh_off_removes_its_surfaces() {
     app.st.dialog = None;
 
     app.rpc()
-        .call(
-            "extension:setBuiltin",
-            json!({ "id": "vorn.ssh", "on": false }),
-        )
-        .expect("switched off");
+        .call("extension:remove", json!({ "id": "vorn.ssh" }))
+        .expect("uninstalled");
     shot.until(&mut app, "the SSH page gone", |a, _| {
         a.st.points.get(page).is_none().then_some(())
     });
@@ -507,7 +504,7 @@ fn switching_ssh_off_removes_its_surfaces() {
         .expect_err("refused");
     assert!(
         off.to_string()
-            .contains("SSH is off. Turn it on in Settings"),
+            .contains("SSH is not installed. Install it in Settings"),
         "{off}"
     );
     let config = app.rpc().call("config:load", Value::Null).expect("config");

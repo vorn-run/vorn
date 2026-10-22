@@ -783,7 +783,7 @@ fn health(daemon: &Daemon) -> Response<Body> {
         "registry": registry_report(daemon),
         "hooks": daemon.native.hooks_activity(),
         "mcp": daemon.mcp.get().map(|mcp| json!({ "sessions": mcp.sessions() })),
-        "extensions": daemon.native.extensions().map(|e| json!({ "hosts": e.hosts(), "panes": e.panes() })),
+        "extensions": daemon.native.extensions().map(|e| json!({ "hosts": e.hosts(), "services": e.services(), "panes": e.panes() })),
     });
     let mut res = Response::new(full(body.to_string()));
     res.headers_mut().insert(

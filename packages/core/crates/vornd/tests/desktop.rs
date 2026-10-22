@@ -1,7 +1,7 @@
 //! The desktop bridge end to end: the app claims its connection to vornd with
 //! `bridge:identify`, one connection at a time, and an agent's `browser:*` and
-//! `device:*` calls go to the Browser and Device built-ins, which refuse them
-//! while switched off. (The built-ins driving the app's web views and
+//! `device:*` calls go to the installed Browser and Device extensions, and
+//! are refused once those are uninstalled. (The extensions driving the app's web views and
 //! simulators with `web:*` and `video:*` are covered end to end by
 //! vorn-app's `panes` tests; the bridge's requests by its unit tests.)
 
@@ -53,7 +53,12 @@ async fn wanted(ws: &mut Socket, id: u64) -> Value {
     }
 }
 
-fn compiler_beside_vornd() -> bool {
+/// Whether this build ships `id` and can compile its component.
+fn runs_shipped(id: &str) -> bool {
+    if !vornd::shipped::SET.iter().any(|s| s.id == id) {
+        eprintln!("skipped: this build does not ship {id} (see packages/core/shipped.toml)");
+        return false;
+    }
     let vornd = std::path::Path::new(env!("CARGO_BIN_EXE_vornd"));
     let vorn = vornd.with_file_name(format!("vorn{}", std::env::consts::EXE_SUFFIX));
     if !vorn.exists() {
@@ -63,8 +68,8 @@ fn compiler_beside_vornd() -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_agents_browser_call_is_the_built_ins_and_refused_when_off() {
-    if !compiler_beside_vornd() {
+async fn an_agents_browser_call_is_the_installed_browsers_and_refused_once_uninstalled() {
+    if !runs_shipped("vorn.browser") {
         return;
     }
     let served = serve();
@@ -72,7 +77,7 @@ async fn an_agents_browser_call_is_the_built_ins_and_refused_when_off() {
     assert_eq!(identify(&mut main, 1).await["result"]["ok"], true);
     let mut agent = connect(served.port, CREDENTIAL).await;
 
-    // The built-in answers, not the app: it knows no session `s`.
+    // The extension answers, not the app: it knows no session `s`.
     send(
         &mut agent,
         json!({ "jsonrpc": "2.0", "id": 2, "method": "browser:openPane", "params": { "sessionId": "s" } }),
@@ -86,12 +91,12 @@ async fn an_agents_browser_call_is_the_built_ins_and_refused_when_off() {
 
     send(
         &mut agent,
-        json!({ "jsonrpc": "2.0", "id": 4, "method": "extension:setBuiltin",
-                "params": { "id": "vorn.browser", "on": false } }),
+        json!({ "jsonrpc": "2.0", "id": 4, "method": "extension:remove",
+                "params": { "id": "vorn.browser" } }),
     )
     .await;
-    let switched = wanted(&mut agent, 4).await;
-    assert!(switched.get("error").is_none(), "{switched}");
+    let removed = wanted(&mut agent, 4).await;
+    assert!(removed.get("error").is_none(), "{removed}");
     send(
         &mut agent,
         json!({ "jsonrpc": "2.0", "id": 5, "method": "browser:listTabs", "params": { "sessionId": "s" } }),
@@ -99,19 +104,19 @@ async fn an_agents_browser_call_is_the_built_ins_and_refused_when_off() {
     .await;
     assert_eq!(
         wanted(&mut agent, 5).await["error"]["message"],
-        "Browser is off. Turn it on in Settings \u{2192} Extensions."
+        "Browser is not installed. Install it in Settings \u{2192} Extensions."
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_agents_device_call_is_the_built_ins_and_refused_when_off() {
-    if !compiler_beside_vornd() {
+async fn an_agents_device_call_is_the_installed_devices_and_refused_once_uninstalled() {
+    if !runs_shipped("vorn.device") {
         return;
     }
     let served = serve();
     let mut agent = connect(served.port, CREDENTIAL).await;
 
-    // The built-in answers, not the app: it knows no session `s`, and the
+    // The extension answers, not the app: it knows no session `s`, and the
     // chrome needs none.
     send(
         &mut agent,
@@ -132,12 +137,12 @@ async fn an_agents_device_call_is_the_built_ins_and_refused_when_off() {
 
     send(
         &mut agent,
-        json!({ "jsonrpc": "2.0", "id": 4, "method": "extension:setBuiltin",
-                "params": { "id": "vorn.device", "on": false } }),
+        json!({ "jsonrpc": "2.0", "id": 4, "method": "extension:remove",
+                "params": { "id": "vorn.device" } }),
     )
     .await;
-    let switched = wanted(&mut agent, 4).await;
-    assert!(switched.get("error").is_none(), "{switched}");
+    let removed = wanted(&mut agent, 4).await;
+    assert!(removed.get("error").is_none(), "{removed}");
     send(
         &mut agent,
         json!({ "jsonrpc": "2.0", "id": 5, "method": "device:claim", "params": { "sessionId": "s", "udid": "u" } }),
@@ -145,6 +150,6 @@ async fn an_agents_device_call_is_the_built_ins_and_refused_when_off() {
     .await;
     assert_eq!(
         wanted(&mut agent, 5).await["error"]["message"],
-        "Device is off. Turn it on in Settings \u{2192} Extensions."
+        "Device is not installed. Install it in Settings \u{2192} Extensions."
     );
 }

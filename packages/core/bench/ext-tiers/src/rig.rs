@@ -36,9 +36,9 @@ pub struct Ext {
 pub const WIDGET: Ext = Ext {
     name: "Widget",
     id: "bench.widget",
-    package: "vorn-ext-widget",
+    package: "vorn-bench-widget",
     bin: "tier-widget",
-    manifest: include_str!("../../../extensions/widget/vorn-extension.toml"),
+    manifest: include_str!("../widget/vorn-extension.toml"),
 };
 
 pub const WORKTREES: Ext = Ext {

@@ -797,7 +797,10 @@ impl Raw {
                 }
                 Some(_) => {}
             }
-            for (field, action) in [("service.start", &service.start), ("service.stop", &service.stop)] {
+            for (field, action) in [
+                ("service.start", &service.start),
+                ("service.stop", &service.stop),
+            ] {
                 if action
                     .as_deref()
                     .is_some_and(|a| a.is_empty() || a.contains(char::is_whitespace))

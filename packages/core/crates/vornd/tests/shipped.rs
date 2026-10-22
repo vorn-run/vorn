@@ -1,6 +1,7 @@
 //! The shipped set against the real vornd: a first launch installs it with
 //! no network, each one an ordinary install that an uninstall removes whole
-//! (files, tables, the agent it brought) and no later start puts back; an
+//! (files, tables, the agent it brought, the service it ran) and no later
+//! start puts back; each moved built-in still works installed; an
 //! older shipped install is updated; and with every adapter gone an agent
 //! still runs in a plain terminal. Skipped by a build that carries no packs.
 
@@ -14,7 +15,7 @@ use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 use vorn_term_proto::bytes::BytesFrame;
 
-use common::{connect, send, serve_in, Socket, CREDENTIAL, PATIENCE};
+use common::{connect, health, send, serve_in, Socket, CREDENTIAL, PATIENCE};
 
 struct Ws {
     ws: Socket,
@@ -145,7 +146,6 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
             pack["icon"].is_object(),
             "{id} has no icon of its own: {pack}"
         );
-        assert_eq!(pack["running"], false, "{pack}");
         let dir = data.join("connectors").join(id).join(shipped.version);
         assert!(
             dir.join("vorn-extension.toml").is_file(),
@@ -179,6 +179,15 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
         );
     }
     assert!(tables(&db, &prefix).is_empty(), "worktrees left its tables");
+    let t = Instant::now();
+    while health(served.port)["extensions"]["services"] != json!([]) {
+        assert!(
+            t.elapsed() < PATIENCE,
+            "a service outlived its extension: {}",
+            health(served.port)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let left = c.result("extension:installed", json!({})).await;
     assert_eq!(left, json!([]), "{left}");
     assert_eq!(c.result("agent:list", json!(null)).await, json!([]));
@@ -199,6 +208,101 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
     let again = serve_in(data);
     let mut c = Ws::open(again.port).await;
     assert_eq!(c.result("extension:installed", json!({})).await, json!([]));
+}
+
+/// The tree `id` draws at `point`, as a client asks for it.
+async fn drawn(c: &mut Ws, id: &str, point: &str) -> String {
+    let answer = c
+        .result(
+            "extension:call",
+            json!({ "id": id, "action": vorn_tree::RENDER,
+                    "args": { "point": point, "surface": {} } }),
+        )
+        .await;
+    let tree = vorn_tree::read(&answer)
+        .unwrap_or_else(|errs| panic!("{id} drew no tree: {errs:?} {answer}"));
+    serde_json::to_string(&tree.tree).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_moved_built_ins_work_installed_and_their_switch_carries_over() {
+    let moved = [
+        "vorn.files",
+        "vorn.blocks",
+        "vorn.widget",
+        "vorn.browser",
+        "vorn.device",
+        "vorn.ssh",
+    ];
+    if moved
+        .iter()
+        .any(|id| !vornd::shipped::SET.iter().any(|s| s.id == *id))
+    {
+        eprintln!("skipped: this build does not ship every moved built-in");
+        return;
+    }
+    // The Widget is off by default; a switch left on installs it, and one left off removes SSH.
+    let data = tempfile::tempdir().unwrap();
+    std::fs::write(
+        data.path().join("builtins.json"),
+        r#"{"vorn.widget": true, "vorn.ssh": false}"#,
+    )
+    .unwrap();
+    let served = serve_in(data);
+    let mut c = Ws::open(served.port).await;
+    let installed = ids(&c.result("extension:installed", json!({})).await, "id");
+    assert!(
+        installed.iter().any(|i| i == "vorn.widget"),
+        "{installed:?}"
+    );
+    assert!(!installed.iter().any(|i| i == "vorn.ssh"), "{installed:?}");
+
+    assert!(!drawn(&mut c, "vorn.widget", "compact").await.is_empty());
+    assert!(!drawn(&mut c, "vorn.files", "files").await.is_empty());
+    let history = c
+        .result(
+            "extension:call",
+            json!({ "id": "vorn.blocks", "action": "history", "args": { "text": "echo" } }),
+        )
+        .await;
+    assert!(history.is_array() || history.is_object(), "{history}");
+
+    // Browser and Device start with vornd, through their manifest's start.
+    let t = Instant::now();
+    loop {
+        let services = health(served.port)["extensions"]["services"].clone();
+        let has = |id: &str| services.as_array().unwrap().iter().any(|s| s == id);
+        if has("vorn.browser") && has("vorn.device") {
+            break;
+        }
+        assert!(t.elapsed() < PATIENCE, "not started: {services}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    for (id, method, name) in [
+        ("vorn.browser", "browser:listTabs", "Browser"),
+        ("vorn.device", "device:claim", "Device"),
+    ] {
+        c.result("extension:remove", json!({ "id": id })).await;
+        let refused = c
+            .call(method, json!({ "sessionId": "s", "udid": "u" }))
+            .await;
+        assert_eq!(
+            refused["error"]["message"],
+            format!("{name} is not installed. Install it in Settings \u{2192} Extensions."),
+            "{refused}"
+        );
+    }
+    let ssh = c
+        .call(
+            "ssh:testConnection",
+            json!({ "id": "h", "hostname": "nowhere.invalid", "user": "nobody", "port": 22 }),
+        )
+        .await;
+    assert_eq!(
+        ssh["error"]["message"],
+        "SSH is not installed. Install it in Settings \u{2192} Extensions.",
+        "{ssh}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

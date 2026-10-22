@@ -1,10 +1,10 @@
 //! The wave 4 panes driven as a user would, on a vornd with its own HOME:
 //! the Browser's pane from the card's globe with its address bar and tabs
-//! (the `vorn.browser` built-in's tree), switched off, an
+//! (the `vorn.browser` extension's tree), uninstalled, an
 //! artifact the agent publishes with its bar, versions, doc editor and
 //! comments rail, a design's canvas and tweaks, and the Device's pane (the
-//! `vorn.device` built-in's tree) with its picker and controls, switched
-//! off. No web view is seated offscreen, so the page itself never loads, and
+//! `vorn.device` extension's tree) with its picker and controls,
+//! uninstalled. No web view is seated offscreen, so the page itself never loads, and
 //! no simulator is started; what a page would report (a design's manifest)
 //! is set on the app's state. `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
@@ -195,7 +195,7 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
 }
 
 #[test]
-fn switched_off_the_browser_leaves_no_globe_and_refuses_its_calls() {
+fn uninstalled_the_browser_leaves_no_globe_and_refuses_its_calls() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -207,11 +207,8 @@ fn switched_off_the_browser_leaves_no_globe_and_refuses_its_calls() {
     until_shown(&mut shot, &mut app, &sid, "about:blank");
 
     app.rpc()
-        .call(
-            "extension:setBuiltin",
-            json!({ "id": BROWSER, "on": false }),
-        )
-        .expect("switched off");
+        .call("extension:remove", json!({ "id": BROWSER }))
+        .expect("uninstalled");
     shot.until(&mut app, "the pane gone", |app, _| {
         app.pump();
         (app.st.points.loaded && app.st.bench.kinds(&sid).is_empty()).then_some(())
@@ -219,7 +216,7 @@ fn switched_off_the_browser_leaves_no_globe_and_refuses_its_calls() {
     shot.hover(&mut app, term_id(&sid));
     assert!(
         shot.labelled(&mut app, "Button", "Open browser").is_none(),
-        "no globe while it is off"
+        "no globe once it is uninstalled"
     );
     let refused = app
         .rpc()
@@ -227,7 +224,7 @@ fn switched_off_the_browser_leaves_no_globe_and_refuses_its_calls() {
         .expect_err("refused");
     let refused = format!("{refused:?}");
     assert!(
-        refused.contains("Browser is off. Turn it on in Settings \u{2192} Extensions."),
+        refused.contains("Browser is not installed. Install it in Settings \u{2192} Extensions."),
         "{refused}"
     );
 }
@@ -589,7 +586,7 @@ fn the_device_button_opens_the_picker_over_the_card_then_the_pane() {
 }
 
 #[test]
-fn switched_off_the_device_leaves_no_phone_and_refuses_its_calls() {
+fn uninstalled_the_device_leaves_no_phone_and_refuses_its_calls() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -600,14 +597,14 @@ fn switched_off_the_device_leaves_no_phone_and_refuses_its_calls() {
     until_video(&mut shot, &mut app, &sid, "the pane", |_| true);
 
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": DEVICE, "on": false }))
-        .expect("switched off");
+        .call("extension:remove", json!({ "id": DEVICE }))
+        .expect("uninstalled");
     shot.until(&mut app, "the pane gone", |app, _| {
         app.pump();
         (app.st.points.loaded && app.st.bench.kinds(&sid).is_empty()).then_some(())
     });
     // The card's buttons follow the refreshed contributions, a beat after the pane.
-    wait_for("no phone while it is off", || {
+    wait_for("no phone once it is uninstalled", || {
         shot.hover(&mut app, term_id(&sid));
         shot.labelled(&mut app, "Button", "Open device")
             .is_none()
@@ -619,7 +616,7 @@ fn switched_off_the_device_leaves_no_phone_and_refuses_its_calls() {
         .expect_err("refused");
     let refused = format!("{refused:?}");
     assert!(
-        refused.contains("Device is off. Turn it on in Settings \u{2192} Extensions."),
+        refused.contains("Device is not installed. Install it in Settings \u{2192} Extensions."),
         "{refused}"
     );
 }

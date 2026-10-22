@@ -14,13 +14,7 @@ use crate::native::{Answer, Native};
 
 /// A core route's `method` (as `browser:openPane`), answered by installed
 /// extension `id`'s action of the same name; uninstalled, it says how to get `name`.
-pub async fn answer(
-    native: &Native,
-    id: &str,
-    name: &str,
-    method: &str,
-    params: Value,
-) -> Answer {
+pub async fn answer(native: &Native, id: &str, name: &str, method: &str, params: Value) -> Answer {
     let Some(ext) = native.extensions() else {
         return Answer::Error("vornd is not hosting extensions".to_owned());
     };

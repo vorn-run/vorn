@@ -11,7 +11,8 @@ the same API and the same permissions:
   machine: no files, no network, no environment. It asks Vorn for what it
   needs through the API's imports, and Vorn holds each call to what the
   manifest declares. Fit for logic that reacts to events, keeps its own data
-  and draws a UI. Worktree cleanup and the Widget, which Vorn ships, are two.
+  and draws a UI. Worktree cleanup, Files, Shell blocks, the Widget, the
+  Browser, the Device and SSH, which Vorn ships, are such components.
 
 Both are written against `wit/extension.wit` in
 `packages/core/crates/extensions`, the only definition of the API. The
@@ -21,7 +22,11 @@ two tiers are measured against each other in
 ## A component's manifest
 
 Only `[service]` differs from a program's: `component` names the `.wasm`
-inside the package, in place of `command`.
+inside the package, in place of `command`. `start` and `stop`, both optional,
+name the actions Vorn calls with no arguments: `start` as Vorn starts and
+after the extension is installed or updated, to publish what it shows from
+the first moment; `stop` before it is uninstalled, to let go of what it holds
+outside Vorn.
 
 ```toml
 id = "acme.hello"
@@ -283,7 +288,7 @@ lists the simulators and reports them. Its `page` events carry:
 | `listed`  | `devices` or `error` | the simulators a `loading` picker asked for            |
 | `saved`   | `path` or `error`    | how the screenshot `save` asked for went               |
 
-A `video` part needs the `video` permission; Vorn's own Device (`packages/core/extensions/device`) draws
+A `video` part needs the `video` permission; Vorn's own Device (`device/` in vorn-run/extensions) draws
 the device pane with one. A Device row with `card` set is drawn over the
 session card's phone button instead of in a pane: its picker, then the
 button waiting while what was picked there starts.
@@ -298,10 +303,9 @@ a page at a time, windows them, drags them between columns and opens them.
 `examples/extensions/agent-footer` a card footer. Vorn's own Tasks
 (`packages/core/extensions/tasks`) and Workflows
 (`packages/core/extensions/workflows`) draw their main views this way;
-Files (`packages/core/extensions/files`) draws its pane and cards, Shell
-blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
-(`packages/core/extensions/browser`) a session's tabs over its page, and
-the Device (`packages/core/extensions/device`) a session's simulator.
+in vorn-run/extensions, Files (`files/`) draws its pane and cards, Shell
+blocks (`blocks/`) a shell's commands, the Browser (`browser/`) a session's
+tabs over its page, and the Device (`device/`) a session's simulator.
 
 ## Top bar buttons
 
@@ -486,12 +490,12 @@ connected it fails. `udid` names the simulator in all but `list`.
 Any other `op`, such as reading the screen or the logs, fails with a message
 saying the native app cannot yet.
 
-### `remote.*`: the SSH built-in's hosts and keys
+### `remote.*`: SSH's hosts and keys
 
-Vorn's SSH built-in edits the remote hosts and the stored SSH keys under the
+Vorn's SSH extension edits the remote hosts and the stored SSH keys under the
 `remote` permission. The hosts
 stay in vornd's config (`remoteHosts`) and the keys in its key store, so
-sessions on a remote host keep running with the built-in off.
+sessions on a remote host keep running with SSH uninstalled.
 
 | method             | params                                            | answers                                                     |
 | ------------------ | ------------------------------------------------- | ----------------------------------------------------------- |

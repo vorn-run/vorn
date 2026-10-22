@@ -494,7 +494,8 @@ async fn without_a_compiler_only_what_the_cache_holds_runs() {
 
 /// The probe packed as Vorn packs what it ships: `vorn.probe`, its manifest naming its hooks.
 fn probe_pack() -> Vec<u8> {
-    let text = manifest(ALL).replace(ID, "vorn.probe") + "start = \"started\"\nstop = \"stopped\"\n";
+    let text =
+        manifest(ALL).replace(ID, "vorn.probe") + "start = \"started\"\nstop = \"stopped\"\n";
     let wasm = fs::read(probe()).unwrap();
     let mut tar = tar::Builder::new(Vec::new());
     for (path, bytes) in [
@@ -547,8 +548,14 @@ async fn a_pack_vorn_pins_owns_its_namespace_and_hears_its_start_and_stop() {
 
     let router = router_trusting(trust);
     router.start_installed().await;
-    assert_eq!(router.rows("vorn.probe", "hooks"), [json!({ "id": "started" })]);
-    router.call("vorn.probe", "call", list.clone(), ctx()).await.unwrap();
+    assert_eq!(
+        router.rows("vorn.probe", "hooks"),
+        [json!({ "id": "started" })]
+    );
+    router
+        .call("vorn.probe", "call", list.clone(), ctx())
+        .await
+        .unwrap();
     router.call_hook("vorn.probe", Hook::Stop).await;
     assert_eq!(
         router.rows("vorn.probe", "hooks"),
@@ -558,7 +565,10 @@ async fn a_pack_vorn_pins_owns_its_namespace_and_hears_its_start_and_stop() {
 
     // The same files, not vouched for by this build, own nothing of Vorn's.
     let unpinned = router_trusting(Trust::default());
-    unpinned.call("vorn.probe", "call", list, ctx()).await.unwrap();
+    unpinned
+        .call("vorn.probe", "call", list, ctx())
+        .await
+        .unwrap();
     assert_eq!(*core.owned.lock().unwrap(), [true, false]);
     unpinned.lifecycle().stop_all().await;
 }

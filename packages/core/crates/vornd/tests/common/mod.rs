@@ -164,14 +164,7 @@ impl Vornd {
     pub fn holder(&self) -> u32 {
         let t = Instant::now();
         loop {
-            let mut s = std::net::TcpStream::connect(("127.0.0.1", self.port)).unwrap();
-            s.write_all(
-                b"GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-            )
-            .unwrap();
-            let mut res = String::new();
-            s.read_to_string(&mut res).unwrap();
-            let body: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let body = health(self.port);
             if let Some(pid) = body["sessiond"]["current"]["pid"].as_u64() {
                 return u32::try_from(pid).unwrap();
             }
@@ -183,6 +176,16 @@ impl Vornd {
     pub fn log(&self) -> String {
         std::fs::read_to_string(self.home.path().join("vornd.log")).unwrap_or_default()
     }
+}
+
+/// What vornd on `port` answers at `/vornd/health`.
+pub fn health(port: u16) -> Value {
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.write_all(b"GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut res = String::new();
+    s.read_to_string(&mut res).unwrap();
+    serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
 }
 
 /// Kills the session holder on drop, so a failing test leaves nothing running.

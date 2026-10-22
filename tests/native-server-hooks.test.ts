@@ -37,7 +37,7 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
   const record = async (id: string): Promise<TerminalSession | undefined> =>
     (await client.result<TerminalSession[]>('terminal:listActive')).find((s) => s.id === id)
   type Asked = { id: string; tool: string; description: string }
-  // The Widget built-in lists open requests: the public API's way to hear of them.
+  // The Widget extension lists open requests: the public API's way to hear of them.
   const asked = (): Promise<Asked[]> =>
     client.result<Asked[]>('extension:rows', { id: 'vorn.widget', collection: 'permissions' })
   const event = (name: string, session: string, extra: Record<string, unknown> = {}) => ({
@@ -48,7 +48,7 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
   })
 
   beforeAll(async () => {
-    server = await startRealServer()
+    server = await startRealServer(undefined, { installed: ['vorn.widget'] })
     home = server.dirs.home
     client = await Watcher.open(server.vornd)
     await until('vornd to register its hook endpoint', () => !!hookEndpoint(home))
@@ -68,7 +68,6 @@ describe.runIf(runnable)('agents’ hooks in vornd', () => {
       projectPath: server.dirs.work
     })
     await until('the agent to start', async () => ((await record(claude.id))?.pid ?? 0) > 0)
-    await client.result('extension:setBuiltin', { id: 'vorn.widget', on: true })
   })
 
   afterAll(async () => {

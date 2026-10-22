@@ -44,14 +44,8 @@ members = [
   "crates/extension-sdk",
   "crates/guest-build",
   "crates/extensions/tests/probe",
-  "extensions/widget",
   "extensions/tasks",
   "extensions/workflows",
-  "extensions/blocks",
-  "extensions/files",
-  "extensions/browser",
-  "extensions/device",
-  "extensions/ssh",
   "../../examples/extensions/turns",
   "../../examples/extensions/agent-footer",
   "bench/scale",
@@ -59,6 +53,7 @@ members = [
   "bench/ext-tiers",
   "bench/ext-tiers/crash",
   "bench/ext-tiers/rss",
+  "bench/ext-tiers/widget",
   "bench/ext-tiers/worktrees",
 ]
 exclude = ["vendor"]

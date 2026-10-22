@@ -65,7 +65,7 @@ describe.runIf(runnable)('the task board in vornd', () => {
   }
 
   beforeAll(async () => {
-    server = await startRealServer()
+    server = await startRealServer(undefined, { installed: ['vorn.widget'] })
     client = await Watcher.open(server.vornd)
     project = 'board'
     await addProject(project, server.dirs.work)
@@ -255,12 +255,10 @@ describe.runIf(runnable)('the task board in vornd', () => {
     expect(all.length).toBeGreaterThan(0)
   })
 
-  it('lists each terminal in the Widget once it is switched on', async () => {
+  it('lists each terminal in the installed Widget', async () => {
     type Agent = { id: string; name?: string; agent?: string; status?: string }
     const agents = (): Promise<Agent[]> =>
       call<Agent[]>('extension:rows', { id: 'vorn.widget', collection: 'agents' })
-    expect(await agents()).toEqual([])
-    await call('extension:setBuiltin', { id: 'vorn.widget', on: true })
     const shell = await call<TerminalSession>('shell:create', server.dirs.work)
     let entry: Agent | undefined
     await until('the widget to list the shell', async () => {
@@ -269,6 +267,5 @@ describe.runIf(runnable)('the task board in vornd', () => {
     })
     expect(Object.keys(entry!).sort()).toEqual(['agent', 'id', 'name', 'status'])
     await call('terminal:kill', shell.id)
-    await call('extension:setBuiltin', { id: 'vorn.widget', on: false })
   })
 })

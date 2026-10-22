@@ -37,7 +37,7 @@ vorn-extensions = { path = "../../crates/extensions", features = ["wasm-compile"
 vorn-extension-sdk = { path = "../../crates/extension-sdk" }
 vorn-guest-build = { path = "../../crates/guest-build" }
 vorn-spawn = { path = "../../crates/spawn" }
-vorn-ext-widget = { path = "../../extensions/widget" }
+vorn-bench-widget = { path = "widget" }
 vorn-bench-worktrees = { path = "worktrees" }
 vorn-bench-rss = { path = "rss" }
 vorn-bench-crash = { path = "crash" }

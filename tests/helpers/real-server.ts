@@ -116,10 +116,11 @@ export const realServers: RealServer[] = []
 /**
  * @param dirs An earlier server's directories, to start again on what it left.
  * @param options.early Returns once vornd says where it is, as the app connects, without waiting for the holder.
+ * @param options.installed Shipped extensions installed too, as a first launch does for a built-in switch left on.
  */
 export async function startRealServer(
   dirs?: RunDirs,
-  options: { early?: boolean } = {}
+  options: { early?: boolean; installed?: string[] } = {}
 ): Promise<RealServer> {
   const made = (name: string): string =>
     fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `vorn-parity-${name}-`)))
@@ -127,6 +128,10 @@ export async function startRealServer(
   dirs ??= { home: made('home'), data: made('data'), work: made('work') }
   // A killed server leaves its port behind.
   fs.rmSync(path.join(dirs.data, WS_PORT_FILENAME), { force: true })
+  if (options.installed?.length) {
+    const on = Object.fromEntries(options.installed.map((id) => [id, true]))
+    fs.writeFileSync(path.join(dirs.data, 'builtins.json'), JSON.stringify(on))
+  }
   const log: string[] = []
   const child = spawn(
     vornd!,

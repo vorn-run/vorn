@@ -345,6 +345,20 @@ impl Extensions {
         self.hosts.running().len()
     }
 
+    /// The extensions whose service runs now, as programs or components.
+    pub fn services(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .router
+            .lifecycle()
+            .running()
+            .into_iter()
+            .map(|k| k.extension)
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
     /// The router programs are called and woken through.
     pub fn router(&self) -> &Arc<Router> {
         &self.router
