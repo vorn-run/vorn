@@ -382,9 +382,18 @@ pub fn tabs(connectors_on: bool) -> Vec<Tab> {
     }
 }
 
-/// Whether a catalog entry can be installed: it names the repository it installs from.
+/// Whether a catalog entry can be installed: it names the repository it
+/// installs from, or a released pack and its checksum.
 pub fn installable(entry: &Value) -> bool {
-    s(entry, "git").is_some_and(|u| !u.is_empty())
+    released_pack(entry) || s(entry, "git").is_some_and(|u| !u.is_empty())
+}
+
+/// Whether a catalog entry lists a released pack, which vornd fetches and
+/// checks against the listed checksum.
+pub fn released_pack(entry: &Value) -> bool {
+    ["packUrl", "sha256"]
+        .iter()
+        .all(|k| s(entry, k).is_some_and(|v| !v.is_empty()))
 }
 
 /// Where a pack stands, from the pack, its catalog entry and any install in
@@ -969,16 +978,11 @@ pub fn hidden_while_off(builtin: &Value) -> String {
             None => format!("{t} in its menu"),
         });
     }
-    let mut note = match parts.as_slice() {
+    match parts.as_slice() {
         [] => "Hidden while off: everything it adds.".to_owned(),
         [one] => format!("Hidden while off: {one}."),
         [rest @ .., last] => format!("Hidden while off: {}, and {last}.", rest.join(", ")),
-    };
-    // What a built-in leaves of yours, where it is worth saying.
-    if s(builtin, "id") == Some("vorn.worktrees") {
-        note.push_str(" Your worktrees stay.");
     }
-    note
 }
 
 /// One line of what an extension may use: what, how, and whether Vorn holds it to that.

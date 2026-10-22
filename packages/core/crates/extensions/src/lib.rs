@@ -42,6 +42,7 @@ pub mod polls;
 pub mod preferences;
 pub mod router;
 pub mod sandbox;
+pub mod shipped;
 pub mod signin;
 pub mod token;
 pub mod usage;

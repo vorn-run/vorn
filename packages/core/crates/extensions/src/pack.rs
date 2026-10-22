@@ -32,6 +32,9 @@ pub struct InstalledPack {
     pub previous_version: Option<String>,
     /// As written, so a pointer from another build reads back unchanged.
     pub installed_at: Value,
+    /// The agent a linked folder adapted when it was linked; one it adapts
+    /// since was claimed after every other adapter's.
+    pub linked_agent: Option<String>,
     pub bytes: u64,
 }
 
@@ -182,9 +185,9 @@ pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
 /// id would own its workflows (`vorn.connectors:` and the rest).
 pub const SHIPPED_NAMESPACE: &str = "vorn.";
 
-/// Whether `id` is Vorn's: no installed or linked extension may have it.
+/// Whether `id` is Vorn's: only a pack whose checksum Vorn pinned may have
+/// it (see [`crate::install::Installs::inspect_archive`]).
 pub fn is_reserved(id: &str) -> bool {
-    // The one place to admit a shipped package, by pinned checksum, once built-ins install like any other.
     RESERVED_IDS.contains(&id) || id.starts_with(SHIPPED_NAMESPACE)
 }
 
@@ -230,6 +233,7 @@ struct Current {
     source: Option<Value>,
     previous_version: Option<String>,
     installed_at: Value,
+    linked_agent: Option<String>,
 }
 
 /// Reads the manifest a folder carries, `vorn-extension.toml`.
@@ -342,6 +346,10 @@ impl PackStore {
                 .filter(|v| is_safe_version(v))
                 .map(str::to_owned),
             installed_at: parsed.get("installedAt").cloned().unwrap_or(Value::Null),
+            linked_agent: parsed
+                .get("linkedAgent")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         })
     }
 
@@ -413,6 +421,7 @@ impl PackStore {
             source: current.source,
             previous_version: current.previous_version,
             installed_at: current.installed_at,
+            linked_agent: current.linked_agent,
             bytes,
         })
     }

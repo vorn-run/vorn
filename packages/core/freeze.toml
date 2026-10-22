@@ -1,7 +1,9 @@
 # The frozen core: every workspace member, classed once, and every feature
 # left in a core or host crate, listed by name with the reason it stays.
 # `cargo test -p vorn-extensions --test freeze` checks this file against the
-# tree; the built-ins under extensions/ are checked against the public API.
+# tree; the built-ins under extensions/ are checked against the public API,
+# and so is the shipped set (shipped.toml) in the extensions repository's
+# checkout that VORN_EXTENSIONS_DIR names.
 
 # The core crates, each with its area: projects, worktrees, sessions,
 # terminals, git, settings, palette, mcp, tasks, workflows, bridge, support.
@@ -66,11 +68,9 @@
 [exceptions.crates]
 "crates/connectors" = "the Connectors built-in on the public API; it starts before the extension host and serves the app from the first moment"
 "crates/workflows" = "the Workflows built-in's node and trigger types and seeds; its steps run in vornd by the engine"
-"crates/adapters" = "the agent adapter packages, data only, read by vornd's adapters"
 
 # Modules a host keeps for a built-in: its registry entry and route.
 [exceptions.modules]
-"crates/vornd/src/native/extensions/builtin/agents.rs" = "the agent adapters' switches"
 "crates/vornd/src/native/extensions/builtin/artifacts.rs" = "Artifacts' switch; its calls and pages are answered by the work model"
 "crates/vornd/src/native/extensions/builtin/browser.rs" = "the Browser component's route for agents' browser calls and MCP tools"
 "crates/vornd/src/native/extensions/builtin/connectors.rs" = "the Connectors built-in's host and switch"
@@ -86,14 +86,11 @@
 
 # Places a core or host crate names a built-in, as "file#name".
 [exceptions.hooks]
-"crates/extensions/src/install.rs#vorn_adapters" = "a manifest's agent rules may name every shipped adapter's agent"
-"crates/cli/src/session.rs#vorn_adapters" = "the vorn command starts the agents Vorn ships without a server"
 "crates/vorn-app/src/app/side.rs#vorn.files" = "the side pane opens Files' pane and cards by its id"
 "crates/vorn-app/src/headless.rs#vorn.workflows" = "a workflow's sessions name the Workflows built-in as their origin"
 "crates/vorn-app/src/panes.rs#vorn.browser" = "the app draws the Browser's tabs over the web views it owns"
 "crates/vorn-app/src/panes.rs#vorn.device" = "the app draws the Device's pane over the simulator screens it takes"
 "crates/vorn-app/src/plugins.rs#vorn.connectors" = "Settings shows the Connectors built-in's page in its place"
-"crates/vorn-app/src/plugins.rs#vorn.worktrees" = "switching Worktrees off says the worktrees stay"
 "crates/vorn-app/src/prompt.rs#vorn.blocks" = "the prompt's menu is answered by Shell blocks"
 "crates/vorn-app/src/screen/tasks/board.rs#vorn.tasks" = "the board is the Tasks built-in's main view"
 "crates/vorn-app/src/workflows.rs#vorn.workflows" = "Workflows' view, menu items and waiting gates are drawn here"
@@ -101,10 +98,6 @@
 "crates/vornd/src/endpoint.rs#vorn_connectors" = "Connectors starts before the extension host, so its switch is read first"
 "crates/vornd/src/native/credential.rs#vorn_connectors" = "credentials kept in the vault are marked as Connectors marks them"
 "crates/vornd/src/native/extensions/builtin/mod.rs#vorn_workflows" = "the old Workflow editor's switch folds into Workflows' once"
-"crates/vornd/src/native/extensions/mod.rs#builtin::connectors" = "the registry starts the Connectors built-in"
-"crates/vornd/src/native/extensions/mod.rs#builtin::tasks" = "the registry starts the Tasks built-in"
-"crates/vornd/src/native/extensions/mod.rs#builtin::wasm" = "the registry starts Workflows in its Settings place"
-"crates/vornd/src/native/extensions/mod.rs#builtin::agents" = "the registry starts the agent adapters' switches"
 "crates/vornd/src/native/extensions/world.rs#vorn_connectors" = "the bridge's HTTP fetch is Connectors' client"
 "crates/vornd/src/native/extensions/world.rs#builtin::tasks" = "Tasks is lent the board's own tables"
 "crates/vornd/src/native/extensions/world.rs#vorn_workflows" = "the Workflows built-in's steps run commands, so seeding them needs process.run"

@@ -5,7 +5,6 @@
 //! ([`wasm`]). Each has a switch; off, it subscribes to nothing, publishes
 //! nothing and contributes nothing.
 
-pub mod agents;
 pub mod artifacts;
 pub mod browser;
 pub mod connectors;
@@ -107,7 +106,6 @@ pub fn precompile(router: &Arc<Router>) {
         (tasks::MANIFEST, tasks::WASM),
         (wasm::workflows().manifest, wasm::workflows().wasm),
         (wasm::widget().manifest, wasm::widget().wasm),
-        (wasm::worktrees().manifest, wasm::worktrees().wasm),
         (wasm::blocks().manifest, wasm::blocks().wasm),
         (wasm::files().manifest, wasm::files().wasm),
         (browser::component().manifest, browser::component().wasm),
@@ -201,12 +199,55 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
         Arc::new(device::component()),
         Arc::new(ssh::component()),
         Arc::new(wasm::blocks()),
-        Arc::new(wasm::worktrees()),
         Arc::new(wasm::widget()),
         Arc::new(artifacts::Artifacts),
     ];
     all.extend(started);
     all
+}
+
+/// A built-in vornd starts before its extension host, which joins the
+/// registry as that host starts if vornd started it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Started {
+    Connectors,
+    Tasks,
+    Workflows,
+}
+
+impl Started {
+    /// Every one, in Settings' order: Workflows' view where it always was, after Tasks.
+    pub const ALL: [Started; 3] = [Started::Connectors, Started::Tasks, Started::Workflows];
+
+    /// The manifest its entry is held to, whether or not vornd started it.
+    pub fn manifest(self) -> &'static str {
+        match self {
+            Started::Connectors => connectors::MANIFEST,
+            Started::Tasks => tasks::MANIFEST,
+            Started::Workflows => vorn_workflows::MANIFEST,
+        }
+    }
+
+    /// Its registry entry, if `native` started it.
+    pub fn entry(self, native: &crate::native::Native) -> Option<Arc<dyn Builtin>> {
+        match self {
+            Started::Connectors => native.connectors().map(connectors::entry),
+            Started::Tasks => native.tasks().map(tasks::entry),
+            Started::Workflows => Some(Arc::new(wasm::workflows())),
+        }
+    }
+}
+
+/// The ids of every extension compiled into vornd, carried or started, which
+/// share one namespace with installs (services, storage, switches), so no
+/// install may take one. A manifest that does not read is an error, not a gap.
+pub fn bundled_ids() -> Result<std::collections::BTreeSet<String>, file::FileError> {
+    shipped(Vec::new())
+        .iter()
+        .map(|b| b.manifest())
+        .chain(Started::ALL.map(Started::manifest))
+        .map(|m| file::parse_builtin(m).map(|m| m.id))
+        .collect()
 }
 
 impl Builtins {

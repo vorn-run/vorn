@@ -21,6 +21,7 @@ mod pair;
 pub mod protocol;
 pub mod registry;
 pub mod serve;
+pub mod shipped;
 #[cfg(feature = "engine")]
 pub mod size;
 pub mod streams;

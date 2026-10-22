@@ -50,9 +50,8 @@ pub struct AgentInfo {
     pub mcp: Option<McpSetup>,
     /// Variables it sets in the sessions it runs, never handed on.
     pub markers: (Vec<String>, Vec<String>),
-    /// The extension it comes in, and whether Vorn ships it.
+    /// The extension it comes in.
     pub extension: String,
-    pub builtin: bool,
 }
 
 fn text(v: &Value, key: &str) -> String {
@@ -134,7 +133,6 @@ impl AgentInfo {
                 strings(v.pointer("/envMarkers/prefixes")),
             ),
             extension: text(v, "extension"),
-            builtin: flag("builtin"),
             key,
         })
     }
@@ -255,13 +253,13 @@ pub mod testing {
               "tint": "#d9775720", "mark": "*", "models": true, "headless": true, "resumes": true,
               "mcp": { "commands": ["/plugin install vorn"], "inAgent": true },
               "envMarkers": { "names": ["ACMECODE"], "prefixes": ["ACME_CODE_"] },
-              "extension": "test.acme", "builtin": true },
+              "extension": "test.acme" },
             { "id": "beta", "name": "Beta CLI", "label": "Beta", "shortName": "Beta",
               "command": "beta", "color": "#7a9dff", "models": true, "groupModels": true,
               "headless": true, "resumes": true, "mcp": { "commands": ["beta mcp add vorn"], "note": "Restart it." },
-              "extension": "test.beta", "builtin": true },
+              "extension": "test.beta" },
             { "id": "gamma", "name": "Gamma CLI", "label": "Gamma", "command": "gamma",
-              "color": "#3186ff", "headless": true, "extension": "test.gamma", "builtin": true }
+              "color": "#3186ff", "headless": true, "extension": "test.gamma" }
         ]))
     }
 }

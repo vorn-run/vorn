@@ -37,12 +37,10 @@ fn manifests() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The SDK's card names an agent Vorn ships; reading its adapter says the id
-/// exists, in this test's process as in any other.
+/// The SDK's card names an agent an adapter adds; knowing its id is what
+/// installing that adapter does.
 fn know_shipped_agents() {
-    for s in vorn_adapters::shipped() {
-        vorn_agents::from_manifest_text(s.manifest).expect("a shipped adapter reads");
-    }
+    vorn_agents::know("claude");
 }
 
 #[test]

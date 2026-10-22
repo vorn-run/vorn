@@ -546,14 +546,23 @@ impl Native {
     pub fn installs(self: &Arc<Self>, data_dir: &Path) -> Arc<vorn_extensions::install::Installs> {
         Arc::clone(self.installs.get_or_init(|| {
             let me = Arc::downgrade(self);
-            Arc::new(vorn_extensions::install::Installs::reading(
-                vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
-                Box::new(move || {
-                    me.upgrade()
-                        .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
-                        .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+            Arc::new(
+                vorn_extensions::install::Installs::reading(
+                    vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
+                    Box::new(move || {
+                        me.upgrade()
+                            .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
+                            .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+                    }),
+                )
+                .trusting(vorn_extensions::install::Trust {
+                    pins: crate::shipped::SET.iter().map(|s| s.pinned()).collect(),
+                    bundled: extensions::builtin::bundled_ids().unwrap_or_else(|err| {
+                        tracing::error!("[extensions] a bundled manifest does not read: {err}");
+                        Default::default()
+                    }),
                 }),
-            ))
+            )
         }))
     }
 
@@ -645,8 +654,8 @@ impl Native {
     pub fn set_database(&self, db: PathBuf) {
         if let Some(dir) = db.parent() {
             self.secrets.settle(dir);
-            // The shipped adapters' switches, kept beside the database by the extension host.
-            self.adapters().load_switches(&dir.join("builtins.json"));
+            // The installed adapters, before the extension host has started.
+            self.adapters().load_installed(&dir.join("connectors"));
         }
         let _ = self.db.set(db);
     }

@@ -104,6 +104,14 @@ impl Manifest {
         let section = self.theme.as_ref()?;
         vorn_theme::Theme::from_section(&self.id, &self.name, section).ok()
     }
+
+    /// The agent id its `[agent]` section adapts, when it has one that reads.
+    pub fn agent_id(&self) -> Option<String> {
+        let section = self.agent.clone()?;
+        vorn_agents::AgentSpec::from_toml(section)
+            .ok()
+            .map(|s| s.id)
+    }
 }
 
 /// Where a package keeps the migrations that make its tables.

@@ -254,7 +254,11 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
         .call("extension:remove", json!({ "id": "test.rules" }))
         .await;
     assert!(removed.get("error").is_none(), "{removed}");
-    assert!(tables(&db).is_empty(), "{:?}", tables(&db));
+    let own: Vec<_> = tables(&db)
+        .into_iter()
+        .filter(|t| t.starts_with("x_test_0rules_"))
+        .collect();
+    assert!(own.is_empty(), "{own:?}");
 
     // Linked again, its migration runs again and its table is back.
     let linked = c

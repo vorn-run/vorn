@@ -1,0 +1,42 @@
+# The shipped set: fetches the extension packs packages/core/shipped.toml pins,
+# as the extensions repository's CI built them at the lock's rev, checks each
+# sha256, and points vornd's build at them. The checkout is for the tests that
+# read the moved sources. The packs are cached on the lock, across platforms.
+name: Shipped set
+description: Fetch and verify the extension packs vornd ships
+runs:
+  using: composite
+  steps:
+    - name: Read the lock
+      id: lock
+      shell: bash
+      run: echo "rev=$(sed -n 's/^rev *= *"\(.*\)"/\1/p' packages/core/shipped.toml)" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/checkout@v7
+      with:
+        repository: vorn-run/extensions
+        ref: ${{ steps.lock.outputs.rev }}
+        path: .extensions
+
+    - id: cache
+      uses: actions/cache@v6
+      with:
+        path: packages/core/shipped
+        key: shipped-v1-${{ hashFiles('packages/core/shipped.toml') }}
+        enableCrossOsArchive: true
+
+    - name: Fetch the packs
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: node packages/core/scripts/shipped.mjs
+
+    - name: Point the build at them
+      shell: bash
+      run: |
+        {
+          echo "VORN_SHIPPED_DIR=$GITHUB_WORKSPACE/packages/core/shipped"
+          echo "VORN_SHIPPED_REQUIRED=1"
+          echo "VORN_EXTENSIONS_DIR=$GITHUB_WORKSPACE/.extensions"
+        } >> "$GITHUB_ENV"

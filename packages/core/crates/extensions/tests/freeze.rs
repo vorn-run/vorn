@@ -22,6 +22,56 @@ fn the_core_and_its_built_ins_keep_to_the_frozen_api() {
     }
 }
 
+/// The shipped set, in the extensions repository's checkout that
+/// `VORN_EXTENSIONS_DIR` names (CI's, built for this lock); skipped without one.
+#[test]
+fn the_shipped_set_keeps_to_the_frozen_api_where_it_moved() {
+    let Some(checkout) = std::env::var_os("VORN_EXTENSIONS_DIR") else {
+        eprintln!("skipped: VORN_EXTENSIONS_DIR names no extensions checkout");
+        return;
+    };
+    if let Err(found) = freeze::check_extensions(workspace(), Path::new(&checkout)) {
+        let lines: Vec<String> = found.iter().map(ToString::to_string).collect();
+        panic!(
+            "the shipped set is past the frozen API:\n{}",
+            lines.join("\n")
+        );
+    }
+}
+
+#[test]
+fn a_shipped_extension_past_the_public_api_is_named() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/freeze");
+    let found = freeze::check_extensions(&fixtures.join("shipped"), &fixtures.join("elsewhere"))
+        .expect_err("the fixture breaks every rule");
+    let mut lines: Vec<String> = found
+        .iter()
+        .map(|f| format!("{}:{}", f.path.display(), f.line).replace('\\', "/"))
+        .collect();
+    lines.sort();
+    assert_eq!(
+        lines,
+        [
+            "bad/Cargo.toml:8",
+            "bad/src/lib.rs:3",
+            "bad/src/lib.rs:5",
+            "bad/vorn-extension.toml:1",
+        ],
+        "{found:#?}"
+    );
+    let says = |needle: &str| found.iter().any(|f| f.message.contains(needle));
+    assert!(says(
+        "is vorn.bad@1.0.0, and shipped.toml pins vorn.bad@2.0.0"
+    ));
+    assert!(says(
+        "depends on vorn-extensions; an extension builds on vorn-extension-sdk alone"
+    ));
+    assert!(says("uses vorn_extension_sdk::guest"));
+    assert!(says(
+        "names task.secretly, which is no public bridge method"
+    ));
+}
+
 #[test]
 fn a_built_in_past_the_public_api_and_an_unlisted_hook_are_each_named() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/freeze/bad");
