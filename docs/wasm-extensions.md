@@ -401,8 +401,9 @@ same fields, with `project` defaulting to the call's project, and answers
 `sessions.launch`; closing one needs only `sessions.launch`.
 
 `terminal.read`, `terminal.send` and `terminal.selection` reach the sessions
-the extension started. Any other session needs `process.run` and a pane of
-the extension's open on that session. `permissions.resolve` answers an
+the extension started, over the gate and over a page's bridge alike. Any
+other session needs `process.run` and a pane of the extension's on that
+session: one it opened, or a tree a client draws for that session. `permissions.resolve` answers an
 agent's request while the extension handles a person's click; on its own it
 needs `process.run`.
 
@@ -431,12 +432,17 @@ stdio, `data` and what `get` answers are base64 strings.
 ### Calls and events Files and Shell blocks use
 
 `files.*` take absolute paths, resolved (`..` and symlinks followed) before
-they are checked. An extension reads and writes the folders of Vorn's
-projects and their worktrees, and its own files' folder; it reads a file a
-person chose for it in a file dialog, and the files directly in a folder a
-session's shell is in. `files.list` and `files.stat` answer names, sizes and
+they are checked, and passed on as the extension named them. A `..` after a
+folder that is not there, or a link that leads nowhere, is refused. An
+extension reads and writes the folders of Vorn's projects and their
+worktrees, its own files' folder, and the folder (and below) that the shell
+of a session it started or has a pane on is in; it reads a file a person
+chose for it in a file dialog, and the files directly in that shell's
+folder. The home folder, and any folder above it, never counts as a project
+or a shell's folder. `files.list` and `files.stat` answer names, sizes and
 times anywhere. Reading or writing anywhere else needs `process.run`. Vorn's
-data, `~/.ssh` and other credential folders, and the shell's startup files
+data, `~/.ssh` and other credential files and folders (cloud, registry and
+git credentials), what runs at login, and the shell's startup files
 (`.zshrc`, `.bashrc`, `.profile` and the like) are never reached.
 
 - `files.list` (`{path}`) answers a folder's entries, `{name, path,

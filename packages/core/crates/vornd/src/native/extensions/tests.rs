@@ -514,6 +514,13 @@ async fn the_bridge_answers_only_the_extension_its_token_was_minted_for() {
     assert_eq!(gone.0, StatusCode::NOT_FOUND);
 
     let lines = r#"{"sessionId":"s1","lines":2}"#;
+    let send = r#"{"sessionId":"s1","text":"hi"}"#;
+    for (method, body) in [("output", lines), ("selection", body), ("send", send)] {
+        let refused = bridge(&w, to("x", method), Some(&x), body).await;
+        assert_eq!(refused.0, StatusCode::FORBIDDEN, "{method}: {}", refused.1);
+    }
+    assert!(written(&w).is_empty());
+    w.ext.given().started("x", "s1");
     let output = bridge(&w, to("x", "output"), Some(&x), lines).await;
     let expected = json!({ "result": "line 0\nline 1" }).to_string();
     assert_eq!(output, (StatusCode::OK, expected));
@@ -521,7 +528,6 @@ async fn the_bridge_answers_only_the_extension_its_token_was_minted_for() {
         let read = bridge(&w, to("x", method), Some(&x), body).await;
         assert_eq!(read.0, StatusCode::OK, "{method}: {}", read.1);
     }
-    let send = r#"{"sessionId":"s1","text":"hi"}"#;
     let sent = bridge(&w, to("x", "send"), Some(&x), send).await;
     assert_eq!(sent.0, StatusCode::NO_CONTENT);
     assert_eq!(written(&w), [("s1".to_owned(), "hi".to_owned())]);
@@ -576,6 +582,10 @@ async fn a_page_speaks_for_the_session_its_pane_was_opened_on() {
         method: "send".into(),
     };
     let body = r#"{"sessionId":"s2","text":"t"}"#;
+    let refused = bridge(&w, on("p", &nonce), None, body).await;
+    assert_eq!(refused.0, StatusCode::FORBIDDEN, "{}", refused.1);
+    assert!(written(&w).is_empty());
+    w.ext.given().started("x", "s1");
     let sent = bridge(&w, on("p", &nonce), None, body).await;
     assert_eq!(sent.0, StatusCode::NO_CONTENT);
     assert_eq!(written(&w), [("s1".to_owned(), "t".to_owned())]);
@@ -583,6 +593,20 @@ async fn a_page_speaks_for_the_session_its_pane_was_opened_on() {
         let refused = bridge(&w, on(pane, nonce), None, body).await;
         assert_eq!(refused.0, StatusCode::UNAUTHORIZED);
     }
+    w.ext.stop().await;
+}
+
+#[tokio::test]
+async fn a_tree_drawn_for_a_live_session_attaches_its_extension_to_it() {
+    let w = world();
+    w.add(w.session("s1"));
+    for (key, session) in [("surface", "s1"), ("event", "s9")] {
+        let args = json!({ key: { "scope": session } });
+        let params = json!({ "id": "x", "action": "render", "args": args });
+        let _ = w.call("extension:call", params).await;
+    }
+    assert!(w.ext.paned("x", "s1"));
+    assert!(!w.ext.paned("x", "s9") && !w.ext.paned("y", "s1"));
     w.ext.stop().await;
 }
 

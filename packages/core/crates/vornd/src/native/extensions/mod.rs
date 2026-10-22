@@ -559,6 +559,13 @@ impl Extensions {
                 if let Some(picked) = params.get("picked").and_then(Value::as_str) {
                     self.hand(id, picked).await;
                 }
+                // A tree drawn for a session (a pane, a shell's log) attaches its extension to it.
+                let scope = ["surface", "event"]
+                    .iter()
+                    .find_map(|k| args.get(k)?.get("scope")?.as_str());
+                if let Some(session) = scope.filter(|s| self.session(s).is_some()) {
+                    guard(&self.given).show(id, session);
+                }
                 let _acting = (action != vorn_tree::RENDER).then(|| self.acting(id));
                 let answer = match self.builtins.call(id, action, args.clone()).await {
                     Some(answered) => answered.map_err(|e| e.message),
@@ -876,9 +883,24 @@ impl Extensions {
         guard(&self.given)
     }
 
-    /// Whether extension `id` has a pane open on session `session`.
+    /// Whether extension `id` has a pane open on session `session`, or a
+    /// client draws a tree of it there.
     pub(crate) fn paned(&self, id: &str, session: &str) -> bool {
-        guard(&self.grants).open_on(id, session, now_ms())
+        let open = guard(&self.grants).open_on(id, session, now_ms());
+        open || guard(&self.given).attached(id, session)
+    }
+
+    /// `terminal.*` on `session` for `caller`: a session it started, or one it
+    /// has a pane on with `process.run`.
+    pub(crate) fn admit_terminal(
+        &self,
+        caller: &vorn_extensions::gate::Caller,
+        method: &str,
+        session: &str,
+    ) -> Result<(), ExtError> {
+        let started = guard(&self.given).starter_of(&caller.extension, session);
+        let paned = self.paned(&caller.extension, session);
+        vorn_extensions::gate::admit_terminal(caller, method, started, paned)
     }
 
     /// The manifest of built-in or installed extension `id`.

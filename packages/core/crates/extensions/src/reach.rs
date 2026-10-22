@@ -2,10 +2,12 @@
 //!
 //! A path is resolved before it is checked: made absolute, `.` and `..`
 //! taken out, and symlinks followed, so a link planted in a project cannot
-//! lead out of it. An extension reads and writes its projects' folders and
-//! its own; it reads a file a person handed it; anywhere else needs
-//! `process.run`, which can reach it anyway. Vorn's own data, the keys in
-//! `~/.ssh` and the shell's startup files are never reached.
+//! lead out of it; a link to nothing, or a `..` past a folder that is not
+//! there, is refused. An extension reads and writes its projects' folders,
+//! its own, and the folders its sessions' shells are in; it reads a file a
+//! person handed it; anywhere else needs `process.run`. The home folder
+//! itself is never a project's or a shell's folder here, and Vorn's own
+//! data, credentials and the shell's startup files are never reached.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Component, Path, PathBuf};
@@ -23,7 +25,8 @@ pub enum Access {
     Write,
 }
 
-/// In the home folder, never reached by `files.*`: credentials and what a shell runs as it starts.
+/// In the home folder, never reached by `files.*`: credentials, and what
+/// runs as a shell or a login starts.
 const CLOSED_IN_HOME: &[&str] = &[
     ".vorn",
     ".ssh",
@@ -32,8 +35,16 @@ const CLOSED_IN_HOME: &[&str] = &[
     ".kube",
     ".docker",
     ".netrc",
+    ".git-credentials",
+    ".npmrc",
+    ".pypirc",
+    ".pgpass",
+    ".claude.json",
     ".config/gh",
     ".config/fish",
+    ".config/autostart",
+    ".config/systemd",
+    "Library/LaunchAgents",
     ".bashrc",
     ".bash_profile",
     ".bash_login",
@@ -51,8 +62,11 @@ const CLOSED_IN_HOME: &[&str] = &[
 pub struct Places {
     /// Every project's folder and its worktrees': read and written.
     pub roots: Vec<PathBuf>,
-    /// The folders a session's shell is in: the files directly in them may be read.
+    /// The folders the shells of its sessions are in: read and written,
+    /// or, for the home folder, only the files directly in it read.
     pub here: Vec<PathBuf>,
+    /// The home folder, which with every folder above it is never a root.
+    pub home: Option<PathBuf>,
     /// The extension's own folder of files.
     pub own: Option<PathBuf>,
     /// What a person handed the extension: read.
@@ -78,51 +92,76 @@ pub fn closed(home: &Path, data: &[&Path]) -> Vec<PathBuf> {
 }
 
 /// `path` as the file system names it: absolute, `.` and `..` gone and
-/// symlinks followed. A path not there yet is resolved through the
-/// nearest folder above it that is.
+/// symlinks followed, one component at a time. A path not there yet keeps
+/// its missing tail as named, which may not hold a `..`; a link that leads
+/// nowhere is refused, since what it names could be made later.
 pub fn resolve(path: &Path) -> Result<PathBuf, ExtError> {
+    let refused = |why: &str| ExtError::new("bad-request", format!("{} {why}", path.display()));
     if !path.is_absolute() {
-        return Err(ExtError::new(
-            "bad-request",
-            format!("{} is not an absolute path", path.display()),
-        ));
+        return Err(refused("is not an absolute path"));
     }
-    let mut missing = Vec::new();
-    let mut at = path;
-    loop {
-        if let Ok(real) = std::fs::canonicalize(at) {
-            let mut out = real;
-            for part in missing.iter().rev() {
-                match part {
-                    Component::Normal(name) => out.push(name),
-                    Component::ParentDir => {
-                        out.pop();
-                    }
-                    _ => {}
+    let anchor: PathBuf = path
+        .components()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .collect();
+    let mut out = std::fs::canonicalize(&anchor).unwrap_or(anchor);
+    let mut missing = false;
+    for part in path.components() {
+        match part {
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+            Component::ParentDir if missing => {
+                return Err(refused("goes up from a folder that is not there"));
+            }
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(name) => {
+                out.push(name);
+                if missing {
+                    continue;
+                }
+                // Canonical names each folder as the disk does, case included, with links followed.
+                match std::fs::canonicalize(&out) {
+                    Ok(real) => out = real,
+                    Err(_) => match std::fs::symlink_metadata(&out) {
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => missing = true,
+                        Ok(m) if m.file_type().is_symlink() => {
+                            return Err(refused("leads through a link to nothing"));
+                        }
+                        _ => return Err(refused("does not resolve")),
+                    },
                 }
             }
-            return Ok(out);
         }
-        let Some(last) = at.components().next_back() else {
-            return Err(ExtError::new(
-                "bad-request",
-                format!("{} does not resolve", path.display()),
-            ));
-        };
-        missing.push(last);
-        at = match at.parent() {
-            Some(parent) => parent,
-            None => {
-                return Err(ExtError::new(
-                    "bad-request",
-                    format!("{} does not resolve", path.display()),
-                ))
-            }
-        };
+    }
+    Ok(out)
+}
+
+/// Whether `path` is `dir` or inside it, by name as the disk compares
+/// names: without case on macOS and Windows.
+fn within(path: &Path, dir: &Path) -> bool {
+    if cfg!(any(target_os = "macos", windows)) {
+        let lower = |p: &Path| p.to_string_lossy().to_lowercase();
+        Path::new(&lower(path)).starts_with(lower(dir))
+    } else {
+        path.starts_with(dir)
     }
 }
 
 impl Places {
+    /// `path` as the caller named it, once `extension` may `access` it as
+    /// resolved: downstream keeps the caller's form (`/tmp`, no `\\?\`).
+    pub fn reach(
+        &self,
+        extension: &str,
+        path: &Path,
+        access: Access,
+        runs_commands: bool,
+    ) -> Result<PathBuf, ExtError> {
+        self.admit(extension, &resolve(path)?, access, runs_commands)?;
+        Ok(path.to_path_buf())
+    }
+
     /// Whether `extension` may `access` the resolved `path`; `runs_commands`
     /// when it declares `process.run`.
     pub fn admit(
@@ -135,23 +174,29 @@ impl Places {
         if self.own.as_deref().is_some_and(|own| path.starts_with(own)) {
             return Ok(());
         }
-        if self.closed.iter().any(|c| path.starts_with(c)) {
+        if self.closed.iter().any(|c| within(path, c)) {
             return Err(ExtError::new(
                 "denied",
                 format!("{} is not open to extensions", path.display()),
             ));
         }
-        let inside = |set: &[PathBuf]| set.iter().any(|r| path.starts_with(r));
+        // The home folder, or one above it, holds everything: it is never a root.
+        let holds_home = |dir: &Path| {
+            dir.parent().is_none() || self.home.as_deref().is_some_and(|h| h.starts_with(dir))
+        };
+        let inside = |set: &[PathBuf]| set.iter().any(|r| !holds_home(r) && path.starts_with(r));
+        let beside_here = path
+            .parent()
+            .is_some_and(|p| self.here.iter().any(|h| h == p));
         let open = match access {
             Access::Look => true,
             Access::Read => {
                 inside(&self.roots)
-                    || inside(&self.handed)
-                    || path
-                        .parent()
-                        .is_some_and(|p| self.here.iter().any(|h| h == p))
+                    || inside(&self.here)
+                    || beside_here
+                    || self.handed.iter().any(|h| h == path)
             }
-            Access::Write => inside(&self.roots),
+            Access::Write => inside(&self.roots) || inside(&self.here),
         };
         if open || runs_commands {
             return Ok(());
@@ -180,6 +225,7 @@ const KEPT: usize = 64;
 pub struct Given {
     paths: HashMap<String, VecDeque<PathBuf>>,
     sessions: HashMap<String, VecDeque<String>>,
+    shown: HashMap<String, VecDeque<String>>,
     acting: HashMap<String, usize>,
 }
 
@@ -222,6 +268,24 @@ impl Given {
             .is_some_and(|s| s.iter().any(|s| s == id))
     }
 
+    /// A client draws a tree of `extension` for session `id`: a pane beside
+    /// its terminal, or its shell's log.
+    pub fn show(&mut self, extension: &str, id: &str) {
+        keep(
+            self.shown.entry(extension.to_owned()).or_default(),
+            id.to_owned(),
+        );
+    }
+
+    /// Whether `extension` started session `id` or a client draws it there.
+    pub fn attached(&self, extension: &str, id: &str) -> bool {
+        self.starter_of(extension, id)
+            || self
+                .shown
+                .get(extension)
+                .is_some_and(|s| s.iter().any(|s| s == id))
+    }
+
     /// A person's click or choice is being answered by `extension`.
     pub fn begin(&mut self, extension: &str) {
         *self.acting.entry(extension.to_owned()).or_default() += 1;
@@ -246,6 +310,7 @@ impl Given {
     pub fn forget(&mut self, extension: &str) {
         self.paths.remove(extension);
         self.sessions.remove(extension);
+        self.shown.remove(extension);
     }
 }
 
@@ -290,6 +355,7 @@ mod tests {
             here: Vec::new(),
             own: Some(d.own.clone()),
             handed: Vec::new(),
+            home: Some(d.home.clone()),
             closed: closed(&d.home, &[&d.home.join(".vorn")]),
         }
     }
@@ -379,9 +445,131 @@ mod tests {
             "bad-request"
         );
         assert_eq!(
-            resolve(&d.root.join("gone/../home/code/app/a.txt")).unwrap(),
+            resolve(&d.project.join("../app/./a.txt")).unwrap(),
             d.project.join("a.txt")
         );
+        assert_eq!(
+            resolve(&d.project.join("new/deeper.txt")).unwrap(),
+            d.project.join("new/deeper.txt")
+        );
+    }
+
+    #[test]
+    fn passes_a_path_on_as_the_caller_named_it() {
+        let d = disk();
+        let p = places(&d);
+        let dotted = d.project.join("./a.txt");
+        assert_eq!(p.reach("x", &dotted, Access::Read, false), Ok(dotted));
+        #[cfg(unix)]
+        {
+            let alias = d.root.join("alias");
+            std::os::unix::fs::symlink(&d.project, &alias).unwrap();
+            let named = alias.join("a.txt");
+            assert_eq!(p.reach("x", &named, Access::Write, false), Ok(named));
+        }
+        let outside = d.home.join("elsewhere/b.txt");
+        assert!(p.reach("x", &outside, Access::Read, false).is_err());
+    }
+
+    #[test]
+    fn refuses_going_up_from_a_missing_folder_or_through_a_link_to_nothing() {
+        let d = disk();
+        let p = places(&d);
+        let up = d.root.join("gone/../home/code/app/a.txt");
+        assert_eq!(resolve(&up).unwrap_err().code, "bad-request");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            symlink(d.home.join(".ssh"), d.project.join("link")).unwrap();
+            let escape = d.project.join("nope/../link/id_ed25519");
+            assert!(resolve(&escape).is_err());
+            assert!(admit(&p, &escape, Access::Read, false).is_err());
+
+            symlink(d.home.join(".zshenv"), d.project.join("x")).unwrap();
+            let err = admit(&p, &d.project.join("x"), Access::Write, true).unwrap_err();
+            assert_eq!(err.code, "bad-request", "{}", err.message);
+            assert!(resolve(&d.project.join("x/y")).is_err());
+
+            symlink(d.project.join("a.txt"), d.project.join("b.txt")).unwrap();
+            assert_eq!(
+                admit(&p, &d.project.join("b.txt"), Access::Read, false),
+                Ok(())
+            );
+        }
+    }
+
+    #[test]
+    fn never_counts_the_home_folder_or_above_it_as_a_project() {
+        let d = disk();
+        let mut p = places(&d);
+        p.roots = vec![
+            d.home.clone(),
+            d.root.clone(),
+            PathBuf::from("/"),
+            d.project.clone(),
+        ];
+        let b = d.home.join("elsewhere/b.txt");
+        for access in [Access::Read, Access::Write] {
+            assert!(admit(&p, &b, access, false).is_err());
+            assert!(admit(&p, &d.home.join("notes.txt"), access, false).is_err());
+            assert_eq!(admit(&p, &d.project.join("a.txt"), access, false), Ok(()));
+        }
+    }
+
+    #[test]
+    fn reaches_the_folder_its_sessions_shell_is_in_but_not_the_home_folder() {
+        let d = disk();
+        let mut p = places(&d);
+        p.here = vec![d.home.join("elsewhere")];
+        let b = d.home.join("elsewhere/b.txt");
+        for access in [Access::Read, Access::Write] {
+            assert_eq!(admit(&p, &b, access, false), Ok(()));
+            assert_eq!(
+                admit(&p, &d.home.join("elsewhere/new/c.txt"), access, false),
+                Ok(())
+            );
+            assert!(admit(&p, &d.home.join("notes.txt"), access, false).is_err());
+        }
+        p.here = vec![d.home.clone()];
+        assert_eq!(
+            admit(&p, &d.home.join("notes.txt"), Access::Read, false),
+            Ok(())
+        );
+        assert!(admit(&p, &d.home.join("notes.txt"), Access::Write, false).is_err());
+        assert!(admit(&p, &b, Access::Read, false).is_err());
+    }
+
+    #[test]
+    fn never_reaches_credentials_or_what_runs_at_login() {
+        let d = disk();
+        let mut p = places(&d);
+        p.here = vec![d.home.join("elsewhere")];
+        for name in [
+            ".git-credentials",
+            ".npmrc",
+            ".pypirc",
+            ".pgpass",
+            ".netrc",
+            ".docker/config.json",
+            ".kube/config",
+            ".aws/credentials",
+            ".config/gh/hosts.yml",
+            ".claude.json",
+            "Library/LaunchAgents/run.plist",
+            ".config/autostart/run.desktop",
+            ".config/systemd/user/run.service",
+        ] {
+            let p = Places {
+                closed: closed(&d.home, &[]),
+                ..p.clone()
+            };
+            let err = admit(&p, &d.home.join(name), Access::Write, true).unwrap_err();
+            assert_eq!(err.code, "denied", "{name}");
+        }
+        if cfg!(any(target_os = "macos", windows)) {
+            let err = admit(&p, &d.home.join(".ZSHENV"), Access::Write, true).unwrap_err();
+            assert_eq!(err.code, "denied");
+        }
     }
 
     #[test]
@@ -393,6 +581,8 @@ mod tests {
         assert_eq!(admit(&p, &b, Access::Read, false), Ok(()));
         assert!(admit(&p, &b, Access::Write, false).is_err());
         assert!(admit(&p, &d.home.join("elsewhere/c.txt"), Access::Read, false).is_err());
+
+        assert!(admit(&p, &d.home.join("elsewhere"), Access::Read, false).is_err());
 
         let mut p = places(&d);
         p.here = vec![d.home.clone()];
@@ -424,7 +614,11 @@ mod tests {
         assert!(g.acting("x") && !g.acting("y"));
         g.end("x");
         assert!(!g.acting("x"));
+        g.show("x", "s2");
+        assert!(g.attached("x", "s2") && g.attached("x", &format!("n{KEPT}")));
+        assert!(!g.attached("y", "s2") && !g.attached("x", "s9"));
         g.forget("x");
         assert!(g.handed("x").is_empty());
+        assert!(!g.attached("x", "s2"));
     }
 }

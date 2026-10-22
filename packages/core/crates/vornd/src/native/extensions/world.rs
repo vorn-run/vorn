@@ -192,9 +192,10 @@ fn host_of(native: &Native) -> Result<Arc<super::Extensions>, ExtError> {
         .ok_or_else(|| ExtError::new("unsupported", "vornd is not hosting extensions"))
 }
 
-/// `path`, resolved, once `caller` may `access` it: within its projects'
-/// folders, its own, what a person handed it, or anywhere with `process.run`;
-/// never Vorn's data, `~/.ssh` or the shell's startup files.
+/// `path` as the caller named it, once `caller` may `access` it as resolved:
+/// within its projects' folders, its own, the folders its sessions' shells
+/// are in, what a person handed it, or anywhere with `process.run`; never
+/// Vorn's data, credentials or the shell's startup files.
 async fn reached(
     native: &Arc<Native>,
     caller: &Caller,
@@ -207,7 +208,7 @@ async fn reached(
     for p in projects.as_array().into_iter().flatten() {
         if let Some(path) = p.get("path").and_then(Value::as_str) {
             roots.push(path.to_owned());
-            roots.push(vorn_worktrees::remote_base_dir(path));
+            roots.push(vorn_git::repo::worktree_base_dir(path));
         }
     }
     let mut here: Vec<String> = Vec::new();
@@ -216,7 +217,9 @@ async fn reached(
             for t in r.live_terminals() {
                 roots.push(t.project_path.clone());
                 roots.extend(t.worktree_path.clone());
-                here.extend(t.shell_cwd.clone());
+                if host.paned(&caller.extension, &t.id) {
+                    here.extend(t.shell_cwd.clone());
+                }
             }
         });
     }
@@ -242,13 +245,12 @@ async fn reached(
         let places = Places {
             roots: resolved(roots),
             here: resolved(here),
+            home: reach::resolve(&home).ok(),
             own: own.and_then(|o| reach::resolve(&o).ok()),
             handed,
             closed: reach::closed(&home, &data),
         };
-        let real = reach::resolve(&path)?;
-        places.admit(&extension, &real, access, runs)?;
-        Ok(real)
+        places.reach(&extension, &path, access, runs)
     })
     .await
     .map_err(|e| ExtError::new("failed", e.to_string()))?
@@ -533,9 +535,7 @@ impl World for Wired {
                     let host = host_of(&native)?;
                     if m.starts_with("terminal.") {
                         let id = text(&args, "sessionId").unwrap_or_default();
-                        let started = host.given().starter_of(&extension, &id);
-                        let paned = host.paned(&extension, &id);
-                        gate::admit_terminal(&caller, m, started, paned)?;
+                        host.admit_terminal(&caller, m, &id)?;
                     }
                     super::routes::session_call(&host, &extension, m, &args)
                         .await
