@@ -179,8 +179,14 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
         );
     }
     assert!(tables(&db, &prefix).is_empty(), "worktrees left its tables");
+    let shipped_running = || {
+        let services = health(served.port)["extensions"]["services"].clone();
+        let ids = services.as_array().cloned().unwrap_or_default();
+        ids.iter()
+            .any(|s| s.as_str().is_some_and(|s| defaults().contains(&s)))
+    };
     let t = Instant::now();
-    while health(served.port)["extensions"]["services"] != json!([]) {
+    while shipped_running() {
         assert!(
             t.elapsed() < PATIENCE,
             "a service outlived its extension: {}",

@@ -459,7 +459,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
 /// Off, SSH takes its page, its palette entry and the project dialog's
 /// host picker with it; the hosts stay in the config.
 #[test]
-fn switching_ssh_off_removes_its_surfaces() {
+fn uninstalling_ssh_removes_its_surfaces() {
     let Some(v) = TestVornd::start() else {
         return;
     };

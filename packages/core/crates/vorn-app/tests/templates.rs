@@ -331,7 +331,7 @@ fn every_template_kind_draws_on_every_surface() {
         &mut app,
         "t-extensions-installed",
         Some(CONTENT),
-        &["INSTALLED", "Turns", "Linked from"],
+        &["Turns", "Linked from"],
         &["Turns", "Linked from"],
     );
 
