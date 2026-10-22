@@ -380,7 +380,7 @@ fn read_key(path: &str) -> Result<Value, String> {
 
 /// Whether a step of `node_type` runs commands or agents: one the Workflows
 /// built-in runs, or one no extension declares, which runs as its agent.
-fn runs_commands(native: &Native, node_type: &str) -> bool {
+pub(crate) fn runs_commands(native: &Native, node_type: &str) -> bool {
     let Some(step) = vorn_work::model::NodeKind::parse(node_type)
         .step()
         .map(str::to_owned)

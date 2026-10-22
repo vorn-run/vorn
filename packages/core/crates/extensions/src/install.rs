@@ -11,7 +11,7 @@
 //!
 //! Everything here blocks (git, the build); a daemon calls it off its runtime.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -73,17 +73,99 @@ impl Trust {
     }
 
     /// Whether `pack` is installed as the very pack this build pins for its
-    /// id and version, which makes it Vorn's own: never a linked folder.
+    /// id and version, which makes it Vorn's own: never a linked folder, and
+    /// only while its files are still exactly the pinned pack's. Blocks on the disk.
     pub fn vouches_for(&self, pack: &InstalledPack) -> bool {
         !pack.linked
             && pin_of(&pack.id, &pack.version, pack.source.as_ref())
-                .is_some_and(|pin| self.vouches(&pin))
+                .is_some_and(|pin| self.vouches(&pin) && holds_pinned(&pack.path, &pin.sha256))
     }
 
     /// Whether only a pack this build pins may have `id`.
     fn guards(&self, id: &str) -> bool {
         id.starts_with(SHIPPED_NAMESPACE) || self.bundled.contains(id)
     }
+}
+
+/// The pinned pack's own bytes, kept in its folder so its files can be checked against the pin.
+pub const PINNED_ARCHIVE: &str = ".pinned.vorn.tgz";
+
+/// Whether `dir` holds exactly the files of the pack kept in it, whose
+/// sha256 must be `sha256`: none changed, added or missing, and no links.
+fn holds_pinned(dir: &Path, sha256: &str) -> bool {
+    let Ok(bytes) = fs::read(dir.join(PINNED_ARCHIVE)) else {
+        return false;
+    };
+    if sha256_hex(&bytes) != sha256 {
+        return false;
+    }
+    let mut installed = BTreeMap::new();
+    match (
+        archive_digests(&bytes),
+        tree_digests(dir, "", &mut installed),
+    ) {
+        (Ok(packed), Ok(())) => packed == installed,
+        _ => false,
+    }
+}
+
+/// Each file of a `.vorn.tgz` under its top folder, by path, with its sha256.
+fn archive_digests(bytes: &[u8]) -> std::io::Result<BTreeMap<String, String>> {
+    use std::path::Component;
+    let mut out = BTreeMap::new();
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(bytes));
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let kind = entry.header().entry_type();
+        if kind.is_dir() {
+            continue;
+        }
+        if !kind.is_file() {
+            return Err(std::io::Error::other("not a plain file"));
+        }
+        let path = entry.path()?;
+        let parts: Vec<String> = path
+            .components()
+            .filter_map(|c| match c {
+                Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .skip(1)
+            .collect();
+        let mut content = Vec::new();
+        entry.read_to_end(&mut content)?;
+        out.insert(parts.join("/"), sha256_hex(&content));
+    }
+    Ok(out)
+}
+
+/// Each file under `dir`, by path, with its sha256; the kept pack itself left out.
+fn tree_digests(
+    dir: &Path,
+    prefix: &str,
+    out: &mut BTreeMap<String, String>,
+) -> std::io::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if prefix.is_empty() && name == PINNED_ARCHIVE {
+            continue;
+        }
+        let rel = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            tree_digests(&entry.path(), &rel, out)?;
+        } else if kind.is_file() {
+            out.insert(rel, sha256_hex(&fs::read(entry.path())?));
+        } else {
+            return Err(std::io::Error::other("not a plain file"));
+        }
+    }
+    Ok(())
 }
 
 /// `bytes`' sha256, in lowercase hex.
@@ -410,7 +492,11 @@ impl Installs {
         let root = self.store.root();
         fs::create_dir_all(root).map_err(|e| format!("cannot create {}: {e}", root.display()))?;
         let dir = root.join(format!(".staging-{}", token()));
+        let vouched = pinned.is_some_and(|p| self.trust.vouches(p));
         let staged = unpack(bytes, &dir).and_then(|()| {
+            if vouched {
+                fs::write(dir.join(PINNED_ARCHIVE), bytes).map_err(|e| e.to_string())?;
+            }
             let manifest = self.read_staged_manifest(&dir, pinned)?;
             let mut source = source;
             source["sha256"] = json!(sha256);
@@ -787,6 +873,8 @@ impl Installs {
         let mut current = json!({ "linked": folder, "installedAt": now_ms() });
         if let Some(agent) = manifest.agent_id() {
             current["linkedAgent"] = json!(agent);
+            let text = fs::read(folder.join(file::FILE)).map_err(|e| e.to_string())?;
+            current["linkedManifest"] = json!(sha256_hex(&text));
         }
         write_current(&home, &current)?;
         info!(
@@ -1035,10 +1123,26 @@ fn read_current(home: &Path) -> Option<Value> {
     serde_json::from_str(&text).ok()
 }
 
+/// Replaces `current.json` atomically, through a fresh file no link can stand in for.
 fn write_current(home: &Path, current: &Value) -> Result<(), String> {
-    let tmp = home.join(format!("{CURRENT_FILE}.tmp"));
-    fs::write(&tmp, current.to_string()).map_err(|e| e.to_string())?;
-    fs::rename(&tmp, home.join(CURRENT_FILE)).map_err(|e| e.to_string())
+    let tmp = home.join(format!("{CURRENT_FILE}.{}.tmp", token()));
+    let write = || -> std::io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(current.to_string().as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&tmp, home.join(CURRENT_FILE))
+    };
+    write().map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// Removes every version directory but the ones kept.
@@ -1138,6 +1242,7 @@ fn bundle(folder: &Path, files: &[String], top: &str, out: &Path) -> std::io::Re
     let file = fs::File::create(out)?;
     let gz = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut tar = tar::Builder::new(gz);
+    tar.follow_symlinks(false);
     for f in files {
         tar.append_path_with_name(folder.join(f), format!("{top}/{f}"))?;
     }
@@ -1173,10 +1278,16 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
         } else {
             format!("{prefix}/{name}")
         };
-        if entry.file_type()?.is_dir() {
+        // `file_type` does not follow links; a pack holds only real files and folders.
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
             walk(&entry.path(), &rel, out)?;
-        } else {
+        } else if kind.is_file() {
             out.push(rel);
+        } else {
+            return Err(std::io::Error::other(format!(
+                "{rel} is a link or special file; a pack holds only files and folders"
+            )));
         }
     }
     Ok(())
@@ -1337,6 +1448,62 @@ migrations = "migrations"
         assert!(!pack.path.join("node_modules").exists());
         fs::write(folder.path().join("hello.sh"), "echo edited").unwrap();
         assert_eq!(fs::read_to_string(pack.path.join("hello.sh")).unwrap(), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_holding_a_link_is_neither_copied_nor_packed() {
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("private"), "kept out").unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(
+            folder.path().join(file::FILE),
+            MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", ""),
+        )
+        .unwrap();
+        fs::write(folder.path().join("hello.sh"), "").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("private"), folder.path().join("a"))
+            .unwrap();
+
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let path = folder.path().display().to_string();
+        let err = installs.inspect_git(&path, None).unwrap_err();
+        assert!(err.contains("a is a link"), "{err}");
+        let left: Vec<_> = fs::read_dir(root.path()).unwrap().flatten().collect();
+        assert!(left.is_empty(), "{left:?}");
+
+        let out = folder.path().join("out.tar.gz");
+        let err = pack(folder.path(), &env(), Some(&out), &[]).unwrap_err();
+        assert!(err.contains("a is a link"), "{err}");
+
+        fs::remove_file(folder.path().join("a")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("dir")).unwrap();
+        let err = pack(folder.path(), &env(), None, &[]).unwrap_err();
+        assert!(err.contains("dir is a link"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writing_current_never_writes_through_a_planted_link() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let target = elsewhere.path().join("target");
+        fs::write(&target, "untouched").unwrap();
+        std::os::unix::fs::symlink(&target, home.path().join(format!("{CURRENT_FILE}.tmp")))
+            .unwrap();
+        write_current(home.path(), &json!({ "version": "1.0.0" })).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "untouched");
+        assert_eq!(
+            read_current(home.path()).unwrap(),
+            json!({ "version": "1.0.0" })
+        );
+        let left: Vec<String> = fs::read_dir(home.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left.len(), 2, "{left:?}");
     }
 
     #[test]

@@ -89,6 +89,8 @@ The plans, one per issue:
 """
 ```
 
+- A workflow's `id` may not start with an extension's id and a colon (`vorn.tasks:`, in any
+  case): those are the workflows that extension adds. A file naming one is not read.
 - A step's table holds its own fields, `id`, `type`, `label`, `slug`, `onError`, `x`, `y` and
   `needs`, and beside them its settings: what the editor shows in the step's panel.
 - A step runs after the step before it unless it says what it `needs`. List several ids to wait
@@ -196,7 +198,9 @@ A trigger is declared with `[[contributes.triggers]]`, with `timing = "cron"`, `
 fires it itself with `workflow.fire`.
 
 An extension can also ship workflows with `[[contributes.workflows]]` and
-`file = "workflows/try.toml"`. Each one is added once, when the extension is installed.
+`file = "workflows/try.toml"`. Each one is added once, when the extension is installed, under
+the extension's namespace and held to what it may seed. It arrives off unless the extension
+declares `process.run`; it still runs by hand, and runs on its trigger once you turn it on.
 
 When an extension is off, its step types stay known. A step of that type fails with a message
 saying which extension to turn on.

@@ -36,6 +36,9 @@ pub struct InstalledPack {
     /// The agent a linked folder adapted when it was linked; one it adapts
     /// since was claimed after every other adapter's.
     pub linked_agent: Option<String>,
+    /// The sha256 of a linked folder's manifest when it was linked: one
+    /// edited since claimed its agent after every other adapter.
+    pub linked_manifest: Option<String>,
     pub bytes: u64,
 }
 
@@ -179,8 +182,8 @@ pub fn is_safe_id(id: &str) -> bool {
 }
 
 /// Ids Vorn's own workflow ids start with (`import:`, `connector:`,
-/// `system:`): an extension of that id would own them.
-pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
+/// `system:`, and `file:` for a repository's): an extension of that id would own them.
+pub const RESERVED_IDS: [&str; 4] = ["import", "connector", "system", "file"];
 
 /// The namespace of the extensions Vorn ships: one installed under such an
 /// id would own its workflows (`vorn.connectors:` and the rest).
@@ -188,8 +191,10 @@ pub const SHIPPED_NAMESPACE: &str = "vorn.";
 
 /// Whether `id` is Vorn's: only a pack whose checksum Vorn pinned may have
 /// it (see [`crate::install::Installs::inspect_archive`]).
+/// Compared in lowercase, as a case-insensitive file system names its folder.
 pub fn is_reserved(id: &str) -> bool {
-    RESERVED_IDS.contains(&id) || id.starts_with(SHIPPED_NAMESPACE)
+    let id = id.to_ascii_lowercase();
+    RESERVED_IDS.contains(&id.as_str()) || id.starts_with(SHIPPED_NAMESPACE)
 }
 
 /// Refuses an id an extension may not have: unsafe as a directory, or
@@ -198,14 +203,15 @@ pub fn check_id(id: &str) -> Result<(), String> {
     if !is_safe_id(id) {
         return Err(format!("\"{id}\" is not an extension id"));
     }
-    if id.starts_with(SHIPPED_NAMESPACE) {
+    if id.to_ascii_lowercase().starts_with(SHIPPED_NAMESPACE) {
         return Err(format!(
             "\"{id}\" is reserved: ids starting with {SHIPPED_NAMESPACE} are the extensions Vorn ships"
         ));
     }
     if is_reserved(id) {
         return Err(format!(
-            "\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:"
+            "\"{id}\" is reserved: Vorn's own workflows' ids start with {}:",
+            id.to_ascii_lowercase()
         ));
     }
     Ok(())
@@ -235,6 +241,7 @@ struct Current {
     previous_version: Option<String>,
     installed_at: Value,
     linked_agent: Option<String>,
+    linked_manifest: Option<String>,
 }
 
 /// Reads the manifest a folder carries, `vorn-extension.toml`.
@@ -351,6 +358,10 @@ impl PackStore {
                 .get("linkedAgent")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            linked_manifest: parsed
+                .get("linkedManifest")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         })
     }
 
@@ -423,6 +434,7 @@ impl PackStore {
             previous_version: current.previous_version,
             installed_at: current.installed_at,
             linked_agent: current.linked_agent,
+            linked_manifest: current.linked_manifest,
             bytes,
         })
     }
@@ -606,6 +618,18 @@ mod tests {
         }
         assert!(check_id("importer").is_ok() && check_id("vornish.x").is_ok());
         assert!(check_id("a/b").is_err());
+    }
+
+    #[test]
+    fn reserved_ids_are_reserved_in_any_case() {
+        for id in ["Import", "SYSTEM", "File", "Vorn.Connectors", "VORN.x"] {
+            assert!(is_reserved(id), "{id}");
+            assert!(check_id(id).is_err(), "{id}");
+        }
+        assert_eq!(
+            check_id("Connector").unwrap_err(),
+            "\"Connector\" is reserved: Vorn's own workflows' ids start with connector:"
+        );
     }
 
     #[test]

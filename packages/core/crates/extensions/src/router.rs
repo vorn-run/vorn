@@ -43,6 +43,9 @@ pub struct RouterSettings {
     pub call_timeout: Duration,
     /// How long a service may take to answer `guest.init`.
     pub start_timeout: Duration,
+    /// The compute a Wasm component's call (or its start) may use, in
+    /// Wasmtime fuel, about one unit per instruction; past it the call is stopped.
+    pub call_fuel: u64,
     /// Where each extension's own files are kept (`blobs.*`); none keeps none.
     pub blobs: Option<PathBuf>,
     /// Extensions Vorn ships whose files are kept in a folder of their own, outside the quota.
@@ -62,6 +65,7 @@ impl RouterSettings {
             version: version.into(),
             call_timeout: Duration::from_secs(60),
             start_timeout: Duration::from_secs(15),
+            call_fuel: CALL_FUEL,
             blobs: None,
             placed_blobs: Vec::new(),
             compiler: Compiler::None,
@@ -80,6 +84,8 @@ pub enum Hook {
     Stop,
 }
 
+/// A Wasm call's fuel: tens of seconds of a busy guest's compute, well past any real call.
+pub const CALL_FUEL: u64 = 50_000_000_000;
 /// The most events one `guest.on-event` carries.
 const MAX_BATCH: usize = 256;
 /// How many of one program's own requests are answered at once.
@@ -666,11 +672,15 @@ impl Router {
     }
 
     /// Starts `pack`'s program with an inbox for what it asks, answered on its own tasks.
-    fn spawn_program(&self, pack: &InstalledPack, argv: &[String]) -> Result<Child, String> {
+    fn spawn_program(
+        &self,
+        pack: &InstalledPack,
+        argv: &[String],
+        caller: Caller,
+    ) -> Result<Child, String> {
         let launch = self.launch(pack, argv)?;
         let (tx, rx): (Inbox, _) = mpsc::channel(64);
         let child = Child::start_with(&launch, format!("[extensions] {}", pack.name()), Some(tx))?;
-        let caller = self.caller_of(pack);
         tokio::spawn(dispatch(
             self.me.clone(),
             Arc::new(pack.manifest.clone()),
@@ -693,14 +703,14 @@ impl Router {
             vorn: self.settings.version.clone(),
             api: crate::api::API.to_owned(),
         };
+        let caller = self.caller_of(pack).await;
         if let Some(component) = &service.component {
             let source = Source::File(pack.path.join(component));
-            let caller = self.caller_of(pack);
             return self
                 .start_component(source, Arc::new(pack.manifest.clone()), caller, ctx)
                 .await;
         }
-        let child = self.spawn_program(pack, &service.command)?;
+        let child = self.spawn_program(pack, &service.command, caller)?;
         let init = params::GuestInit { ctx };
         let answered = child
             .request(
@@ -717,11 +727,18 @@ impl Router {
         Ok(Program::Child(child))
     }
 
-    /// Who installed `pack` asks as: Vorn's own when it is the pack this build pins for its id.
-    fn caller_of(&self, pack: &InstalledPack) -> Caller {
+    /// Who installed `pack` asks as: Vorn's own when it is the pack this
+    /// build pins for its id, its files checked off the runtime.
+    pub async fn caller_of(&self, pack: &InstalledPack) -> Caller {
+        let builtin = crate::pack::is_reserved(&pack.id) && {
+            let (trust, pack) = (self.settings.trust.clone(), pack.clone());
+            tokio::task::spawn_blocking(move || trust.vouches_for(&pack))
+                .await
+                .unwrap_or(false)
+        };
         Caller {
             extension: pack.id.clone(),
-            builtin: crate::pack::is_reserved(&pack.id) && self.settings.trust.vouches_for(pack),
+            builtin,
             ..Caller::of(&pack.manifest)
         }
     }
@@ -755,6 +772,7 @@ impl Router {
             name,
             init,
             start_timeout: self.settings.start_timeout,
+            call_fuel: self.settings.call_fuel,
             router: self.me.clone(),
             manifest: Arc::clone(&manifest),
             caller,
@@ -792,8 +810,9 @@ impl Router {
         args: Value,
         ctx: CallCtx,
     ) -> Result<Value, ExtError> {
+        let caller = self.caller_of(pack).await;
         let child = self
-            .spawn_program(pack, &run.command)
+            .spawn_program(pack, &run.command, caller)
             .map_err(|e| ExtError::new("start", e))?;
         let params = params::GuestHandle {
             method: action.to_owned(),

@@ -3,7 +3,7 @@
 //!
 //! Each is a pack whose version and sha256 Vorn pinned. [`sync`] installs the
 //! ones a person has not removed and replaces an older shipped or catalog
-//! install with the carried version; one installed from git or linked is the
+//! install with the carried version, or one of Vorn's own whose files changed; one installed from git or linked is the
 //! person's and is left alone. A removal is kept in `shipped.json` beside the
 //! packages, so the next start does not put it back.
 
@@ -159,6 +159,14 @@ pub fn sync(installs: &Installs, set: &[Shipped<'_>], record: &Record) -> Synced
             None if s.default || switch == Some(true) => Some(false),
             None => None,
             Some(pack) if pack.linked || !replaceable(pack.source.as_ref()) => None,
+            // One of Vorn's own whose files are no longer the pinned pack's is put back.
+            Some(pack)
+                if pack.version == s.version
+                    && crate::pack::is_reserved(s.id)
+                    && !installs.trust().vouches_for(&pack) =>
+            {
+                Some(true)
+            }
             Some(pack) if !older(&pack.version, s.version) => None,
             Some(_) => Some(true),
         };
@@ -359,6 +367,33 @@ mod tests {
         let pack = new.installs().store().describe("vorn.a").unwrap();
         assert_eq!(pack.version, "1.1.0");
         assert_eq!(pack.previous_version.as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
+    fn one_of_vorns_own_whose_files_changed_is_put_back_and_owns_nothing_until_then() {
+        let f = Fixture::new(&[("vorn.a", "1.0.0", true), ("other", "1.0.0", true)]);
+        f.sync();
+        let installs = f.installs();
+        let pack = installs.store().describe("vorn.a").unwrap();
+        assert!(installs.trust().vouches_for(&pack));
+        fs::write(pack.path.join("hello.sh"), "echo changed\n").unwrap();
+        assert!(!installs.trust().vouches_for(&pack));
+        fs::write(pack.path.join("hello.sh"), "true\n").unwrap();
+        fs::write(pack.path.join("extra.sh"), "").unwrap();
+        assert!(!installs.trust().vouches_for(&pack));
+        fs::remove_file(pack.path.join(crate::install::PINNED_ARCHIVE)).unwrap();
+        fs::remove_file(pack.path.join("extra.sh")).unwrap();
+        assert!(!installs.trust().vouches_for(&pack));
+
+        let other = installs.store().describe("other").unwrap();
+        fs::write(other.path.join("hello.sh"), "echo mine\n").unwrap();
+        assert_eq!(f.sync().updated, ["vorn.a"]);
+        let pack = installs.store().describe("vorn.a").unwrap();
+        assert!(installs.trust().vouches_for(&pack));
+        assert_eq!(
+            fs::read_to_string(other.path.join("hello.sh")).unwrap(),
+            "echo mine\n"
+        );
     }
 
     #[test]

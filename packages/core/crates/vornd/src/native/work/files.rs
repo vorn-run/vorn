@@ -589,6 +589,22 @@ impl Work {
         }
     }
 
+    /// The extension whose namespace workflow `id` is in (`<extension id>:`,
+    /// in any case): Vorn's own, one installed, or a built-in.
+    fn extension_owning(&self, id: &str) -> Option<String> {
+        let (namespace, _) = id.split_once(':')?;
+        let namespace = namespace.to_ascii_lowercase();
+        if namespace.starts_with(vorn_extensions::pack::SHIPPED_NAMESPACE) {
+            return Some(namespace);
+        }
+        let native = self.native.upgrade()?;
+        let ext = native.extensions()?;
+        let installed = ext.router().store().ids();
+        let owned = ext.builtins().has(&namespace)
+            || installed.iter().any(|i| i.eq_ignore_ascii_case(&namespace));
+        owned.then_some(namespace)
+    }
+
     /// Reads `file` of project `name` at `path` into its stored workflow;
     /// whether the workflow changed.
     async fn read_file(&self, name: &str, path: &str, file: &Path) -> bool {
@@ -630,6 +646,20 @@ impl Work {
                 id
             }
         };
+        // One Vorn saved itself, as written, keeps its id.
+        if let Some(owner) = self.extension_owning(&id).filter(|_| !trusted) {
+            let mut s = self.files.lock();
+            s.refuse(
+                file,
+                at,
+                vec![format!(
+                    "{}: its id {id} is in the namespace of the extension {owner}, which only it adds workflows to",
+                    file.display(),
+                )],
+            );
+            self.files.keep(&s);
+            return false;
+        }
         let (taken, tied) = {
             let s = self.files.lock();
             let other = s
@@ -955,8 +985,16 @@ impl Work {
         Ok(json!({ "path": file, "created": true }))
     }
 
-    /// Adds, once each, the workflows the extensions that are on ship.
+    /// Adds, once each, the workflows the extensions that are on ship, held
+    /// to what each extension may seed. One from an extension that does not
+    /// declare `process.run` arrives off, so it runs only once switched on.
     pub(crate) async fn seed_contributed(&self, contributed: Vec<(String, String, String)>) {
+        let Some(native) = self.native.upgrade() else {
+            return;
+        };
+        let Some(router) = native.extensions().map(|e| Arc::clone(e.router())) else {
+            return;
+        };
         let conns = connections(self).await;
         for (extension, id, text) in contributed {
             let key = format!("{extension}/{id}");
@@ -980,6 +1018,18 @@ impl Work {
                 wf.get("id").and_then(Value::as_str).unwrap_or(&id)
             );
             wf["id"] = json!(stored_id);
+            let Ok(pack) = router.pack(&extension) else {
+                continue;
+            };
+            let caller = router.caller_of(&pack).await;
+            let runs = |t: &str| crate::native::extensions::world::runs_commands(&native, t);
+            if let Err(err) = vorn_extensions::gate::admit_seed(&caller, &wf, runs) {
+                warn!(%extension, workflow = %stored_id, "a shipped workflow is not added: {}", err.message);
+                continue;
+            }
+            if !caller.runs_commands {
+                wf["enabled"] = json!(false);
+            }
             let row = wf.clone();
             let added = self
                 .db

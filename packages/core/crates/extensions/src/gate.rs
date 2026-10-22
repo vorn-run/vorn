@@ -119,14 +119,7 @@ pub fn admit_seed(
     if caller.runs_commands {
         return Ok(());
     }
-    let nodes = workflow.get("nodes").and_then(Value::as_array);
-    let kind = |n: &Value| {
-        n.get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned()
-    };
-    match nodes.into_iter().flatten().map(kind).find(|t| runs_commands(t)) {
+    match first_node_type(workflow, &runs_commands) {
         None => Ok(()),
         Some(step) => Err(ExtError::new(
             "denied",
@@ -135,6 +128,25 @@ pub fn admit_seed(
                 caller.extension
             ),
         )),
+    }
+}
+
+/// The first node type `pick` takes, of the nodes at any depth of `value`:
+/// a workflow's own and those of any workflow nested in its configs.
+fn first_node_type(value: &Value, pick: &impl Fn(&str) -> bool) -> Option<String> {
+    match value {
+        Value::Object(map) => {
+            let nodes = map.get("nodes").and_then(Value::as_array);
+            fn kind(n: &Value) -> &str {
+                n.get("type").and_then(Value::as_str).unwrap_or("")
+            }
+            if let Some(step) = nodes.into_iter().flatten().map(kind).find(|t| pick(t)) {
+                return Some(step.to_owned());
+            }
+            map.values().find_map(|v| first_node_type(v, pick))
+        }
+        Value::Array(items) => items.iter().find_map(|v| first_node_type(v, pick)),
+        _ => None,
     }
 }
 
@@ -650,6 +662,34 @@ header = "Authorization: Bearer {token}"
         assert_eq!(admit_run(&commands, "wf-1"), Ok(()));
         assert_eq!(admit_seed(&commands, &wf("x:a", "script"), runs), Ok(()));
         assert!(admit_seed(&commands, &wf("y:a", "script"), runs).is_err());
+    }
+
+    #[test]
+    fn a_seeded_workflow_is_checked_at_every_depth() {
+        let x = Caller {
+            extension: "x".into(),
+            project: None,
+            runs_commands: false,
+            builtin: false,
+        };
+        let runs = |t: &str| t == "script";
+        let nested = serde_json::json!({
+            "id": "x:a",
+            "nodes": [
+                { "type": "trigger" },
+                { "type": "loop", "config": { "workflow": { "nodes": [
+                    { "type": "createTask" },
+                    { "type": "group", "nodes": [{ "type": "script" }] }
+                ] } } }
+            ]
+        });
+        let err = admit_seed(&x, &nested, runs).unwrap_err();
+        assert_eq!(
+            err.message,
+            "x does not declare process.run, which workflow.seed needs for x:a: its script step runs commands"
+        );
+        let plain = serde_json::json!({ "id": "x:a", "nodes": [{ "type": "loop", "config": { "nodes": [{ "type": "createTask" }] } }] });
+        assert_eq!(admit_seed(&x, &plain, runs), Ok(()));
     }
 
     #[test]
