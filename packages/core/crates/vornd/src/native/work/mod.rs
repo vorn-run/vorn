@@ -1714,6 +1714,101 @@ scriptContent = "echo built"
         ));
     }
 
+    /// A project `p` at `dir/p` on remote host `box`, holding the workflow files `files`.
+    async fn project_with(work: &Work, dir: &std::path::Path, files: &[(&str, &str)]) {
+        let project = dir.join("p");
+        let folder = project.join(files::FOLDER);
+        std::fs::create_dir_all(&folder).unwrap();
+        for (name, text) in files {
+            std::fs::write(folder.join(name), text).unwrap();
+        }
+        let path = project.to_string_lossy().into_owned();
+        work.db
+            .run(move |s| {
+                s.call(
+                    "dbInsertProject",
+                    json!([{ "name": "p", "path": path, "preferredAgents": [], "hostIds": ["local", "box"] }]),
+                )
+                .unwrap();
+            })
+            .await;
+        work.look_at_files().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_file_with_a_parallel_loop_reads_and_is_written_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let each = BUILD.replace("id = \"build\"", "id = \"each\"")
+            + "\n[[step]]\nid = \"loop\"\ntype = \"loop\"\nmode = \"forEach\"\nitems = \"a,b\"\n\
+               bodyNodeIds = [\"body\"]\nparallel = true\nconcurrency = 2\n\n\
+               [[step]]\nid = \"body\"\ntype = \"script\"\nscriptContent = \"echo {{loop.item}}\"\n";
+        project_with(&work, dir.path(), &[("each.toml", &each)]).await;
+        assert_eq!(work.files_listed().await["errors"], json!([]));
+        assert!(row(&work, "each").await.is_object());
+        assert!(matches!(
+            work.call(
+                "workflow:update",
+                &json!({ "id": "each", "updates": { "name": "Each" } })
+            )
+            .await,
+            Answer::Result(_)
+        ));
+        let file = dir.path().join("p").join(files::FOLDER).join("each.toml");
+        let edited = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            edited.contains("Each") && edited.contains("parallel = true"),
+            "{edited}"
+        );
+        work.look_at_files().await;
+        assert_eq!(work.files_listed().await["errors"], json!([]));
+        assert_eq!(row(&work, "each").await["name"], "Each");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_step_of_no_declared_type_is_listed_as_the_agent_it_runs_as() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_native, work) = work(dir.path());
+        work.sync_types();
+        let agent = |id: &str, kind: &str, setting: &str| {
+            format!(
+                "name = \"{id}\"\nid = \"{id}\"\n\n[trigger]\ntype = \"manual\"\nid = \"start\"\n\n\
+                 [[step]]\nid = \"go\"\n{kind}{setting} = \"x\"\nprojectName = \"p\"\n"
+            )
+        };
+        let typed = agent("typed", "type = \"agent\"\n", "prompt");
+        let untyped = agent("untyped", "", "prompt");
+        let odd = agent("odd", "", "command");
+        project_with(
+            &work,
+            dir.path(),
+            &[
+                ("typed.toml", &typed),
+                ("untyped.toml", &untyped),
+                ("odd.toml", &odd),
+            ],
+        )
+        .await;
+        for id in ["typed", "untyped"] {
+            assert_eq!(
+                file_entry(&work, id).await["runs"],
+                json!([
+                    "Trigger: manual",
+                    "go (launchAgent)",
+                    "  prompt: x",
+                    "  projectName: p",
+                    "  remote host: box"
+                ])
+            );
+        }
+        let errors = work.files_listed().await["errors"].to_string();
+        assert!(
+            errors.contains("command is not a setting of a launchAgent step"),
+            "{errors}"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_workflow_saved_to_a_file_from_vorn_stays_on() {
         let dir = tempfile::tempdir().unwrap();

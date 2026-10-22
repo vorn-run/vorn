@@ -22,6 +22,10 @@ use serde_json::{json, Map, Value};
 use tracing::{info, warn};
 use vorn_workflow_file::{Bindings, FileError, RUNTIME_FIELDS};
 
+use vorn_work::model::NodeKind;
+use vorn_workflow::Registry;
+
+use super::host::VorndHost;
 use super::Work;
 
 /// How often the projects' workflow folders are looked at.
@@ -159,6 +163,8 @@ const KINDS: &[Kind] = &[
             "bodyNodeIds",
             "maxIterations",
             "until",
+            "parallel",
+            "concurrency",
         ],
     },
     Kind {
@@ -243,8 +249,13 @@ fn remote_line(name: &str, projects: &[Value]) -> String {
 /// that decides what it runs or sends, for the user to read before turning
 /// it on; an agent step also names the remote host its project runs on, from
 /// `projects`. Refuses a step of a built-in type with a setting the type
-/// does not read.
-pub fn runs(wf: &Value, projects: &[Value]) -> Result<Vec<String>, String> {
+/// does not read. A step runs as `types` resolves it, so one of a type no
+/// extension declares is listed and checked as the fallback it runs as.
+pub fn runs(
+    wf: &Value,
+    projects: &[Value],
+    types: &Registry<VorndHost>,
+) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for node in wf
         .get("nodes")
@@ -252,7 +263,12 @@ pub fn runs(wf: &Value, projects: &[Value]) -> Result<Vec<String>, String> {
         .into_iter()
         .flatten()
     {
-        let kind = node.get("type").and_then(Value::as_str).unwrap_or("step");
+        let raw = node.get("type").and_then(Value::as_str).unwrap_or("");
+        let kind = match NodeKind::parse(raw).step() {
+            Some(step) => types.runs_as(step).unwrap_or_else(|| step.to_owned()),
+            None => raw.to_owned(),
+        };
+        let kind = kind.as_str();
         let label = node
             .get("label")
             .and_then(Value::as_str)
@@ -418,7 +434,7 @@ impl Files {
 
     /// Every file, whether it is on and what it runs, and what is wrong
     /// with the ones that do not read; agent steps' hosts from `projects`.
-    pub fn listed(&self, projects: &[Value]) -> Value {
+    pub fn listed(&self, projects: &[Value], types: &Registry<VorndHost>) -> Value {
         let s = self.lock();
         let files: Vec<Value> = s
             .by_id
@@ -429,7 +445,7 @@ impl Files {
                     "path": path,
                     "trusted": s.trusts(path),
                     "hash": s.hashes.get(path),
-                    "runs": s.runs.get(path).map(|wf| runs(wf, projects).unwrap_or_default()).unwrap_or_default(),
+                    "runs": s.runs.get(path).map(|wf| runs(wf, projects, types).unwrap_or_default()).unwrap_or_default(),
                 })
             })
             .collect();
@@ -675,7 +691,7 @@ impl Work {
             }
             None => theirs.clone(),
         };
-        if let Err(why) = runs(&met, &[]) {
+        if let Err(why) = runs(&met, &[], self.engine.registry()) {
             warn!(file = %file.display(), %why, "a workflow file does not read");
             let mut s = self.files.lock();
             s.refuse(file, at, vec![format!("{}: {why}", file.display())]);
@@ -828,7 +844,7 @@ impl Work {
         }
         let hash = digest(&text);
         let mut s = self.files.lock();
-        match runs(&next, &[]) {
+        match runs(&next, &[], self.engine.registry()) {
             Ok(_) => {
                 if let Some(at) = stamp(&file) {
                     s.stamps.insert(file.clone(), at);
@@ -850,7 +866,8 @@ impl Work {
 
     /// `workflow:files`: [`Files::listed`] with each agent step's host as its project has it now.
     pub(crate) async fn files_listed(&self) -> Value {
-        self.files.listed(&project_rows(self).await)
+        self.files
+            .listed(&project_rows(self).await, self.engine.registry())
     }
 
     /// Removes the file of workflow `id`, as the workflow was deleted.
@@ -923,7 +940,7 @@ impl Work {
             s.stamps.insert(file.clone(), at);
         }
         if let Some(read) = read {
-            if runs(&read, &[]).is_ok() {
+            if runs(&read, &[], self.engine.registry()).is_ok() {
                 s.runs.insert(file.clone(), read.clone());
             }
             s.base.insert(file.clone(), read);
@@ -1040,18 +1057,38 @@ fn upsert(s: &mut vorn_store::Store, wf: &Value) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vorn_workflow::NodeType;
 
-    fn one(kind: &str, config: Value) -> Result<Vec<String>, String> {
+    /// The built-in steps and one extension's, with the agent step as the fallback, as vornd declares them.
+    fn types() -> Registry<VorndHost> {
+        let types = Registry::default();
+        let builtin = KINDS
+            .iter()
+            .filter(|k| NodeKind::parse(k.id).step().is_some())
+            .map(|k| (k.id, vorn_workflows::ID));
+        for (id, provider) in builtin.chain([("some.ext/step", "some.ext")]) {
+            let node = NodeType {
+                id: id.to_owned(),
+                provider: provider.to_owned(),
+                provider_name: provider.to_owned(),
+                doc: Value::Null,
+            };
+            types.add_node(node, None);
+        }
+        types.set_fallback(Some(vorn_workflows::FALLBACK));
+        types
+    }
+
+    fn node(node: Value) -> Result<Vec<String>, String> {
         let projects = [
             json!({ "name": "far", "path": "/f", "hostIds": ["local", "box"] }),
             json!({ "name": "near", "path": "/n", "hostIds": ["local"] }),
         ];
-        runs(
-            &json!({ "nodes": [
-                { "id": "s", "type": kind, "label": "Do\nit", "config": config }
-            ] }),
-            &projects,
-        )
+        runs(&json!({ "nodes": [node] }), &projects, &types())
+    }
+
+    fn one(kind: &str, config: Value) -> Result<Vec<String>, String> {
+        node(json!({ "id": "s", "type": kind, "label": "Do\nit", "config": config }))
     }
 
     #[test]
@@ -1170,11 +1207,36 @@ mod tests {
             ("condition", json!({ "url": "x" })),
             ("approval", json!({ "anything": 1 })),
             ("loop", json!({ "shell": "sh" })),
+            ("agent", json!({ "command": "x" })),
         ] {
             let why = one(kind, config).unwrap_err();
-            assert!(why.contains(&format!("of a {kind} step")), "{why}");
+            let runs_as = if kind == "agent" { "launchAgent" } else { kind };
+            assert!(why.contains(&format!("of a {runs_as} step")), "{why}");
         }
+        let untyped = node(json!({ "id": "s", "config": { "command": "x" } }));
+        assert!(untyped.unwrap_err().contains("of a launchAgent step"));
         assert!(one("script", json!("echo")).is_err());
+    }
+
+    #[test]
+    fn lists_a_step_of_a_type_nothing_declares_as_the_agent_it_runs_as() {
+        let config = json!({ "prompt": "go", "projectName": "far" });
+        let shown = [
+            "Do it (launchAgent)",
+            "  prompt: go",
+            "  projectName: far",
+            "  remote host: box",
+        ];
+        assert_eq!(one("agent", config.clone()).unwrap(), shown);
+        let untyped = node(json!({ "id": "s", "label": "Do it", "config": config }));
+        assert_eq!(untyped.unwrap(), shown);
+    }
+
+    #[test]
+    fn reads_a_loop_that_runs_its_items_side_by_side() {
+        let config = json!({ "mode": "forEach", "items": "a", "bodyNodeIds": ["b"],
+                             "parallel": true, "concurrency": 2 });
+        assert!(one("loop", config).unwrap().is_empty());
     }
 
     #[test]
@@ -1185,7 +1247,7 @@ mod tests {
                 project: None,
             };
             let wf = vorn_workflow_file::read(text, &bindings).unwrap().workflow;
-            runs(&vorn_work::js_numbers(wf), &[]).unwrap();
+            runs(&vorn_work::js_numbers(wf), &[], &types()).unwrap();
         }
     }
 }
