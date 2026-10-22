@@ -15,6 +15,7 @@ import {
   Watcher,
   realServers,
   removeRealServerDirs,
+  inCatalog,
   runnable,
   startRealServer,
   stopRealServer,
@@ -67,14 +68,14 @@ function identify(ws: WebSocket): Promise<Frame> {
   })
 }
 
-describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
+describe.skipIf(!runnable || !inCatalog('vorn.device'))('the desktop bridge through vornd', () => {
   let server: RealServer
   let agent: Watcher
   let main: { ws: WebSocket; asked: Frame[] }
 
   beforeAll(async () => {
     try {
-      server = await startRealServer()
+      server = await startRealServer(undefined, { installed: ['vorn.device'] })
       main = await openMain(server.vornd)
       agent = await Watcher.open(server.vornd)
     } catch (err) {

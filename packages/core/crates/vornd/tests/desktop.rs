@@ -1,6 +1,6 @@
 //! The desktop bridge end to end: the app claims its connection to vornd with
 //! `bridge:identify`, one connection at a time, and an agent's `browser:*` and
-//! `device:*` calls go to the installed Browser and Device extensions, and
+//! `device:*` calls go to the installed Browser and Device (from the catalog) extensions, and
 //! are refused once those are uninstalled. (The extensions driving the app's web views and
 //! simulators with `web:*` and `video:*` are covered end to end by
 //! vorn-app's `panes` tests; the bridge's requests by its unit tests.)
@@ -53,10 +53,12 @@ async fn wanted(ws: &mut Socket, id: u64) -> Value {
     }
 }
 
-/// Whether this build ships `id` and can compile its component.
+/// Whether this build ships `id`, or has its pack for the catalog, and can compile its component.
 fn runs_shipped(id: &str) -> bool {
-    if !vornd::shipped::SET.iter().any(|s| s.id == id) {
-        eprintln!("skipped: this build does not ship {id} (see packages/core/shipped.toml)");
+    if !vornd::shipped::SET.iter().any(|s| s.id == id) && common::catalog_pack(id).is_none() {
+        eprintln!(
+            "skipped: this build has no pack of {id} (see packages/core/scripts/shipped.mjs)"
+        );
         return false;
     }
     let vornd = std::path::Path::new(env!("CARGO_BIN_EXE_vornd"));
@@ -113,8 +115,20 @@ async fn an_agents_device_call_is_the_installed_devices_and_refused_once_uninsta
     if !runs_shipped("vorn.device") {
         return;
     }
-    let served = serve();
+    // Device is not shipped: it installs from the catalog.
+    let (version, sha256, bytes) = common::catalog_pack("vorn.device").unwrap();
+    let home = tempfile::tempdir().unwrap();
+    common::offer_in_catalog(home.path(), vec![("vorn.device", version, sha256, bytes)]);
+    let served = common::serve_at(tempfile::tempdir().unwrap(), home);
     let mut agent = connect(served.port, CREDENTIAL).await;
+    send(
+        &mut agent,
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "connector:installPack",
+                "params": { "kind": "catalog", "id": "vorn.device" } }),
+    )
+    .await;
+    let installed = wanted(&mut agent, 1).await;
+    assert_eq!(installed["result"]["ok"], true, "{installed}");
 
     // The extension answers, not the app: it knows no session `s`, and the
     // chrome needs none.

@@ -208,7 +208,7 @@ Run Claude, Copilot, Codex, OpenCode, and Gemini in a responsive grid layout. Re
 
 ### Panes Beside the Terminal
 
-A session holds its own terminals, a browser, an editor and an iOS simulator. Draw on the page and the agent sees it; it reads and drives all of them to check its own work.
+A session holds its own terminals, a browser, an editor and, with the Device extension from the catalog, an iOS simulator. Draw on the page and the agent sees it; it reads and drives all of them to check its own work.
 
 <p align="center">
   <img src="docs/screenshots/panes.png" alt="A session with a terminal and a browser pane side by side" width="700" />
@@ -264,7 +264,7 @@ Agents running inside Vorn can access tasks, projects, workflows, sessions, and 
 
 ### Floating Widget
 
-A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, answer permission requests and agent questions (including the rules an agent offers to keep), jump back into any session with one click, or fold it to a single line of counts. It is a built-in extension, off until you turn it on in Settings › Extensions; Cmd+Alt+W shows or hides it.
+A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, answer permission requests and agent questions (including the rules an agent offers to keep), jump back into any session with one click, or fold it to a single line of counts. It is an extension: install the Widget from the catalog in Settings › Extensions; Cmd+Alt+W shows or hides it.
 
 <p align="center">
   <img src="docs/screenshots/floating-widget.png" alt="Floating widget" width="400" />

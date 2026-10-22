@@ -2309,7 +2309,7 @@ impl PackSource {
 /// Fetches the pack a catalog `entry` lists and stages it, pinned to the
 /// version and checksum the entry gives: bytes that are not those are refused.
 /// The catalog is not signed, so an entry in Vorn's own namespace installs
-/// only when it is exactly a pack this build ships.
+/// only when it is exactly a pack this build pins.
 fn stage_listed(installs: &Installs, entry: &Value, fetch: &dyn Fetch) -> Result<Sheet, String> {
     let field = |key: &str| {
         entry

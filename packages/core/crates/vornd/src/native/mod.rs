@@ -556,7 +556,7 @@ impl Native {
                     }),
                 )
                 .trusting(vorn_extensions::install::Trust {
-                    pins: crate::shipped::SET.iter().map(|s| s.pinned()).collect(),
+                    pins: crate::shipped::pins(),
                     bundled: extensions::builtin::bundled_ids().unwrap_or_else(|err| {
                         tracing::error!("[extensions] a bundled manifest does not read: {err}");
                         Default::default()

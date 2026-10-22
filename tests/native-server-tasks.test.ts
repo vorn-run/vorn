@@ -24,6 +24,7 @@ import {
   type RealServer,
   Watcher,
   removeRealServerDirs,
+  inCatalog,
   runnable,
   startRealServer,
   stopRealServer,
@@ -65,7 +66,9 @@ describe.runIf(runnable)('the task board in vornd', () => {
   }
 
   beforeAll(async () => {
-    server = await startRealServer(undefined, { installed: ['vorn.widget'] })
+    server = await startRealServer(undefined, {
+      installed: inCatalog('vorn.widget') ? ['vorn.widget'] : []
+    })
     client = await Watcher.open(server.vornd)
     project = 'board'
     await addProject(project, server.dirs.work)
@@ -255,7 +258,7 @@ describe.runIf(runnable)('the task board in vornd', () => {
     expect(all.length).toBeGreaterThan(0)
   })
 
-  it('lists each terminal in the installed Widget', async () => {
+  it.runIf(inCatalog('vorn.widget'))('lists each terminal in the Widget installed from the catalog', async () => {
     type Agent = { id: string; name?: string; agent?: string; status?: string }
     const agents = (): Promise<Agent[]> =>
       call<Agent[]>('extension:rows', { id: 'vorn.widget', collection: 'agents' })

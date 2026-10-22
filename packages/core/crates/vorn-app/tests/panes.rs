@@ -3,8 +3,9 @@
 //! (the `vorn.browser` extension's tree), uninstalled, an
 //! artifact the agent publishes with its bar, versions, doc editor and
 //! comments rail, a design's canvas and tweaks, and the Device's pane (the
-//! `vorn.device` extension's tree) with its picker and controls,
-//! uninstalled. No web view is seated offscreen, so the page itself never loads, and
+//! `vorn.device` extension's tree, installed from a catalog) with its
+//! picker and controls, absent and uninstalled. No web view is seated
+//! offscreen, so the page itself never loads, and
 //! no simulator is started; what a page would report (a design's manifest)
 //! is set on the app's state. `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
@@ -421,7 +422,7 @@ fn tell_screen(app: &mut App, sid: &str, kind: vorn_tree::EventKind, value: &str
 
 #[test]
 fn the_device_button_opens_the_picker_over_the_card_then_the_pane() {
-    let Some(v) = TestVornd::start() else {
+    let Some(v) = TestVornd::start_with(&[DEVICE]) else {
         return;
     };
     let mut app = connect(&v);
@@ -586,8 +587,25 @@ fn the_device_button_opens_the_picker_over_the_card_then_the_pane() {
 }
 
 #[test]
-fn uninstalled_the_device_leaves_no_phone_and_refuses_its_calls() {
+fn without_the_device_installed_a_mobile_card_offers_no_phone() {
     let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    let sid = mobile_agent(&mut shot, &mut app, &v);
+    wait_for("the contributions", || {
+        app.pump();
+        app.st.points.loaded.then_some(())
+    });
+    shot.hover(&mut app, term_id(&sid));
+    assert!(shot.labelled(&mut app, "Button", "Open device").is_none());
+    assert!(device_key(&app.st.points, &sid).is_none());
+}
+
+#[test]
+fn uninstalled_the_device_leaves_no_phone_and_refuses_its_calls() {
+    let Some(v) = TestVornd::start_with(&[DEVICE]) else {
         return;
     };
     let mut app = connect(&v);

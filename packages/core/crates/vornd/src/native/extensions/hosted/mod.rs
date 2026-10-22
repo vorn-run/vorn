@@ -32,9 +32,38 @@ pub fn not_installed(name: &str) -> String {
     format!("{name} is not installed. Install it in Settings → Extensions.")
 }
 
+/// Vorn's own MCP tools that call the extensions `installed` says are, so
+/// an agent is offered none whose extension is gone.
+pub fn mcp_tools(installed: impl Fn(&str) -> bool) -> Vec<Value> {
+    vorn_mcp::hosted_tools()
+        .filter(|(id, _)| installed(id))
+        .flat_map(|(_, tools)| tools.iter().cloned())
+        .collect()
+}
+
 fn client() -> CallCtx {
     CallCtx {
         caller: "client".to_owned(),
         project: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(tools: &[Value]) -> Vec<&str> {
+        tools.iter().filter_map(|t| t["name"].as_str()).collect()
+    }
+
+    #[test]
+    fn an_extensions_tools_are_offered_only_while_it_is_installed() {
+        assert!(mcp_tools(|_| false).is_empty());
+        let device = mcp_tools(|id| id == device::ID);
+        let device = names(&device);
+        assert!(device.contains(&"device_list") && device.contains(&"open_device_pane"));
+        assert!(!device.contains(&"read_page"));
+        let both = mcp_tools(|id| id == device::ID || id == browser::ID);
+        assert!(names(&both).contains(&"read_page"));
     }
 }

@@ -56,11 +56,11 @@ pub struct Pinned {
     pub sha256: String,
 }
 
-/// What this build of Vorn vouches for, compiled into it: the packs of its
-/// shipped set, the only ones that may have an id in Vorn's own namespace,
-/// and the ids of the extensions it bundles, which no install may take.
-/// A catalog is not in it: its listing is not signed, so it vouches for
-/// nothing in Vorn's namespace.
+/// What this build of Vorn vouches for, compiled into it: the packs it pins
+/// (its shipped set, and Vorn's own the catalog offers), the only ones that
+/// may have an id in Vorn's own namespace, and the ids of the extensions it
+/// bundles, which no install may take. A catalog listing vouches for nothing
+/// in Vorn's namespace: it is not signed.
 #[derive(Debug, Clone, Default)]
 pub struct Trust {
     pub pins: Vec<Pinned>,

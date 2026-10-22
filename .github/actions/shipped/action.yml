@@ -1,4 +1,4 @@
-# The shipped set: fetches the extension packs packages/core/shipped.toml pins,
+# The shipped set: fetches the extension packs packages/core/shipped.toml and pinned.toml pin,
 # as the extensions repository's CI built them at the lock's rev, checks each
 # sha256, and points vornd's build at them. The checkout is for the tests that
 # read the moved sources. The packs are cached on the lock, across platforms.
@@ -22,7 +22,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: packages/core/shipped
-        key: shipped-v1-${{ hashFiles('packages/core/shipped.toml') }}
+        key: shipped-v1-${{ hashFiles('packages/core/shipped.toml', 'packages/core/pinned.toml') }}
         enableCrossOsArchive: true
 
     - name: Fetch the packs

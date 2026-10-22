@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Fetches the shipped set: the packs shipped.toml pins, into
-// packages/core/shipped/, where vornd's build embeds them. Each pack is
-// checked against its pinned sha256.
+// packages/core/shipped/, where vornd's build embeds them; and the packs
+// pinned.toml pins, which only the catalog offers, into shipped/catalog/,
+// where the tests install them from. Each pack is checked against its sha256.
 //
 //   node scripts/shipped.mjs                    the packs the extensions repo's CI built at the rev (needs gh)
 //   node scripts/shipped.mjs --from <checkout>  builds them from a checkout of that repo (on Linux)
@@ -49,7 +50,7 @@ function build(checkout, lock) {
   if (head !== lock.rev) {
     console.warn(`shipped: ${checkout} is at ${head}, and shipped.toml pins ${lock.rev}`)
   }
-  const paths = lock.extensions.map((e) => e.path)
+  const paths = [...lock.extensions, ...lock.catalog].map((e) => e.path)
   run('cargo', ['run', '--locked', '--release', '-p', 'vorn-pack', '--', ...paths], checkout)
   return join(checkout, 'dist')
 }
@@ -70,26 +71,33 @@ function main() {
   const args = process.argv.slice(2)
   const at = args.indexOf('--from')
   const lock = readLock(readFileSync(join(core, 'shipped.toml'), 'utf8'))
-  if (!lock.rev || lock.extensions.some((e) => !e.id || !e.version || !e.sha256)) {
+  lock.catalog = readLock(readFileSync(join(core, 'pinned.toml'), 'utf8')).extensions
+  const all = [...lock.extensions, ...lock.catalog]
+  if (!lock.rev || all.some((e) => !e.id || !e.version || !e.sha256)) {
     throw new Error('shipped.toml: a rev, and an id, version and sha256 for every extension')
   }
   const packs = at >= 0 && args[at + 1] ? build(resolve(args[at + 1]), lock) : download(lock)
   const out = join(core, 'shipped')
-  mkdirSync(out, { recursive: true })
   const wrong = []
-  for (const e of lock.extensions) {
-    const name = `${e.id}-${e.version}.vorn.tgz`
-    const from = join(packs, name)
-    const sha = createHash('sha256').update(readFileSync(from)).digest('hex')
-    if (sha !== e.sha256) {
-      wrong.push(`${name}: got ${sha}, pinned ${e.sha256}`)
-      continue
+  for (const [into, set] of [
+    [out, lock.extensions],
+    [join(out, 'catalog'), lock.catalog]
+  ]) {
+    mkdirSync(into, { recursive: true })
+    for (const e of set) {
+      const name = `${e.id}-${e.version}.vorn.tgz`
+      const from = join(packs, name)
+      const sha = createHash('sha256').update(readFileSync(from)).digest('hex')
+      if (sha !== e.sha256) {
+        wrong.push(`${name}: got ${sha}, pinned ${e.sha256}`)
+        continue
+      }
+      copyFileSync(from, join(into, name))
+      console.log(`shipped: ${name} ${sha}`)
     }
-    copyFileSync(from, join(out, name))
-    console.log(`shipped: ${name} ${sha}`)
   }
   if (wrong.length) {
-    throw new Error(`not the packs shipped.toml pins:\n${wrong.join('\n')}`)
+    throw new Error(`not the packs shipped.toml and pinned.toml pin:\n${wrong.join('\n')}`)
   }
 }
 

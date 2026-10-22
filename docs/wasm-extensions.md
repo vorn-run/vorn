@@ -11,8 +11,9 @@ the same API and the same permissions:
   machine: no files, no network, no environment. It asks Vorn for what it
   needs through the API's imports, and Vorn holds each call to what the
   manifest declares. Fit for logic that reacts to events, keeps its own data
-  and draws a UI. Worktree cleanup, Files, Shell blocks, the Widget, the
-  Browser, the Device and SSH, which Vorn ships, are such components.
+  and draws a UI. Worktree cleanup, Files, Shell blocks, the Browser and SSH,
+  which Vorn ships, are such components, as are the Widget and the Device,
+  which you install from the catalog.
 
 Both are written against `wit/extension.wit` in
 `packages/core/crates/extensions`, the only definition of the API. The

@@ -6,6 +6,9 @@
 //                        a built-in extension adds, which go to its own
 //                        `generated/tools.json` (each built-in's manifest names
 //                        them under `[mcp.<name>]`)
+// - hosted.json          the tools of each extension the core routes to
+//                        (`browser:*`, `device:*`), by its id: vornd lists
+//                        them only while that extension is installed
 // - schemas.json         each tool's argument schema as the zod it is checked
 //                        with, so vornd can check arguments the same way and
 //                        word a refusal as zod does (JSON Schema keeps neither
@@ -31,6 +34,12 @@ const OUT = path.join(root, 'packages/core/crates/mcp/generated')
 
 /** The built-ins that add tools: the crate each lives in, whose manifest names them. */
 const BUILTINS = ['packages/core/crates/connectors', 'packages/core/extensions/tasks']
+
+/** The extensions the core routes to, by id: the module that registers their tools and its function. */
+const HOSTED = {
+  'vorn.browser': ['packages/mcp/src/tools/browser.ts', 'registerBrowserTools'],
+  'vorn.device': ['packages/mcp/src/tools/device.ts', 'registerDeviceTools']
+}
 
 /** The built-in crate that declares each node type, from `crates/`; the rest are the engine's own. */
 const NODE_OWNERS = {
@@ -78,6 +87,7 @@ const nodeConfig = await load('packages/mcp/src/tools/node-config-schemas.ts')
 const workflows = await load('packages/mcp/src/tools/workflows.ts')
 const { WORKFLOW_NODES_REFERENCE } = await load('packages/mcp/src/tools/describe-nodes.ts')
 const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js')
 
 /** The `tools/list` answer as a client receives it: no client-side parsing in between. */
 async function listTools(server) {
@@ -298,6 +308,15 @@ async function generate() {
     )
     own = own.filter((t) => !names.has(t.name))
   }
+  const hosted = {}
+  for (const [id, [file, register]] of Object.entries(HOSTED)) {
+    const only = new McpServer({ name: 'vorn', version: '0.0.0' }, { capabilities: { tools: {} } })
+    ;(await load(file))[register](only)
+    const names = new Set((await listTools(only)).map((t) => t.name))
+    hosted[id] = own.filter((t) => names.has(t.name))
+    own = own.filter((t) => !names.has(t.name))
+  }
+  files['hosted.json'] = hosted
   files['tools.json'] = own
   return files
 }

@@ -1,5 +1,8 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
+import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
@@ -116,7 +119,7 @@ export const realServers: RealServer[] = []
 /**
  * @param dirs An earlier server's directories, to start again on what it left.
  * @param options.early Returns once vornd says where it is, as the app connects, without waiting for the holder.
- * @param options.installed Shipped extensions installed too, as a first launch does for a built-in switch left on.
+ * @param options.installed Vorn's own catalog extensions installed too, from a catalog served on loopback, as a person installs one.
  */
 export async function startRealServer(
   dirs?: RunDirs,
@@ -128,10 +131,7 @@ export async function startRealServer(
   dirs ??= { home: made('home'), data: made('data'), work: made('work') }
   // A killed server leaves its port behind.
   fs.rmSync(path.join(dirs.data, WS_PORT_FILENAME), { force: true })
-  if (options.installed?.length) {
-    const on = Object.fromEntries(options.installed.map((id) => [id, true]))
-    fs.writeFileSync(path.join(dirs.data, 'builtins.json'), JSON.stringify(on))
-  }
+  if (options.installed?.length) await offerInCatalog(dirs.home, options.installed)
   const log: string[] = []
   const child = spawn(
     vornd!,
@@ -151,6 +151,7 @@ export async function startRealServer(
         [BOOTSTRAP_ENV_VAR]: TEST_CREDENTIAL,
         // Secrets go to a private file in the data directory, never this machine's keychain.
         VORND_KEYCHAIN: '0',
+        NO_PROXY: '127.0.0.1,localhost',
         VORND_LOG: process.env.VORND_LOG ?? 'info'
       },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -181,7 +182,59 @@ export async function startRealServer(
     if (!health.sessiond?.current?.pid) return false
     return health.registry?.fed === true && health.registry.decides === true
   })
+  if (options.installed?.length) {
+    const client = await Watcher.open(server.vornd)
+    for (const id of options.installed) {
+      const done = await client.result<{ ok?: boolean }>('connector:installPack', { kind: 'catalog', id })
+      if (done.ok !== true) throw new Error(`installing ${id}: ${JSON.stringify(done)}`)
+    }
+    client.close()
+  }
   return server
+}
+
+/** Where scripts/shipped.mjs puts the packs of Vorn's own catalog extensions. */
+const catalogPacks = path.resolve(
+  process.env.VORN_SHIPPED_DIR ?? path.resolve(__dirname, '../../packages/core/shipped'),
+  'catalog'
+)
+
+/** Whether scripts/shipped.mjs fetched the pack of each of `ids`. */
+export function inCatalog(...ids: string[]): boolean {
+  const names = fs.existsSync(catalogPacks) ? fs.readdirSync(catalogPacks) : []
+  return ids.every((id) => names.some((n) => n.startsWith(`${id}-`)))
+}
+
+/** Lists `ids` in the catalog vornd at `home` reads, served from loopback as the release would be. */
+export async function offerInCatalog(home: string, ids: string[]): Promise<void> {
+  const packs = ids.map((id) => {
+    const name = fs.readdirSync(catalogPacks).find((n) => n.startsWith(`${id}-`))
+    if (!name) throw new Error(`${id} was not fetched (run packages/core/scripts/shipped.mjs)`)
+    const bytes = fs.readFileSync(path.join(catalogPacks, name))
+    const version = name.slice(id.length + 1, -'.vorn.tgz'.length)
+    return { id, name, version, bytes }
+  })
+  const served = http.createServer((req, res) => {
+    const pack = packs.find((p) => req.url === `/${p.name}`)
+    if (!pack) return void res.writeHead(404).end()
+    res.writeHead(200, { 'content-length': pack.bytes.length }).end(pack.bytes)
+  })
+  await new Promise<void>((resolve) => served.listen(0, '127.0.0.1', resolve))
+  served.unref()
+  const { port } = served.address() as AddressInfo
+  const connectors = packs.map((p) => ({
+    id: p.id,
+    name: p.id,
+    kind: 'extension',
+    version: p.version,
+    sha256: createHash('sha256').update(p.bytes).digest('hex'),
+    packUrl: `http://127.0.0.1:${port}/${p.name}`
+  }))
+  fs.mkdirSync(path.join(home, '.vorn'), { recursive: true })
+  fs.writeFileSync(
+    path.join(home, '.vorn', 'connector-catalog.json'),
+    JSON.stringify({ connectors, fetchedAt: Date.now() })
+  )
 }
 
 /**

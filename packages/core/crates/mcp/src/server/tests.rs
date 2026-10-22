@@ -166,6 +166,19 @@ fn an_extensions_tools_are_listed_after_vorns_and_called_through_vornd() {
     assert_eq!(tools.len(), crate::tool_count() + 1);
     assert_eq!(tools.last().unwrap(), &tool);
 
+    // A tool of an extension the core routes to stands where Vorn's list puts it.
+    let device = crate::hosted_tools()
+        .find(|(id, _)| *id == "vorn.device")
+        .map(|(_, t)| t[0].clone())
+        .unwrap();
+    rpc.answer("extension:mcpTools", json!([tool, device]));
+    let listed = block_on(server.handle(&rpc, &caller(), &list)).unwrap();
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), crate::tool_count() + 2);
+    assert_eq!(tools.last().unwrap(), &tool);
+    let at = tools.iter().position(|t| t == &device).unwrap();
+    assert!(at < tools.len() - 2, "{at}");
+
     let call = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": { "name": "test_x__check", "arguments": { "n": 1 } }

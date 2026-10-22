@@ -588,6 +588,7 @@ impl Extensions {
             }
             "extension:mcpTools" => self.listed_tools().await.map(|tools| {
                 let mut listed = self.builtins.mcp_tools();
+                listed.extend(hosted::mcp_tools(|id| self.router.program(id).is_some()));
                 listed.extend(tools.into_iter().map(|t| t.listed));
                 Value::Array(listed)
             }),

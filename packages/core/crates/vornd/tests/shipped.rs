@@ -1,7 +1,8 @@
 //! The shipped set against the real vornd: a first launch installs it with
 //! no network, each one an ordinary install that an uninstall removes whole
 //! (files, tables, the agent it brought, the service it ran) and no later
-//! start puts back; each moved built-in still works installed; an
+//! start puts back; each moved built-in still works installed, and the
+//! optional ones install from a catalog and uninstall whole; an
 //! older shipped install is updated; and with every adapter gone an agent
 //! still runs in a plain terminal. Skipped by a build that carries no packs.
 
@@ -134,6 +135,9 @@ async fn a_first_launch_installs_the_shipped_set_offline_and_an_uninstall_leaves
     let mut want: Vec<String> = defaults().iter().map(|s| (*s).to_owned()).collect();
     want.sort();
     assert_eq!(ids(&installed, "id"), want, "{installed}");
+    for id in OPTIONAL {
+        assert!(!want.iter().any(|w| w == id), "{id} is shipped");
+    }
     for pack in installed.as_array().unwrap() {
         let id = pack["id"].as_str().unwrap();
         let shipped = vornd::shipped::SET.iter().find(|s| s.id == id).unwrap();
@@ -230,38 +234,167 @@ async fn drawn(c: &mut Ws, id: &str, point: &str) -> String {
     serde_json::to_string(&tree.tree).unwrap()
 }
 
+/// The extensions Vorn pins but does not ship: each one installs from the catalog.
+const OPTIONAL: [&str; 2] = ["vorn.widget", "vorn.device"];
+
+/// vornd with the optional extensions listed in its catalog, served from
+/// loopback; `None` when scripts/shipped.mjs has not fetched them.
+fn serve_with_catalog(data: tempfile::TempDir) -> Option<common::Served> {
+    let mut packs = Vec::new();
+    for id in OPTIONAL {
+        let Some((version, sha256, bytes)) = common::catalog_pack(id) else {
+            eprintln!("skipped: {id} was not fetched (run packages/core/scripts/shipped.mjs)");
+            return None;
+        };
+        packs.push((id, version, sha256, bytes));
+    }
+    let home = tempfile::tempdir().unwrap();
+    common::offer_in_catalog(home.path(), packs);
+    Some(common::serve_at(data, home))
+}
+
+async fn install_from_catalog(c: &mut Ws, id: &str) {
+    let installed = c
+        .result(
+            "connector:installPack",
+            json!({ "kind": "catalog", "id": id }),
+        )
+        .await;
+    assert_eq!(installed["ok"], true, "{id}: {installed}");
+}
+
+fn services(port: u16) -> Vec<String> {
+    ids_of(&health(port)["extensions"]["services"])
+}
+
+fn ids_of(list: &Value) -> Vec<String> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s.as_str().map(str::to_owned))
+        .collect()
+}
+
+async fn tool_names(c: &mut Ws) -> Vec<String> {
+    ids(&c.result("extension:mcpTools", json!({})).await, "name")
+}
+
+async fn wait_for(port: u16, what: &str, until: impl Fn(&[String]) -> bool) {
+    let t = Instant::now();
+    while !until(&services(port)) {
+        assert!(t.elapsed() < PATIENCE, "{what}: {}", health(port));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_widget_and_the_device_install_from_the_catalog_and_an_uninstall_leaves_nothing() {
+    let Some(served) = serve_with_catalog(tempfile::tempdir().unwrap()) else {
+        return;
+    };
+    let data = served.data.path().to_path_buf();
+    let mut c = Ws::open(served.port).await;
+
+    // Not there on a first launch, and nothing of theirs is offered.
+    let installed = ids(&c.result("extension:installed", json!({})).await, "id");
+    let owned = |list: &Value| {
+        list.as_array().unwrap().iter().any(|p| {
+            p["extension"]
+                .as_str()
+                .is_some_and(|e| OPTIONAL.contains(&e))
+        })
+    };
+    for id in OPTIONAL {
+        assert!(!installed.iter().any(|i| i == id), "{installed:?}");
+    }
+    assert!(!tool_names(&mut c).await.iter().any(|t| t == "device_list"));
+    assert!(!owned(
+        &c.result("extension:contributions", json!({})).await
+    ));
+
+    for id in OPTIONAL {
+        install_from_catalog(&mut c, id).await;
+    }
+    let installed = c.result("extension:installed", json!({})).await;
+    for id in OPTIONAL {
+        let pack = installed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("{id} is not installed: {installed}"));
+        assert_eq!(pack["source"]["catalog"], id, "{pack}");
+        assert!(pack["icon"].is_object(), "{id} has no icon: {pack}");
+    }
+    // Each one is whole again: its pane, its tools, its service, its window.
+    assert!(owned(&c.result("extension:contributions", json!({})).await));
+    assert!(!drawn(&mut c, "vorn.widget", "compact").await.is_empty());
+    assert!(tool_names(&mut c).await.iter().any(|t| t == "device_list"));
+    wait_for(served.port, "Device did not start", |s| {
+        s.iter().any(|i| i == "vorn.device")
+    })
+    .await;
+    let claimed = c
+        .call("device:claim", json!({ "sessionId": "s", "udid": "u" }))
+        .await;
+    assert_ne!(
+        claimed["error"]["message"],
+        "Device is not installed. Install it in Settings \u{2192} Extensions.",
+        "{claimed}"
+    );
+
+    for id in OPTIONAL {
+        let removed = c.result("extension:remove", json!({ "id": id })).await;
+        assert_eq!(removed["removed"], id);
+        assert!(
+            !data.join("connectors").join(id).exists(),
+            "{id} left files"
+        );
+    }
+    wait_for(served.port, "Device outlived its uninstall", |s| {
+        !s.iter().any(|i| OPTIONAL.contains(&i.as_str()))
+    })
+    .await;
+    let installed = ids(&c.result("extension:installed", json!({})).await, "id");
+    for id in OPTIONAL {
+        assert!(!installed.iter().any(|i| i == id), "{installed:?}");
+    }
+    assert!(!tool_names(&mut c).await.iter().any(|t| t == "device_list"));
+    assert!(!owned(
+        &c.result("extension:contributions", json!({})).await
+    ));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_moved_built_ins_work_installed_and_their_switch_carries_over() {
-    let moved = [
-        "vorn.files",
-        "vorn.blocks",
-        "vorn.widget",
-        "vorn.browser",
-        "vorn.device",
-        "vorn.ssh",
-    ];
-    if moved
+    let shipped = ["vorn.files", "vorn.blocks", "vorn.browser", "vorn.ssh"];
+    if shipped
         .iter()
         .any(|id| !vornd::shipped::SET.iter().any(|s| s.id == *id))
     {
         eprintln!("skipped: this build does not ship every moved built-in");
         return;
     }
-    // The Widget is off by default; a switch left on installs it, and one left off removes SSH.
+    // A switch left off removes SSH; one left on no longer installs the Widget.
     let data = tempfile::tempdir().unwrap();
     std::fs::write(
         data.path().join("builtins.json"),
         r#"{"vorn.widget": true, "vorn.ssh": false}"#,
     )
     .unwrap();
-    let served = serve_in(data);
+    let Some(served) = serve_with_catalog(data) else {
+        return;
+    };
     let mut c = Ws::open(served.port).await;
     let installed = ids(&c.result("extension:installed", json!({})).await, "id");
+    assert!(!installed.iter().any(|i| i == "vorn.ssh"), "{installed:?}");
     assert!(
-        installed.iter().any(|i| i == "vorn.widget"),
+        !installed.iter().any(|i| i == "vorn.widget"),
         "{installed:?}"
     );
-    assert!(!installed.iter().any(|i| i == "vorn.ssh"), "{installed:?}");
+    for id in OPTIONAL {
+        install_from_catalog(&mut c, id).await;
+    }
 
     assert!(!drawn(&mut c, "vorn.widget", "compact").await.is_empty());
     assert!(!drawn(&mut c, "vorn.files", "files").await.is_empty());
@@ -273,17 +406,14 @@ async fn the_moved_built_ins_work_installed_and_their_switch_carries_over() {
         .await;
     assert!(history.is_array() || history.is_object(), "{history}");
 
-    // Browser and Device start with vornd, through their manifest's start.
-    let t = Instant::now();
-    loop {
-        let services = health(served.port)["extensions"]["services"].clone();
-        let has = |id: &str| services.as_array().unwrap().iter().any(|s| s == id);
-        if has("vorn.browser") && has("vorn.device") {
-            break;
-        }
-        assert!(t.elapsed() < PATIENCE, "not started: {services}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // Browser starts with vornd through its manifest's start; Device with its install.
+    wait_for(served.port, "not started", |s| {
+        ["vorn.browser", "vorn.device"]
+            .iter()
+            .all(|id| s.iter().any(|i| i == id))
+    })
+    .await;
+    assert!(tool_names(&mut c).await.iter().any(|t| t == "read_page"));
     for (id, method, name) in [
         ("vorn.browser", "browser:listTabs", "Browser"),
         ("vorn.device", "device:claim", "Device"),
@@ -298,6 +428,7 @@ async fn the_moved_built_ins_work_installed_and_their_switch_carries_over() {
             "{refused}"
         );
     }
+    assert!(!tool_names(&mut c).await.iter().any(|t| t == "read_page"));
     let ssh = c
         .call(
             "ssh:testConnection",

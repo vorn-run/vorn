@@ -19,6 +19,7 @@ import {
   type RealServer,
   Watcher,
   removeRealServerDirs,
+  inCatalog,
   runnable,
   startRealServer,
   stopRealServer,
@@ -27,7 +28,8 @@ import {
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
-describe.runIf(runnable)('agents’ hooks in vornd', () => {
+// The Widget, from the catalog, is how the public API hears of requests.
+describe.runIf(runnable && inCatalog('vorn.widget'))('agents’ hooks in vornd', () => {
   let server: RealServer
   let client: Watcher
   let endpoint: { port: number; token: string }

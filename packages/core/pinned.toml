@@ -1,0 +1,18 @@
+# Vorn's own extensions the catalog offers and the installer does not
+# carry: nothing installs them on a first launch, a person installs them from
+# the catalog. The catalog is not signed, so this build vouches for their
+# packs here, which lets them have an id in Vorn's namespace. Pinned like
+# shipped.toml's, from the same rev of vorn-run/extensions; scripts/shipped.mjs
+# fetches them into packages/core/shipped/catalog/ for the tests.
+
+[[extension]]
+id = "vorn.device"
+path = "device"
+version = "1.0.0"
+sha256 = "cce89f0d58d7a9fe6a4c1fd8179e4f66bdb66a77a5fedfe7520e8b08890bd512"
+
+[[extension]]
+id = "vorn.widget"
+path = "widget"
+version = "1.0.0"
+sha256 = "c4ed5da9c9d36287cf9ac052f92d879b028aba711bf7b810b39695cd1c739204"

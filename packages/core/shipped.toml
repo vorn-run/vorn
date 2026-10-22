@@ -67,20 +67,7 @@ version = "1.0.0"
 sha256 = "db37b82a6d3c248aec3eca265fd8693447972f6e2c26f1a34e40cb6750d39ce0"
 
 [[extension]]
-id = "vorn.device"
-path = "device"
-version = "1.0.0"
-sha256 = "cce89f0d58d7a9fe6a4c1fd8179e4f66bdb66a77a5fedfe7520e8b08890bd512"
-
-[[extension]]
 id = "vorn.ssh"
 path = "ssh"
 version = "1.0.0"
 sha256 = "01bdb2a6f24c7b9f00821f38638bbd1eadb5ddd35d36bbcfbeecf9d791cab312"
-
-[[extension]]
-id = "vorn.widget"
-path = "widget"
-version = "1.0.0"
-sha256 = "c4ed5da9c9d36287cf9ac052f92d879b028aba711bf7b810b39695cd1c739204"
-default = false
