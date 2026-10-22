@@ -171,13 +171,15 @@ pub struct PackStore {
 }
 
 /// Ids are directory names, so anything that could traverse is not one.
+/// Lowercase only, so no two ids name one folder on a case-insensitive disk.
 pub fn is_safe_id(id: &str) -> bool {
+    let lower = |c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit();
     let b = id.as_bytes();
     !b.is_empty()
         && b.len() <= 64
-        && b[0].is_ascii_alphanumeric()
+        && lower(&b[0])
         && b.iter()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
+            .all(|c| lower(c) || matches!(c, b'-' | b'.' | b'_'))
         && !id.contains("..")
 }
 
@@ -203,15 +205,14 @@ pub fn check_id(id: &str) -> Result<(), String> {
     if !is_safe_id(id) {
         return Err(format!("\"{id}\" is not an extension id"));
     }
-    if id.to_ascii_lowercase().starts_with(SHIPPED_NAMESPACE) {
+    if id.starts_with(SHIPPED_NAMESPACE) {
         return Err(format!(
             "\"{id}\" is reserved: ids starting with {SHIPPED_NAMESPACE} are the extensions Vorn ships"
         ));
     }
     if is_reserved(id) {
         return Err(format!(
-            "\"{id}\" is reserved: Vorn's own workflows' ids start with {}:",
-            id.to_ascii_lowercase()
+            "\"{id}\" is reserved: Vorn's own workflows' ids start with {id}:"
         ));
     }
     Ok(())
@@ -621,15 +622,14 @@ mod tests {
     }
 
     #[test]
-    fn reserved_ids_are_reserved_in_any_case() {
-        for id in ["Import", "SYSTEM", "File", "Vorn.Connectors", "VORN.x"] {
-            assert!(is_reserved(id), "{id}");
-            assert!(check_id(id).is_err(), "{id}");
+    fn ids_are_lowercase_only() {
+        for id in ["Import", "SYSTEM", "Vorn.Connectors", "Test.Marker", "a.B"] {
+            assert!(!is_safe_id(id), "{id}");
+            assert_eq!(
+                check_id(id).unwrap_err(),
+                format!("\"{id}\" is not an extension id")
+            );
         }
-        assert_eq!(
-            check_id("Connector").unwrap_err(),
-            "\"Connector\" is reserved: Vorn's own workflows' ids start with connector:"
-        );
     }
 
     #[test]

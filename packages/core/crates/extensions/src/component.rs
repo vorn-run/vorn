@@ -49,6 +49,8 @@ pub enum Source {
     File(PathBuf),
     /// Bytes compiled into the host: an extension Vorn ships.
     Bundled(&'static [u8]),
+    /// A package's file read once, so what was checked of it is what runs.
+    Read(std::sync::Arc<[u8]>),
 }
 
 /// An extension Vorn ships as a Wasm component: its manifest, and the

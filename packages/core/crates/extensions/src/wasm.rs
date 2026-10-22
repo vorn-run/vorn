@@ -323,10 +323,11 @@ fn deserialize(rt: &Runtime, code: &Path) -> Result<Component, String> {
     unsafe { Component::deserialize(&rt.engine, bytes) }.map_err(|e| format!("{e:#}"))
 }
 
-/// The bytes of `source`: borrowed when they are compiled into the host.
-async fn read(source: &Source) -> Result<std::borrow::Cow<'static, [u8]>, String> {
+/// The bytes of `source`: borrowed when they are already in memory.
+async fn read(source: &Source) -> Result<std::borrow::Cow<'_, [u8]>, String> {
     match source {
         Source::Bundled(bytes) => Ok(std::borrow::Cow::Borrowed(*bytes)),
+        Source::Read(bytes) => Ok(std::borrow::Cow::Borrowed(bytes)),
         Source::File(path) => {
             let path = path.clone();
             tokio::task::spawn_blocking(move || {

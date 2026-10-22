@@ -703,14 +703,24 @@ impl Router {
             vorn: self.settings.version.clone(),
             api: crate::api::API.to_owned(),
         };
-        let caller = self.caller_of(pack).await;
         if let Some(component) = &service.component {
-            let source = Source::File(pack.path.join(component));
+            let (trust, read, file) =
+                (self.settings.trust.clone(), pack.clone(), component.clone());
+            let (bytes, vouched) =
+                tokio::task::spawn_blocking(move || trust.read_vouched(&read, &file))
+                    .await
+                    .map_err(|e| e.to_string())??;
+            let caller = caller(pack, crate::pack::is_reserved(&pack.id) && vouched);
             return self
-                .start_component(source, Arc::new(pack.manifest.clone()), caller, ctx)
+                .start_component(
+                    Source::Read(bytes.into()),
+                    Arc::new(pack.manifest.clone()),
+                    caller,
+                    ctx,
+                )
                 .await;
         }
-        let child = self.spawn_program(pack, &service.command, caller)?;
+        let child = self.spawn_program(pack, &service.command, caller(pack, false))?;
         let init = params::GuestInit { ctx };
         let answered = child
             .request(
@@ -727,8 +737,9 @@ impl Router {
         Ok(Program::Child(child))
     }
 
-    /// Who installed `pack` asks as: Vorn's own when it is the pack this
-    /// build pins for its id, its files checked off the runtime.
+    /// Who installed `pack` is, for what it adds rather than runs: Vorn's
+    /// own when it is the pack this build pins for its id, its files checked
+    /// off the runtime. What it runs is checked as it is read (`start_service`).
     pub async fn caller_of(&self, pack: &InstalledPack) -> Caller {
         let builtin = crate::pack::is_reserved(&pack.id) && {
             let (trust, pack) = (self.settings.trust.clone(), pack.clone());
@@ -736,11 +747,7 @@ impl Router {
                 .await
                 .unwrap_or(false)
         };
-        Caller {
-            extension: pack.id.clone(),
-            builtin,
-            ..Caller::of(&pack.manifest)
-        }
+        caller(pack, builtin)
     }
 
     async fn start_bundled(&self, bundled: &Bundled) -> Result<Program, String> {
@@ -810,9 +817,8 @@ impl Router {
         args: Value,
         ctx: CallCtx,
     ) -> Result<Value, ExtError> {
-        let caller = self.caller_of(pack).await;
         let child = self
-            .spawn_program(pack, &run.command, caller)
+            .spawn_program(pack, &run.command, caller(pack, false))
             .map_err(|e| ExtError::new("start", e))?;
         let params = params::GuestHandle {
             method: action.to_owned(),
@@ -876,6 +882,16 @@ impl Router {
         if !told.is_empty() {
             self.world.published(caller, collection, &told);
         }
+    }
+}
+
+/// Installed `pack` as a caller; Vorn's own only when `builtin`. A program
+/// reads its files as it runs, so one is never Vorn's own.
+fn caller(pack: &InstalledPack, builtin: bool) -> Caller {
+    Caller {
+        extension: pack.id.clone(),
+        builtin,
+        ..Caller::of(&pack.manifest)
     }
 }
 

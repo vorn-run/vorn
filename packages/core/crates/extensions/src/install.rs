@@ -77,8 +77,34 @@ impl Trust {
     /// only while its files are still exactly the pinned pack's. Blocks on the disk.
     pub fn vouches_for(&self, pack: &InstalledPack) -> bool {
         !pack.linked
+            && pin_of(&pack.id, &pack.version, pack.source.as_ref()).is_some_and(|pin| {
+                self.vouches(&pin) && pinned_files(&pack.path, &pin.sha256).is_some()
+            })
+    }
+
+    /// `file` of `pack`, read once, and whether these very bytes are Vorn's
+    /// own: `pack` is vouched for and they are the pinned pack's `file`. What
+    /// runs is what was checked, so a file changed after the check runs as no one's.
+    pub fn read_vouched(
+        &self,
+        pack: &InstalledPack,
+        file: &str,
+    ) -> Result<(Vec<u8>, bool), String> {
+        let path = pack.path.join(file);
+        let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let key: Vec<String> = Path::new(file)
+            .components()
+            .filter_map(|c| match c {
+                std::path::Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect();
+        let vouched = !pack.linked
             && pin_of(&pack.id, &pack.version, pack.source.as_ref())
-                .is_some_and(|pin| self.vouches(&pin) && holds_pinned(&pack.path, &pin.sha256))
+                .filter(|pin| self.vouches(pin))
+                .and_then(|pin| pinned_files(&pack.path, &pin.sha256))
+                .is_some_and(|files| files.get(&key.join("/")) == Some(&sha256_hex(&bytes)));
+        Ok((bytes, vouched))
     }
 
     /// Whether only a pack this build pins may have `id`.
@@ -90,23 +116,18 @@ impl Trust {
 /// The pinned pack's own bytes, kept in its folder so its files can be checked against the pin.
 pub const PINNED_ARCHIVE: &str = ".pinned.vorn.tgz";
 
-/// Whether `dir` holds exactly the files of the pack kept in it, whose
-/// sha256 must be `sha256`: none changed, added or missing, and no links.
-fn holds_pinned(dir: &Path, sha256: &str) -> bool {
-    let Ok(bytes) = fs::read(dir.join(PINNED_ARCHIVE)) else {
-        return false;
-    };
+/// Each file of the pack kept in `dir`, with its sha256, when `dir` holds
+/// exactly those files and the kept pack's sha256 is `sha256`: none
+/// changed, added or missing, and no links.
+fn pinned_files(dir: &Path, sha256: &str) -> Option<BTreeMap<String, String>> {
+    let bytes = fs::read(dir.join(PINNED_ARCHIVE)).ok()?;
     if sha256_hex(&bytes) != sha256 {
-        return false;
+        return None;
     }
+    let packed = archive_digests(&bytes).ok()?;
     let mut installed = BTreeMap::new();
-    match (
-        archive_digests(&bytes),
-        tree_digests(dir, "", &mut installed),
-    ) {
-        (Ok(packed), Ok(())) => packed == installed,
-        _ => false,
-    }
+    tree_digests(dir, "", &mut installed).ok()?;
+    (packed == installed).then_some(packed)
 }
 
 /// Each file of a `.vorn.tgz` under its top folder, by path, with its sha256.
@@ -456,6 +477,7 @@ impl Installs {
                     keep_only(&dir, p)?;
                     source["path"] = json!(p);
                 }
+                refuse_links(&dir, "")?;
                 Ok(source)
             })
         };
@@ -945,6 +967,30 @@ fn usable_subfolder(path: &str) -> Result<(), String> {
 }
 
 /// Leaves only `path` of the clone at `dir`, moved up to be all of it.
+/// Refuses a tree holding a link or special file anywhere, as a pack holds
+/// only files and folders; a clone keeps what was committed, links included.
+fn refuse_links(dir: &Path, prefix: &str) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let kind = entry.file_type().map_err(|e| format!("{rel}: {e}"))?;
+        if kind.is_dir() {
+            refuse_links(&entry.path(), &rel)?;
+        } else if !kind.is_file() {
+            return Err(format!(
+                "{rel} is a link or special file; a pack holds only files and folders"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn keep_only(dir: &Path, path: &str) -> Result<(), String> {
     // A committed link could name a folder anywhere; each part must be a real folder of the clone.
     let mut inner = dir.to_path_buf();
@@ -972,6 +1018,7 @@ impl Installs {
         let folder = folder
             .canonicalize()
             .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
+        walk(&folder, "", &mut Vec::new()).map_err(|e| format!("cannot link: {e}"))?;
         let manifest = read_dir_manifest(&folder)?;
         self.admit(&manifest, None)?;
         Ok((folder, manifest))
@@ -1481,6 +1528,104 @@ migrations = "migrations"
         std::os::unix::fs::symlink(outside.path(), folder.path().join("dir")).unwrap();
         let err = pack(folder.path(), &env(), None, &[]).unwrap_err();
         assert!(err.contains("dir is a link"), "{err}");
+    }
+
+    #[test]
+    fn a_link_committed_to_a_repository_is_refused() {
+        if git().is_none() {
+            return;
+        }
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("private"), "kept out").unwrap();
+        let manifest = MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "");
+        let repo = repo(&[
+            (file::FILE, &manifest),
+            ("sub/vorn-extension.toml", &manifest),
+        ]);
+        std::os::unix::fs::symlink(outside.path().join("private"), repo.path().join("sub/a"))
+            .unwrap();
+        let added = Command::new("git")
+            .args(["add", "sub/a"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success();
+        let committed = Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "link",
+            ])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success();
+        assert!(added && committed);
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let url = format!("file://{}", repo.path().display());
+        let err = installs.inspect_git(&url, None).unwrap_err();
+        assert!(err.contains("sub/a is a link"), "{err}");
+        let err = installs
+            .inspect_git_at(&url, None, Some("sub"))
+            .unwrap_err();
+        assert!(err.contains("a is a link"), "{err}");
+        let left: Vec<_> = fs::read_dir(root.path()).unwrap().flatten().collect();
+        assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn a_folder_holding_a_link_is_not_linked() {
+        let outside = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(
+            folder.path().join(file::FILE),
+            MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", ""),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("dir")).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let err = installs.link(folder.path()).unwrap_err();
+        assert!(err.contains("dir is a link"), "{err}");
+        assert!(installs.inspect_link(folder.path()).is_err());
+        assert!(installs.store().describe("test.marker").is_none());
+    }
+
+    #[test]
+    fn an_id_differing_only_in_case_is_not_installed_over_another() {
+        let manifest = MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "");
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(folder.path().join(file::FILE), &manifest).unwrap();
+        fs::write(folder.path().join("hello.sh"), "mine").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let sheet = installs
+            .inspect_git(&folder.path().display().to_string(), None)
+            .unwrap();
+        installs.confirm(&sheet.token, "test.marker").unwrap();
+
+        let other = tempfile::tempdir().unwrap();
+        fs::write(
+            other.path().join(file::FILE),
+            manifest.replace("test.marker", "Test.Marker"),
+        )
+        .unwrap();
+        fs::write(other.path().join("hello.sh"), "theirs").unwrap();
+        assert!(installs
+            .inspect_git(&other.path().display().to_string(), None)
+            .is_err());
+        assert!(installs.link(other.path()).is_err());
+        assert!(installs.remove("Test.Marker").is_err());
+        let kept = installs.store().describe("test.marker").unwrap();
+        assert_eq!(
+            fs::read_to_string(kept.path.join("hello.sh")).unwrap(),
+            "mine"
+        );
     }
 
     #[cfg(unix)]

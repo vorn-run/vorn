@@ -90,7 +90,8 @@ The plans, one per issue:
 ```
 
 - A workflow's `id` may not start with an extension's id and a colon (`vorn.tasks:`, in any
-  case): those are the workflows that extension adds. A file naming one is not read.
+  case): those are the workflows that extension adds. A file naming one is not read, and one
+  read before the extension was installed is taken back then, unless you turned it on.
 - A step's table holds its own fields, `id`, `type`, `label`, `slug`, `onError`, `x`, `y` and
   `needs`, and beside them its settings: what the editor shows in the step's panel.
 - A step runs after the step before it unless it says what it `needs`. List several ids to wait

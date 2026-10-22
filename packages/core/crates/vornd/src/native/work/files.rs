@@ -407,6 +407,32 @@ impl Files {
         })
     }
 
+    /// Takes back each stored workflow of a file not turned on whose id is
+    /// in a namespace `owns` says an extension holds now, and lets every
+    /// file that did not read be read again: the extensions changed, so what
+    /// an id may be did too. The ids taken back, to delete.
+    fn take_owned(&self, owns: impl Fn(&str) -> bool) -> Vec<String> {
+        let mut s = self.lock();
+        let taken: Vec<(String, PathBuf)> = s
+            .by_id
+            .iter()
+            .filter(|(id, file)| id.contains(':') && !s.trusts(file) && owns(id))
+            .map(|(id, file)| (id.clone(), file.clone()))
+            .collect();
+        for (id, file) in &taken {
+            s.by_id.remove(id);
+            s.forget(file);
+        }
+        let refused: Vec<PathBuf> = s.errors.keys().cloned().collect();
+        for file in refused {
+            s.stamps.remove(&file);
+        }
+        if !taken.is_empty() {
+            self.keep(&s);
+        }
+        taken.into_iter().map(|(id, _)| id).collect()
+    }
+
     /// Turns on workflow `id`'s file as the user saw it: `hash` is the
     /// content listed to them, and a file that changed since is refused.
     pub fn trust(&self, id: &str, hash: &str) -> Result<(), String> {
@@ -587,6 +613,28 @@ impl Work {
         if any {
             self.workflows_changed();
         }
+    }
+
+    /// Takes back the stored workflows of files not turned on whose ids an
+    /// extension now owns, as `read_file` would refuse them today.
+    pub(crate) async fn recheck_files(&self) {
+        let taken = self
+            .files
+            .take_owned(|id| self.extension_owning(id).is_some());
+        if taken.is_empty() {
+            return;
+        }
+        for id in &taken {
+            info!(workflow = %id, "a project's workflow is in an extension's namespace; it is taken back");
+        }
+        self.db
+            .run(move |s| {
+                for id in taken {
+                    let _ = s.call("dbDeleteWorkflow", json!([id]));
+                }
+            })
+            .await;
+        self.workflows_changed();
     }
 
     /// The extension whose namespace workflow `id` is in (`<extension id>:`,
@@ -1113,6 +1161,35 @@ fn upsert(s: &mut vorn_store::Store, wf: &Value) -> Option<bool> {
 mod tests {
     use super::*;
     use vorn_workflow::NodeType;
+
+    #[test]
+    fn an_extension_takes_back_its_namespace_from_files_not_turned_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = Files::new(dir.path());
+        let at = (SystemTime::UNIX_EPOCH, 1);
+        let [x, y, plain, bad] =
+            ["x.toml", "y.toml", "p.toml", "bad.toml"].map(|f| dir.path().join(f));
+        {
+            let mut s = files.lock();
+            for (id, file) in [("acme:x", &x), ("acme:y", &y), ("acme-plain", &plain)] {
+                s.by_id.insert(id.into(), file.clone());
+                s.hashes.insert(file.clone(), "h".into());
+                s.stamps.insert(file.clone(), at);
+            }
+            s.trusted.insert(y.clone(), "h".into());
+            s.refuse(&bad, Some(at), vec!["bad".into()]);
+        }
+        assert!(files.take_owned(|id| id.starts_with("other:")).is_empty());
+        assert_eq!(files.take_owned(|id| id.starts_with("acme:")), ["acme:x"]);
+        let s = files.lock();
+        assert_eq!(s.by_id.keys().collect::<Vec<_>>(), ["acme-plain", "acme:y"]);
+        assert!(!s.stamps.contains_key(&x) && !s.hashes.contains_key(&x));
+        assert!(
+            !s.stamps.contains_key(&bad),
+            "a file that did not read is read again"
+        );
+        assert!(s.stamps.contains_key(&y) && s.stamps.contains_key(&plain));
+    }
 
     /// The built-in steps and one extension's, with the agent step as the fallback, as vornd declares them.
     fn types() -> Registry<VorndHost> {

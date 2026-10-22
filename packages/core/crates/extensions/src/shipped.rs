@@ -397,6 +397,22 @@ mod tests {
     }
 
     #[test]
+    fn only_the_very_bytes_read_of_vorns_own_are_vouched_for() {
+        let f = Fixture::new(&[("vorn.a", "1.0.0", true)]);
+        f.sync();
+        let installs = f.installs();
+        let pack = installs.store().describe("vorn.a").unwrap();
+        let (bytes, vouched) = installs.trust().read_vouched(&pack, "hello.sh").unwrap();
+        assert_eq!((bytes.as_slice(), vouched), (&b"true\n"[..], true));
+        let (_, vouched) = installs.trust().read_vouched(&pack, "./hello.sh").unwrap();
+        assert!(vouched);
+        fs::write(pack.path.join("hello.sh"), "echo changed\n").unwrap();
+        let (bytes, vouched) = installs.trust().read_vouched(&pack, "hello.sh").unwrap();
+        assert_eq!((bytes.as_slice(), vouched), (&b"echo changed\n"[..], false));
+        assert!(installs.trust().read_vouched(&pack, "gone.wasm").is_err());
+    }
+
+    #[test]
     fn an_install_of_the_persons_own_is_left_alone() {
         let older = Fixture::new(&[("vorn.a", "1.0.0", true)]);
         let pack = &older.set()[0];
