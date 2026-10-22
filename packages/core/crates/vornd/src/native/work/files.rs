@@ -25,6 +25,8 @@ use vorn_workflow_file::{Bindings, FileError, RUNTIME_FIELDS};
 use vorn_work::model::NodeKind;
 use vorn_workflow::Registry;
 
+use crate::atomic;
+
 use super::host::VorndHost;
 use super::Work;
 
@@ -382,17 +384,8 @@ impl Files {
             trusted: state.trusted.clone(),
             hashes: state.hashes.clone(),
         };
-        let written = self
-            .record
-            .parent()
-            .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| {
-                std::fs::write(
-                    &self.record,
-                    serde_json::to_vec_pretty(&kept).unwrap_or_default(),
-                )
-            });
-        if let Err(err) = written {
+        let bytes = serde_json::to_vec_pretty(&kept).unwrap_or_default();
+        if let Err(err) = atomic::replace(&self.record, &bytes) {
             warn!(%err, "could not keep which workflows came from files");
         }
     }
@@ -512,11 +505,21 @@ fn listed_files(project_path: &str) -> Vec<PathBuf> {
         .filter(|p| {
             p.extension()
                 .is_some_and(|e| e == vorn_workflow_file::EXTENSION)
+                && !atomic::is_temp(p)
                 && p.is_file()
         })
         .collect();
     out.sort();
     out
+}
+
+/// A write that syncs to disk, run off the async runtime.
+async fn off_runtime(
+    write: impl FnOnce() -> std::io::Result<()> + Send + 'static,
+) -> std::io::Result<()> {
+    tokio::task::spawn_blocking(write)
+        .await
+        .unwrap_or_else(|e| Err(std::io::Error::other(e)))
 }
 
 fn shown(path: &Path, errors: &[FileError]) -> Vec<String> {
@@ -723,7 +726,11 @@ impl Work {
         let (mut at, mut hash) = (at, hash);
         if met != theirs {
             let text = vorn_workflow_file::update(&text, &met, &bindings);
-            if std::fs::write(file, &text).is_ok() {
+            let (f, t) = (file.to_owned(), text.clone());
+            if off_runtime(move || atomic::replace(&f, t.as_bytes()))
+                .await
+                .is_ok()
+            {
                 at = stamp(file);
                 hash = digest(&text);
             }
@@ -837,7 +844,8 @@ impl Work {
         }
         let text = vorn_workflow_file::update(&old, &next, &bindings);
         if text != old {
-            if let Err(err) = std::fs::write(&file, &text) {
+            let (f, t) = (file.clone(), text.clone());
+            if let Err(err) = off_runtime(move || atomic::replace(&f, t.as_bytes())).await {
                 warn!(%err, file = %file.display(), "could not write a workflow back to its file");
                 return;
             }
@@ -906,27 +914,24 @@ impl Work {
         let base = vorn_workflow_file::file_name(row["name"].as_str().unwrap_or("workflow"));
         let ext = format!(".{}", vorn_workflow_file::EXTENSION);
         let stem = base.trim_end_matches(&ext).to_owned();
-        let mut file = dir.join(&base);
-        let mut n = 2;
-        // A link, even one to nothing, is taken too: it is never written through.
-        while std::fs::symlink_metadata(&file).is_ok() {
-            file = dir.join(format!("{stem}-{n}{ext}"));
-            n += 1;
-        }
         let conns = connections(self).await;
         let bindings = Bindings {
             connections: &conns,
             project: Some((&name, &path)),
         };
         let text = vorn_workflow_file::write(&as_file(row), &bindings);
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Could not make {}: {e}", dir.display()))?;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&file)
-            .and_then(|mut f| std::io::Write::write_all(&mut f, text.as_bytes()))
-            .map_err(|e| format!("Could not write {}: {e}", file.display()))?;
+        let mut file = dir.join(&base);
+        // A link, even one to nothing, is taken too: it is never written through.
+        for n in 2.. {
+            let (f, t) = (file.clone(), text.clone());
+            match off_runtime(move || atomic::create(&f, t.as_bytes())).await {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    file = dir.join(format!("{stem}-{n}{ext}"));
+                }
+                Err(e) => return Err(format!("Could not write {}: {e}", file.display())),
+            }
+        }
         let read = vorn_workflow_file::read(&text, &bindings)
             .ok()
             .map(|r| vorn_work::js_numbers(r.workflow));
