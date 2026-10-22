@@ -226,6 +226,7 @@ fn a_step_type_an_extension_declares_is_in_the_library_with_its_form() {
             ],
         ),
     );
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     shot.click(
         &mut app,
@@ -315,6 +316,7 @@ fn the_editor_draws_a_200_step_workflow_within_a_frame() {
     let mut shot = Shot::new();
     seed(&mut shot, &mut app, workflow("wf-small", "Small", steps(1)));
     seed(&mut shot, &mut app, workflow("wf-big", "Big", steps(199)));
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     let (small, _) = drag_frames(&mut shot, &mut app, "wf-small", true);
     let (p50, p99) = drag_frames(&mut shot, &mut app, "wf-big", false);
@@ -346,6 +348,7 @@ fn switching_workflows_off_takes_its_button_and_run_workflow_away() {
             .find(wf::ID, vorn_app::points::kind::MENUS, "run")
             .map(|_| ())
     });
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     app.rpc()
@@ -397,6 +400,7 @@ fn save_to_project_writes_the_workflow_into_its_projects_folder() {
     );
     w["nodes"][1]["config"]["projectName"] = json!("web");
     seed(&mut shot, &mut app, w);
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     shot.right_click(
         &mut app,
@@ -409,9 +413,7 @@ fn save_to_project_writes_the_workflow_into_its_projects_folder() {
         .unwrap_or_else(|| panic!("Save to project in {labels:?}"));
     shot.click(&mut app, item_id(MENU, at));
     let file = root.join(".vorn/workflows/keep-me.toml");
-    shot.until(&mut app, "the file", |_, _| file.is_file().then_some(()));
-    let text = std::fs::read_to_string(&file).expect("read");
-    assert!(text.starts_with("name = \"Keep me\""), "{text}");
+    // The toast follows the write, so the file is whole once it shows.
     shot.until(&mut app, "the toast", |app, _| {
         app.st
             .toasts
@@ -419,4 +421,10 @@ fn save_to_project_writes_the_workflow_into_its_projects_folder() {
             .any(|t| t.text.starts_with("Saved \"Keep me\" to "))
             .then_some(())
     });
+    let text = shot.until(&mut app, "the file", |_, _| {
+        std::fs::read_to_string(&file)
+            .ok()
+            .filter(|t| t.starts_with("name = \"Keep me\""))
+    });
+    assert!(text.contains("echo hi"), "{text}");
 }
