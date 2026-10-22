@@ -16,7 +16,7 @@ use vorn_extensions::api::types::{CallCtx, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::component::{Bundled, Compiler, COMPILED};
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
-use vorn_extensions::install::{sha256_hex, Installs, Pinned, Trust};
+use vorn_extensions::install::{sha256_hex, Installs, Trust};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
 use vorn_extensions::router::{Hook, Router, RouterSettings};

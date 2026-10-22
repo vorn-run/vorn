@@ -6,10 +6,7 @@
 //! nothing and contributes nothing.
 
 pub mod artifacts;
-pub mod browser;
 pub mod connectors;
-pub mod device;
-pub mod ssh;
 pub mod tasks;
 pub mod wasm;
 
@@ -105,12 +102,6 @@ pub fn precompile(router: &Arc<Router>) {
     let shipped: Vec<(&'static str, &'static [u8])> = [
         (tasks::MANIFEST, tasks::WASM),
         (wasm::workflows().manifest, wasm::workflows().wasm),
-        (wasm::widget().manifest, wasm::widget().wasm),
-        (wasm::blocks().manifest, wasm::blocks().wasm),
-        (wasm::files().manifest, wasm::files().wasm),
-        (browser::component().manifest, browser::component().wasm),
-        (device::component().manifest, device::component().wasm),
-        (ssh::component().manifest, ssh::component().wasm),
     ]
     .into_iter()
     .collect();
@@ -194,12 +185,6 @@ impl std::fmt::Debug for Builtins {
 /// those vornd starts before the extension host (Connectors) after them.
 fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     let mut all: Vec<Arc<dyn Builtin>> = vec![
-        Arc::new(wasm::files()),
-        Arc::new(browser::component()),
-        Arc::new(device::component()),
-        Arc::new(ssh::component()),
-        Arc::new(wasm::blocks()),
-        Arc::new(wasm::widget()),
         Arc::new(artifacts::Artifacts),
     ];
     all.extend(started);
@@ -480,5 +465,3 @@ pub(crate) fn unknown(name: &str, action: &str) -> ExtError {
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod widget_tiers;

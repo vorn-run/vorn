@@ -281,6 +281,11 @@ impl Installs {
         self
     }
 
+    /// What vouches for packs in Vorn's namespace, which the router lets own it too.
+    pub fn trust(&self) -> &Trust {
+        &self.trust
+    }
+
     /// Refuses `pin` up front when it claims an id only this build's own
     /// pins may have and is not one of them, as a catalog entry may.
     pub fn vouch(&self, pin: &Pinned) -> Result<(), String> {

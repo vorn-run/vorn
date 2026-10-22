@@ -1,10 +1,6 @@
-//! The Device in vornd: the component Vorn ships
-//! (`packages/core/extensions/device`) as an entry of the built-ins'
-//! registry, and the core's route to it. An agent's `device:*` calls and its
-//! MCP device tools reach the component through the router, under the same
-//! gate and lifecycle as an installed component; it drives the machine's
-//! simulators through the app with `video.call`. While its switch is off
-//! each call is refused with [`OFF`].
+//! The Device's route in vornd. An agent's `device:*` calls and its MCP
+//! device tools reach the installed Device extension through the router; it
+//! drives the machine's simulators through the app with `video.call`.
 //!
 //! A simulator an agent claims while it is down is started here, not in
 //! the component: the component answers one call at a time, and a cold
@@ -18,15 +14,11 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use super::wasm::Component;
 use crate::bridge::Bridge;
 use crate::native::{Answer, Native};
 
 /// The id the Device goes by.
 pub const ID: &str = "vorn.device";
-
-/// What a call to a device method is told while the Device is off.
-pub const OFF: &str = "Device is off. Turn it on in Settings → Extensions.";
 
 /// Every `device:*` call it answers, each by the action of the same name.
 pub const METHODS: &[&str] = &[
@@ -46,21 +38,6 @@ pub const METHODS: &[&str] = &[
     "device:logs",
 ];
 
-/// The component, built for wasm32-wasip2 by vornd's build script. It is
-/// started in the background as vornd starts, which checks the claims kept
-/// from before and keeps the first pane from waiting. A session that ends
-/// lets its simulator go, and switched off it lets every one go.
-pub fn component() -> Component {
-    Component {
-        manifest: include_str!("../../../../../../extensions/device/vorn-extension.toml"),
-        events: &[vorn_extensions::events::SESSION_EXITED],
-        wasm: include_bytes!(concat!(env!("OUT_DIR"), "/device.wasm")),
-        on_by_default: true,
-        start: Some("start"),
-        stop: Some("stop"),
-    }
-}
-
 /// The component's action that hears how starting an agent's claim went.
 const BOOTED: &str = "booted";
 /// How long a simulator an agent claimed may take to start: a first boot
@@ -71,9 +48,9 @@ const BOOT_LIMIT: Duration = Duration::from_secs(180);
 /// lands once it is up, as it did when the call itself timed out.
 const ANSWER_WITHIN: Duration = Duration::from_secs(55);
 
-/// Answers one of its `device:*` calls; while it is off, [`OFF`].
+/// Answers one of its `device:*` calls.
 pub async fn answer(native: &Native, method: &str, params: Value) -> Answer {
-    let first = super::wasm::answer(native, ID, OFF, method, params.clone()).await;
+    let first = super::answer(native, ID, "Device", method, params.clone()).await;
     let booting = match &first {
         Answer::Result(v) => v.get("booting").and_then(Value::as_str),
         _ => None,
@@ -99,10 +76,9 @@ pub async fn answer(native: &Native, method: &str, params: Value) -> Answer {
             Ok(v) => told["bootedHere"] = v["bootedHere"].clone(),
             Err(e) => told["error"] = json!(e),
         }
-        match ext.builtins().call(ID, BOOTED, told).await {
-            Some(Ok(v)) => Answer::Result(v),
-            Some(Err(e)) => Answer::Error(e.message),
-            None => Answer::Unanswered,
+        match ext.call(ID, BOOTED, told, super::client()).await {
+            Ok(v) => Answer::Result(v),
+            Err(e) => Answer::Error(e.message),
         }
     });
     match tokio::time::timeout(ANSWER_WITHIN, starting).await {

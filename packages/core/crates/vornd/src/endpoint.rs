@@ -335,6 +335,8 @@ impl Daemon {
         )];
         router_settings.compiler = wasm_compiler();
         router_settings.preferences = Some(db_dir.join("extension-preferences.json"));
+        let installs = native.installs(&db_dir);
+        router_settings.trust = installs.trust().clone();
         let router = Router::new(
             store.clone(),
             lifecycle,
@@ -342,7 +344,6 @@ impl Daemon {
             router_settings,
             Arc::clone(native.events()),
         );
-        let installs = native.installs(&db_dir);
         let around = Wired {
             native: Arc::downgrade(native),
             loopback: Arc::new(crate::mcp::Loopback::new(addr, &token)),

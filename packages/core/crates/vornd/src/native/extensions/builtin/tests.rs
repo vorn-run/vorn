@@ -1,10 +1,8 @@
 use std::sync::Mutex;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 use vorn_extensions::api::types::{Request, Response};
 use vorn_extensions::api::ExtError;
-use vorn_extensions::events::{AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_EXITED};
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
@@ -62,32 +60,8 @@ impl World for Core {
     }
 }
 
-impl Core {
-    fn keep(&self, extension: &str, key: &str, value: Value) {
-        guard(&self.kept).insert((extension.to_owned(), key.to_owned()), value);
-    }
-
-    /// The simulators the Device asked the client to shut down, in order.
-    fn shut_down(&self) -> Vec<String> {
-        self.asked("video.call")
-            .iter()
-            .filter(|a| a["op"] == "shutdown")
-            .filter_map(|a| a["params"]["udid"].as_str().map(str::to_owned))
-            .collect()
-    }
-
-    fn asked(&self, method: &str) -> Vec<Value> {
-        guard(&self.calls)
-            .iter()
-            .filter(|(m, _)| m.ends_with(&format!(" {method}")))
-            .map(|(_, a)| a.clone())
-            .collect()
-    }
-}
-
 struct Setup {
     dir: tempfile::TempDir,
-    core: Arc<Core>,
     router: Arc<Router>,
     builtins: Builtins,
 }
@@ -101,7 +75,7 @@ fn setup() -> Setup {
     let router = Router::new(
         PackStore::new(dir.path().join("connectors")),
         Lifecycle::new(Policy::default()),
-        Arc::clone(&core) as Arc<dyn World>,
+        core as Arc<dyn World>,
         settings,
         vorn_extensions::events::Bus::new(),
     );
@@ -112,27 +86,20 @@ fn setup() -> Setup {
     );
     Setup {
         dir,
-        core,
         router,
         builtins,
     }
 }
 
-async fn until(mut done: impl FnMut() -> bool) {
-    for _ in 0..200 {
-        if done() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("never happened");
-}
-
 #[tokio::test]
 async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
     let s = setup();
-    s.builtins.set("vorn.widget", true).unwrap();
-    let listed = s.builtins.contributions();
+    let registry = Builtins::new(
+        Arc::clone(&s.router),
+        s.dir.path().join("registry.json"),
+        vec![Arc::new(wasm::workflow_editor())],
+    );
+    let listed = registry.contributions();
     let kinds: Vec<(&str, &str)> = listed
         .iter()
         .map(|c| {
@@ -145,230 +112,34 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
     assert_eq!(
         kinds,
         [
-            ("vorn.files", "panes"),
-            ("vorn.files", "cards"),
-            ("vorn.browser", "panes"),
-            ("vorn.device", "panes"),
-            ("vorn.ssh", "settings"),
-            ("vorn.blocks", "shell"),
-            ("vorn.widget", "commands"),
-            ("vorn.widget", "windows"),
-            ("vorn.widget", "windows"),
+            ("vorn.workflow-editor", "menus"),
+            ("vorn.workflow-editor", "menus"),
+            ("vorn.workflow-editor", "menus"),
+            ("vorn.workflow-editor", "views"),
+            ("vorn.workflow-editor", "attention"),
         ]
     );
     for c in &listed {
         assert_eq!(c["builtin"], true);
         assert!(c.get("view").is_none() && c.get("errors").is_none(), "{c}");
-        let draws = !matches!(c["kind"].as_str(), Some("menus" | "commands"));
+        let draws = !matches!(c["kind"].as_str(), Some("menus" | "commands" | "attention"));
         assert_eq!(c["tree"] == true, draws, "{c}");
     }
-}
-
-/// Starts the Widget's component, as a window asking for its tree does.
-async fn widget_drawn(s: &Setup, point: &str) -> String {
-    let answer = s
-        .builtins
-        .call(
-            "vorn.widget",
-            vorn_tree::RENDER,
-            json!({ "point": point, "surface": {} }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let tree = vorn_tree::read(&answer).expect("a tree the client draws");
-    serde_json::to_string(&tree.tree).unwrap()
 }
 
 #[test]
 fn lists_what_each_adds_and_uses_for_settings() {
     let s = setup();
     let list = s.builtins.list();
-    let widget = list
+    let artifacts = list
         .as_array()
         .unwrap()
         .iter()
-        .find(|b| b["id"] == "vorn.widget")
+        .find(|b| b["id"] == "vorn.artifacts")
         .unwrap();
-    assert_eq!(widget["on"], false);
-    assert!(widget["contributes"]["windows"]
-        .as_array()
-        .is_some_and(|w| !w.is_empty()));
-    let uses = widget["declares"]["uses"].as_array().unwrap();
+    assert_eq!(artifacts["on"], true);
+    let uses = artifacts["declares"]["uses"].as_array().unwrap();
     assert!(uses.iter().any(|u| u == "sessions.read"), "{uses:?}");
-}
-
-#[tokio::test]
-async fn the_widget_is_off_until_switched_on_and_kept_so() {
-    let s = setup();
-    s.builtins.start();
-    let off = s
-        .builtins
-        .call("vorn.widget", "allow", json!({ "id": "r1" }))
-        .await
-        .unwrap()
-        .unwrap_err();
-    assert_eq!(off.code, "off");
-    assert!(off.message.ends_with("Settings › Extensions"), "{off}");
-    assert!(s
-        .builtins
-        .contributions()
-        .iter()
-        .all(|c| c["extension"] != "vorn.widget"));
-
-    s.builtins.set("vorn.widget", true).unwrap();
-    assert!(widget_drawn(&s, "compact").await.contains("waiting"));
-    until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
-    s.router.bus().emit(AGENT_PERMISSION, || {
-        json!({ "requestId": "r1", "terminalId": "t1", "toolName": "Bash",
-                "toolInput": { "command": "cargo test" } })
-    });
-    until(|| s.router.rows("vorn.widget", "permissions").len() == 1).await;
-    let row = &s.router.rows("vorn.widget", "permissions")[0];
-    assert_eq!(
-        (row["agent"].clone(), row["description"].clone()),
-        (json!("api"), json!("cargo test"))
-    );
-    assert!(widget_drawn(&s, "widget").await.contains("allow:r1"));
-    let click = json!({ "point": "widget", "event": { "id": "allow:r1", "kind": "click" } });
-    s.builtins
-        .call("vorn.widget", vorn_tree::EVENT, click)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        s.core.asked("permissions.resolve"),
-        [json!({ "requestId": "r1", "allow": true })]
-    );
-    assert!(s.router.rows("vorn.widget", "permissions").is_empty());
-
-    s.router.bus().emit(
-        AGENT_PERMISSION,
-        || json!({ "requestId": "r2", "toolName": "Edit" }),
-    );
-    until(|| s.router.rows("vorn.widget", "permissions").len() == 1).await;
-    s.router
-        .bus()
-        .emit(AGENT_PERMISSION_CLOSED, || json!({ "requestId": "r2" }));
-    until(|| s.router.rows("vorn.widget", "permissions").is_empty()).await;
-
-    let again = Builtins::new(
-        Arc::clone(&s.router),
-        s.dir.path().join("builtins.json"),
-        Vec::new(),
-    );
-    assert!(again.is_on("vorn.widget"));
-    s.builtins.set("vorn.widget", false).unwrap();
-    assert!(s.router.rows("vorn.widget", "agents").is_empty());
-    s.router
-        .bus()
-        .emit(AGENT_PERMISSION, || json!({ "requestId": "r3" }));
-    tokio::time::sleep(Duration::from_millis(30)).await;
-    assert!(s.router.rows("vorn.widget", "permissions").is_empty());
-}
-
-#[tokio::test]
-async fn the_widget_keeps_an_offered_rule_and_answers_questions() {
-    let s = setup();
-    s.builtins.start();
-    s.builtins.set("vorn.widget", true).unwrap();
-    widget_drawn(&s, "widget").await;
-    until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
-    let rows = |c: &str| s.router.rows("vorn.widget", c);
-    s.router.bus().emit(AGENT_PERMISSION, || {
-        json!({ "requestId": "r1", "terminalId": "t1", "toolName": "Bash",
-                "toolInput": { "command": "npm test" },
-                "permissionSuggestions": [
-                    { "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "npm test" }] },
-                    { "type": "setMode", "mode": "acceptEdits" }
-                ] })
-    });
-    until(|| rows("suggestions").len() == 2).await;
-    assert_eq!(rows("suggestions")[1]["label"], "Auto-accept edits");
-    s.builtins
-        .call("vorn.widget", "suggest", json!({ "id": "r1:0" }))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        s.core.asked("permissions.resolve"),
-        [json!({ "requestId": "r1", "allow": true, "suggestion": 0 })]
-    );
-    assert!(rows("permissions").is_empty() && rows("suggestions").is_empty());
-
-    s.router.bus().emit(AGENT_PERMISSION, || {
-        json!({ "requestId": "r2", "terminalId": "t1", "toolName": "AskUserQuestion",
-                "questions": [
-                    { "header": "Theme", "question": "Which?", "options": [{ "label": "Dark" }, { "label": "Light" }] },
-                    { "question": "Tabs?", "options": [{ "label": "Yes" }] }
-                ] })
-    });
-    until(|| rows("options").len() == 3).await;
-    assert_eq!(rows("permissions")[0]["question"], json!(true));
-    assert_eq!(rows("options")[0]["ask"], "THEME: Which?");
-    let call = |action: &'static str, id: &'static str| {
-        s.builtins.call("vorn.widget", action, json!({ "id": id }))
-    };
-    call("pick", "r2:0:0").await.unwrap().unwrap();
-    call("pick", "r2:0:1").await.unwrap().unwrap();
-    assert!(call("submit", "r2").await.unwrap().is_err());
-    assert_eq!(rows("permissions")[0]["ready"], json!(false));
-    call("pick", "r2:1:0").await.unwrap().unwrap();
-    assert_eq!(rows("permissions")[0]["ready"], json!(true));
-    let picked: Vec<Value> = rows("options")
-        .iter()
-        .map(|o| o["picked"].clone())
-        .collect();
-    assert_eq!(picked, [json!(false), json!(true), json!(true)]);
-    call("submit", "r2").await.unwrap().unwrap();
-    assert_eq!(
-        s.core.asked("permissions.resolve")[1],
-        json!({ "requestId": "r2", "allow": true, "answers": { "0": "Light", "1": "Yes" } })
-    );
-    assert!(rows("permissions").is_empty() && rows("options").is_empty());
-}
-
-#[tokio::test]
-async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
-    let s = setup();
-    let device = device::component();
-    // Compiled before the clock starts, as vornd does ahead: `until` times the Device, not the compiler.
-    let bundled = vorn_extensions::component::Bundled {
-        manifest: Arc::new(file::parse_builtin(device.manifest).unwrap()),
-        wasm: device.wasm,
-    };
-    s.router.prepare_bundled(&bundled).await.unwrap();
-    // Only the Device, so no other built-in compiles beside it.
-    let builtins = Builtins::with(
-        Arc::clone(&s.router),
-        s.dir.path().join("device.json"),
-        vec![Arc::new(device)],
-    );
-    let claim = |udid: &str| json!({ "udid": udid, "name": "iPhone", "bootedHere": true });
-    // Kept from before vornd started: `gone` ended meanwhile, `t1` still runs.
-    s.core.keep(
-        device::ID,
-        "claims",
-        json!({ "gone": claim("u1"), "t1": claim("u2") }),
-    );
-    builtins.start();
-    until(|| s.core.shut_down() == ["u1"]).await;
-
-    s.router.bus().emit(
-        SESSION_EXITED,
-        || json!({ "sessionId": "t1", "kind": "terminal" }),
-    );
-    until(|| s.core.shut_down() == ["u1", "u2"]).await;
-    assert_eq!(
-        guard(&s.core.kept)[&(device::ID.to_owned(), "claims".to_owned())],
-        json!({})
-    );
-
-    s.core
-        .keep(device::ID, "claims", json!({ "t1": claim("u3") }));
-    builtins.set(device::ID, false).unwrap();
-    until(|| s.core.shut_down() == ["u1", "u2", "u3"]).await;
-    assert!(s.router.rows(device::ID, "open").is_empty());
 }
 
 #[test]
@@ -464,12 +235,6 @@ fn every_bundled_extension_s_id_is_kept_from_installs() {
     assert_eq!(ids, registered);
     assert_eq!(wasm::workflows().manifest, Started::Workflows.manifest());
     for id in [
-        "vorn.files",
-        "vorn.browser",
-        "vorn.device",
-        "vorn.ssh",
-        "vorn.blocks",
-        "vorn.widget",
         "vorn.tasks",
         "vorn.workflows",
         "vorn.artifacts",

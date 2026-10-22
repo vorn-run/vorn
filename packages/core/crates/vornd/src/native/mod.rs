@@ -167,9 +167,9 @@ pub enum Route {
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
     (extensions::builtin::tasks::METHODS, Route::Tasks),
-    (extensions::builtin::browser::METHODS, Route::Browser),
-    (extensions::builtin::device::METHODS, Route::Device),
-    (extensions::builtin::ssh::METHODS, Route::Ssh),
+    (extensions::hosted::browser::METHODS, Route::Browser),
+    (extensions::hosted::device::METHODS, Route::Device),
+    (extensions::hosted::ssh::METHODS, Route::Ssh),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),
@@ -730,13 +730,13 @@ impl Native {
                 });
             }
             Some(Route::Browser) => {
-                return extensions::builtin::browser::answer(self, &method, params).await;
+                return extensions::hosted::browser::answer(self, &method, params).await;
             }
             Some(Route::Device) => {
-                return extensions::builtin::device::answer(self, &method, params).await;
+                return extensions::hosted::device::answer(self, &method, params).await;
             }
             Some(Route::Ssh) => {
-                return extensions::builtin::ssh::answer(self, &method, params).await;
+                return extensions::hosted::ssh::answer(self, &method, params).await;
             }
             Some(Route::TaskList) => return task_list::answer(self, &method, params).await,
             Some(Route::Projects) => return projects::answer(self, &method, params).await,

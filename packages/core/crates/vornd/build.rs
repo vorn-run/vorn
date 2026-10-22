@@ -9,19 +9,13 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 /// `(workspace package, its folder, the name it is kept under)`.
-const SHIPPED: [(&str, &str, &str); 8] = [
-    ("vorn-ext-widget", "extensions/widget", "widget.wasm"),
+const SHIPPED: [(&str, &str, &str); 2] = [
     ("vorn-ext-tasks", "extensions/tasks", "tasks.wasm"),
     (
         "vorn-ext-workflows",
         "extensions/workflows",
         "workflows.wasm",
     ),
-    ("vorn-ext-blocks", "extensions/blocks", "blocks.wasm"),
-    ("vorn-ext-files", "extensions/files", "files.wasm"),
-    ("vorn-ext-browser", "extensions/browser", "browser.wasm"),
-    ("vorn-ext-device", "extensions/device", "device.wasm"),
-    ("vorn-ext-ssh", "extensions/ssh", "ssh.wasm"),
 ];
 
 fn main() {

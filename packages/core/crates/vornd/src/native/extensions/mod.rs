@@ -10,6 +10,7 @@
 //! its own endpoint and the clients it serves.
 
 pub mod builtin;
+pub mod hosted;
 pub mod routes;
 pub mod world;
 
@@ -35,7 +36,7 @@ use vorn_extensions::install::Installs;
 use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
-use vorn_extensions::router::Router;
+use vorn_extensions::router::{Hook, Router};
 use vorn_extensions::{points, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
@@ -360,6 +361,8 @@ impl Extensions {
         self.router.reindex();
         self.sync_adapters();
         self.builtins.start();
+        let router = Arc::clone(&self.router);
+        tokio::spawn(async move { router.start_installed().await });
         self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
@@ -727,6 +730,7 @@ impl Extensions {
         }
         let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
         self.kill_terminals(&closed);
+        self.router.call_hook(id, Hook::Stop).await;
         self.hosts.stop_extension(id).await;
         self.router.forget(id).await;
         self.router.forget_preferences(id);
@@ -753,6 +757,7 @@ impl Extensions {
         if let Err(err) = self.router.prepare_installed(id).await {
             warn!("[extensions] {err}");
         }
+        self.router.call_hook(id, Hook::Start).await;
         self.around.pack_changed(id).await;
         self.relist.store(true, Ordering::Relaxed);
         self.contributions_changed(id);
@@ -768,6 +773,21 @@ impl Extensions {
             && (self.builtins.has(id) || self.router.program(id).is_some())
     }
 
+    /// Extension `id`'s `action`, built in or installed.
+    pub async fn call(
+        &self,
+        id: &str,
+        action: &str,
+        args: Value,
+        ctx: CallCtx,
+    ) -> Result<Value, ExtError> {
+        if self.builtins.has(id) {
+            let answered = self.builtins.call(id, action, args).await;
+            return answered.unwrap_or_else(|| Err(builtin::unknown(id, action)));
+        }
+        self.router.call(id, action, args, ctx).await
+    }
+
     /// A client's call to `<id>:<action>`, routed to the extension.
     pub async fn call_action(&self, method: &str, params: Value) -> Answer {
         let Some((id, action)) = method.split_once(':') else {
@@ -780,11 +800,7 @@ impl Extensions {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         };
-        let answered = match self.builtins.call(id, action, params.clone()).await {
-            Some(answered) => answered,
-            None => self.router.call(id, action, params, ctx).await,
-        };
-        match answered {
+        match self.call(id, action, params, ctx).await {
             Ok(value) => Answer::Result(value),
             Err(ExtError { message, .. }) => Answer::Error(message),
         }
