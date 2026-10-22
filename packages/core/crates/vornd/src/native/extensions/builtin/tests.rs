@@ -97,7 +97,7 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
     let registry = Builtins::new(
         Arc::clone(&s.router),
         s.dir.path().join("registry.json"),
-        vec![Arc::new(wasm::workflow_editor())],
+        vec![Arc::new(wasm::workflows())],
     );
     let listed = registry.contributions();
     let kinds: Vec<(&str, &str)> = listed
@@ -112,11 +112,11 @@ async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
     assert_eq!(
         kinds,
         [
-            ("vorn.workflow-editor", "menus"),
-            ("vorn.workflow-editor", "menus"),
-            ("vorn.workflow-editor", "menus"),
-            ("vorn.workflow-editor", "views"),
-            ("vorn.workflow-editor", "attention"),
+            ("vorn.workflows", "menus"),
+            ("vorn.workflows", "menus"),
+            ("vorn.workflows", "menus"),
+            ("vorn.workflows", "views"),
+            ("vorn.workflows", "attention"),
         ]
     );
     for c in &listed {

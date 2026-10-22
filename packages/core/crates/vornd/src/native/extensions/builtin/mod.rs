@@ -184,9 +184,7 @@ impl std::fmt::Debug for Builtins {
 /// The built-ins this Vorn ships, in the order Settings lists them, with
 /// those vornd starts before the extension host (Connectors) after them.
 fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
-    let mut all: Vec<Arc<dyn Builtin>> = vec![
-        Arc::new(artifacts::Artifacts),
-    ];
+    let mut all: Vec<Arc<dyn Builtin>> = vec![Arc::new(artifacts::Artifacts)];
     all.extend(started);
     all
 }
