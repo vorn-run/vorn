@@ -1,5 +1,5 @@
 //! The top bar's buttons as extensions contribute them, on a vornd with its
-//! own HOME: Tasks' button and key follow its switch, Tasks' and Workflows'
+//! own HOME: Tasks' button and key go with its uninstall, Tasks' and Workflows'
 //! "Show in the top bar" settings hide only their buttons, and an installed
 //! extension's button comes after the built-ins', opens its view and goes
 //! when it is removed.
@@ -26,7 +26,7 @@ fn titles(app: &App) -> Vec<String> {
 }
 
 #[test]
-fn the_tasks_button_follows_its_switch() {
+fn the_tasks_button_goes_with_its_uninstall() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -39,24 +39,14 @@ fn the_tasks_button_follows_its_switch() {
     assert_eq!(app.st.view, MainView::Tasks);
 
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": TASKS, "on": false }))
-        .expect("switched off");
+        .call("extension:remove", json!({ "id": TASKS }))
+        .expect("uninstalled");
     app.st.points.stale = true;
     shot.until(&mut app, "its button gone", |app, _| {
         (titles(app) == ["Workflows"] && app.st.view == MainView::Sessions).then_some(())
     });
     shot.send(&mut app, key("KeyT", MOD(), None));
     assert_eq!(app.st.view, MainView::Sessions);
-
-    app.rpc()
-        .call("extension:setBuiltin", json!({ "id": TASKS, "on": true }))
-        .expect("switched on");
-    app.st.points.stale = true;
-    shot.until(&mut app, "its button back", |app, _| {
-        (titles(app) == ["Tasks", "Workflows"]).then_some(())
-    });
-    shot.send(&mut app, key("KeyT", MOD(), None));
-    assert_eq!(app.st.view, MainView::Tasks);
 }
 
 fn set_top_bar(app: &mut App, id: &str, on: bool) {

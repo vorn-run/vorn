@@ -24,7 +24,7 @@ pub fn workflows_manifest(native: &Native) -> Result<Manifest, String> {
     native
         .extensions()
         .and_then(|ext| ext.router().program(vorn_workflows::ID))
-        .map(|pack| (*pack.manifest).clone())
+        .map(|pack| pack.manifest.clone())
         .ok_or_else(|| crate::native::extensions::hosted::not_installed("Workflows"))
 }
 
@@ -69,10 +69,12 @@ fn providers(native: &Native) -> Vec<Provider> {
     }
     if let Some(ext) = native.extensions() {
         let mut installed = ext.workflow_providers();
-        let rank = |id: &str| [vorn_workflows::ID, vorn_workflows::TASKS_ID]
-            .iter()
-            .position(|first| *first == id)
-            .unwrap_or(usize::MAX);
+        let rank = |id: &str| {
+            [vorn_workflows::ID, vorn_workflows::TASKS_ID]
+                .iter()
+                .position(|first| *first == id)
+                .unwrap_or(usize::MAX)
+        };
         installed.sort_by_key(|(m, _)| rank(&m.id));
         for (manifest, dir) in installed {
             out.push(Provider {

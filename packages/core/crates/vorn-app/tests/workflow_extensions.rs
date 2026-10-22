@@ -335,7 +335,7 @@ fn the_editor_draws_a_200_step_workflow_within_a_frame() {
 }
 
 #[test]
-fn switching_workflows_off_takes_its_button_and_run_workflow_away() {
+fn uninstalling_workflows_takes_its_button_and_run_workflow_away() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -352,8 +352,8 @@ fn switching_workflows_off_takes_its_button_and_run_workflow_away() {
     shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Workflows);
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": wf::ID, "on": false }))
-        .expect("switched off");
+        .call("extension:remove", json!({ "id": wf::ID }))
+        .expect("uninstalled");
     app.st.points.stale = true;
     shot.until(&mut app, "its button and menus gone", |app, _| {
         let left = app.st.points.all.iter().any(|p| p.extension == wf::ID);
@@ -364,18 +364,6 @@ fn switching_workflows_off_takes_its_button_and_run_workflow_away() {
     assert_eq!(app.st.view, MainView::Sessions);
     shot.frame(&mut app);
     shot.save(&mut app, "x-workflows-off");
-    app.rpc()
-        .call("extension:setBuiltin", json!({ "id": wf::ID, "on": true }))
-        .expect("switched back on");
-    app.st.points.stale = true;
-    shot.until(&mut app, "its button back", |app, _| {
-        app.st
-            .points
-            .find(wf::ID, vorn_app::points::kind::VIEWS, "workflows")
-            .map(|_| ())
-    });
-    shot.send(&mut app, key("KeyW", MOD() | mods::SHIFT, None));
-    assert_eq!(app.st.view, MainView::Workflows);
 }
 
 #[test]

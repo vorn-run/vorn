@@ -455,9 +455,18 @@ pub fn engine(fake: Fake) -> Engine<Fake> {
         } else {
             &none
         };
-        vorn_workflows::declare::declare(engine.registry(), &manifest, &docs, local, &|_| None, true);
+        vorn_workflows::declare::declare(
+            engine.registry(),
+            &manifest,
+            &docs,
+            local,
+            &|_| None,
+            true,
+        );
     }
-    engine.registry().set_fallback(Some(vorn_workflows::FALLBACK));
+    engine
+        .registry()
+        .set_fallback(Some(vorn_workflows::FALLBACK));
     engine
 }
 

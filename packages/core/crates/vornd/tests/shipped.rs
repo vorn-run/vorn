@@ -442,6 +442,131 @@ async fn the_moved_built_ins_work_installed_and_their_switch_carries_over() {
     );
 }
 
+/// The workflow node and trigger types `extension` declares, as the editor lists them.
+async fn types_of(c: &mut Ws, extension: &str) -> Vec<String> {
+    let listed = c.result("workflow:nodeTypes", json!({})).await;
+    let mut out: Vec<String> = ["nodes", "triggers"]
+        .iter()
+        .flat_map(|k| listed[*k].as_array().cloned().unwrap_or_default())
+        .filter(|t| t["extension"] == extension)
+        .filter_map(|t| t["id"].as_str().map(str::to_owned))
+        .collect();
+    out.sort();
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn tasks_and_workflows_work_installed_and_an_uninstall_of_each_leaves_nothing() {
+    let moved = ["vorn.tasks", "vorn.workflows"];
+    if moved
+        .iter()
+        .any(|id| !vornd::shipped::SET.iter().any(|s| s.id == *id))
+    {
+        eprintln!("skipped: this build does not ship Tasks and Workflows");
+        return;
+    }
+    let served = serve_in(tempfile::tempdir().unwrap());
+    let data = served.data.path().to_path_buf();
+    let mut c = Ws::open(served.port).await;
+    let mut cfg = c.result("config:load", Value::Null).await;
+    cfg["projects"] = json!([{ "name": "app", "path": data, "preferredAgents": [] }]);
+    c.result("config:save", cfg).await;
+
+    // Installed on the first launch: the board, the editor, their buttons, steps and tools.
+    let owned = |list: &Value, id: &str| -> Vec<String> {
+        let mut out: Vec<String> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["extension"] == id)
+            .map(|p| p.to_string())
+            .collect();
+        out.sort();
+        out
+    };
+    let points = c.result("extension:contributions", json!({})).await;
+    for id in moved {
+        assert!(!owned(&points, id).is_empty(), "{id}: {points}");
+    }
+    assert!(!drawn(&mut c, "vorn.workflows", "workflows")
+        .await
+        .is_empty());
+    assert_eq!(
+        types_of(&mut c, "vorn.tasks").await,
+        ["createTaskFromItem", "taskCreated", "taskStatusChanged"]
+    );
+    assert!(types_of(&mut c, "vorn.workflows")
+        .await
+        .iter()
+        .any(|t| t == "launchAgent"));
+    let tools = tool_names(&mut c).await;
+    for tool in [
+        "list_tasks",
+        "create_task",
+        "list_workflows",
+        "resolve_gate",
+        "describe_workflow_nodes",
+    ] {
+        assert!(tools.iter().any(|t| t == tool), "{tool}: {tools:?}");
+    }
+    let made = c
+        .result(
+            "task:create",
+            json!({ "projectName": "app", "title": "Ship it" }),
+        )
+        .await;
+    assert_eq!(made["ok"], true, "{made}");
+    let workflows = c.result("workflow:list", json!({})).await;
+    assert!(!workflows.as_array().unwrap().is_empty(), "{workflows}");
+
+    // Each uninstall takes its files, contributions, steps, service and tools, and nothing else.
+    for (id, gone, kept) in [
+        ("vorn.tasks", "list_tasks", Some("list_workflows")),
+        ("vorn.workflows", "list_workflows", None),
+    ] {
+        let removed = c.result("extension:remove", json!({ "id": id })).await;
+        assert_eq!(removed["removed"], id);
+        assert!(
+            !data.join("connectors").join(id).exists(),
+            "{id} left files"
+        );
+        wait_for(served.port, &format!("{id} outlived its uninstall"), |s| {
+            !s.iter().any(|i| i == id)
+        })
+        .await;
+        let points = c.result("extension:contributions", json!({})).await;
+        assert!(owned(&points, id).is_empty(), "{id}: {points}");
+        let t = Instant::now();
+        while !types_of(&mut c, id).await.is_empty() {
+            assert!(t.elapsed() < PATIENCE, "{id} left its steps");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let tools = tool_names(&mut c).await;
+        assert!(!tools.iter().any(|t| t == gone), "{id}: {tools:?}");
+        if let Some(kept) = kept {
+            assert!(tools.iter().any(|t| t == kept), "{kept} went with {id}");
+        }
+    }
+    let refused = c
+        .call(
+            "task:create",
+            json!({ "projectName": "app", "title": "Again" }),
+        )
+        .await;
+    assert_eq!(
+        refused["error"]["message"],
+        "Tasks is not installed. Install it in Settings \u{2192} Extensions.",
+        "{refused}"
+    );
+    // The board's tasks are the core's and stay listed.
+    let listed = c.result("task:list", json!({})).await;
+    assert_eq!(listed[0]["title"], "Ship it", "{listed}");
+    let installed = ids(&c.result("extension:installed", json!({})).await, "id");
+    for id in moved {
+        assert!(!installed.iter().any(|i| i == id), "{installed:?}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_older_shipped_install_is_updated_and_the_persons_own_is_left_alone() {
     if !carried() {

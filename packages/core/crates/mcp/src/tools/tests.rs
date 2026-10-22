@@ -34,7 +34,10 @@ fn parsed(result: &Value) -> Value {
 #[test]
 fn every_listed_tool_is_implemented() {
     let rpc = FakeRpc::new(sample_config());
-    let hosted = crate::hosted_tools().flat_map(|(_, tools)| tools);
+    // Tasks' tools are answered by the installed extension itself.
+    let hosted = crate::hosted_tools()
+        .filter(|(id, _)| *id != "vorn.tasks")
+        .flat_map(|(_, tools)| tools);
     for tool in crate::tools_list().as_array().unwrap().iter().chain(hosted) {
         let name = tool["name"].as_str().unwrap();
         let result = run(&rpc, name, json!({}));

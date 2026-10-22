@@ -1,8 +1,9 @@
-//! Tasks, the component Vorn ships, against the real vornd: the board's
-//! writes, the core's reads of them, the card badge's rows, a task's image
-//! where an agent can read it, the MCP tools, and the switch, which off
-//! refuses writes while the core still lists every task. Skipped without the
-//! vorn command beside vornd, which compiles the component.
+//! Tasks, the extension Vorn ships, installed on a first launch, against the
+//! real vornd: the board's writes, the core's reads of them, the card badge's
+//! rows, a task's image where an agent can read it, the MCP tools, and an
+//! uninstall, which refuses writes and drops the tools while the core still
+//! lists every task. Skipped without the vorn command beside vornd, which
+//! compiles the component, or by a build that does not carry Tasks.
 
 mod common;
 
@@ -41,6 +42,10 @@ impl Ws {
 }
 
 fn compiler_beside_vornd() -> bool {
+    if !vornd::shipped::SET.iter().any(|s| s.id == "vorn.tasks") {
+        eprintln!("skipped: this build does not carry Tasks (see packages/core/shipped.toml)");
+        return false;
+    }
     let vornd = Path::new(env!("CARGO_BIN_EXE_vornd"));
     let vorn = vornd.with_file_name(format!("vorn{}", std::env::consts::EXE_SUFFIX));
     if !vorn.exists() {
@@ -50,7 +55,7 @@ fn compiler_beside_vornd() -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tasks_write_through_its_component_and_keep_the_board_when_off() {
+async fn tasks_write_through_its_extension_and_keep_the_board_when_uninstalled() {
     if !compiler_beside_vornd() {
         return;
     }
@@ -123,32 +128,39 @@ async fn tasks_write_through_its_component_and_keep_the_board_when_off() {
         .await;
     assert_eq!(refused["error"]["message"], "Invalid taskId: ../x");
 
-    // Switched off, writes are refused and the core still lists the board.
-    c.result(
-        "extension:setBuiltin",
-        json!({ "id": "vorn.tasks", "on": false }),
-    )
-    .await;
-    let off = c
+    // Its tools are offered and answered by the installed extension.
+    let tools = c.result("extension:mcpTools", json!({})).await;
+    let offered = |tools: &Value| {
+        tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "list_tasks")
+    };
+    assert!(offered(&tools), "{tools}");
+    let listed = c
+        .result(
+            "extension:mcpCall",
+            json!({ "name": "list_tasks", "arguments": { "project_name": "app" } }),
+        )
+        .await;
+    assert!(listed["isError"].is_null(), "{listed}");
+    assert!(listed.to_string().contains("Ship it"), "{listed}");
+
+    // Uninstalled, writes are refused, its tools are gone, and the core still lists the board.
+    c.result("extension:remove", json!({ "id": "vorn.tasks" }))
+        .await;
+    let gone = c
         .call("task:setStatus", json!({ "id": id, "status": "done" }))
         .await;
     assert_eq!(
-        off["error"]["message"],
-        "Tasks is off. Turn it on in Settings → Extensions."
+        gone["error"]["message"],
+        "Tasks is not installed. Install it in Settings \u{2192} Extensions."
     );
+    assert!(!offered(&c.result("extension:mcpTools", json!({})).await));
     let listed = c.result("task:list", json!({})).await;
     assert_eq!(listed[0]["id"], id);
-    c.result(
-        "extension:setBuiltin",
-        json!({ "id": "vorn.tasks", "on": true }),
-    )
-    .await;
-    let moved = c
-        .result("task:setStatus", json!({ "id": id, "status": "done" }))
-        .await;
-    assert_eq!(moved, json!({ "ok": true }));
-    assert_eq!(
-        c.result("task:get", json!({ "id": id })).await["status"],
-        "done"
-    );
+    assert_eq!(listed[0]["status"], "in_progress");
+    // Its images stay where the board keeps them, for a later install.
+    assert_eq!(std::fs::read(path).unwrap(), b"png");
 }

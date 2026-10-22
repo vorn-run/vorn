@@ -110,8 +110,8 @@ fn the_tasks_pane_lists_the_cards_project_while_tasks_is_on() {
     shot.send(&mut app, key("Escape", 0, None));
 
     app.rpc()
-        .call("extension:setBuiltin", json!({ "id": TASKS, "on": false }))
-        .expect("Tasks off");
+        .call("extension:remove", json!({ "id": TASKS }))
+        .expect("Tasks uninstalled");
     app.st.points.stale = true;
     shot.until(&mut app, "the pane gone", |app, _| {
         let listed = app.st.points.find(TASKS, kind::PANES, "tasks").is_some();
