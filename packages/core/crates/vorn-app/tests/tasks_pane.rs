@@ -29,7 +29,7 @@ fn open_menu(shot: &mut Shot, app: &mut App, id: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_tasks_pane_lists_the_cards_project_while_tasks_is_on() {
+fn the_tasks_pane_lists_the_cards_project_while_tasks_is_installed() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -95,7 +95,7 @@ fn the_tasks_pane_lists_the_cards_project_while_tasks_is_on() {
         tree_says(app, &tree, "In Review").then_some(())
     });
 
-    // Hiding Tasks' button keeps the pane in the card menu.
+    // Hiding Tasks' button keeps the open pane in the card menu.
     app.rpc()
         .call(
             "extension:setPreference",
@@ -106,7 +106,7 @@ fn the_tasks_pane_lists_the_cards_project_while_tasks_is_on() {
         (!app.st.points.top_bar().iter().any(|p| p.extension == TASKS)).then_some(())
     });
     let labels = open_menu(&mut shot, &mut app, &id);
-    assert!(labels.iter().any(|l| l == "Tasks"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Close Tasks"), "{labels:?}");
     shot.send(&mut app, key("Escape", 0, None));
 
     app.rpc()
@@ -115,8 +115,14 @@ fn the_tasks_pane_lists_the_cards_project_while_tasks_is_on() {
     app.st.points.stale = true;
     shot.until(&mut app, "the pane gone", |app, _| {
         let listed = app.st.points.find(TASKS, kind::PANES, "tasks").is_some();
-        (!listed && !app.st.ext.panes.contains_key(&id)).then_some(())
+        let offered = app
+            .st
+            .ext
+            .items(&id)
+            .iter()
+            .any(|p| p.extension_id == TASKS);
+        (!listed && !offered && !app.st.ext.panes.contains_key(&id)).then_some(())
     });
     let labels = open_menu(&mut shot, &mut app, &id);
-    assert!(!labels.iter().any(|l| l == "Tasks"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l.ends_with("Tasks")), "{labels:?}");
 }

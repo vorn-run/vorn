@@ -30,7 +30,8 @@ pub struct InstalledPack {
     /// Where it was installed from, as written: `{ "git": url, "rev": sha }`.
     pub source: Option<Value>,
     pub previous_version: Option<String>,
-    /// As written, so a pointer from another build reads back unchanged.
+    /// When it was first installed, kept by updates; as written, so a
+    /// pointer from another build reads back unchanged.
     pub installed_at: Value,
     /// The agent a linked folder adapted when it was linked; one it adapts
     /// since was claimed after every other adapter's.
