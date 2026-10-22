@@ -184,10 +184,11 @@ impl Daemon {
         });
     }
 
-    /// Starts the work model ([`crate::native::work`]) once vornd has a
+    /// Opens the work model ([`crate::native::work`]) once vornd has a
     /// database, its own address and a credential for it: the desktop's, or
-    /// the local one published beside the database.
-    pub fn start_work(&self) {
+    /// the local one published beside the database. It answers calls from
+    /// here on; [`Self::start_work`] sets it running.
+    pub fn open_work(&self) {
         use crate::native::work::{db::Db, host::TOPICS, Work};
         let native = &self.native;
         let (Some(db_path), Some(addr)) = (
@@ -209,8 +210,16 @@ impl Daemon {
         };
         let loopback = Arc::new(crate::mcp::Loopback::with_topics(addr, &token, TOPICS));
         let work = Work::new(native, db, loopback);
-        native.set_work(Arc::clone(&work));
-        work.start();
+        native.set_work(work);
+    }
+
+    /// Sets the work model's scheduler and resumed runs going. This waits
+    /// for the installed extensions, as Workflows brings the trigger and
+    /// node types a missed schedule or a resumed run needs.
+    pub fn start_work(&self) {
+        if let Some(work) = self.native.work() {
+            work.start();
+        }
     }
 
     /// Starts the endpoint agents' hooks post to ([`crate::native::hooks`]).
