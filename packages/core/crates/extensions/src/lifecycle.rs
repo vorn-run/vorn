@@ -67,9 +67,9 @@ impl ServiceKey {
 /// How long services live and how many run at once.
 ///
 /// The defaults come from the 20-extension load test
-/// (docs/extension-load-test.md). Twenty busy extensions peak at 21 running
-/// services with the built-ins, so a cap of 24 never evicts. One idle minute
-/// frees every program's memory, and the next call costs at most ~130 ms (Node).
+/// (docs/extension-load-test.md). Twenty busy extensions peak at 19 running
+/// services with Vorn's own, so a cap of 24 never evicts. One idle minute
+/// frees every program's memory, and the next call costs at most ~160 ms (Node).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Policy {
     /// Stopped after this long with no call in flight.

@@ -63,6 +63,7 @@
 "bench/ext-tiers/rss" = "the extension-tiers benchmark's feed reader"
 "bench/ext-tiers/widget" = "the extension-tiers benchmark's copy of the Widget"
 "bench/ext-tiers/worktrees" = "the extension-tiers benchmark's copy of Worktree cleanup"
+"bench/ext-load/templates/rust" = "the extension load test's Rust extension, as a program and a component"
 
 # Feature crates still in the workspace, each to move to the extensions repo.
 [exceptions.crates]
