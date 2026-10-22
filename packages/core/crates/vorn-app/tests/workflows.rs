@@ -912,6 +912,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
     shot.save(&mut app, "icons-projects");
 
     // The task dialog's project picker draws `ProjectPicker`'s own icons.
+    support::views_listed(&mut shot, &mut app);
     shot.send(&mut app, key("KeyT", MOD(), None));
     shot.click(
         &mut app,

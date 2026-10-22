@@ -26,6 +26,7 @@ fn the_palette_filters_moves_and_runs_a_command() {
     let mut app = connect(&v);
     add_project(&mut app, &v, "api", json!({}));
     let mut shot = Shot::new();
+    support::views_listed(&mut shot, &mut app);
 
     shot.send(&mut app, key("KeyK", MOD(), None));
     assert!(palette_open(&app));

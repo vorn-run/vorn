@@ -586,6 +586,7 @@ fn long_board(cells: bool) {
             (1400.0, 900.0),
         )
     };
+    support::views_listed_in(&mut app, &mut ui, size);
     app.st.view = MainView::Tasks;
     app.st.project = Some("web".into());
     app.st.tasks.mode = Mode::Board;

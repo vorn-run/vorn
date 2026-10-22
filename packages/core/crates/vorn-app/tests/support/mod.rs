@@ -292,9 +292,15 @@ impl Drop for TestVornd {
     }
 }
 
-/// Waits for the built-ins' top-bar views, whose keys come with them.
+/// Waits for the built-ins' views, which come once their extensions start; their keys, pills and palette entries come with them.
 pub fn views_listed(shot: &mut Shot, app: &mut App) {
-    shot.until(app, "the built-ins' views", |app, _| {
+    views_listed_in(app, &mut shot.ui, shot.size);
+}
+
+/// [`views_listed`] laying out frames on a test's own `ui`.
+pub fn views_listed_in(app: &mut App, ui: &mut Ui, size: (f32, f32)) {
+    wait_for("the built-ins' views", || {
+        app.frame(ui, size);
         let p = &app.st.points;
         (p.find("vorn.tasks", "views", "board").is_some()
             && p.find("vorn.workflows", "views", "workflows").is_some())

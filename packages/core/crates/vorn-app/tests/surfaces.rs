@@ -169,6 +169,7 @@ fn the_sidebar_adds_and_edits_a_project_through_the_dialog() {
     assert_eq!(app.st.project, None);
 
     // The view modes and the sidebar toggle.
+    support::views_listed(&mut shot, &mut app);
     shot.click(
         &mut app,
         control("sidebar-mode", Act::View(MainView::Workflows)),
@@ -559,6 +560,7 @@ fn cards_minimize_to_the_dock_expand_and_switch_views() {
     shot.click(&mut app, control("sidebar", Act::ToggleSidebar));
     assert!(!app.st.sidebar);
     let order = [MainView::Sessions, MainView::Tasks, MainView::Workflows];
+    support::views_listed(&mut shot, &mut app);
     for (i, view) in order.iter().enumerate().rev() {
         shot.click(&mut app, item_id(VIEWS, i));
         assert_eq!(app.st.view, *view);
