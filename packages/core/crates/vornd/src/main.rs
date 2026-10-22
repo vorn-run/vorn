@@ -426,9 +426,10 @@ async fn run(args: Args, desktop_token: Option<Vec<u8>>) -> ExitCode {
     daemon.set_app_link(Arc::clone(&link));
     link.set_server_host(serving.addr().ip().to_string());
     daemon.start_connectors().await;
-    daemon.start_work();
+    daemon.open_work();
     daemon.start_hooks().await;
     daemon.start_extensions().await;
+    daemon.start_work();
     daemon.prepare_shipped(shipped);
     serving.publish();
     let native = Arc::downgrade(daemon.native());

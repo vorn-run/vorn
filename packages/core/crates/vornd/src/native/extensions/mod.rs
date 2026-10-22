@@ -23,7 +23,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::future::BoxFuture;
 use serde_json::{json, Map, Value};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_extensions::activation::{self, Subject};
@@ -239,6 +239,8 @@ pub struct Extensions {
     next_sync: AtomicU64,
     /// A package was linked or installed: the manifest watcher lists the linked ones again.
     relist: AtomicBool,
+    /// A package was removed: its sessions are settled now, not on the next pack check.
+    removed: Arc<Notify>,
     me: Weak<Extensions>,
 }
 
@@ -331,6 +333,7 @@ impl Extensions {
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
             relist: AtomicBool::new(false),
+            removed: Arc::default(),
             me: me.clone(),
         })
     }
@@ -399,14 +402,14 @@ impl Extensions {
     /// and the built-ins that are on.
     fn contributions(&self) -> Vec<Value> {
         let store = self.router.store();
+        let mut packs: Vec<_> = (store.ids().iter())
+            .filter_map(|id| store.inspect_unmeasured(id).ok())
+            .filter(|pack| pack.is_extension())
+            .collect();
+        // In the order they were installed: a top-bar button keeps its place.
+        packs.sort_by_key(|p| p.installed_at.as_u64().unwrap_or(u64::MAX));
         let mut out = Vec::new();
-        for id in store.ids() {
-            let Ok(pack) = store.inspect_unmeasured(&id) else {
-                continue;
-            };
-            if !pack.is_extension() {
-                continue;
-            }
+        for pack in packs {
             let settings = self.router.preferences(&pack.manifest);
             for mut c in points::listed(&pack.manifest, &settings) {
                 c["extensionName"] = json!(pack.manifest.name);
@@ -680,8 +683,11 @@ impl Extensions {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        if let Some(answered) = self.builtins.mcp_call(name, arguments).await {
+        if let Some(answered) = self.builtins.mcp_call(name, arguments.clone()).await {
             return Ok(answered);
+        }
+        if hosted::tasks::offers(name) && self.router.program(hosted::tasks::ID).is_some() {
+            return Ok(hosted::tasks::mcp_call(self, name, arguments).await);
         }
         let found = self
             .listed_tools()
@@ -760,6 +766,7 @@ impl Extensions {
         self.sync_adapters();
         self.around.pack_removed(id).await;
         self.contributions_changed(id);
+        self.removed.notify_one();
         Ok(json!({ "removed": id }))
     }
 
@@ -1240,13 +1247,17 @@ async fn next_note(notes: &mut Option<broadcast::Receiver<Value>>) {
 /// and settles every session again after a pack changed.
 async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value>>) {
     let mut known: HashMap<String, Live> = HashMap::new();
-    let Some(mut packs) = me.upgrade().map(|e| fingerprint(e.hosts.store().root())) else {
+    let Some((mut packs, removed)) = me
+        .upgrade()
+        .map(|e| (fingerprint(e.hosts.store().root()), Arc::clone(&e.removed)))
+    else {
         return;
     };
     let mut tick = tokio::time::interval(PACK_CHECK);
     loop {
         tokio::select! {
             () = next_note(&mut notes) => {}
+            () = removed.notified() => {}
             _ = tick.tick() => {}
         }
         let Some(extensions) = me.upgrade() else {
@@ -1478,10 +1489,7 @@ impl Around for Wired {
         let Some(native) = self.native.upgrade() else {
             return Vec::new();
         };
-        builtin::Started::ALL
-            .into_iter()
-            .filter_map(|s| s.entry(&native))
-            .collect()
+        builtin::started(&native).into_iter().collect()
     }
 
     fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {

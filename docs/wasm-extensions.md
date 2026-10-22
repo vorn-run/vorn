@@ -301,12 +301,11 @@ a page at a time, windows them, drags them between columns and opens them.
 `graph()` places the workflow editor's canvas, which the client draws whole.
 
 `examples/extensions/turns` draws a tree in every place, and
-`examples/extensions/agent-footer` a card footer. Vorn's own Tasks
-(`packages/core/extensions/tasks`) and Workflows
-(`packages/core/extensions/workflows`) draw their main views this way;
-in vorn-run/extensions, Files (`files/`) draws its pane and cards, Shell
-blocks (`blocks/`) a shell's commands, the Browser (`browser/`) a session's
-tabs over its page, and the Device (`device/`) a session's simulator.
+`examples/extensions/agent-footer` a card footer. In vorn-run/extensions,
+Tasks (`tasks/`) and Workflows (`workflows/`) draw their main views this
+way, Files (`files/`) its pane and cards, Shell blocks (`blocks/`) a
+shell's commands, the Browser (`browser/`) a session's tabs over its page,
+and the Device (`device/`) a session's simulator.
 
 ## Top bar buttons
 

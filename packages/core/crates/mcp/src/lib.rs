@@ -52,10 +52,10 @@ pub fn tool_count() -> usize {
     TOOLS.as_array().map_or(0, Vec::len)
 }
 
-/// The tools of each extension the core routes to (the Browser's, the
-/// Device's), by its id, from `generated/hosted.json`. They are Vorn's own
-/// tools, answered here, but listed only while that extension is installed,
-/// so an agent is never offered a tool nothing answers.
+/// The tools of each extension Vorn ships as an install (Browser, Device,
+/// Tasks, Workflows), by its id, from `generated/hosted.json`. They are
+/// Vorn's own tools, answered here or by that extension, but listed only
+/// while it is installed, so an agent is never offered a tool nothing answers.
 pub fn hosted_tools() -> impl Iterator<Item = (&'static str, &'static [Value])> {
     HOSTED.as_object().into_iter().flatten().map(|(id, tools)| {
         let tools = tools.as_array().map_or(&[][..], Vec::as_slice);

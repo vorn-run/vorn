@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 use vorn_store::{Opened, SeedWorkflow, Store, StoreOptions};
 
-/// The workflows vornd seeds, as the Workflows built-in ships them: `(flag, file)`.
+/// The workflows vornd seeds a new database with: `(flag, file)`.
 const SEED_WORKFLOWS: [(&str, &str); 2] = [
     (
         "hasSeededDefaultTaskWorkflow",
-        include_str!("../../../../extensions/workflows/workflows/default-task.toml"),
+        include_str!("../../../workflows/seeds/default-task.toml"),
     ),
     (
         "hasSeededDevServerWorkflow",
-        include_str!("../../../../extensions/workflows/workflows/dev-server.toml"),
+        include_str!("../../../workflows/seeds/dev-server.toml"),
     ),
 ];
 

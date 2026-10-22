@@ -78,16 +78,12 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
-# Builds the extensions Vorn ships as Wasm components, which vornd carries.
 [build-dependencies]
-vorn-guest-build = { path = "../guest-build" }
 # The shipped set's lock is read and each pack checked against its pin; both already in the tree.
 sha2 = { version = "0.10", default-features = false }
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
-# Tasks' triggers, built natively to fire them the way its component does.
-vorn-ext-tasks = { path = "../../extensions/tasks" }
 # The built-ins' tests compile their components in process.
 vorn-extensions = { path = "../extensions", features = ["wasm-compile"] }
 # Reads vorn.db directly to see an extension's tables come and go; already in the tree.

@@ -185,6 +185,15 @@ fn now_ms() -> u64 {
         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
 }
 
+/// When the extension `current` points at was first installed: an update or
+/// a rollback keeps its place among the others, which are ordered by it.
+fn first_installed(current: Option<&Value>) -> u64 {
+    current
+        .and_then(|c| c.get("installedAt"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(now_ms)
+}
+
 fn token() -> String {
     crate::token::mint().unwrap_or_else(|_| format!("{:x}", now_ms()))
 }
@@ -696,7 +705,7 @@ impl Installs {
             &json!({
                 "version": m.version,
                 "previousVersion": previous,
-                "installedAt": now_ms(),
+                "installedAt": first_installed(current.as_ref()),
                 "source": staged.source,
                 "previousSource": previous_source,
             }),
@@ -745,7 +754,7 @@ impl Installs {
             &json!({
                 "version": previous,
                 "previousVersion": version,
-                "installedAt": now_ms(),
+                "installedAt": first_installed(Some(&current)),
                 "source": source.cloned().unwrap_or(Value::Null),
                 "previousSource": current.get("source").cloned().unwrap_or(Value::Null),
             }),
@@ -1800,6 +1809,24 @@ migrations = "migrations"
         installs.remove("acme.b").unwrap();
         let back = installs.rollback("acme.a").unwrap();
         assert_eq!(back.version, "1.0.0");
+    }
+
+    #[test]
+    fn an_update_and_a_rollback_keep_when_it_was_first_installed() {
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), PathBuf::from("git"), env());
+        let install = |bytes: &[u8]| {
+            let sheet = installs.inspect_archive(bytes, json!({}), None).unwrap();
+            installs.confirm(&sheet.token, "acme.a").unwrap()
+        };
+        let first = install(&adapter_at("acme.a", "alpha", "1.0.0")).installed_at;
+        assert!(first.as_u64().is_some(), "{first}");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert_eq!(
+            install(&adapter_at("acme.a", "alpha", "2.0.0")).installed_at,
+            first
+        );
+        assert_eq!(installs.rollback("acme.a").unwrap().installed_at, first);
     }
 
     #[test]

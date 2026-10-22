@@ -240,9 +240,8 @@ pub(crate) async fn announce(native: &Arc<Native>) {
             native.broadcast("task:rows", super::task_list::Change::Reload.note());
             native.broadcast("workflow:changed", workflows);
             // Its own call, so a write Tasks makes never waits on Tasks.
-            if let Some(tasks) = native.tasks().filter(|t| t.is_on()).cloned() {
-                tokio::spawn(async move { tasks.badges().await });
-            }
+            let n = Arc::clone(native);
+            tokio::spawn(async move { super::extensions::hosted::tasks::badges(&n).await });
             native.config_changed();
         }
         Err(err) => warn!(%err, "could not read the configuration to announce it"),

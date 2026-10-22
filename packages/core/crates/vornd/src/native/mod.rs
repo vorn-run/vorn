@@ -166,7 +166,7 @@ pub enum Route {
 /// Each module's methods and where they go, in the order they are matched.
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
-    (extensions::builtin::tasks::METHODS, Route::Tasks),
+    (extensions::hosted::tasks::METHODS, Route::Tasks),
     (extensions::hosted::browser::METHODS, Route::Browser),
     (extensions::hosted::device::METHODS, Route::Device),
     (extensions::hosted::ssh::METHODS, Route::Ssh),
@@ -302,8 +302,6 @@ pub struct Native {
     work: OnceLock<Arc<work::Work>>,
     /// The Connectors built-in, once vornd has a database and its own address.
     connectors: OnceLock<Arc<extensions::builtin::connectors::ConnectorsBuiltin>>,
-    /// The Tasks built-in, once vornd has a database.
-    tasks: OnceLock<Arc<extensions::builtin::tasks::TasksBuiltin>>,
     /// The approval gates told waiting, by run.
     waiting: work::waiting::Waiting,
     /// Each extension's own tables, on a connection kept open between its storage calls.
@@ -372,7 +370,6 @@ impl Native {
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
             connectors: OnceLock::new(),
-            tasks: OnceLock::new(),
             waiting: work::waiting::Waiting::default(),
             ext_tables: extensions::world::Tables::default(),
             installs: OnceLock::new(),
@@ -521,15 +518,6 @@ impl Native {
 
     pub fn connectors(&self) -> Option<&Arc<extensions::builtin::connectors::ConnectorsBuiltin>> {
         self.connectors.get()
-    }
-
-    /// Keeps the Tasks built-in, once vornd has a database.
-    pub fn set_tasks(&self, tasks: Arc<extensions::builtin::tasks::TasksBuiltin>) {
-        let _ = self.tasks.set(tasks);
-    }
-
-    pub fn tasks(&self) -> Option<&Arc<extensions::builtin::tasks::TasksBuiltin>> {
-        self.tasks.get()
     }
 
     /// Each extension's tables, kept open between its storage calls.
@@ -718,16 +706,7 @@ impl Native {
         match route(&method) {
             Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
             Some(Route::Tasks) => {
-                let Some(tasks) = self.tasks.get().cloned() else {
-                    // Only a test starts vornd without a database.
-                    return Answer::Unanswered;
-                };
-                let m = method.clone();
-                let running = tokio::spawn(async move { tasks.answer(&m, params).await });
-                return running.await.unwrap_or_else(|err| {
-                    warn!(%method, %err, "a task call failed");
-                    Answer::Error(format!("{method} failed in vornd"))
-                });
+                return extensions::hosted::tasks::answer(self, &method, params).await;
             }
             Some(Route::Browser) => {
                 return extensions::hosted::browser::answer(self, &method, params).await;
@@ -753,31 +732,18 @@ impl Native {
                 let Some(host) = self.extensions.get().cloned() else {
                     // The built-ins' tools need no extension host.
                     return match method.as_str() {
-                        "extension:mcpTools" => {
-                            let mut tools = extensions::builtin::connectors::mcp_tools(self);
-                            if let Some(tasks) = self.tasks.get() {
-                                tools.extend(tasks.mcp_tools());
-                            }
-                            Answer::Result(Value::Array(tools))
-                        }
+                        "extension:mcpTools" => Answer::Result(Value::Array(
+                            extensions::builtin::connectors::mcp_tools(self),
+                        )),
                         "extension:mcpCall" => {
                             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
                             let arguments = params
                                 .get("arguments")
                                 .cloned()
                                 .unwrap_or_else(|| json!({}));
-                            let tasks = self.tasks.get().cloned();
-                            let answered = match tasks {
-                                Some(t) => t.mcp_call(name, arguments.clone()).await,
-                                None => None,
-                            };
-                            let answered = match answered {
-                                Some(a) => Some(a),
-                                None => {
-                                    extensions::builtin::connectors::mcp_call(self, name, arguments)
-                                        .await
-                                }
-                            };
+                            let answered =
+                                extensions::builtin::connectors::mcp_call(self, name, arguments)
+                                    .await;
                             match answered {
                                 Some(answered) => Answer::Result(answered),
                                 None => Answer::Error(format!(

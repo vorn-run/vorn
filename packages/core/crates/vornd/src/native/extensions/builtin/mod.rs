@@ -1,14 +1,11 @@
-//! The extensions Vorn ships with, written against the API a package speaks
-//! (a manifest, trees, core calls held to the declared permissions,
-//! published rows and subscribed events) and compiled in rather than started
-//! as a program: as Rust in vornd, or as a Wasm component vornd carries
-//! ([`wasm`]). Each has a switch; off, it subscribes to nothing, publishes
+//! The extensions compiled into vornd, written against the API a package
+//! speaks (a manifest, trees, core calls held to the declared permissions,
+//! published rows and subscribed events) as Rust rather than started as a
+//! program. Each has a switch; off, it subscribes to nothing, publishes
 //! nothing and contributes nothing.
 
 pub mod artifacts;
 pub mod connectors;
-pub mod tasks;
-pub mod wasm;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -90,41 +87,6 @@ pub trait Builtin: Send + Sync + 'static {
     }
 }
 
-/// Compiles every component Vorn ships into the cache, one after another
-/// and Tasks first, so the first task written or board opened after an
-/// install or upgrade waits for nothing. A call that comes first compiles as
-/// it always did. A test's vornd (`VORN_EXIT_WITH`) skips it: its start stays
-/// cheap, and each component compiles at its first use.
-pub fn precompile(router: &Arc<Router>) {
-    if std::env::var_os(vorn_spawn::watch::EXIT_WITH).is_some() {
-        return;
-    }
-    let shipped: Vec<(&'static str, &'static [u8])> = [
-        (tasks::MANIFEST, tasks::WASM),
-        (wasm::workflows().manifest, wasm::workflows().wasm),
-    ]
-    .into_iter()
-    .collect();
-    let router = Arc::clone(router);
-    tokio::spawn(async move {
-        for (manifest, wasm) in shipped {
-            let Ok(manifest) = file::parse_builtin(manifest) else {
-                continue;
-            };
-            let bundled = vorn_extensions::component::Bundled {
-                manifest: Arc::new(manifest),
-                wasm,
-            };
-            if let Err(err) = router.prepare_bundled(&bundled).await {
-                warn!(
-                    "[extensions] could not compile {} ahead: {err}",
-                    bundled.manifest.name
-                );
-            }
-        }
-    });
-}
-
 /// Whether built-in `id` is switched on in `file`, `default` when the person never switched it.
 pub fn switched_on(file: &std::path::Path, id: &str, default: bool) -> bool {
     std::fs::read(file)
@@ -132,20 +94,6 @@ pub fn switched_on(file: &std::path::Path, id: &str, default: bool) -> bool {
         .and_then(|b| serde_json::from_slice::<BTreeMap<String, bool>>(&b).ok())
         .and_then(|m| m.get(id).copied())
         .unwrap_or(default)
-}
-
-/// The id Workflows' view, menus and gates went by before they joined Workflows.
-const OLD_WORKFLOW_EDITOR: &str = "vorn.workflow-editor";
-
-/// Folds the old Workflow editor's switch into Workflows', once: the merged
-/// one is off only if both were off. Says whether `on` changed.
-fn merge_workflow_switches(on: &mut BTreeMap<String, bool>) -> bool {
-    let Some(editor) = on.remove(OLD_WORKFLOW_EDITOR) else {
-        return false;
-    };
-    let workflows = on.get(vorn_workflows::ID).copied().unwrap_or(true);
-    on.insert(vorn_workflows::ID.to_owned(), workflows || editor);
-    true
 }
 
 struct Entry {
@@ -189,36 +137,10 @@ fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
     all
 }
 
-/// A built-in vornd starts before its extension host, which joins the
-/// registry as that host starts if vornd started it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Started {
-    Connectors,
-    Tasks,
-    Workflows,
-}
-
-impl Started {
-    /// Every one, in Settings' order: Workflows' view where it always was, after Tasks.
-    pub const ALL: [Started; 3] = [Started::Connectors, Started::Tasks, Started::Workflows];
-
-    /// The manifest its entry is held to, whether or not vornd started it.
-    pub fn manifest(self) -> &'static str {
-        match self {
-            Started::Connectors => connectors::MANIFEST,
-            Started::Tasks => tasks::MANIFEST,
-            Started::Workflows => vorn_workflows::MANIFEST,
-        }
-    }
-
-    /// Its registry entry, if `native` started it.
-    pub fn entry(self, native: &crate::native::Native) -> Option<Arc<dyn Builtin>> {
-        match self {
-            Started::Connectors => native.connectors().map(connectors::entry),
-            Started::Tasks => native.tasks().map(tasks::entry),
-            Started::Workflows => Some(Arc::new(wasm::workflows())),
-        }
-    }
+/// The built-in vornd starts before its extension host (Connectors), which
+/// joins the registry as that host starts if vornd started it.
+pub fn started(native: &crate::native::Native) -> Option<Arc<dyn Builtin>> {
+    native.connectors().map(connectors::entry)
 }
 
 /// The ids of every extension compiled into vornd, carried or started, which
@@ -228,7 +150,7 @@ pub fn bundled_ids() -> Result<std::collections::BTreeSet<String>, file::FileErr
     shipped(Vec::new())
         .iter()
         .map(|b| b.manifest())
-        .chain(Started::ALL.map(Started::manifest))
+        .chain([connectors::MANIFEST])
         .map(|m| file::parse_builtin(m).map(|m| m.id))
         .collect()
 }
@@ -266,16 +188,10 @@ impl Builtins {
                 })
             })
             .collect();
-        let mut on = std::fs::read(&file)
+        let on = std::fs::read(&file)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        if merge_workflow_switches(&mut on) {
-            let saved = serde_json::to_vec_pretty(&on).unwrap_or_default();
-            if let Err(err) = std::fs::write(&file, saved) {
-                warn!("[extensions] could not keep the built-ins' switches: {err}");
-            }
-        }
         Builtins {
             entries,
             on: Mutex::new(on),

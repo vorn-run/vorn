@@ -1,39 +1,14 @@
-//! Builds the extensions Vorn still carries as built-ins as Wasm components
-//! ([`crate::native::extensions::builtin`]): each one's crate is built for
-//! wasm32-wasip2 and its `.wasm` copied into `OUT_DIR`. Then embeds the
-//! shipped set, the released packs `shipped.toml` pins, and the pins of
-//! `pinned.toml`'s, which only the catalog offers ([`crate::shipped`]).
+//! Embeds the shipped set, the released packs `shipped.toml` pins, and the
+//! pins of `pinned.toml`'s, which only the catalog offers ([`crate::shipped`]).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
-/// `(workspace package, its folder, the name it is kept under)`.
-const SHIPPED: [(&str, &str, &str); 2] = [
-    ("vorn-ext-tasks", "extensions/tasks", "tasks.wasm"),
-    (
-        "vorn-ext-workflows",
-        "extensions/workflows",
-        "workflows.wasm",
-    ),
-];
-
 fn main() {
-    let workspace = vorn_guest_build::workspace();
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR"));
-    let sdk = workspace.join("crates/extension-sdk");
-    let wit = workspace.join("crates/extensions/wit");
-    let tree = workspace.join("crates/tree");
-    // Tasks words its MCP tools with the server's toolkit.
-    let mcp = workspace.join("crates/mcp");
-    for (package, folder, name) in SHIPPED {
-        let folder = workspace.join(folder);
-        vorn_guest_build::rerun_if_changed(&[&folder, &sdk, &wit, &tree, &mcp]);
-        let built = vorn_guest_build::component(package).unwrap_or_else(|e| panic!("{e}"));
-        std::fs::copy(&built, out.join(name))
-            .unwrap_or_else(|e| panic!("{}: {e}", built.display()));
-    }
     embed_shipped(&workspace, &out);
     embed_pinned(&workspace, &out);
 }

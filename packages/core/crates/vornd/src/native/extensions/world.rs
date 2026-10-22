@@ -66,7 +66,7 @@ impl Tables {
 
 /// The core's tables extension `id` is lent: Tasks keeps the board's own.
 fn lent(id: &str) -> &'static [Grant] {
-    if id == super::builtin::tasks::ID {
+    if id == super::hosted::tasks::ID {
         vorn_store::extension::TASKS
     } else {
         &[]
@@ -578,12 +578,8 @@ impl World for Wired {
                     let value = secret_of(weak.upgrade(), extension, connection, field).await?;
                     Ok(json!({ "value": value }))
                 }
-                "task.take" | "task.handBack" => {
-                    let tasks = native
-                        .tasks()
-                        .cloned()
-                        .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
-                    tasks.api(m, args).await
+                "task.take" | "task.handBack" | "task.importItems" | "task.sourceLink" => {
+                    super::hosted::tasks::api(&native, m, args).await
                 }
                 "task.changed" => {
                     task_changed(&native, &args).await;
@@ -602,13 +598,6 @@ impl World for Wired {
                     work.fire_api(&extension, &args)
                         .await
                         .map_err(|e| ExtError::new("failed", e))
-                }
-                "task.importItems" | "task.sourceLink" => {
-                    let tasks = native
-                        .tasks()
-                        .cloned()
-                        .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
-                    tasks.api(m, args).await
                 }
                 "task.list" => {
                     on_store(&native, m, move |s| {

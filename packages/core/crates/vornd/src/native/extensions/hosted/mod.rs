@@ -1,11 +1,13 @@
 //! The core's routes to extensions Vorn ships as ordinary installs: an
-//! agent's `browser:*` and `device:*` calls, its MCP tools and a client's
-//! `ssh:*` reach the installed component through the router, under the same
-//! gate and lifecycle as any other. Uninstalled, each call says so.
+//! agent's `browser:*` and `device:*` calls, its MCP tools, a client's
+//! `ssh:*` and `task:*` reach the installed component through the router,
+//! under the same gate and lifecycle as any other. Uninstalled, each call
+//! says so.
 
 pub mod browser;
 pub mod device;
 pub mod ssh;
+pub mod tasks;
 
 use serde_json::Value;
 use vorn_extensions::api::types::CallCtx;
