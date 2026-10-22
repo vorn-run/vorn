@@ -53,6 +53,7 @@ members = [
   "bench/ext-tiers/rss",
   "bench/ext-tiers/widget",
   "bench/ext-tiers/worktrees",
+  "bench/ext-load/templates/rust",
 ]
 exclude = ["vendor"]
 
