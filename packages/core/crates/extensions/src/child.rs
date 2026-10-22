@@ -244,18 +244,29 @@ impl Child {
         name: String,
         inbox: Option<Inbox>,
     ) -> Result<Child, String> {
-        let program = on_path(&launch.program, &launch.env, &launch.cwd);
-        let mut command = vorn_spawn::tokio_command(program.as_deref().unwrap_or(&launch.program));
-        command
-            .args(&launch.args)
-            .current_dir(&launch.cwd)
-            .env_clear()
-            .envs(launch.env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(false);
-        let mut child = command.spawn().map_err(|err| {
+        let spawn = |program: &Path| {
+            vorn_spawn::tokio_command(program)
+                .args(&launch.args)
+                .current_dir(&launch.cwd)
+                .env_clear()
+                .envs(launch.env.iter().map(|(k, v)| (k, v)))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(false)
+                .spawn()
+        };
+        let spawned = match on_path(&launch.program, &launch.env, &launch.cwd) {
+            Some(full) => spawn(&full).or_else(|err| {
+                if bare_name_may_run(&err) {
+                    spawn(&launch.program)
+                } else {
+                    Err(err)
+                }
+            }),
+            None => spawn(&launch.program),
+        };
+        let mut child = spawned.map_err(|err| {
             format!(
                 "{name} could not start {}: {}",
                 launch.program.display(),
@@ -503,7 +514,6 @@ fn send_signal(child: &mut tokio::process::Child, pid: Option<u32>, sig: Signal)
     let _ = child.start_kill();
 }
 
-/// Why a start failed, as `spawn <program> ENOENT` and the like.
 /// Where a bare program name (`node`) is on the `PATH` in `env`, which the
 /// child runs with, rather than this process's.
 ///
@@ -512,10 +522,11 @@ fn send_signal(child: &mut tokio::process::Child, pid: Option<u32>, sig: Signal)
 /// waits) to search that `PATH` in the child; a full path lets it use
 /// `posix_spawn`, which shares the parent's memory until the child execs.
 /// `None` when `program` is a path already, or is not found; the spawn then
-/// searches as before, and says ENOENT for a missing one.
+/// searches as before, and says ENOENT for a missing one. Like `execvp`, an
+/// entry this process may not execute is skipped.
 #[cfg(unix)]
 fn on_path(program: &Path, env: &[(String, String)], cwd: &Path) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::ffi::OsStrExt;
     if program.is_absolute() || program.components().count() != 1 {
         return None;
     }
@@ -524,9 +535,22 @@ fn on_path(program: &Path, env: &[(String, String)], cwd: &Path) -> Option<PathB
     std::env::split_paths(path)
         .map(|dir| cwd.join(dir).join(program))
         .find(|candidate| {
-            std::fs::metadata(candidate)
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            let Ok(c_path) = std::ffi::CString::new(candidate.as_os_str().as_bytes()) else {
+                return false;
+            };
+            // SAFETY: access(2) reads a NUL-terminated path that outlives the call.
+            let runnable = unsafe { libc::access(c_path.as_ptr(), libc::X_OK) } == 0;
+            runnable && std::fs::metadata(candidate).is_ok_and(|m| m.is_file())
         })
+}
+
+/// Whether a full path from [`on_path`] failed where `execvp` on the bare
+/// name could still run something: it skips an entry it may not execute
+/// (EACCES) and runs a script with no `#!` line through `/bin/sh` (ENOEXEC).
+/// Retrying with the bare name then behaves as it always did.
+#[cfg(unix)]
+fn bare_name_may_run(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(libc::EACCES | libc::ENOEXEC))
 }
 
 /// Windows starts no process by forking, so there is nothing to spare.
@@ -535,6 +559,12 @@ fn on_path(_: &Path, _: &[(String, String)], _: &Path) -> Option<PathBuf> {
     None
 }
 
+#[cfg(not(unix))]
+fn bare_name_may_run(_: &std::io::Error) -> bool {
+    false
+}
+
+/// Why a start failed, as `spawn <program> ENOENT` and the like.
 fn spawn_reason(program: &std::path::Path, err: &std::io::Error) -> String {
     let program = program.display();
     match err.kind() {
@@ -802,6 +832,60 @@ mod tests {
         assert_eq!(found("./tool"), None);
         assert_eq!(found("/bin/sh"), None);
         assert_eq!(on_path(Path::new("tool"), &[], &cwd), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_a_path_entry_this_user_may_not_execute() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: geteuid(2) has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root may execute anything with an execute bit
+        }
+        let root = tempfile::tempdir().expect("temp dir");
+        let (first, second) = (root.path().join("a"), root.path().join("b"));
+        for (dir, mode) in [(&first, 0o601), (&second, 0o755)] {
+            std::fs::create_dir(dir).expect("dir");
+            let tool = dir.join("tool");
+            std::fs::write(&tool, "#!/bin/sh\n").expect("write");
+            std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(mode)).expect("chmod");
+        }
+        let path = std::env::join_paths([&first, &second]).expect("PATH");
+        let env = vec![("PATH".to_owned(), path.to_string_lossy().into_owned())];
+        // Others may execute the first, its owner may not, as execvp would find.
+        assert_eq!(
+            on_path(Path::new("tool"), &env, root.path()),
+            Some(second.join("tool"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn starts_a_script_without_a_shebang_through_the_shell() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().expect("temp dir");
+        let tool = root.path().join("tool");
+        std::fs::write(
+            &tool,
+            "read line; echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"ok\"}'\n",
+        )
+        .expect("write");
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let path = std::env::join_paths([root.path(), Path::new("/usr/bin"), Path::new("/bin")])
+            .expect("PATH");
+        let launch = Launch {
+            program: "tool".into(),
+            args: vec![],
+            cwd: root.path().to_owned(),
+            env: vec![("PATH".into(), path.to_string_lossy().into_owned())],
+        };
+        let child = Child::start(&launch, "tool".into()).expect("starts");
+        let answer = child
+            .request("ping", json!({}), Duration::from_secs(10))
+            .await
+            .expect("answered");
+        assert_eq!(answer, json!("ok"));
+        child.close().await;
     }
 
     #[cfg(unix)]
