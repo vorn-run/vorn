@@ -360,6 +360,22 @@ pub struct Staged {
     pub install: Install,
 }
 
+/// Removes the files of a staged update a newer one replaced.
+fn discard(old: &Staged) {
+    let _ = match &old.install {
+        Install::Mac(_) => old
+            .path
+            .parent()
+            .filter(|d| {
+                d.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(".Vorn-update-"))
+            })
+            .map_or(Ok(()), std::fs::remove_dir_all),
+        Install::Windows | Install::AppImage(_) => std::fs::remove_file(&old.path),
+        Install::Deb | Install::Dev => Ok(()),
+    };
+}
+
 fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<String, String> {
     let out = command(cmd)
         .args(args)
@@ -860,27 +876,28 @@ impl Updater {
         let Some(prefs) = self.lock().prefs.clone() else {
             return;
         };
-        if self.lock().staged.is_some() {
-            // Ready stays ready; a newer release waits for the restart.
-            return;
-        }
         self.set(UpdateStatus::Checking);
-        let found = fetch_feed(&prefs.channel).map(|feed| {
-            let asset = self
-                .install
-                .key()
-                .and_then(|k| pick(&feed, k, env!("CARGO_PKG_VERSION")));
+        self.checked(fetch_feed(&prefs.channel), &prefs);
+    }
+
+    /// Offers a release newer than the staged update (or this build); else a staged update stays ready.
+    fn checked(&self, feed: Result<Feed, String>, prefs: &Prefs) {
+        let staged = self.lock().staged.as_ref().map(|s| s.version.clone());
+        let base = staged.as_deref().unwrap_or(env!("CARGO_PKG_VERSION"));
+        let found = feed.map(|feed| {
+            let asset = self.install.key().and_then(|k| pick(&feed, k, base));
             (feed.version, asset)
         });
-        match found {
-            Err(message) => self.set(UpdateStatus::Error { message }),
-            Ok((_, None)) => self.set(UpdateStatus::Idle {
+        match (found, staged) {
+            (Err(_) | Ok((_, None)), Some(version)) => self.set(UpdateStatus::Ready { version }),
+            (Err(message), None) => self.set(UpdateStatus::Error { message }),
+            (Ok((_, None)), None) => self.set(UpdateStatus::Idle {
                 last_checked: Some(crate::state::now_ms()),
             }),
-            Ok((version, Some(_))) if matches!(self.install, Install::Deb) => {
+            (Ok((version, Some(_))), _) if matches!(self.install, Install::Deb) => {
                 self.set(UpdateStatus::Manual { version });
             }
-            Ok((version, Some(asset))) => {
+            (Ok((version, Some(asset))), _) => {
                 {
                     let mut inner = self.lock();
                     inner.offered = Some(asset);
@@ -920,13 +937,30 @@ impl Updater {
         };
         let staged = download(&asset, &dir, &progress)
             .and_then(|file| stage(&self.install, &file, &version));
-        match staged {
-            Ok(staged) => {
-                self.lock().staged = Some(staged);
-                self.set(UpdateStatus::Ready { version });
+        self.downloaded(staged);
+    }
+
+    /// Stages a download in place of an older staged update; a failed one keeps the older ready.
+    fn downloaded(&self, staged: Result<Staged, String>) {
+        let mut inner = self.lock();
+        let status = match (staged, inner.staged.take()) {
+            (Ok(new), old) => {
+                if let Some(old) = old.filter(|o| o.path != new.path) {
+                    discard(&old);
+                }
+                let version = new.version.clone();
+                inner.staged = Some(new);
+                UpdateStatus::Ready { version }
             }
-            Err(message) => self.set(UpdateStatus::Error { message }),
-        }
+            (Err(_), Some(old)) => {
+                let version = old.version.clone();
+                inner.staged = Some(old);
+                UpdateStatus::Ready { version }
+            }
+            (Err(message), None) => UpdateStatus::Error { message },
+        };
+        drop(inner);
+        self.set(status);
     }
 }
 
@@ -1085,5 +1119,157 @@ mod tests {
         assert!(!dir.join("Other.zip").exists());
         server.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn updater(install: Install, staged: Option<Staged>) -> Updater {
+        let status = match &staged {
+            Some(s) => UpdateStatus::Ready {
+                version: s.version.clone(),
+            },
+            None => UpdateStatus::Idle { last_checked: None },
+        };
+        Updater {
+            install,
+            inner: Mutex::new(Inner {
+                status,
+                prefs: None,
+                job: None,
+                offered: None,
+                offered_version: String::new(),
+                staged,
+            }),
+            signal: Condvar::new(),
+            wake: Arc::new(|| {}),
+        }
+    }
+
+    fn staged(version: &str, path: PathBuf, install: &Install) -> Staged {
+        Staged {
+            version: version.into(),
+            path,
+            install: install.clone(),
+        }
+    }
+
+    fn feed(version: &str, key: &str) -> Feed {
+        serde_json::from_value(json!({
+            "version": version,
+            "assets": [{ "key": key, "name": "n", "url": "u", "sha256": "ab", "size": 2 }]
+        }))
+        .unwrap()
+    }
+
+    const ASKING: Prefs = Prefs {
+        channel: String::new(),
+        auto_download: false,
+    };
+
+    #[test]
+    fn a_check_with_an_update_staged_offers_only_a_newer_one() {
+        let install = Install::Mac(PathBuf::from("/Applications/Vorn.app"));
+        let Some(key) = install.key() else {
+            eprintln!("skipped: no update builds for this architecture");
+            return;
+        };
+        let ready = |v: &str| UpdateStatus::Ready { version: v.into() };
+        let u = updater(
+            install.clone(),
+            Some(staged("98.0.0", PathBuf::from("/x"), &install)),
+        );
+        // The same release again, or a failed check, keeps the staged one ready.
+        u.checked(Ok(feed("98.0.0", key)), &ASKING);
+        assert_eq!(u.status(), ready("98.0.0"));
+        u.checked(Err("offline".into()), &ASKING);
+        assert_eq!(u.status(), ready("98.0.0"));
+        // A newer release is offered in its place; the staged one stays until it lands.
+        u.checked(Ok(feed("99.0.0", key)), &ASKING);
+        assert_eq!(
+            u.status(),
+            UpdateStatus::Available {
+                version: "99.0.0".into()
+            }
+        );
+        let inner = u.lock();
+        assert_eq!(inner.offered_version, "99.0.0");
+        assert_eq!(
+            inner.staged.as_ref().map(|s| s.version.as_str()),
+            Some("98.0.0")
+        );
+    }
+
+    #[test]
+    fn a_check_with_nothing_staged_goes_idle_or_fails() {
+        let install = Install::Mac(PathBuf::from("/Applications/Vorn.app"));
+        let Some(key) = install.key() else {
+            eprintln!("skipped: no update builds for this architecture");
+            return;
+        };
+        let u = updater(install, None);
+        u.checked(Ok(feed(env!("CARGO_PKG_VERSION"), key)), &ASKING);
+        assert!(matches!(
+            u.status(),
+            UpdateStatus::Idle {
+                last_checked: Some(_)
+            }
+        ));
+        u.checked(Err("offline".into()), &ASKING);
+        assert_eq!(
+            u.status(),
+            UpdateStatus::Error {
+                message: "offline".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_newer_download_replaces_the_staged_update_and_a_failed_one_keeps_it() {
+        let dir = std::env::temp_dir().join(format!("vorn-restage-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let install = Install::AppImage(dir.join("Vorn.AppImage"));
+        let (old, new) = (dir.join(".Vorn-98.AppImage"), dir.join(".Vorn-99.AppImage"));
+        std::fs::write(&old, b"old").unwrap();
+        std::fs::write(&new, b"new").unwrap();
+        let u = updater(
+            install.clone(),
+            Some(staged("98.0.0", old.clone(), &install)),
+        );
+        u.downloaded(Err("cut off".into()));
+        assert_eq!(
+            u.status(),
+            UpdateStatus::Ready {
+                version: "98.0.0".into()
+            }
+        );
+        assert!(old.exists(), "a failed download keeps the staged update");
+        u.downloaded(Ok(staged("99.0.0", new.clone(), &install)));
+        assert_eq!(
+            u.status(),
+            UpdateStatus::Ready {
+                version: "99.0.0".into()
+            }
+        );
+        assert_eq!(
+            u.lock().staged.as_ref().map(|s| s.path.clone()),
+            Some(new.clone())
+        );
+        assert!(
+            !old.exists() && new.exists(),
+            "the replaced update is removed"
+        );
+        // The same file staged again is not removed.
+        u.downloaded(Ok(staged("99.0.0", new.clone(), &install)));
+        assert!(new.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_check_is_taken_while_an_update_is_ready() {
+        let install = Install::Dev;
+        let u = updater(
+            install.clone(),
+            Some(staged("98.0.0", PathBuf::new(), &install)),
+        );
+        u.check();
+        assert_eq!(u.lock().job, Some(Job::Check));
     }
 }

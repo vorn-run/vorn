@@ -102,6 +102,20 @@ fn keys_that_were_declared_but_never_listed_survive() {
 }
 
 #[test]
+fn appearance_choices_survive_a_save() {
+    for (key, value) in [
+        ("colorScheme", json!("dark")),
+        ("lightTheme", json!("paper")),
+        ("darkTheme", json!("nord")),
+        ("interfaceStyle", json!("tinted")),
+        ("contrastCorrection", json!(true)),
+        ("materials", json!("solid")),
+    ] {
+        round_trips(key, value);
+    }
+}
+
+#[test]
 fn worktree_retention_survives_a_save() {
     round_trips("worktreeRetention", json!({ "mode": "days", "days": 7 }));
 }

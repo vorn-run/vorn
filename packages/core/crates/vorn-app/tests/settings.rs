@@ -135,6 +135,25 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     let grid = SetAct::Default("layoutMode".into(), "\"grid\"".into());
     shot.click(&mut app, control("layout-mode", Act::Set(grid)));
 
+    // The theme tiles and the style segment are kept by vornd and read back.
+    use vorn_app::appearance as look;
+    use vorn_app::screen::settings::theme_tile_id;
+    shot.click(&mut app, theme_tile_id("nord"));
+    shot.click(&mut app, theme_tile_id("solarized-light"));
+    let tinted = SetAct::Default(look::CHROME.into(), "\"tinted\"".into());
+    shot.click(&mut app, control(look::CHROME, Act::Set(tinted)));
+    saved(&mut app, "the chosen themes and style", |c| {
+        c.pointer("/defaults/darkTheme") == Some(&json!("nord"))
+            && c.pointer("/defaults/lightTheme") == Some(&json!("solarized-light"))
+            && c.pointer("/defaults/interfaceStyle") == Some(&json!("tinted"))
+    });
+    wait_for("the app's prefs after vornd's echo", || {
+        app.pump();
+        let p = look::prefs(app.store.config.get("defaults"));
+        (p.dark == "nord" && p.light == "solarized-light" && p.chrome == vorn_theme::Chrome::Tinted)
+            .then_some(())
+    });
+
     // General: a switch, a select from its menu, and the shell's typed path.
     open(&mut shot, &mut app, Category::General);
     shot.until(&mut app, "the shells", |a, _| {

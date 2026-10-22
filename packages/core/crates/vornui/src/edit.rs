@@ -4,6 +4,7 @@
 //! pixels; moving up or down a line is answered by the [`Ui`](crate::Ui),
 //! which has the shaped text.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
@@ -48,6 +49,32 @@ impl Clipboard for MemoryClipboard {
     }
     fn has_image(&mut self) -> bool {
         self.image
+    }
+}
+
+/// Text as the system clipboard keeps it: CRLF line ends where Windows programs read them.
+pub fn to_system(text: &str, crlf: bool) -> Cow<'_, str> {
+    if !crlf || !text.contains('\n') {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() + text.len() / 16);
+    let mut prev = '\0';
+    for ch in text.chars() {
+        if ch == '\n' && prev != '\r' {
+            out.push('\r');
+        }
+        out.push(ch);
+        prev = ch;
+    }
+    Cow::Owned(out)
+}
+
+/// Text from the system clipboard with LF line ends, so a pasted CRLF is one Enter, not two.
+pub fn from_system(text: String) -> String {
+    if text.contains("\r\n") {
+        text.replace("\r\n", "\n")
+    } else {
+        text
     }
 }
 
@@ -246,32 +273,39 @@ impl TextEdit {
         let primary = !altgr && m & if mac { mods::SUPER } else { mods::CTRL } != 0;
         let word = !altgr && m & if mac { mods::ALT } else { mods::CTRL } != 0;
         let line = mac && m & mods::SUPER != 0;
-        if primary && !shift {
-            match code {
-                "KeyA" => {
-                    self.select_all();
+        let held = m & (mods::SHIFT | mods::CTRL | mods::ALT | mods::SUPER);
+        let chord = match (code, held) {
+            ("KeyA" | "KeyC" | "KeyX" | "KeyV", _) if primary && !shift => Some(code),
+            // Ctrl+Insert, Shift+Insert and Shift+Delete copy, paste and cut off the Mac.
+            ("Insert", mods::CTRL) if !mac => Some("KeyC"),
+            ("Insert", mods::SHIFT) if !mac => Some("KeyV"),
+            ("Delete", mods::SHIFT) if !mac => Some("KeyX"),
+            _ => None,
+        };
+        match chord {
+            Some("KeyA") => {
+                self.select_all();
+                return Outcome::Moved;
+            }
+            Some(c @ ("KeyC" | "KeyX")) => {
+                if self.caret == self.anchor || self.secure {
                     return Outcome::Moved;
                 }
-                "KeyC" | "KeyX" => {
-                    if self.caret == self.anchor || self.secure {
-                        return Outcome::Moved;
-                    }
-                    clip.set(self.selected_text());
-                    if code == "KeyC" {
-                        return Outcome::Moved;
-                    }
-                    self.insert("");
-                    return Outcome::Changed;
+                clip.set(self.selected_text());
+                if c == "KeyC" {
+                    return Outcome::Moved;
                 }
-                "KeyV" => {
-                    let Some(s) = clip.get() else {
-                        return Outcome::Moved;
-                    };
-                    self.insert(&s);
-                    return Outcome::Changed;
-                }
-                _ => {}
+                self.insert("");
+                return Outcome::Changed;
             }
+            Some(_) => {
+                let Some(s) = clip.get() else {
+                    return Outcome::Moved;
+                };
+                self.insert(&s);
+                return Outcome::Changed;
+            }
+            None => {}
         }
         if code != "ArrowUp" && code != "ArrowDown" {
             self.goal_x = None;
@@ -505,6 +539,52 @@ mod tests {
             e.key(&key("KeyV", mods::CTRL), true, &mut c),
             Outcome::Unhandled
         );
+    }
+
+    #[test]
+    fn windows_insert_chords_copy_cut_and_paste_off_the_mac() {
+        let mut c = MemoryClipboard::default();
+        let mut e = TextEdit::new("abc", false);
+        e.set_selection(0, 2);
+        assert_eq!(
+            e.key(&key("Insert", mods::CTRL), false, &mut c),
+            Outcome::Moved
+        );
+        assert_eq!(c.text.as_deref(), Some("ab"));
+        assert_eq!(
+            e.key(&key("Delete", mods::SHIFT), false, &mut c),
+            Outcome::Changed
+        );
+        assert_eq!(e.text(), "c");
+        e.set_selection(1, 1);
+        assert_eq!(
+            e.key(&key("Insert", mods::SHIFT), false, &mut c),
+            Outcome::Changed
+        );
+        assert_eq!(e.text(), "cab");
+        // On a Mac these are no clipboard keys.
+        assert_eq!(
+            e.key(&key("Insert", mods::SHIFT), true, &mut c),
+            Outcome::Unhandled
+        );
+        // Ctrl+Shift+C is no copy in a field, as in a browser's.
+        e.set_selection(0, 3);
+        c.text = None;
+        e.key(&key("KeyC", mods::CTRL | mods::SHIFT), false, &mut c);
+        assert_eq!(c.text, None);
+    }
+
+    #[test]
+    fn clipboard_text_takes_the_platforms_line_ends() {
+        assert_eq!(to_system("a\nb\r\nc\n", true), "a\r\nb\r\nc\r\n");
+        assert_eq!(to_system("a\nb", false), "a\nb");
+        assert!(matches!(to_system("plain", true), Cow::Borrowed(_)));
+        assert_eq!(to_system("", true), "");
+        assert_eq!(from_system("a\r\nb\r\n".into()), "a\nb\n");
+        assert_eq!(from_system("a\rb\n".into()), "a\rb\n");
+        // A round trip through Windows' clipboard gives back what was copied.
+        let copied = "ls -la\n  é\t🇯🇵\n";
+        assert_eq!(from_system(to_system(copied, true).into_owned()), copied);
     }
 
     #[test]

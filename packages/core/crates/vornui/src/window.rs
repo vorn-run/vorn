@@ -42,10 +42,10 @@ struct System(arboard::Clipboard);
 
 impl Clipboard for System {
     fn get(&mut self) -> Option<String> {
-        self.0.get_text().ok()
+        self.0.get_text().ok().map(crate::edit::from_system)
     }
     fn set(&mut self, text: &str) {
-        let _ = self.0.set_text(text);
+        let _ = self.0.set_text(crate::edit::to_system(text, cfg!(windows)));
     }
     fn has_image(&mut self) -> bool {
         clipboard_has_image()

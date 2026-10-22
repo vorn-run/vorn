@@ -54,7 +54,7 @@ pub mod window {
 
 pub use {accesskit, web_time, wgpu, winit};
 
-pub use edit::{Clipboard, MemoryClipboard, TextEdit};
+pub use edit::{from_system, to_system, Clipboard, MemoryClipboard, TextEdit};
 pub use element::{
     custom, div, icon, image, shape, text, Action, Content, Cursor, El, Id, Overlay, Place, Sense,
 };
