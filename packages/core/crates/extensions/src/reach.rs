@@ -61,13 +61,19 @@ pub struct Places {
     pub closed: Vec<PathBuf>,
 }
 
-/// The places never reached under `home`, with Vorn's `data` folders, each resolved.
+/// The places never reached under `home`, with Vorn's `data` folders, each
+/// resolved. A data folder holding `home` is left open, or nothing in the
+/// home folder would be reached; `.vorn` in it stays closed.
 pub fn closed(home: &Path, data: &[&Path]) -> Vec<PathBuf> {
+    let home_real = resolve(home).ok();
+    let data = data
+        .iter()
+        .filter_map(|d| resolve(d).ok())
+        .filter(|d| home_real.as_ref().is_none_or(|h| !h.starts_with(d)));
     CLOSED_IN_HOME
         .iter()
-        .map(|p| home.join(p))
-        .chain(data.iter().map(|d| d.to_path_buf()))
-        .filter_map(|p| resolve(&p).ok())
+        .filter_map(|p| resolve(&home.join(p)).ok())
+        .chain(data)
         .collect()
 }
 
@@ -317,6 +323,19 @@ mod tests {
             assert_eq!(err.code, "denied");
             assert!(err.message.contains("process.run"), "{}", err.message);
             assert_eq!(admit(&p, &b, access, true), Ok(()));
+        }
+    }
+
+    #[test]
+    fn closes_a_data_folder_unless_it_holds_the_home_folder() {
+        let d = disk();
+        let data = d.root.join("data");
+        fs::create_dir_all(&data).unwrap();
+        assert!(closed(&d.home, &[&data]).contains(&data));
+        for holding in [&d.home, &d.root] {
+            let shut = closed(&d.home, &[holding]);
+            assert!(!shut.contains(holding));
+            assert!(shut.contains(&d.home.join(".vorn")));
         }
     }
 
