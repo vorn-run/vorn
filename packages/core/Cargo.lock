@@ -7000,7 +7000,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-app"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "embed-resource",
  "futures-util",
@@ -7050,7 +7050,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-bench-ext-tiers"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "libc",
  "serde_json",
@@ -7092,7 +7092,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-cli"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -7120,7 +7120,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-components"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "serde_json",
  "vorn-tree",
@@ -7306,7 +7306,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-logfile"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "tempfile",
 ]
@@ -7324,7 +7324,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-phone"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -7403,7 +7403,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-scale-bench"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "futures-util",
  "libc",
@@ -7430,7 +7430,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-sessiond"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "crc32fast",
  "libc",
@@ -7514,7 +7514,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-vault"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -7527,7 +7527,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-web"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -7571,7 +7571,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-workflow-bench"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "futures-util",
  "libc",
@@ -7621,7 +7621,7 @@ dependencies = [
 
 [[package]]
 name = "vornd"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "bytes",
  "chrono",
