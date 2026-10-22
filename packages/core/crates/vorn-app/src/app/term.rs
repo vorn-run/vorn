@@ -24,16 +24,34 @@ pub enum Clip {
     SelectAll,
 }
 
-/// The clipboard keys: Cmd-C, Cmd-V and Cmd-A on a Mac;
-/// elsewhere Ctrl-Shift-C and Ctrl-Shift-V, and Ctrl-C only over a
-/// selection, else it interrupts. Ctrl-V is the program's everywhere (agent
-/// CLIs paste an image on it). Shift-Insert pastes everywhere.
-pub fn clipboard_key(code: &str, m: u16, selection: bool, mac: bool) -> Option<Clip> {
+/// Whose terminal clipboard keys apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keys {
+    Mac,
+    Windows,
+    Unix,
+}
+
+impl Keys {
+    /// This build's: a browser build learns the Mac from its page.
+    pub fn here() -> Keys {
+        if mods::mac() {
+            Keys::Mac
+        } else if cfg!(windows) {
+            Keys::Windows
+        } else {
+            Keys::Unix
+        }
+    }
+}
+
+/// The clipboard keys, as each platform's terminals have them; Ctrl-C and Ctrl-Insert copy only a selection.
+pub fn clipboard_key(code: &str, m: u16, selection: bool, keys: Keys) -> Option<Clip> {
     let held = m & (mods::SHIFT | mods::CTRL | mods::ALT | mods::SUPER);
     if code == "Insert" && held == mods::SHIFT {
         return Some(Clip::Paste);
     }
-    if mac {
+    if keys == Keys::Mac {
         return match code {
             "KeyC" if held == mods::SUPER => Some(Clip::Copy),
             "KeyV" if held == mods::SUPER => Some(Clip::Paste),
@@ -45,7 +63,8 @@ pub fn clipboard_key(code: &str, m: u16, selection: bool, mac: bool) -> Option<C
     let ctrl_shift = held == mods::CTRL | mods::SHIFT;
     match code {
         "KeyC" if ctrl_shift || ctrl && selection => Some(Clip::Copy),
-        "KeyV" if ctrl_shift => Some(Clip::Paste),
+        "Insert" if ctrl && selection => Some(Clip::Copy),
+        "KeyV" if ctrl_shift || ctrl && keys == Keys::Windows => Some(Clip::Paste),
         _ => None,
     }
 }
@@ -163,7 +182,7 @@ impl App {
             return false;
         };
         let selection = self.st.sel.as_ref().is_some_and(|(s, _)| *s == sid);
-        let Some(clip) = clipboard_key(code, m, selection, mods::mac()) else {
+        let Some(clip) = clipboard_key(code, m, selection, Keys::here()) else {
             return false;
         };
         let act = match clip {
@@ -457,32 +476,51 @@ mod tests {
 
     #[test]
     fn mac_clipboard_keys_are_cmd_c_v_and_a() {
-        let key = |code, m| clipboard_key(code, m, false, true);
+        let key = |code, m| clipboard_key(code, m, false, Keys::Mac);
         assert_eq!(key("KeyC", CMD), Some(Clip::Copy));
         assert_eq!(key("KeyV", CMD), Some(Clip::Paste));
         assert_eq!(key("KeyA", CMD), Some(Clip::SelectAll));
         assert_eq!(key("Insert", SHIFT), Some(Clip::Paste));
         // Ctrl stays the terminal's: Ctrl-C interrupts, Ctrl-V is quoted insert.
-        assert_eq!(clipboard_key("KeyC", CTRL, true, true), None);
+        assert_eq!(clipboard_key("KeyC", CTRL, true, Keys::Mac), None);
         assert_eq!(key("KeyV", CTRL), None);
         assert_eq!(key("KeyA", CTRL), None);
         assert_eq!(key("KeyC", CMD | SHIFT), None);
+        assert_eq!(clipboard_key("Insert", CTRL, true, Keys::Mac), None);
     }
 
     #[test]
     fn ctrl_c_copies_only_over_a_selection_off_the_mac() {
-        let key = |code, m, sel| clipboard_key(code, m, sel, false);
-        assert_eq!(key("KeyC", CTRL, true), Some(Clip::Copy));
-        assert_eq!(key("KeyC", CTRL, false), None);
-        assert_eq!(key("KeyC", CTRL | SHIFT, false), Some(Clip::Copy));
-        // Ctrl-V is the program's: agent CLIs paste the clipboard's image on it.
-        assert_eq!(key("KeyV", CTRL, false), None);
-        assert_eq!(key("KeyV", CTRL, true), None);
-        assert_eq!(key("KeyV", CTRL | SHIFT, false), Some(Clip::Paste));
-        assert_eq!(key("Insert", SHIFT, false), Some(Clip::Paste));
-        assert_eq!(key("KeyA", CTRL, false), None);
-        assert_eq!(key("KeyC", CMD, true), None);
-        assert_eq!(key("Insert", 0, false), None);
+        for keys in [Keys::Windows, Keys::Unix] {
+            let key = |code, m, sel| clipboard_key(code, m, sel, keys);
+            assert_eq!(key("KeyC", CTRL, true), Some(Clip::Copy));
+            assert_eq!(
+                key("KeyC", CTRL, false),
+                None,
+                "{keys:?}: Ctrl-C interrupts"
+            );
+            assert_eq!(key("KeyC", CTRL | SHIFT, false), Some(Clip::Copy));
+            assert_eq!(key("Insert", CTRL, true), Some(Clip::Copy));
+            assert_eq!(key("Insert", CTRL, false), None);
+            assert_eq!(key("KeyV", CTRL | SHIFT, false), Some(Clip::Paste));
+            assert_eq!(key("Insert", SHIFT, false), Some(Clip::Paste));
+            assert_eq!(key("KeyA", CTRL, false), None);
+            assert_eq!(key("KeyC", CMD, true), None);
+            assert_eq!(key("KeyV", CMD, false), None);
+            assert_eq!(key("Insert", 0, false), None);
+            assert_eq!(key("KeyC", CTRL | mods::ALT, true), None, "AltGr types");
+        }
+    }
+
+    #[test]
+    fn ctrl_v_pastes_on_windows_and_is_the_programs_elsewhere() {
+        let win = |m, sel| clipboard_key("KeyV", m, sel, Keys::Windows);
+        assert_eq!(win(CTRL, false), Some(Clip::Paste));
+        assert_eq!(win(CTRL, true), Some(Clip::Paste));
+        assert_eq!(win(CTRL | mods::ALT, false), None, "AltGr+V types");
+        // Unix terminals send ^V: quoted insert, or an agent CLI's image paste.
+        assert_eq!(clipboard_key("KeyV", CTRL, false, Keys::Unix), None);
+        assert_eq!(clipboard_key("KeyV", CTRL, true, Keys::Unix), None);
     }
 
     #[test]

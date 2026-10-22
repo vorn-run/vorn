@@ -195,6 +195,12 @@ impl Store {
                 "enableHoverPreview",
                 "worktreeRetention",
                 "tuiDrawing",
+                "colorScheme",
+                "lightTheme",
+                "darkTheme",
+                "interfaceStyle",
+                "contrastCorrection",
+                "materials",
             ],
         );
         Ok(out)

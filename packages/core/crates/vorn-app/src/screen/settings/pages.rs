@@ -252,7 +252,7 @@ pub(super) fn appearance(s: &Screen<'_>) -> El {
 }
 
 /// The id of a theme's preview tile, which the app reads the hover of.
-pub(crate) fn theme_tile_id(theme: &str) -> Id {
+pub fn theme_tile_id(theme: &str) -> Id {
     Id::new(&format!("theme-tile:{theme}"))
 }
 
