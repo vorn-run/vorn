@@ -258,6 +258,32 @@ pub struct Calls {
     pub errors: Vec<String>,
     pub peak_bench: usize,
     pub peak_vorn: usize,
+    /// When each call was in flight, and to what kind of extension.
+    pub spans: Vec<Span>,
+}
+
+/// One call in flight, so a slow key press can be laid against it.
+pub struct Span {
+    pub start: Instant,
+    pub end: Instant,
+    pub lang: Lang,
+    pub service: bool,
+}
+
+impl Calls {
+    /// The kind of extension a call was in flight to over `from..to`, if any.
+    pub fn during(&self, from: Instant, to: Instant) -> Option<String> {
+        self.spans
+            .iter()
+            .find(|s| s.start < to && from < s.end)
+            .map(|s| kind(s.lang, s.service))
+    }
+}
+
+/// A kind's name in the report, as `node service` or `rust one-shot`.
+pub fn kind(lang: Lang, service: bool) -> String {
+    let what = if service { "service" } else { "one-shot" };
+    format!("{} {what}", lang.name())
 }
 
 /// Calls every extension in turn, each once per period, on a connection of
@@ -284,10 +310,19 @@ impl Driver {
                     break;
                 }
                 match exts.get(tick % (exts.len() + 1)) {
-                    Some(ext) => match call(&rpc, ext) {
-                        Ok(ms) => calls.ms.push(ms),
-                        Err(e) => calls.errors.push(e),
-                    },
+                    Some(ext) => {
+                        let start = Instant::now();
+                        match call(&rpc, ext) {
+                            Ok(ms) => calls.ms.push(ms),
+                            Err(e) => calls.errors.push(e),
+                        }
+                        calls.spans.push(Span {
+                            start,
+                            end: Instant::now(),
+                            lang: ext.lang,
+                            service: ext.service,
+                        });
+                    }
                     None => {
                         if let Ok((bench, vorn)) = running(&rpc) {
                             calls.peak_bench = calls.peak_bench.max(bench);
@@ -415,6 +450,32 @@ pub fn read_log(log: &str) -> Lifecycle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_press_is_put_down_to_the_call_it_overlaps() {
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let span = |from, to, lang, service| Span {
+            start: at(from),
+            end: at(to),
+            lang,
+            service,
+        };
+        let calls = Calls {
+            spans: vec![
+                span(0, 10, Lang::Wasm, true),
+                span(20, 150, Lang::Node, false),
+            ],
+            ..Calls::default()
+        };
+        assert_eq!(calls.during(at(5), at(25)).as_deref(), Some("wasm service"));
+        assert_eq!(
+            calls.during(at(140), at(170)).as_deref(),
+            Some("node one-shot")
+        );
+        assert_eq!(calls.during(at(10), at(20)), None);
+        assert_eq!(calls.during(at(150), at(200)), None);
+    }
 
     #[test]
     fn the_log_counts_restarts_past_each_services_first_start() {

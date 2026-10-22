@@ -660,6 +660,7 @@ mod bench {
 
         let mut frames: Vec<f64> = Vec::new();
         let mut latencies: Vec<f64> = Vec::new();
+        let mut presses: Vec<(Instant, Instant)> = Vec::new();
         let mut timeouts = 0usize;
         let mut seq = 0usize;
         let mut pending: Option<(char, Instant)> = None;
@@ -710,6 +711,7 @@ mod bench {
             };
             if shows(&app, probe, c) {
                 latencies.push(ms(t1 - sent));
+                presses.push((sent, t1));
             } else if t1 - sent < PROBE_TIMEOUT {
                 continue;
             } else {
@@ -722,6 +724,17 @@ mod bench {
         }
         let wall = started.elapsed().as_secs_f64();
         let calls = driver.finish();
+        // Each press's latency under the kind of extension a call was in flight to.
+        let mut during: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        for &(sent, shown) in &presses {
+            let kind = calls
+                .during(sent, shown)
+                .unwrap_or_else(|| "none".to_owned());
+            during
+                .entry(kind)
+                .or_default()
+                .push(round(ms(shown - sent)));
+        }
         let app_cpu = (self_cpu() - cpu_app) / wall * 100.0;
         let daemon_cpu = (procs_cpu(&pids) - cpu_daemons) / wall * 100.0;
         let streaming = revs(&app)
@@ -761,6 +774,7 @@ mod bench {
                 "p99": pct(&latencies, 99.0),
                 "samples": latencies.len(),
                 "timeouts": timeouts,
+                "during": during,
             },
             "cpu_pct": {
                 "app": round(app_cpu),
