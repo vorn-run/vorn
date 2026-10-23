@@ -189,7 +189,13 @@ pub(crate) fn draw<A: App>(
     let mut tries = 0;
     ui.viewport = size;
     loop {
-        ui.begin_at(app.background(), now);
+        // Over the system's material the window clears to nothing, so the material shows.
+        let clear = if ui.see_through() {
+            Rgba::TRANSPARENT
+        } else {
+            app.background()
+        };
+        ui.begin_at(clear, now);
         let root = app.view(ui);
         let laid = ui.layout(root, size);
         app.paint(ui, &laid);
