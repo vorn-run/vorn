@@ -822,7 +822,9 @@ pub fn switch_track(on: bool) -> El {
                 .absolute(if on { 20.0 } else { 4.0 }, 4.0)
                 .size(16.0, 16.0)
                 .rounded(radius::FULL)
-                .bg(color::WHITE),
+                // literal-colour: a knob is white on every theme, as system switches are.
+                .bg(Rgba::WHITE)
+                .border(1.0, crate::palette::shadow(0.12)),
         )
 }
 

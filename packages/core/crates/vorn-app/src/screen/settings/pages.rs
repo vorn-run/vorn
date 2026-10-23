@@ -109,7 +109,8 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
                 .absolute(x, 0.0)
                 .size(knob, knob)
                 .rounded(knob / 2.0)
-                .bg(c(look::WHITE))
+                // literal-colour: a knob is white on every theme, as system switches are.
+                .bg(Rgba::WHITE)
                 .border(1.0, crate::ui::theme::shadow(0.12)),
         )
 }
@@ -403,17 +404,16 @@ fn surface_tile(
 ) -> El {
     let term = crate::ui::palette::terminal();
     let base = c(look::SURFACE_BASE);
+    let panel = c(look::SURFACE_PANEL);
+    let desk = Some((term.ansi[4].mix(base, 0.3), term.ansi[5].mix(base, 0.3)));
+    let tint = term.ansi[4];
     let (desk, sidebar, content) = match m {
-        Materials::Solid => (None, c(look::SURFACE_PANEL), base),
-        Materials::Native => (
-            Some((term.ansi[4], term.ansi[5])),
-            white(0.10),
-            base.alpha(0.85),
-        ),
+        Materials::Solid => (None, panel, base),
+        Materials::Native => (desk, panel.alpha(0.7), base.alpha(0.82)),
         Materials::Themed => (
-            Some((term.ansi[4], term.ansi[5])),
-            c(look::SURFACE_PANEL).alpha(0.7),
-            base.alpha(0.85),
+            desk,
+            panel.mix(tint, 0.3).alpha(0.8),
+            base.mix(tint, 0.18).alpha(0.9),
         ),
     };
     let line = |w: f32, a: f32| div().size(w, 3.0).rounded(1.5).bg(white(a));
@@ -738,16 +738,22 @@ pub(crate) fn theme_info(s: &Screen<'_>, id: &str) -> El {
     let Some(t) = crate::appearance::find(installed, id) else {
         return div();
     };
-    let mut grid = div().row().wrap_children().gap(5.0);
-    for (i, &rgb) in t.terminal.ansi.iter().enumerate() {
-        grid = grid.child(
-            div()
-                .size(26.0, 20.0)
-                .rounded(3.0)
-                .bg(Rgba::from(rgb))
-                .border(1.0, white(0.08))
-                .role(Role::Image, format!("Colour {i}")),
-        );
+    let mut grid = div().col().gap(5.0);
+    for (r, row) in t.terminal.ansi.chunks(8).enumerate() {
+        let mut line = div().row().gap(5.0);
+        for (i, &rgb) in row.iter().enumerate() {
+            line = line.child(
+                div()
+                    .grow()
+                    .min_w0()
+                    .h(20.0)
+                    .rounded(3.0)
+                    .bg(Rgba::from(rgb))
+                    .border(1.0, white(0.08))
+                    .role(Role::Image, format!("Colour {}", r * 8 + i)),
+            );
+        }
+        grid = grid.child(line);
     }
     let title = format!("{} \u{b7} terminal palette", t.name);
     crate::ui::widgets::popover("Theme details")
@@ -789,13 +795,17 @@ pub(crate) fn theme_picker(s: &Screen<'_>, side: Look) -> El {
         .border(1.0, white(0.1).mix(white(0.2), focus))
         .frames(THEME_SEARCH)
         .child(glyph_icon(glyph::SEARCH, 12.0, c(look::GRAY_500)))
-        .child(div().grow().min_w0().child(field(
-            THEME_SEARCH,
-            &placeholder,
-            &placeholder,
-            style,
-            look::GRAY_200,
-        )));
+        .child(
+            field(
+                THEME_SEARCH,
+                &placeholder,
+                &placeholder,
+                style,
+                look::GRAY_200,
+            )
+            .grow()
+            .min_w0(),
+        );
     let mut chips = div().row().gap(6.0).role(Role::RadioGroup, "Filter");
     for f in ThemeFilter::ALL {
         let on = filter == Some(f);

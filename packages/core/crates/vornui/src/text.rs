@@ -611,11 +611,11 @@ impl TextSystem {
         if let Some(list) = &self.mono_list {
             return list.clone();
         }
-        let mut names: Vec<String> = self
-            .fonts
-            .db()
+        let db = self.fonts.db();
+        let mut names: Vec<String> = db
             .faces()
             .filter(|f| f.monospaced)
+            .filter(|f| has_outlines(db, f.id))
             .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
             // A leading dot names a face the system keeps for itself.
             .filter(|n| !n.starts_with('.'))
@@ -902,6 +902,17 @@ pub fn text_presentation(cluster: &str) -> bool {
     let c = u32::from(first);
     let at = EMOJI_PRESENTATION.partition_point(|&(_, hi)| hi < c);
     !EMOJI_PRESENTATION.get(at).is_some_and(|&(lo, _)| lo <= c)
+}
+
+/// Whether a face draws its glyphs from outlines; a bitmap-only face has
+/// nothing for the terminal to scale.
+fn has_outlines(db: &cosmic_text::fontdb::Database, id: cosmic_text::fontdb::ID) -> bool {
+    use cosmic_text::skrifa::{raw::TableProvider, FontRef};
+    db.with_face_data(id, |data, index| {
+        FontRef::from_index(data, index)
+            .is_ok_and(|f| f.glyf().is_ok() || f.cff().is_ok() || f.cff2().is_ok())
+    })
+    .unwrap_or(false)
 }
 
 fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba, gamma: TextGamma) {
