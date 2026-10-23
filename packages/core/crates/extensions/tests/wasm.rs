@@ -158,7 +158,7 @@ impl Rig {
     }
 }
 
-const ALL: &str = "\"sessions.read\", \"sessions.launch\", \"storage\"";
+const ALL: &str = "\"sessions.read\", \"sessions.launch\", \"process.run\", \"storage\"";
 
 /// The probe as if built against API `version`: its import names rewritten
 /// in place, the same length, so the component stays valid.

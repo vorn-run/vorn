@@ -720,8 +720,8 @@ impl App {
             Picked::Import => self.import(&path),
             Picked::ExtFolder(origin) => self.plug_picked(ui, origin, &path),
             Picked::Tree { key, node } => {
-                let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Submit, path);
-                self.tell(&key, &event);
+                let event = vorn_tree::Event::new(node, vorn_tree::EventKind::Submit, path.clone());
+                self.tell_picked(&key, &event, &path);
             }
         }
     }

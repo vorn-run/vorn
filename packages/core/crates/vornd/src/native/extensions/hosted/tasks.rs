@@ -58,6 +58,15 @@ async fn call(native: &Native, action: &str, args: Value, caller: &str) -> Resul
 
 /// Answers one of its `task:*` calls.
 pub async fn answer(native: &Native, method: &str, params: Value) -> Answer {
+    // The image a person picked for a task is Tasks' to read.
+    if method == "task:imageSave" {
+        if let (Some(ext), Some(path)) = (
+            native.extensions(),
+            params.get("sourcePath").and_then(Value::as_str),
+        ) {
+            ext.hand(ID, path).await;
+        }
+    }
     let answered = match call(native, method, params, "client").await {
         Ok(v) => v,
         Err(e) => return Answer::Error(e.message),

@@ -159,7 +159,7 @@ impl BlobStore {
     }
 
     /// Extension `id`'s folder; its name escapes the id as the store's tables do.
-    fn dir(&self, id: &str) -> PathBuf {
+    pub fn dir(&self, id: &str) -> PathBuf {
         if let Some((_, folder)) = self.placed.iter().find(|(p, _)| p == id) {
             return folder.clone();
         }

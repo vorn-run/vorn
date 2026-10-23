@@ -625,6 +625,11 @@ impl Router {
         self.blobs.as_ref().map(|s| s.path(id, name))
     }
 
+    /// Extension `id`'s own folder of files; `None` when this Vorn keeps none.
+    pub fn files_dir(&self, id: &str) -> Option<PathBuf> {
+        self.blobs.as_ref().map(|s| s.dir(id))
+    }
+
     /// Runs `call` on extension `id`'s own files, off the runtime.
     async fn blobs(&self, id: &str, call: BlobCall) -> Result<Value, ExtError> {
         let store = self

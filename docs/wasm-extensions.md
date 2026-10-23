@@ -397,7 +397,15 @@ record session-start {
 A shell takes only `project` and `name`. A headless session names the
 extension as what started it. `host.call("sessions.launch", ...)` takes the
 same fields, with `project` defaulting to the call's project, and answers
-`{sessionId}`.
+`{sessionId}`. Starting a session needs `process.run` as well as
+`sessions.launch`; closing one needs only `sessions.launch`.
+
+`terminal.read`, `terminal.send` and `terminal.selection` reach the sessions
+the extension started, over the gate and over a page's bridge alike. Any
+other session needs `process.run` and a pane of the extension's on that
+session: one it opened, or a tree a client draws for that session. `permissions.resolve` answers an
+agent's request while the extension handles a person's click; on its own it
+needs `process.run`.
 
 ### `storage.transaction`
 
@@ -422,6 +430,39 @@ extension keeps up to 256 MiB in all. Its files go when it is removed. Over
 stdio, `data` and what `get` answers are base64 strings.
 
 ### Calls and events Files and Shell blocks use
+
+`files.*` take absolute paths, resolved (`..` and symlinks followed) before
+they are checked, and passed on as the extension named them. A `..` after a
+folder that is not there, or a link that leads nowhere, is refused; on
+Windows any `..` is refused. An extension reads and writes the folders of
+Vorn's projects and their worktrees, its own files' folder, and the folder
+(and below) that the shell of a session it started or has a pane on is in;
+it reads a file a person chose for it in a file dialog. The home folder, and
+any folder above it, never counts as a project; a shell in the home folder
+lets the extension read below it but not write, and a shell above it only
+the files directly in that folder. `git.status`, `git.diff` and
+`git.branches` read, and `git.commit` and `worktrees.reclaim`, `.prune` and
+`.remove` write, under the same rule. Writing inside a repository's git
+folder (`.git`, the folder a worktree's `.git` file points to, and the
+repository's common folder) needs `process.run`, since git runs what its
+config names.
+`files.list` and `files.stat` answer names, sizes and times anywhere.
+Reading or writing anywhere else needs `process.run`.
+
+Never reached through `files.*`, even with `process.run`: Vorn's data, and in the home
+folder:
+
+- keys and credentials: `.ssh`, `.gnupg`, `.aws`, `.azure`,
+  `.config/gcloud`, `.kube`, `.docker`, `.netrc`, `.git-credentials`,
+  `.npmrc`, `.pypirc`, `.pgpass`, `.cargo/credentials`,
+  `.cargo/credentials.toml`, `.gem/credentials`, `.config/gh`,
+  `.claude.json`;
+- what runs at login: `Library/LaunchAgents`, `.config/autostart`,
+  `.config/systemd`, `Documents/PowerShell`, `Documents/WindowsPowerShell`,
+  and `AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`;
+- the shell's startup files: `.bashrc`, `.bash_aliases`, `.bash_profile`,
+  `.bash_login`, `.bash_logout`, `.profile`, `.zshrc`, `.zshenv`,
+  `.zprofile`, `.zlogin`, `.zlogout`, `.config/fish`.
 
 - `files.list` (`{path}`) answers a folder's entries, `{name, path,
 isDirectory}`, folders first, without what git ignores; `files.stat`
@@ -464,6 +505,9 @@ answers what the app does; with no app connected it fails.
 | `console` | `limit`                          | its console messages                         |
 | `network` | `limit`                          | its requests                                 |
 
+vornd refuses any other `op`: no op runs a script of the extension's own in
+the page.
+
 The app refuses a `file:` address outside the session's project, on disk as
 well as by name, and anything it would not load from the address bar.
 
@@ -487,8 +531,7 @@ connected it fails. `udid` names the simulator in all but `list`.
 | `screenshot` | `udid`             | `{data, width, height}`, a PNG in base64                    |
 | `save`       | `udid`, `name`     | `{path}`, a screenshot saved to Downloads                   |
 
-Any other `op`, such as reading the screen or the logs, fails with a message
-saying the native app cannot yet.
+vornd refuses any other `op`.
 
 ### `remote.*`: SSH's hosts and keys
 
@@ -504,9 +547,12 @@ sessions on a remote host keep running with SSH uninstalled.
 | `remote.test`      | `host`, optional `then` and `key`                 | `{success, message, durationMs}`; with `then`, see below    |
 | `remote.keys`      |                                                   | the stored keys, without their private halves               |
 | `remote.storeKey`  | `label`, `privateKey`, `publicKey`, `certificate` | the stored key                                              |
-| `remote.importKey` | `path` (`~` is home)                              | the stored key, read from the file and its `.pub` beside it |
+| `remote.importKey` | `path` (`~` is home), in `~/.ssh` or chosen       | the stored key, read from the file and its `.pub` beside it |
 | `remote.deleteKey` | `id`                                              | `null`, the key and its secret gone                         |
 | `remote.vault`     |                                                   | `{keychain}`: `false` when the OS keychain is missing       |
+
+`remote.importKey` reads a private key in `~/.ssh` or one the person chose
+with a file dialog; for any other path it fails with the same message.
 
 A test logs in for up to ten seconds, and a component answers one call at a
 time, so with `then` `remote.test` answers `{testing: true}` at once and

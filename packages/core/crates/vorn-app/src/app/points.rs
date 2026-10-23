@@ -304,6 +304,21 @@ impl App {
         );
     }
 
+    /// Tells tree point `key`'s extension the file a person picked in a
+    /// dialog, which it may then read: vornd hears it as `picked`.
+    pub(super) fn tell_picked(&mut self, key: &str, event: &vorn_tree::Event, path: &str) {
+        self.flush_codes(key);
+        let Some(mut params) = self.st.points.tell(key, event) else {
+            return;
+        };
+        params["picked"] = json!(path);
+        self.call(
+            Call::Point(PointCall::Told(key.to_owned())),
+            "extension:call",
+            params,
+        );
+    }
+
     pub(super) fn point_answered(&mut self, call: PointCall, answer: Result<Value, RpcError>) {
         match call {
             PointCall::List => {
