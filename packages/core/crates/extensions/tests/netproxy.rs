@@ -23,7 +23,7 @@ console.log(JSON.stringify(out))
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sandboxed_program_reaches_its_hosts_only_through_the_proxy() {
-    if !sandbox::available() {
+    if sandbox::Kind::here() != sandbox::Kind::Seatbelt {
         eprintln!("skipped: the sandbox profile needs macOS");
         return;
     }
@@ -72,7 +72,9 @@ async fn a_sandboxed_program_reaches_its_hosts_only_through_the_proxy() {
         cwd: dir.path().to_path_buf(),
         env,
     };
-    let held = sandbox::wrap_through(launch, dir.path(), Some(proxy.port()));
+    let mut reach = sandbox::Reach::of(dir.path(), None, None);
+    reach.ports.push(proxy.port());
+    let held = sandbox::wrap(launch, &reach, None).expect("Seatbelt confines");
     let out = tokio::process::Command::new(&held.program)
         .args(&held.args)
         .current_dir(&held.cwd)
@@ -93,7 +95,7 @@ async fn a_sandboxed_program_reaches_its_hosts_only_through_the_proxy() {
 
     // Without the proxy the same program reaches nothing at all.
     let mut bare = held.clone();
-    bare.args[1] = sandbox::profile(&std::fs::canonicalize(dir.path()).unwrap(), None);
+    bare.args[1] = sandbox::profile(&sandbox::Reach::of(dir.path(), None, None));
     bare.env
         .retain(|(k, _)| !k.to_lowercase().ends_with("_proxy"));
     let out = tokio::process::Command::new(&bare.program)

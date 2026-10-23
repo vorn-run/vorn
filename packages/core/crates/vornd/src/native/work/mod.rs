@@ -91,6 +91,7 @@ pub const METHODS: &[&str] = &[
     "artifact:get",
     "artifact:versionUrl",
     "artifact:forGate",
+    "page:ticket",
     "artifact:readComments",
     "artifact:saveComment",
     "artifact:updateComment",
@@ -122,6 +123,8 @@ pub struct Work {
     queue: Mutex<Queue>,
     /// The workflows that are files in a project.
     pub(crate) files: Arc<files::Files>,
+    /// The single-use tickets addresses open pages with, instead of tokens.
+    tickets: Mutex<vorn_work::tickets::Tickets>,
 }
 
 fn param<'a>(params: &'a Value, key: &str) -> Option<&'a Value> {
@@ -169,6 +172,7 @@ impl Work {
             rearm: Notify::new(),
             queue: Mutex::default(),
             files: workflow_files,
+            tickets: Mutex::default(),
         })
     }
 
@@ -323,8 +327,51 @@ impl Work {
                 Answer::Error(super::extensions::builtin::artifacts::OFF.to_owned())
             }
             "artifact" => self.artifact(method, params).await,
+            "page" => self.page_ticket(params),
             _ => self.workflow(method, params).await,
         }
+    }
+
+    /// `path` (a page's address, `?t=<token>` and all) with its token swapped for a ticket.
+    pub(crate) fn ticketed(&self, path: &str) -> String {
+        let mut tickets = self.tickets.lock().unwrap_or_else(|e| e.into_inner());
+        vorn_work::tickets::swap_token(&mut tickets, path, now_ms())
+    }
+
+    /// The token a page's `ticket` opens it with, once.
+    pub(crate) fn redeem(&self, ticket: &str, page: &str) -> Option<String> {
+        self.tickets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .redeem(ticket, page, now_ms())
+    }
+
+    /// `page:ticket`: a client's page address, `?t=<token>`, as one to open:
+    /// `{path}` with a single-use ticket in place of the token.
+    fn page_ticket(&self, params: &Value) -> Answer {
+        let Some(path) = text(params, "path") else {
+            return Answer::Error("page:ticket needs the page's path".into());
+        };
+        if !path.contains("?t=") && !path.contains("&t=") {
+            return Answer::Error("page:ticket needs a path with its page's token".into());
+        }
+        Answer::Result(json!({ "path": self.ticketed(&path) }))
+    }
+
+    /// An answer's `url` (and `path`, the same page) with one ticket in place of the token.
+    fn with_tickets(&self, mut v: Value) -> Value {
+        let Some(url) = v.get("url").and_then(Value::as_str).map(str::to_owned) else {
+            return v;
+        };
+        let Some(at) = url.find("/artifact/").or_else(|| url.find("/gate-view/")) else {
+            return v;
+        };
+        let path = self.ticketed(&url[at..]);
+        v["url"] = Value::String(format!("{}{path}", &url[..at]));
+        if v.get("path").is_some() {
+            v["path"] = Value::String(path);
+        }
+        v
     }
 
     /// What this process knows that the database does not.
@@ -808,7 +855,10 @@ impl Work {
     async fn artifact(self: &Arc<Self>, method: &str, params: &Value) -> Answer {
         let data_dir = self.host().data_dir.clone();
         match method {
-            "artifact:versionUrl" | "artifact:forGate" => self.read(method, params).await,
+            "artifact:versionUrl" | "artifact:forGate" => match self.read(method, params).await {
+                Answer::Result(v) => Answer::Result(self.with_tickets(v)),
+                other => other,
+            },
             "artifact:publish" => {
                 let session_id = text(params, "sessionId").unwrap_or_default();
                 let me = match self.calling_session(&session_id) {
@@ -825,7 +875,10 @@ impl Work {
                     Some(Err(e)) => return Answer::Error(e),
                     None => return stored(None),
                 };
-                let url = self.loopback_url(outcome["path"].as_str().unwrap_or(""));
+                // One ticket for the pane that opens now, another for the address answered.
+                let path = outcome["path"].as_str().unwrap_or("");
+                let url = self.loopback_url(&self.ticketed(path));
+                let pane_url = self.loopback_url(&self.ticketed(path));
                 self.host().broadcast(
                     "artifact:published",
                     json!({ "artifact": outcome["artifact"], "version": outcome["version"] }),
@@ -834,7 +887,7 @@ impl Work {
                 if params.get("open") != Some(&Value::Bool(false)) {
                     let a = &outcome["artifact"];
                     let pane = json!({
-                        "sessionId": session_id, "url": url,
+                        "sessionId": session_id, "url": pane_url,
                         "artifact": { "id": a["id"], "version": outcome["version"]["version"], "kind": a["kind"], "title": a["title"] }
                     });
                     match self

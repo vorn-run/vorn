@@ -125,11 +125,21 @@ pub struct DeviceToken {
     pub revoked_at: Option<String>,
     #[serde(default)]
     pub last_address: Option<String>,
+    /// Unused for longer than vornd keeps a device signed in.
+    #[serde(default)]
+    pub expired: bool,
 }
+
+/// How long a device may go without connecting before it is signed out, as the page says it.
+pub const IDLE_EXPIRY: &str =
+    "A device that does not connect for 30 days is signed out and pairs again.";
 
 impl DeviceToken {
     /// The line under the device's name.
     pub fn seen(&self) -> String {
+        if self.expired {
+            return "Signed out: not connected for 30 days".to_owned();
+        }
         let Some(at) = self.last_seen_at.as_deref().filter(|s| !s.is_empty()) else {
             return "Never connected".to_owned();
         };
@@ -450,6 +460,7 @@ mod tests {
             last_seen_at: None,
             revoked_at: None,
             last_address: None,
+            expired: false,
         };
         assert_eq!(never.seen(), "Never connected");
         let seen = DeviceToken {
@@ -465,6 +476,11 @@ mod tests {
             from.seen(),
             "Last seen 1/1/2030, 9:00:00 AM from 192.168.1.7"
         );
+        let gone = DeviceToken {
+            expired: true,
+            ..from
+        };
+        assert_eq!(gone.seen(), "Signed out: not connected for 30 days");
     }
 
     #[test]
@@ -501,6 +517,7 @@ mod tests {
             last_seen_at: None,
             revoked_at: revoked.then(|| "2030-01-01T00:00:00Z".into()),
             last_address: None,
+            expired: false,
         };
         let n = Network {
             tokens: Some(vec![t("a", false), t("b", true), t("c", false)]),

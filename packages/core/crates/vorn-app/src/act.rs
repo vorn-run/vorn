@@ -81,6 +81,8 @@ pub enum Act {
     CopySelection(String),
     /// Runs the paste the confirm dialog holds, or drops it.
     ConfirmPaste(bool),
+    /// Puts a program's copy on the clipboard, or drops it.
+    ConfirmProgramCopy(bool),
     /// Back to a terminal's live screen from its history.
     ScrollToBottom(String),
     /// A page up (true) or down through a terminal's history, from its scrollbar's track.

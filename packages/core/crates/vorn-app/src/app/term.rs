@@ -338,12 +338,63 @@ impl App {
         }
     }
 
-    /// What vornd answered: a word to select, text to copy, a paste to confirm.
-    pub(super) fn grid_replies(&mut self, ui: &mut Ui) {
-        let Some(g) = &self.grid else {
+    /// The program-copy dialog's answer.
+    pub(super) fn confirm_program_copy(&mut self, ui: &mut Ui, copy: bool) {
+        let pending = self.st.program_copy.take();
+        if self.st.dialog == Some(Dialog::ProgramCopy) {
+            self.st.dialog = None;
+            ui.set_focus(None);
+        }
+        if let (true, Some(p)) = (copy, pending) {
+            ui.clipboard().set(&p.text);
+        }
+    }
+
+    /// A program's copy (OSC 52), as the place it runs in allows: onto the
+    /// clipboard, with a word when its card is not the one being typed into;
+    /// asked about first; or dropped.
+    fn program_copied(&mut self, ui: &mut Ui, session: &str, text: String) {
+        use crate::copying::{decide, policy, Decision};
+        let Some(s) = self.store.session(session) else {
             return;
         };
-        for reply in g.take_replies() {
+        let host = s.info.remote_host_id.as_deref();
+        let place = s
+            .info
+            .remote_host_label
+            .as_deref()
+            .filter(|l| host.is_some() && !l.is_empty());
+        let who = match place {
+            Some(label) => format!("{} on {label}", s.title()),
+            None => s.title(),
+        };
+        let chosen = policy(self.store.config.get("defaults"), host);
+        let foreground = ui.window_focused() && self.typing_target().as_deref() == Some(session);
+        match decide(chosen, foreground) {
+            Decision::Copy => ui.clipboard().set(&text),
+            Decision::CopyAndTell => {
+                ui.clipboard().set(&text);
+                let size = crate::copying::size(&text);
+                self.st
+                    .toast(format!("{who} copied {size} to the clipboard"), false);
+            }
+            // A newer copy replaces one still asked about; another dialog open drops it.
+            Decision::Ask => {
+                if matches!(self.st.dialog, None | Some(Dialog::ProgramCopy)) {
+                    self.st.program_copy = Some(crate::state::ProgramCopy { who, text });
+                    self.st.dialog = Some(Dialog::ProgramCopy);
+                }
+            }
+            Decision::Drop => {}
+        }
+    }
+
+    /// What vornd answered: a word to select, text to copy, a paste to confirm.
+    pub(super) fn grid_replies(&mut self, ui: &mut Ui) {
+        let Some(replies) = self.grid.as_ref().map(|g| g.take_replies()) else {
+            return;
+        };
+        for reply in replies {
             match reply {
                 Reply::Selection { session, range } => {
                     let primary = self.views.get(&session).is_some_and(|v| v.primary);
@@ -361,6 +412,7 @@ impl App {
                         self.st.dialog = Some(Dialog::Paste);
                     }
                 }
+                Reply::ProgramCopied { session, text } => self.program_copied(ui, &session, text),
             }
         }
     }

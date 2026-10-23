@@ -201,6 +201,21 @@ fn run(
         .then(|| String::from_utf8_lossy(&out).trim().to_owned())
 }
 
+/// `token:list`'s rows, each with `expired`: unused past [`token::IDLE_EXPIRY_MS`] at `now`.
+fn with_expiry(mut list: Value, now: u64) -> Value {
+    let now = i64::try_from(now).unwrap_or(i64::MAX);
+    if let Some(rows) = list.as_array_mut() {
+        for row in rows {
+            let used = row["lastSeenAt"]
+                .as_str()
+                .or_else(|| row["createdAt"].as_str())
+                .and_then(vorn_store::parse_iso_millis);
+            row["expired"] = json!(used.is_some_and(|at| token::idle_expired(at, now)));
+        }
+    }
+    list
+}
+
 /// The error while there is no database of device tokens.
 fn no_tokens() -> Answer {
     Answer::Error("vornd has no database of device tokens".to_owned())
@@ -225,7 +240,7 @@ impl Native {
             }
             "token:list" => match self.tokens() {
                 Some(t) => match t.list() {
-                    Ok(list) => Answer::Result(json!(list)),
+                    Ok(list) => Answer::Result(with_expiry(json!(list), now_ms())),
                     Err(e) => Answer::Error(e.to_string()),
                 },
                 None => no_tokens(),
@@ -454,6 +469,14 @@ impl Native {
         if row.revoked_at.is_some() || !token::secret_matches(parsed.secret, &row.token_hash) {
             return None;
         }
+        let now = i64::try_from(now_ms()).unwrap_or(i64::MAX);
+        match tokens.last_used_ms(&row.id) {
+            Ok(Some(at)) if !token::idle_expired(at, now) => {}
+            _ => {
+                debug!(token = %row.id, "refused a device token unused for too long");
+                return None;
+            }
+        }
         if let Err(err) = tokens.touch(
             &row.id,
             &vorn_store::now_iso(),
@@ -481,4 +504,24 @@ impl Native {
 /// JavaScript's `trim`: Unicode white space and the byte order mark.
 fn js_trim(s: &str) -> &str {
     s.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_a_token_unused_for_thirty_days_as_expired() {
+        let day = 24 * 60 * 60 * 1000;
+        let now = 40 * day;
+        let list = json!([
+            { "id": "a", "createdAt": vorn_store::now_iso(), "lastSeenAt": null },
+            { "id": "b", "createdAt": "1970-01-01T00:00:00.000Z", "lastSeenAt": "1970-01-31T00:00:00.000Z" },
+            { "id": "c", "createdAt": "1970-01-01T00:00:00.000Z", "lastSeenAt": null },
+        ]);
+        let listed = with_expiry(list, now);
+        assert_eq!(listed[1]["expired"], false);
+        assert_eq!(listed[2]["expired"], true);
+        assert_eq!(listed[0]["expired"], false);
+    }
 }

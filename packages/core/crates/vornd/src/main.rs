@@ -329,6 +329,19 @@ fn take_desktop_token() -> Option<Vec<u8>> {
 }
 
 fn main() -> ExitCode {
+    // vornd as the sandbox's helper: confine this process, then become the program.
+    #[cfg(target_os = "linux")]
+    {
+        let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
+        if argv
+            .get(1)
+            .is_some_and(|a| a == vorn_extensions::sandbox::CONFINE_FLAG)
+        {
+            let err = vorn_extensions::sandbox::landlock::confine_and_exec(&argv[2..]);
+            eprintln!("vornd: could not start the program sandboxed: {err}");
+            return ExitCode::from(126);
+        }
+    }
     let desktop_token = take_desktop_token();
     let args = match parse_args(std::env::args().skip(1)) {
         Ok(args) => args,

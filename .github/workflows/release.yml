@@ -50,18 +50,10 @@ jobs:
             gh release create "$tag" $flags
           fi
 
-  # Vorn for every platform, and the update feeds the installed apps read.
+  # Vorn for every platform, the server alone for Linux ARM64 boards, and the update feeds the installed apps read.
   build:
     needs: create-release
     uses: ./.github/workflows/native-app.yml
-    with:
-      tag: ${{ needs.create-release.outputs.tag }}
-    secrets: inherit
-
-  # The server alone for Linux ARM64 boards, which have no desktop app yet.
-  server-linux-arm64:
-    needs: create-release
-    uses: ./.github/workflows/server-linux-arm64.yml
     with:
       tag: ${{ needs.create-release.outputs.tag }}
     secrets: inherit

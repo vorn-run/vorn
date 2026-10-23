@@ -47,6 +47,19 @@ fn frame(s: &Screen<'_>, id: Id, inner: El) -> El {
         .child(inner)
 }
 
+/// Where a password goes, in warning colour when there is no keychain.
+fn kept_hint(s: &Screen<'_>) -> El {
+    let ink = if s.st.keychain == Some(false) {
+        look::AMBER_400
+    } else {
+        look::GRAY_600
+    };
+    text(crate::settings::secrets_kept(s.st.keychain), 10.0, c(ink))
+        .line_height(15.0)
+        .mt(4.0)
+        .silent()
+}
+
 fn style(mono: bool) -> TextStyle {
     let base = if mono {
         TextStyle::mono(12.0)
@@ -252,7 +265,7 @@ fn host_form(s: &Screen<'_>, h: &Value, id: &str) -> El {
                     .secure()
                     .w_full(),
                 ))
-                .child(hint("Encrypted with your OS keychain"))
+                .child(kept_hint(s))
         }
         "key-stored" => {
             let cred = s_of(h, "credentialId");

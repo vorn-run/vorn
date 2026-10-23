@@ -665,6 +665,8 @@ export interface RequestMethods {
   'config:save': { params: AppConfig; result: void }
   /** Whether the Rust core loaded, for Settings › About. */
   'core:status': { params: void; result: CoreStatus }
+  /** Whether secrets are in the OS keychain; `false` when it is missing and a private file holds them. */
+  'vault:status': { params: void; result: { keychain: boolean } }
   /**
    * Sessions from the last run that no pane has taken yet.
    *

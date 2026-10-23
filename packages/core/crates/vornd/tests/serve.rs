@@ -204,6 +204,35 @@ async fn serves_clients_with_nothing_behind_it() {
     let health: Value =
         serde_json::from_str(&reqwest_get(served.port, "/vornd/health").await).unwrap();
     assert_eq!(health["ok"], true);
+    // vornd's reports want the local credential and a Host that names this machine.
+    let port = served.port;
+    assert_eq!(
+        reqwest_get_as(port, "/vornd/health", "127.0.0.1", None).await,
+        "a token is required"
+    );
+    assert_eq!(
+        reqwest_get_as(port, "/vornd/sessions", "127.0.0.1", Some("nope")).await,
+        "a token is required"
+    );
+    assert_eq!(
+        reqwest_get_as(port, "/vornd/health", "rebound.example", Some(CREDENTIAL)).await,
+        "this route answers only requests addressed to this machine"
+    );
+    // A browser here holds a device token, which reads them too.
+    send(
+        &mut desktop,
+        json!({ "jsonrpc": "2.0", "id": 7, "method": "token:create", "params": { "name": "Browser" } }),
+    )
+    .await;
+    let minted = answer(&mut desktop, 7).await["result"]["plaintext"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let read: Value = serde_json::from_str(
+        &reqwest_get_as(port, "/vornd/health", "127.0.0.1", Some(&minted)).await,
+    )
+    .unwrap();
+    assert_eq!(read["ok"], true);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -437,9 +466,15 @@ fn a_debug_build_will_not_touch_the_default_data_directory() {
 
 /// GETs `path` and answers the body.
 async fn reqwest_get(port: u16, path: &str) -> String {
+    reqwest_get_as(port, path, "127.0.0.1", Some(CREDENTIAL)).await
+}
+
+/// A GET naming `host`, with `bearer` when given.
+async fn reqwest_get_as(port: u16, path: &str, host: &str, bearer: Option<&str>) -> String {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    let auth = bearer.map_or(String::new(), |t| format!("Authorization: Bearer {t}\r\n"));
+    let req = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\n{auth}Connection: close\r\n\r\n");
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut out = String::new();
     stream.read_to_string(&mut out).await.unwrap();

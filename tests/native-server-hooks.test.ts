@@ -25,6 +25,7 @@ import {
   stopRealServer,
   until
 } from './helpers/real-server'
+import { vorndReport } from './helpers/served'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 120_000 })
 
@@ -216,7 +217,7 @@ describe.runIf(runnable && inCatalog('vorn.widget'))('agents’ hooks in vornd',
 
   it('gives the registration up when it stops', async () => {
     const health = (await (
-      await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+      await vorndReport(server.vornd, '/vornd/health', server.dirs.data)
     ).json()) as {
       hooks: { owner: boolean; pendingPermissions: number }
     }

@@ -8,7 +8,13 @@ import {
   serverArchiveName,
   windowsVersion
 } from '../packages/core/scripts/package-native.mjs'
-import { feeds, nativeFeed } from '../packages/core/scripts/release-feeds.mjs'
+import { execFileSync } from 'node:child_process'
+import { generateKeyPairSync } from 'node:crypto'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { feeds, nativeFeed, releaseAssets } from '../packages/core/scripts/release-feeds.mjs'
+import { publicBase64, signFeed, verifyFeed } from '../packages/core/scripts/sign-feed.mjs'
 import {
   compareVersions,
   nextPatch,
@@ -131,6 +137,44 @@ describe('release feeds', () => {
 
   it('publishes only the native feed', () => {
     expect(Object.keys(feeds({ ...base, files: fakeFiles() }))).toEqual(['vorn-update.json'])
+  })
+
+  it('lists every release file with its SHA-256 for the install scripts', () => {
+    const files = fakeFiles()
+    const feed = nativeFeed({ ...base, files })
+    expect(Object.keys(feed.checksums).sort()).toEqual(Object.keys(files).sort())
+    expect(feed.checksums['Vorn-0.8.0-beta.9-arm64.dmg']).toMatch(/^sha256-/)
+    // install.sh reads one `"name": "hash"` pair a line.
+    const text = feeds({ ...base, files })['vorn-update.json']
+    expect(text).toContain('"Vorn-0.8.0-beta.9.AppImage": "')
+  })
+
+  it('refuses to write a release feed without the server archives it must list', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-feed-'))
+    for (const name of Object.values(releaseAssets('9.9.9')) as string[]) {
+      fs.writeFileSync(path.join(dir, name), 'x')
+    }
+    const script = path.resolve(__dirname, '../packages/core/scripts/release-feeds.mjs')
+    const args = [script, '--dir', dir, '--version', '9.9.9', '--servers', 'linux-arm64']
+    const write = () => execFileSync('node', args, { stdio: 'pipe' })
+    expect(write).toThrow()
+    fs.writeFileSync(path.join(dir, 'vorn-server-9.9.9-linux-arm64.tar.gz'), 'y')
+    write()
+    const feed = JSON.parse(fs.readFileSync(path.join(dir, 'vorn-update.json'), 'utf8'))
+    expect(feed.checksums['vorn-server-9.9.9-linux-arm64.tar.gz']).toMatch(/^[0-9a-f]{64}$/)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('signs the feed so only its own key verifies it', () => {
+    const { privateKey } = generateKeyPairSync('ed25519')
+    const other = generateKeyPairSync('ed25519').privateKey
+    const body = Buffer.from(feeds({ ...base, files: fakeFiles() })['vorn-update.json'])
+    const signature = signFeed(body, privateKey)
+    const key = publicBase64(privateKey)
+    expect(Buffer.from(key, 'base64')).toHaveLength(32)
+    expect(verifyFeed(body, signature, key)).toBe(true)
+    expect(verifyFeed(Buffer.concat([body, Buffer.from(' ')]), signature, key)).toBe(false)
+    expect(verifyFeed(body, signFeed(body, other), key)).toBe(false)
   })
 })
 

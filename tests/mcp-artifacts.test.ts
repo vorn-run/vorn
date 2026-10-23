@@ -51,7 +51,7 @@ describe('artifact tools', () => {
     rpcCall.mockResolvedValue({
       artifact: { id: 'a1', kind: 'page', title: 'Figures' },
       version: { version: 4 },
-      url: 'http://127.0.0.1:1/artifact/a1/4?t=x',
+      url: 'http://127.0.0.1:1/artifact/a1/4?ticket=x',
       answered: 3,
       opened: true
     })

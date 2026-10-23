@@ -186,8 +186,10 @@ impl Vornd {
 /// What vornd on `port` answers at `/vornd/health`.
 pub fn health(port: u16) -> Value {
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-    s.write_all(b"GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .unwrap();
+    let req = format!(
+        "GET /vornd/health HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {CREDENTIAL}\r\nConnection: close\r\n\r\n"
+    );
+    s.write_all(req.as_bytes()).unwrap();
     let mut res = String::new();
     s.read_to_string(&mut res).unwrap();
     serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()

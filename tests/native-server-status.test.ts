@@ -23,7 +23,7 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AgentStatus, TerminalSession } from '@vornrun/shared/types'
 import { spawnsRealServers } from './helpers/one-at-a-time'
-import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
+import { builtSessiond, builtVornd, startServed, type Served, vorndReport } from './helpers/served'
 
 const CREDENTIAL = 'native-status-test-credential'
 const runnable = !!builtVornd && !!builtSessiond && process.platform !== 'win32'
@@ -176,7 +176,7 @@ async function startServer(): Promise<Server> {
   const server: Server = { served, dirs: [home, served.dataDir], port: served.port }
   servers.push(server)
   await waitFor('the session holder', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.port}/vornd/health`)
+    const res = await vorndReport(server.port, '/vornd/health', served.dataDir)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }

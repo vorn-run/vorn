@@ -406,7 +406,13 @@ fn devices(s: &Screen<'_>, n: &Network) -> El {
             }
             r
         });
-        el = el.child(div().col().mt(4.0).children(rows));
+        el = el.child(div().col().mt(4.0).children(rows)).child(
+            text(crate::network::IDLE_EXPIRY, 10.0, c(look::GRAY_600))
+                .line_height(14.0)
+                .mt(4.0)
+                .wrapping()
+                .silent(),
+        );
     }
     el
 }

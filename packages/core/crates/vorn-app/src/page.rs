@@ -223,6 +223,27 @@ pub async fn get_json(path: &str) -> Option<serde_json::Value> {
     serde_json::from_str(&text).ok()
 }
 
+/// A GET of `path` from the page's vornd with `token` as its bearer, as JSON.
+pub async fn get_json_as(path: &str, token: &str) -> Option<serde_json::Value> {
+    let init = web_sys::RequestInit::new();
+    let headers = web_sys::Headers::new().ok()?;
+    headers
+        .set("authorization", &format!("Bearer {token}"))
+        .ok()?;
+    init.set_headers(&headers);
+    let req = web_sys::Request::new_with_str_and_init(path, &init).ok()?;
+    let res: web_sys::Response = JsFuture::from(window().fetch_with_request(&req))
+        .await
+        .ok()?
+        .dyn_into()
+        .ok()?;
+    if !res.ok() {
+        return None;
+    }
+    let text = JsFuture::from(res.text().ok()?).await.ok()?.as_string()?;
+    serde_json::from_str(&text).ok()
+}
+
 /// POSTs `body` as JSON to `path` on the page's vornd; the JSON answer, or
 /// vornd's error message.
 pub async fn post_json(path: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {

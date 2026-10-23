@@ -8,7 +8,7 @@ use super::{act, activity_line, chip_button, filled_button, glyph, tone_line, we
 use crate::act::Act;
 use crate::plugins::{
     count, describe, details, place_groups, places, runs_line, uses, Kind, Listing, PackAction,
-    PackState, PlugAct, Source,
+    PackState, PlugAct, Source, Tone,
 };
 use crate::points::PointAct;
 use crate::runs::s as sv;
@@ -413,6 +413,42 @@ fn extension(s: &Screen<'_>, l: &Listing) -> El {
         }
         _ => col,
     };
+    let widened = pack.and_then(|p| {
+        let line = crate::plugins::widened_line(p)?;
+        let folder = sv(p, "path")?.to_owned();
+        Some((line, folder))
+    });
+    let col = match widened {
+        Some((line, folder)) => col.child(
+            div()
+                .col()
+                .gap(8.0)
+                .mt(16.0)
+                .child(tone_line(Tone::Blocked, &line, 12.0))
+                .child(div().row().child(chip_button(
+                    s,
+                    "plug-detail-link-again",
+                    PlugAct::LinkAgain(folder),
+                    Some("link"),
+                    "Link again",
+                    k::GRAY_300,
+                    true,
+                ))),
+        ),
+        None => col,
+    };
+    let closed = pack.map(crate::plugins::closed_lines).unwrap_or_default();
+    let col = if closed.is_empty() {
+        col
+    } else {
+        col.child(
+            div()
+                .col()
+                .gap(4.0)
+                .mt(16.0)
+                .children(closed.iter().map(|line| tone_line(Tone::Idle, line, 12.0))),
+        )
+    };
     col.child_if(activity_line(s, &l.id).map(|e| e.mt(16.0)))
         .child(extension_actions(s, l, &state))
 }
@@ -441,16 +477,32 @@ fn extension_actions(s: &Screen<'_>, l: &Listing, state: &PackState) -> El {
     let Some(pack) = l.pack.as_ref() else {
         return row;
     };
-    if pack.get("sandboxAvailable") == Some(&Value::Bool(true)) {
+    let runs = pack.get("sandbox").is_some_and(|v| !v.is_null());
+    if runs && pack.get("sandboxAvailable") == Some(&Value::Bool(true)) {
         let on = pack.get("sandboxed") == Some(&Value::Bool(true));
         row = row.child(chip_button(
             s,
             "plug-detail-sandbox",
             PlugAct::Sandbox(l.id.clone(), !on),
             Some("shield"),
-            if on { "Sandbox: on" } else { "Sandbox: off" },
+            match (on, pack.get("sandbox").and_then(Value::as_str)) {
+                (true, Some("files-only")) => "Sandbox: files only",
+                (true, _) => "Sandbox: on",
+                (false, _) => "Sandbox: off",
+            },
             k::GRAY_300,
             true,
+        ));
+    } else if runs {
+        // Nothing to switch: this machine has no sandbox for programs.
+        row = row.child(chip_button(
+            s,
+            "plug-detail-sandbox",
+            PlugAct::Sandbox(l.id.clone(), true),
+            Some("shield"),
+            "Unsandboxed",
+            k::GRAY_300,
+            false,
         ));
     }
     if let Some(path) = sv(pack, "path").filter(|p| !p.is_empty()) {

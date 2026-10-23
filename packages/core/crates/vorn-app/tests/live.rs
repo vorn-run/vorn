@@ -243,6 +243,45 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     shot.until(&mut app, "the shell back from sleep", shows("after-9"));
 }
 
+/// A program's copy (OSC 52) lands on the clipboard where this machine's
+/// choice allows it, and waits on a dialog where the choice is to ask.
+#[test]
+#[cfg(unix)]
+fn a_program_copies_to_the_clipboard_as_its_place_allows() {
+    use vorn_app::state::Dialog;
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let mut shot = Shot::new();
+    shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
+    let id = wait_for("the shell's card", || {
+        app.pump();
+        app.st.selected.clone()
+    });
+    shot.until(&mut app, "the shell's fitted screen", |app, _| {
+        app.pane(&id).filter(|p| p.sb_epoch > 0).map(|_| ())
+    });
+    shot.ui.clipboard().set("");
+    // "hi" in base64; the typed line itself is never the copy.
+    shot.type_line(&mut app, "printf '\\033]52;c;aGk=\\007'");
+    assert_eq!(copied(&mut shot, &mut app, "the program's copy"), "hi");
+
+    // The choice as Settings › General writes it.
+    app.store.config["defaults"]["clipboardFromPrograms"] = json!("ask");
+    shot.ui.clipboard().set("");
+    // "hi3".
+    shot.type_line(&mut app, "printf '\\033]52;c;aGkz\\007'");
+    shot.until(&mut app, "the copy asked about", |app, _| {
+        (app.st.dialog == Some(Dialog::ProgramCopy)).then_some(())
+    });
+    shot.save(&mut app, "program-copy");
+    assert_eq!(shot.ui.clipboard().get().unwrap_or_default(), "");
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
+    assert_eq!(app.st.dialog, None);
+    assert_eq!(copied(&mut shot, &mut app, "the allowed copy"), "hi3");
+}
+
 /// What the copy put on the clipboard, once it has; the caller empties it
 /// before the copy.
 fn copied(shot: &mut Shot, app: &mut vorn_app::App, what: &str) -> String {

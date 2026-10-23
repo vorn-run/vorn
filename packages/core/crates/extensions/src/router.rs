@@ -56,6 +56,8 @@ pub struct RouterSettings {
     pub preferences: Option<PathBuf>,
     /// The packs this build pins: one installed as such owns Vorn's namespace (`vorn.`).
     pub trust: Trust,
+    /// How programs are sandboxed; by default, as far as this process alone can.
+    pub confiner: sandbox::Confiner,
 }
 
 impl RouterSettings {
@@ -71,6 +73,7 @@ impl RouterSettings {
             compiler: Compiler::None,
             preferences: None,
             trust: Trust::default(),
+            confiner: sandbox::Confiner::default(),
         }
     }
 }
@@ -345,9 +348,24 @@ impl Router {
         Ok(pack)
     }
 
-    /// Whether extension `id`'s programs start under the macOS sandbox profile.
+    /// Whether extension `id`'s programs start sandboxed.
     pub fn sandboxed(&self, id: &str) -> bool {
-        sandbox::available() && sandbox::is_on(&self.store.root().join(id))
+        self.settings.confiner.available() && sandbox::is_on(&self.store.root().join(id))
+    }
+
+    /// Whether this machine sandboxes programs at all.
+    pub fn can_sandbox(&self) -> bool {
+        self.settings.confiner.available()
+    }
+
+    /// The sandbox programs start in here, `None` where there is none.
+    pub fn sandbox_kind(&self) -> Option<sandbox::Kind> {
+        self.can_sandbox().then(sandbox::Kind::here)
+    }
+
+    /// How programs are sandboxed here.
+    pub fn confiner(&self) -> &sandbox::Confiner {
+        &self.settings.confiner
     }
 
     /// Turns the sandbox profile on or off for extension `id`; its running
@@ -615,8 +633,10 @@ impl Router {
         guard(&self.preferences).forget(id);
     }
 
-    /// Removes every file extension `id` keeps in its own store; blocks on the disk.
+    /// Removes every file extension `id` keeps in its own store and its
+    /// data folder, so a later package with its id starts empty; blocks on the disk.
     pub fn forget_files(&self, id: &str) -> std::io::Result<()> {
+        self.settings.confiner.forget_data(id)?;
         match &self.blobs {
             Some(store) => store.forget(id),
             None => Ok(()),
@@ -656,6 +676,7 @@ impl Router {
     /// Stops extension `id` and drops what it published.
     pub async fn forget(&self, id: &str) {
         self.lifecycle.stop_extension(id).await;
+        self.settings.confiner.revoke(id);
         guard(&self.rows).retain(|(ext, _), _| ext != id);
         guard(&self.packs).remove(id);
         self.reindex();
@@ -674,10 +695,18 @@ impl Router {
             cwd: PathBuf::from(&pack.path),
             env,
         };
-        if self.sandboxed(&pack.id) {
-            return Ok(sandbox::wrap(launch, &pack.path));
+        let mut launch = launch;
+        self.settings.confiner.name_data(&pack.id, &mut launch);
+        if !self.sandboxed(&pack.id) {
+            return Ok(launch);
         }
-        Ok(launch)
+        let confiner = &self.settings.confiner;
+        let mut reach = confiner.reach(&pack.path, &pack.id, true);
+        let hosts = pack.manifest.declares.network.clone();
+        confiner.share(&pack.id, hosts, &mut launch, &mut reach);
+        confiner
+            .wrap(launch, &reach)
+            .ok_or_else(|| format!("{} cannot be sandboxed here", pack.name()))
     }
 
     /// Starts `pack`'s program with an inbox for what it asks, answered on its own tasks.

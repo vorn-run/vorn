@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use super::{button, header, row, segmented, set, svg, toggle, Seg};
 use crate::act::Act;
+use crate::copying;
 use crate::look;
 use crate::screen::menus::Item;
 use crate::screen::{agent_icon, c, ico, white, Screen};
@@ -1031,6 +1032,39 @@ pub(super) fn general(s: &Screen<'_>) -> El {
             "Preview sessions by hovering over them in the sidebar",
             None,
         ));
+    rows = rows.child(row(
+        "Clipboard From Programs",
+        "What a program in a terminal on this machine may put on your clipboard. A copy from a card you are not typing into says so.",
+        None,
+        text_seg(s, copying::LOCAL_KEY, "allow", &copying::OPTIONS),
+        false,
+    ));
+    for host in s
+        .store
+        .config
+        .get("remoteHosts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let field = |k: &str| host.get(k).and_then(Value::as_str).unwrap_or_default();
+        let (id, name) = (field("id"), field("label"));
+        if id.is_empty() {
+            continue;
+        }
+        let name = if name.is_empty() {
+            field("hostname")
+        } else {
+            name
+        };
+        rows = rows.child(row(
+            &format!("Clipboard From {name}"),
+            &format!("What a program on {name} may put on your clipboard."),
+            None,
+            text_seg(s, &copying::host_key(id), "ask", &copying::OPTIONS),
+            false,
+        ));
+    }
     rows = rows.child_if(cli_row(s));
     rows = rows.child(switch_row(
         s,
@@ -1813,9 +1847,17 @@ pub(super) fn keys(s: &Screen<'_>) -> El {
         )
         .child(
             text(
-                "The secrets your connections hold, stored encrypted with your OS keychain",
+                if s.st.keychain == Some(false) {
+                    "The secrets your connections hold. No OS keychain was found, so they are kept unencrypted in a file only you can read"
+                } else {
+                    "The secrets your connections hold, stored encrypted with your OS keychain"
+                },
                 14.0,
-                c(look::GRAY_500),
+                c(if s.st.keychain == Some(false) {
+                    look::AMBER_400
+                } else {
+                    look::GRAY_500
+                }),
             )
             .line_height(20.0)
             .mb(24.0)

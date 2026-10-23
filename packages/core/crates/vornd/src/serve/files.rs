@@ -76,8 +76,11 @@ impl Held {
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
         let written = options.open(&path).and_then(|mut f| f.write_all(secret));
+        // Windows has no mode bits: the access list names this user alone.
+        #[cfg(windows)]
+        let written = written.and_then(|()| vorn_vault::private::restrict(&path));
         if let Err(err) = written {
-            warn!(%err, "could not publish the local credential; tools on this machine cannot connect");
+            warn!(%err, "could not publish the local credential readable by this user only; tools on this machine may not connect");
         }
     }
 

@@ -169,6 +169,20 @@ impl DeviceTokens {
         list(&self.conn)
     }
 
+    /// When token `id` was last used, else made, in milliseconds since the
+    /// epoch: what its idle expiry is counted from. `None` for an unknown id.
+    pub fn last_used_ms(&self, id: &str) -> Result<Option<i64>> {
+        let at: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(last_seen_at, created_at) FROM device_tokens WHERE id = ?",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(at.as_deref().and_then(crate::sql::parse_iso_millis))
+    }
+
     /// Records that token `id` was just used, from `address`.
     pub fn touch(&self, id: &str, seen_at: &str, address: &str) -> Result<()> {
         touch(&self.conn, id, seen_at, Some(address))

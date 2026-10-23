@@ -120,7 +120,7 @@ impl App {
             }
             Category::About => {
                 self.call(Call::Set(SetCall::Core), "core:status", Value::Null);
-                self.health = Some(health(self.port));
+                self.health = Some(health(self.port, self.local_token.clone()));
             }
             _ => {}
         }
@@ -395,7 +395,7 @@ impl App {
                 };
                 self.st.settings.end_failure =
                     outcome.err().map(|d| format!("Could not end them: {d}."));
-                self.health = Some(health(self.port));
+                self.health = Some(health(self.port, self.local_token.clone()));
             }
         }
     }
@@ -553,16 +553,16 @@ pub(super) fn new_id() -> String {
 }
 
 /// `/vornd/health`, read on a thread so the frame does not wait on it.
-fn health(port: u16) -> mpsc::Receiver<Option<Value>> {
+fn health(port: u16, token: String) -> mpsc::Receiver<Option<Value>> {
     let (tx, rx) = mpsc::channel();
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::spawn(move || {
-        let _ = tx.send(crate::system::http_get_json(port, "/vornd/health"));
+        let _ = tx.send(crate::system::http_get_json(port, "/vornd/health", &token));
     });
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen_futures::spawn_local(async move {
         let _ = port;
-        let _ = tx.send(crate::page::get_json("/vornd/health").await);
+        let _ = tx.send(crate::page::get_json_as("/vornd/health", &token).await);
     });
     rx
 }

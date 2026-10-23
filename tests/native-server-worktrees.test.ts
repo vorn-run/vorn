@@ -15,7 +15,7 @@ import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import { normalizeWorktrees } from './helpers/worktrees-parity'
-import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
+import { builtSessiond, builtVornd, startServed, type Served, vorndReport } from './helpers/served'
 import { recorded } from './helpers/vornd-fixtures'
 
 const TEST_CREDENTIAL = 'native-server-worktrees-credential'
@@ -106,7 +106,7 @@ async function startRealServer(): Promise<RealServer> {
   }
   realServers.push(server)
   await until('the session holder, and the copy fed', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.port}/vornd/health`)
+    const res = await vorndReport(server.port, '/vornd/health', served.dataDir)
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }

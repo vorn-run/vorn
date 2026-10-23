@@ -16,7 +16,6 @@ use std::sync::Arc;
 use serde_json::Value;
 use vorn_extensions::install::Installs;
 use vorn_extensions::lifecycle::Lifecycle;
-use vorn_extensions::netproxy::NetProxy;
 use vorn_extensions::polls::Polls;
 use vorn_extensions::signin::Windows;
 use vorn_store::Store;
@@ -79,8 +78,8 @@ pub struct Services {
     pub windows: Arc<Windows>,
     /// Who answers polls; the built-in offers `connectorPoll`'s.
     pub polls: Arc<Polls>,
-    /// The network a sandboxed program reaches its declared hosts through.
-    pub proxy: Option<Arc<NetProxy>>,
+    /// How a program is sandboxed, and the network proxy it reaches its declared hosts through.
+    pub confiner: vorn_extensions::sandbox::Confiner,
     /// vornd's own address, where a program reaches its window.
     pub origin: String,
     /// The version a program is greeted with.

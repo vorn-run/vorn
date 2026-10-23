@@ -20,6 +20,7 @@ pub mod canvas;
 pub mod cli_link;
 pub mod client;
 pub mod code;
+pub mod copying;
 pub mod crash;
 pub mod extensions;
 pub mod file_icons;

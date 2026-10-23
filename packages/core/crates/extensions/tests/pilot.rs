@@ -94,6 +94,7 @@ fn launch(pack: &InstalledPack, argv: &[String]) -> SdkLaunch {
         },
         source: Source::Pack,
         protocol: pack.manifest.protocol,
+        redact: Vec::new(),
     }
 }
 
@@ -367,7 +368,11 @@ async fn an_idle_service_stops_and_starts_again_on_the_next_event() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn under_the_sandbox_profile_the_pilot_runs_and_writes_stay_in_its_folder() {
     use vorn_extensions::sandbox;
-    if !sandbox::available() || !has("git") || !has("node") || !has("bash") {
+    if sandbox::Kind::here() != sandbox::Kind::Seatbelt
+        || !has("git")
+        || !has("node")
+        || !has("bash")
+    {
         return;
     }
     let source = repository();
@@ -379,7 +384,9 @@ async fn under_the_sandbox_profile_the_pilot_runs_and_writes_stay_in_its_folder(
     sandbox::set(&root.path().join("test.feeds"), true).unwrap();
     let held = |argv: &[String]| {
         let mut l = launch(&pack, argv);
-        l.launch = sandbox::wrap(l.launch, &pack.path);
+        let mut reach = sandbox::Reach::of(&pack.path, None, None);
+        reach.work = sandbox::Confiner::default().work_dir("test.feeds");
+        l.launch = sandbox::wrap(l.launch, &reach, None).expect("Seatbelt confines");
         l
     };
     let service_argv = pack.manifest.service.clone().unwrap().command;
@@ -420,11 +427,12 @@ async fn under_the_sandbox_profile_the_pilot_runs_and_writes_stay_in_its_folder(
     .unwrap();
     let script = format!(
         r#"read -r _
-inside=denied; echo x > ./inside.txt && inside=ok
+inside=denied; echo x > "$VORN_EXTENSION_DATA/inside.txt" && inside=ok
+own=denied; echo x > ./own.txt 2>/dev/null && own=ok
 outside=denied; echo x > '{}/outside.txt' 2>/dev/null && outside=ok
 socket=$( {{ exec 3<>/dev/tcp/127.0.0.1/9; }} 2>&1 )
 case "$socket" in *"not permitted"*) socket=denied ;; *) socket=allowed ;; esac
-printf '{{"jsonrpc":"2.0","id":1,"result":{{"inside":"%s","outside":"%s","socket":"%s"}}}}\n' $inside $outside $socket
+printf '{{"jsonrpc":"2.0","id":1,"result":{{"inside":"%s","own":"%s","outside":"%s","socket":"%s"}}}}\n' $inside $own $outside $socket
 "#,
         outside.path().display()
     );
@@ -435,10 +443,13 @@ printf '{{"jsonrpc":"2.0","id":1,"result":{{"inside":"%s","outside":"%s","socket
         .link(folder.path())
         .unwrap();
     let r = router(store, Lifecycle::new(Policy::default()));
+    // On by default; turned off, the same program reaches everything.
+    assert!(r.sandboxed("test.held"));
+    r.set_sandboxed("test.held", false).await.unwrap();
     let free = r.call("test.held", "try", json!({}), ctx()).await.unwrap();
     assert_eq!(
         free,
-        json!({ "inside": "ok", "outside": "ok", "socket": "allowed" })
+        json!({ "inside": "ok", "own": "ok", "outside": "ok", "socket": "allowed" })
     );
     fs::remove_file(outside.path().join("outside.txt")).unwrap();
     r.set_sandboxed("test.held", true).await.unwrap();
@@ -448,7 +459,7 @@ printf '{{"jsonrpc":"2.0","id":1,"result":{{"inside":"%s","outside":"%s","socket
     eprintln!("sandboxed bash one-shot: {:?}", started.elapsed());
     assert_eq!(
         held,
-        json!({ "inside": "ok", "outside": "denied", "socket": "denied" })
+        json!({ "inside": "ok", "own": "denied", "outside": "denied", "socket": "denied" })
     );
     assert!(!outside.path().join("outside.txt").exists());
 }

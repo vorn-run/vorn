@@ -1,7 +1,7 @@
 //! Pairing a phone by showing it a code.
 //!
-//! A device token never expires, so a QR code carrying one would be a
-//! permanent key on a screen. What the screen shows instead is a code that
+//! A device token lasts until it goes a month unused, so a QR code carrying
+//! one would be a long-lived key on a screen. What the screen shows instead is a code that
 //! lives five minutes and works once, which the phone trades for a token only
 //! after a person approves the exchange on this machine.
 //!
@@ -19,6 +19,13 @@ pub const APPROVAL_TTL_MS: u64 = 5 * 60_000;
 
 /// Wrong codes allowed before the code is abandoned.
 pub const MAX_ATTEMPTS: u32 = 10;
+
+/// Refused codes one address may offer in [`PEER_WINDOW_MS`]; past it, that
+/// address is refused until the window ends, whatever it offers.
+pub const PEER_TRIES: u32 = 5;
+pub const PEER_WINDOW_MS: u64 = 60_000;
+/// Addresses remembered at once; the stalest go first past it.
+const PEERS_KEPT: usize = 256;
 
 /// Crockford's alphabet: nothing reads as a digit, no accidental words.
 const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -115,6 +122,8 @@ pub struct Pairing {
     active: Option<ActiveCode>,
     /// In the order they were asked.
     requests: Vec<Request>,
+    /// Refused offers by address: when its window began and how many.
+    peers: std::collections::HashMap<String, (u64, u32)>,
 }
 
 /// Forty random bits as eight characters of the alphabet, five bits each,
@@ -213,6 +222,52 @@ impl Pairing {
     /// decide and hands nothing over. A wrong code and no code at all answer
     /// alike, so the reply never tells whether pairing is open.
     pub fn redeem(
+        &mut self,
+        code: &Value,
+        device_name: &Value,
+        address: &str,
+        now: u64,
+    ) -> Result<String, Refused> {
+        if self.peer_throttled(address, now) {
+            return Err(Refused::Throttled);
+        }
+        let redeemed = self.redeem_code(code, device_name, address, now);
+        if redeemed.is_err() {
+            self.peer_refused(address, now);
+        }
+        redeemed
+    }
+
+    /// Whether `address` used up its refused offers for the current window.
+    fn peer_throttled(&self, address: &str, now: u64) -> bool {
+        self.peers.get(address).is_some_and(|&(since, n)| {
+            n >= PEER_TRIES && now.saturating_sub(since) < PEER_WINDOW_MS
+        })
+    }
+
+    fn peer_refused(&mut self, address: &str, now: u64) {
+        if !self.peers.contains_key(address) && self.peers.len() >= PEERS_KEPT {
+            self.peers
+                .retain(|_, (since, _)| now.saturating_sub(*since) < PEER_WINDOW_MS);
+            if self.peers.len() >= PEERS_KEPT {
+                if let Some(stalest) = self
+                    .peers
+                    .iter()
+                    .min_by_key(|(_, (since, _))| *since)
+                    .map(|(a, _)| a.clone())
+                {
+                    self.peers.remove(&stalest);
+                }
+            }
+        }
+        let entry = self.peers.entry(address.to_owned()).or_insert((now, 0));
+        if now.saturating_sub(entry.0) >= PEER_WINDOW_MS {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+    }
+
+    fn redeem_code(
         &mut self,
         code: &Value,
         device_name: &Value,
@@ -408,20 +463,59 @@ mod tests {
             Err(Refused::Unknown)
         );
         let (mut p, code) = started();
-        for _ in 0..MAX_ATTEMPTS - 1 {
+        // From as many addresses, so no one address is held off first.
+        for i in 0..MAX_ATTEMPTS - 1 {
             assert_eq!(
-                p.redeem(&json!("WRONG"), &json!(null), "x", T0),
+                p.redeem(&json!("WRONG"), &json!(null), &format!("10.0.0.{i}"), T0),
                 Err(Refused::Unknown)
             );
         }
         assert_eq!(
-            p.redeem(&json!("WRONG"), &json!(null), "x", T0),
+            p.redeem(&json!("WRONG"), &json!(null), "10.0.1.1", T0),
             Err(Refused::Throttled)
         );
         assert_eq!(
-            p.redeem(&json!(code), &json!(null), "x", T0),
+            p.redeem(&json!(code), &json!(null), "10.0.1.2", T0),
             Err(Refused::Throttled)
         );
+    }
+
+    #[test]
+    fn one_address_offering_wrong_codes_is_held_off_for_a_minute() {
+        let (mut p, code) = started();
+        let name = json!("Phone");
+        for _ in 0..PEER_TRIES {
+            assert_eq!(
+                p.redeem(&json!("WRONGONE"), &name, "10.0.0.9", T0),
+                Err(Refused::Unknown)
+            );
+        }
+        // The right code from that address waits out the window; another address is not held.
+        assert_eq!(
+            p.redeem(&json!(code.clone()), &name, "10.0.0.9", T0 + 1_000),
+            Err(Refused::Throttled)
+        );
+        assert_eq!(
+            p.redeem(&json!("WRONGTWO"), &name, "10.0.0.8", T0 + 1_000),
+            Err(Refused::Unknown)
+        );
+        assert!(p
+            .redeem(&json!(code), &name, "10.0.0.9", T0 + PEER_WINDOW_MS)
+            .is_ok());
+    }
+
+    #[test]
+    fn remembers_a_bounded_number_of_addresses() {
+        let mut p = Pairing::new();
+        for i in 0..(PEERS_KEPT + 10) {
+            let _ = p.redeem(
+                &json!("X"),
+                &json!("P"),
+                &format!("10.1.{}.{}", i / 250, i % 250),
+                0,
+            );
+        }
+        assert!(p.peers.len() <= PEERS_KEPT);
     }
 
     #[test]

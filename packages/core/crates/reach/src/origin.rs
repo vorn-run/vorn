@@ -155,6 +155,24 @@ fn split_host_port(authority: &str) -> Option<(&str, Option<&str>)> {
     }
 }
 
+/// Whether a `Host` header names this machine by a loopback address
+/// (`127.0.0.0/8`, `[::1]`) or `localhost`, with any port: what a request to
+/// a route served only on loopback must say, so a page whose own name was
+/// pointed at this machine (DNS rebinding) is turned away.
+pub fn is_loopback_host(raw: &str) -> bool {
+    let Some(host) = host_header(raw) else {
+        return false;
+    };
+    let name = match host.strip_prefix('[') {
+        Some(v6) => return v6.split_once(']').is_some_and(|(addr, _)| addr == "::1"),
+        None => host.split_once(':').map_or(host.as_str(), |(h, _)| h),
+    };
+    name == "localhost"
+        || name
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|a| a.is_loopback())
+}
+
 /// The `Host` header as `new URL('http://' + raw).host` gives it, lowercased;
 /// `None` where the parser would throw, or where this reads more narrowly
 /// than the parser (see the module notes).
@@ -348,6 +366,33 @@ fn serialize_ipv6(addr: &Ipv6Addr) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_loopback_host_is_an_address_on_this_machine_or_localhost() {
+        for ok in [
+            "127.0.0.1:4310",
+            "127.0.0.1",
+            "127.1.2.3:80",
+            "localhost:4310",
+            "LOCALHOST",
+            "[::1]:4310",
+            "[0:0:0:0:0:0:0:1]",
+        ] {
+            assert!(is_loopback_host(ok), "{ok}");
+        }
+        for no in [
+            "",
+            "evil.example:4310",
+            "127.0.0.1.evil.example",
+            "localhost.evil.example",
+            "192.168.1.4:4310",
+            "[::2]:4310",
+            "0.0.0.0",
+            "127.0.0.1:99999",
+        ] {
+            assert!(!is_loopback_host(no), "{no}");
+        }
+    }
 
     fn trusted() -> TrustedHosts {
         TrustedHosts::new(["my-mac.tail1234.ts.net.", "100.64.0.1"], "My-Mac")

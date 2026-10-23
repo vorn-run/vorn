@@ -141,7 +141,7 @@
       "updatedAt": "<time>"
     },
     "version": 1,
-    "url": "http://127.0.0.1:<port>/artifact/<id2>/1?t=<token2>"
+    "url": "http://127.0.0.1:<port>/artifact/<id2>/1?ticket=<ticket>"
   },
   "artifact": {
     "artifact": {
@@ -218,7 +218,7 @@
         "status": "waiting",
         "startedAt": "<time>",
         "message": "Look at draft 2",
-        "viewToken": "<token3>",
+        "viewToken": "<token2>",
         "round": 2,
         "feedback": [
           {
@@ -273,7 +273,7 @@
         "completedAt": "<time>",
         "approvedAt": "<time>",
         "message": "Look at draft 2",
-        "viewToken": "<token3>",
+        "viewToken": "<token2>",
         "round": 2,
         "feedback": [
           {
@@ -358,7 +358,7 @@
         "completedAt": "<time>",
         "error": "no",
         "message": "Look at draft",
-        "viewToken": "<token4>",
+        "viewToken": "<token3>",
         "round": 1,
         "feedback": [
           {

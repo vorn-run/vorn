@@ -26,6 +26,8 @@ struct Fake {
     killed: Mutex<Vec<String>>,
     written: Mutex<Vec<(String, String)>>,
     renamed: Mutex<Vec<(String, String)>>,
+    /// Each call about a removal, with whether the extension's data folder was there.
+    removed: Mutex<Vec<(&'static str, String, bool)>>,
 }
 
 impl Fake {
@@ -45,6 +47,18 @@ impl Fake {
 }
 
 impl Around for Fake {
+    fn pack_stopping(&self, id: &str) -> BoxFuture<'static, ()> {
+        let data = std::env::temp_dir().join("vorn-extension-data").join(id);
+        guard(&self.removed).push(("stopping", id.to_owned(), data.exists()));
+        Box::pin(async {})
+    }
+
+    fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
+        let data = std::env::temp_dir().join("vorn-extension-data").join(id);
+        guard(&self.removed).push(("removed", id.to_owned(), data.exists()));
+        Box::pin(async {})
+    }
+
     fn live(&self) -> Option<Vec<Live>> {
         Some(guard(&self.live).clone())
     }
@@ -247,6 +261,7 @@ fn world() -> World {
             .collect(),
         bridge_origin: "http://127.0.0.1:9".into(),
         version: "test".into(),
+        confiner: vorn_extensions::sandbox::Confiner::default(),
     };
     let store = PackStore::new(packs.path());
     let lifecycle = Lifecycle::new(Policy::default());
@@ -490,6 +505,96 @@ async fn a_changed_pack_takes_its_panes_and_processes_with_it() {
     assert_eq!(w.ext.panes(), 0);
     assert_eq!(w.ext.hosts(), 0);
     assert_eq!(guard(&w.fake.killed).len(), 1);
+}
+
+/// A program that only runs, for the lifecycle to hold.
+struct Idle;
+
+impl vorn_extensions::lifecycle::Running for Idle {
+    fn name(&self) -> &str {
+        "idle"
+    }
+    fn exited(&self) -> bool {
+        false
+    }
+    fn close(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async {})
+    }
+}
+
+#[tokio::test]
+async fn a_removed_extensions_programs_stop_before_its_data_goes() {
+    let w = world();
+    let dir = w.ext.router.confiner().work_dir("y").unwrap();
+    fs::write(dir.join("written-while-running"), "x").unwrap();
+    result(w.call("extension:remove", json!({ "id": "y" })).await);
+    // Its connector programs stopped while the folder was there; its connections went after it.
+    assert_eq!(
+        guard(&w.fake.removed).as_slice(),
+        [
+            ("stopping", "y".to_owned(), true),
+            ("removed", "y".to_owned(), false)
+        ]
+    );
+    assert!(!dir.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_data_folder_that_will_not_go_keeps_the_extensions_connections() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = world();
+    // An id of its own: the data folders of these tests share one temporary folder.
+    install(w.packs.path(), "zz", &extension("zz"));
+    let dir = w.ext.router.confiner().work_dir("zz").unwrap();
+    let locked = dir.join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    fs::write(locked.join("kept"), "x").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    let removed = w.call("extension:remove", json!({ "id": "zz" })).await;
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        matches!(&removed, Answer::Error(e) if e.contains("Could not remove the files")),
+        "{removed:?}"
+    );
+    let calls: Vec<&str> = guard(&w.fake.removed).iter().map(|c| c.0).collect();
+    assert_eq!(calls, ["stopping"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_removal_that_fails_keeps_the_extensions_connections() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = world();
+    // Its files cannot be removed.
+    fs::set_permissions(w.packs.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    let removed = w.call("extension:remove", json!({ "id": "x" })).await;
+    fs::set_permissions(w.packs.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(matches!(removed, Answer::Error(_)), "{removed:?}");
+    let calls: Vec<&str> = guard(&w.fake.removed).iter().map(|c| c.0).collect();
+    assert_eq!(calls, ["stopping"]);
+}
+
+#[tokio::test]
+async fn a_changed_pack_stops_its_service_so_it_starts_again_with_the_new_hosts() {
+    let w = world();
+    // It reaches the network through the proxy, as its manifest declared.
+    let proxy = vorn_extensions::netproxy::NetProxy::start().await.unwrap();
+    let grant = proxy.grant("x", vec!["api.example.com".into()]).unwrap();
+    guard(&w.ext.router.confiner().grants).insert("x".to_owned(), grant);
+    let lifecycle = w.ext.router.lifecycle();
+    let key = vorn_extensions::lifecycle::ServiceKey::new("x".to_owned(), "");
+    drop(
+        lifecycle
+            .get_or_start(&key, || async { Ok::<_, String>(Idle) })
+            .await
+            .unwrap(),
+    );
+    assert_eq!(lifecycle.running().len(), 1);
+    w.ext.pack_changed("x").await;
+    assert!(lifecycle.running().is_empty());
+    assert!(guard(&w.ext.router.confiner().grants).is_empty());
 }
 
 #[tokio::test]

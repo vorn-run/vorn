@@ -65,11 +65,14 @@ pub fn video_part<'a>(
 }
 
 /// The artifact an address shows, `(id, version)`: vornd serves each
-/// version at `/artifact/<id>/<version>?t=<token>` on its own host.
+/// version at `/artifact/<id>/<version>?ticket=<ticket>` on its own host.
 pub fn artifact_address(url: &str) -> Option<(String, u32)> {
     let u = url::Url::parse(url).ok()?;
     let local = matches!(u.host_str(), Some("127.0.0.1" | "localhost"));
-    if !local || !u.query_pairs().any(|(k, v)| k == "t" && !v.is_empty()) {
+    let opens = |(k, v): (std::borrow::Cow<'_, str>, std::borrow::Cow<'_, str>)| {
+        (k == "ticket" || k == "t") && !v.is_empty()
+    };
+    if !local || !u.query_pairs().any(opens) {
         return None;
     }
     let mut parts = u.path_segments()?;
@@ -451,7 +454,7 @@ mod tests {
     fn an_artifact_is_read_from_its_address_on_vornds_host() {
         let id = |u: &str| artifact_address(u);
         assert_eq!(
-            id("http://127.0.0.1:4310/artifact/a1/3?t=k"),
+            id("http://127.0.0.1:4310/artifact/a1/3?ticket=k"),
             Some(("a1".to_owned(), 3))
         );
         assert_eq!(id("http://127.0.0.1:4310/artifact/a1/3"), None, "no token");

@@ -149,6 +149,7 @@ async fn write(
         Ok(saved.after)
     })
     .await?;
+    native.config_is(&after);
     native.broadcast("config:changed", after);
     native.config_changed();
     Ok(())
@@ -236,6 +237,7 @@ pub(crate) async fn announce(native: &Arc<Native>) {
     .await;
     match loaded {
         Ok((config, workflows)) => {
+            native.config_is(&config);
             native.broadcast("config:changed", config);
             native.broadcast("task:rows", super::task_list::Change::Reload.note());
             native.broadcast("workflow:changed", workflows);

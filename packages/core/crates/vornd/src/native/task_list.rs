@@ -145,6 +145,7 @@ pub async fn told(native: &Arc<Native>, change: Change) {
     .await;
     match loaded {
         Ok((config, change)) => {
+            native.config_is(&config);
             native.broadcast("config:changed", config);
             native.broadcast("task:rows", change.note());
             native.config_changed();

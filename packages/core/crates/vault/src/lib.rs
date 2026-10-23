@@ -17,6 +17,7 @@
 pub mod file;
 pub mod memory;
 pub mod os;
+pub mod private;
 
 use std::collections::BTreeMap;
 use std::fmt;
