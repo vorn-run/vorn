@@ -128,8 +128,8 @@ impl Adapters {
 
 /// Every adapter the packages in `store` install, Vorn's own first, then by
 /// id. An agent runs one adapter: Vorn's own keeps its agent id, then the one
-/// that claimed it first, by `installedAt`. A linked folder edited since it
-/// was linked to adapt another agent claimed it last, so it is skipped.
+/// that claimed it first, by `installedAt`. A linked folder whose manifest
+/// changed since it was linked claimed its agent last.
 pub fn read_installed(store: &PackStore) -> Vec<Installed> {
     let mut read: Vec<(bool, (bool, u64), InstalledPack, Agent)> = store
         .ids()
@@ -142,7 +142,9 @@ pub fn read_installed(store: &PackStore) -> Vec<Installed> {
                 .map_err(|err| warn!("[extensions] the agent adapter in {id} does not read: {err}"))
                 .ok()?;
             let ours = id.starts_with(vorn_extensions::pack::SHIPPED_NAMESPACE);
-            let edited = pack.linked && pack.linked_agent.as_deref() != Some(&agent.spec().id);
+            let edited = pack.linked
+                && (pack.linked_agent.as_deref() != Some(&agent.spec().id)
+                    || pack.linked_manifest != manifest_digest(&pack.path));
             let claimed = (edited, pack.installed_at.as_u64().unwrap_or(u64::MAX));
             Some((!ours, claimed, pack, agent))
         })
@@ -181,6 +183,12 @@ pub fn read_installed(store: &PackStore) -> Vec<Installed> {
 }
 
 /// What a client draws of one agent.
+/// The sha256 of the manifest in folder `dir`, as a link records it.
+fn manifest_digest(dir: &Path) -> Option<String> {
+    let text = std::fs::read(dir.join(vorn_extensions::manifest::file::FILE)).ok()?;
+    Some(vorn_extensions::install::sha256_hex(&text))
+}
+
 fn describe(k: &Installed) -> Value {
     let spec = k.agent.spec();
     let mut out = Map::new();
@@ -431,8 +439,14 @@ mod tests {
         let home = root.join(id);
         let current = match linked {
             Some(folder) => {
-                std::fs::write(folder.join("vorn-extension.toml"), manifest).unwrap();
-                serde_json::json!({ "linked": folder, "installedAt": at, "linkedAgent": agent })
+                std::fs::write(folder.join("vorn-extension.toml"), &manifest).unwrap();
+                let digest = vorn_extensions::install::sha256_hex(manifest.as_bytes());
+                serde_json::json!({
+                    "linked": folder,
+                    "installedAt": at,
+                    "linkedAgent": agent,
+                    "linkedManifest": digest,
+                })
             }
             None => {
                 std::fs::create_dir_all(home.join("1.0.0")).unwrap();
@@ -492,5 +506,20 @@ mod tests {
 
         let adapters = Adapters::installed_in(dir.path());
         assert_eq!(adapters.extension_of("acme").as_deref(), Some("acme.a"));
+    }
+
+    #[test]
+    fn a_link_whose_manifest_changed_since_claims_its_agent_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        adapter(dir.path(), "acme.0linked", "acme", 10, Some(folder.path()));
+        adapter(dir.path(), "acme.a", "acme", 20, None);
+        assert_eq!(extensions_in(dir.path()), ["acme.0linked"]);
+
+        // Edited away and back to the same agent: no longer the manifest it was linked as.
+        let toml = folder.path().join("vorn-extension.toml");
+        let edited = std::fs::read_to_string(&toml).unwrap() + "\n# edited\n";
+        std::fs::write(&toml, edited).unwrap();
+        assert_eq!(extensions_in(dir.path()), ["acme.a"]);
     }
 }

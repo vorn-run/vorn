@@ -103,6 +103,17 @@ fn rig(uses: &str, policy: Policy, call_timeout: Duration) -> Rig {
 
 /// [`rig`] for the component `wasm`.
 fn rig_of(wasm: &[u8], uses: &str, policy: Policy, call_timeout: Duration) -> Rig {
+    rig_fueled(
+        wasm,
+        uses,
+        policy,
+        call_timeout,
+        vorn_extensions::router::CALL_FUEL,
+    )
+}
+
+/// [`rig_of`] with each call's fuel `fuel`.
+fn rig_fueled(wasm: &[u8], uses: &str, policy: Policy, call_timeout: Duration, fuel: u64) -> Rig {
     let (folder, root) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     fs::write(folder.path().join("vorn-extension.toml"), manifest(uses)).unwrap();
     fs::write(folder.path().join("probe.wasm"), wasm).unwrap();
@@ -115,6 +126,7 @@ fn rig_of(wasm: &[u8], uses: &str, policy: Policy, call_timeout: Duration) -> Ri
     let core = Arc::new(Core::default());
     let mut settings = RouterSettings::new(Vec::new(), "9.9.9");
     settings.call_timeout = call_timeout;
+    settings.call_fuel = fuel;
     settings.compiler = Compiler::InProcess;
     settings.blobs = Some(root.path().join("files"));
     let router = Router::new(
@@ -369,6 +381,27 @@ async fn a_component_reaches_no_file_variable_or_socket_of_the_host() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_past_its_fuel_is_stopped_long_before_its_deadline() {
+    let wasm = fs::read(probe()).unwrap();
+    let rig = rig_fueled(
+        &wasm,
+        ALL,
+        Policy::default(),
+        Duration::from_secs(60),
+        50_000_000,
+    );
+    let echo = json!({ "n": 1 });
+    assert_eq!(rig.call("echo", echo.clone()).await.unwrap(), echo);
+    let started = std::time::Instant::now();
+    let spun = rig.call("spin", Value::Null).await.unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert_eq!(spun.code, "timeout", "{}", spun.message);
+    assert!(spun.message.contains("compute"), "{}", spun.message);
+    assert_eq!(rig.call("echo", echo.clone()).await.unwrap(), echo);
+    rig.router.lifecycle().stop_all().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_trap_a_runaway_loop_and_a_memory_grab_are_survived_within_the_crash_budget() {
     let policy = Policy {
         max_crashes: 3,
@@ -546,7 +579,7 @@ async fn a_pack_vorn_pins_owns_its_namespace_and_hears_its_start_and_stop() {
     };
     let list = json!({ "method": "sessions.list", "args": {} });
 
-    let router = router_trusting(trust);
+    let router = router_trusting(trust.clone());
     router.start_installed().await;
     assert_eq!(
         router.rows("vorn.probe", "hooks"),
@@ -566,9 +599,20 @@ async fn a_pack_vorn_pins_owns_its_namespace_and_hears_its_start_and_stop() {
     // The same files, not vouched for by this build, own nothing of Vorn's.
     let unpinned = router_trusting(Trust::default());
     unpinned
-        .call("vorn.probe", "call", list, ctx())
+        .call("vorn.probe", "call", list.clone(), ctx())
         .await
         .unwrap();
     assert_eq!(*core.owned.lock().unwrap(), [true, false]);
     unpinned.lifecycle().stop_all().await;
+
+    // Nor do they once a file is added beside the pinned pack's.
+    let installed = store.describe("vorn.probe").unwrap();
+    fs::write(installed.path.join("extra.txt"), "").unwrap();
+    let changed = router_trusting(trust);
+    changed
+        .call("vorn.probe", "call", list, ctx())
+        .await
+        .unwrap();
+    assert_eq!(*core.owned.lock().unwrap(), [true, false, false]);
+    changed.lifecycle().stop_all().await;
 }

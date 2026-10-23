@@ -7,7 +7,9 @@
  * Vorn is saved to a
  * project's folder in one call; a file that does not read says where;
  * `vorn workflow check` names each problem by file, line and column; and a
- * node type installed from git runs, with the workflow its extension ships.
+ * node type installed from git runs, with the workflow its extension ships,
+ * off unless the extension declares process.run; and a file may not take an
+ * id in an extension's namespace.
  *
  * Runs where vornd and its session holder have been built.
  */
@@ -411,6 +413,8 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
         'its workflow to be added',
         async () => !!(await workflow('example.shout:try-shout'))
       )
+      // Its extension does not declare process.run, so its workflow arrives off.
+      expect((await workflow('example.shout:try-shout'))!.enabled).toBe(false)
       await client.result('workflow:runManual', {
         workflowId: 'example.shout:try-shout',
         inputs: { words: 'hello' }
@@ -420,6 +424,26 @@ describe.runIf(!!builtVornd && !!builtSessiond && process.platform !== 'win32')(
       expect(output(run, 'loud')).toBe('HELLO HELLO')
       const described = await client.result<{ nodeTypes: Json }>('workflow:describe')
       expect(Object.keys(described.nodeTypes)).toContain('shout')
+    })
+
+    it("refuses a project file whose id is in an extension's namespace", async () => {
+      const file = path.join(folder, 'namespaced.toml')
+      for (const id of ['Example.Shout:mine', 'vorn.workflows:mine']) {
+        fs.writeFileSync(
+          file,
+          `name = "Namespaced"\nid = "${id}"\n\n[trigger]\nid = "t"\ntype = "manual"\n`
+        )
+        await until(`${id} to be refused`, async () => {
+          const files = await client.result<{ errors: Array<{ errors: string[] }> }>(
+            'workflow:files'
+          )
+          return files.errors.some((e) =>
+            e.errors.some((m) => m.includes(`its id ${id} is in the namespace of the extension`))
+          )
+        })
+        expect(await workflow(id)).toBeNull()
+      }
+      fs.rmSync(file)
     })
   }
 )

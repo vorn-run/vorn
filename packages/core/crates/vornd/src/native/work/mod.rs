@@ -183,10 +183,13 @@ impl Work {
             types::sync(&native, self.engine.registry());
             self.rearm.notify_one();
             let shipped = types::contributed_workflows(&native);
-            if !shipped.is_empty() {
-                let work = Arc::clone(self);
-                tokio::spawn(async move { work.seed_contributed(shipped).await });
-            }
+            let work = Arc::clone(self);
+            tokio::spawn(async move {
+                work.recheck_files().await;
+                if !shipped.is_empty() {
+                    work.seed_contributed(shipped).await;
+                }
+            });
         }
     }
 

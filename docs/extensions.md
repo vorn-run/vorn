@@ -156,10 +156,22 @@ inserts and the prefix `workflow.unseed` removes start with its id and a
 colon (`acme.tickets:`), and `workflow.run` runs only those. Running anyone
 else's workflow, or seeding a step that runs commands or agents (a script, an
 agent, or a type no extension declares, which runs as an agent), also needs
-`process.run`, which the install sheet shows as running programs. Vorn's own
-workflow ids start with `import:`, `connector:` and `system:`, so `import`,
-`connector` and `system` cannot be an extension's id, and ids starting with
-`vorn.` belong to the extensions Vorn ships.
+`process.run`, which the install sheet shows as running programs; a step is
+checked at every depth of the workflow. Vorn's own workflow ids start with
+`import:`, `connector:`, `system:` and `file:`, so `import`, `connector`,
+`system` and `file` cannot be an extension's id, and ids starting with
+`vorn.` belong to the extensions Vorn ships. Extension ids are lowercase, so
+no two name the same folder on a disk that ignores case. A project's workflow
+file whose id is in an extension's namespace is not read, and one read before
+that extension was installed is taken back when it is, unless you turned the
+file on.
+
+An installed pack counts as one Vorn ships only while its files are exactly
+the pinned pack's; Vorn puts back one whose files changed at its next start. A
+service component counts as Vorn's own only when the bytes Vorn read to run it
+are the pinned pack's; a service or command run as a program never does.
+Installing from a folder or a git repository, linking a folder, and packing all
+refuse a tree holding a symlink or special file, a committed one included.
 
 The core is frozen against that API: `packages/core/freeze.toml` lists every
 crate of the core by its area and every feature still left in it, and
