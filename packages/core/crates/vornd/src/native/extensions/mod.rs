@@ -394,8 +394,12 @@ impl Extensions {
         self.router.reindex();
         self.sync_adapters();
         self.builtins.start();
-        let router = Arc::clone(&self.router);
-        tokio::spawn(async move { router.start_installed().await });
+        let (router, installs) = (Arc::clone(&self.router), Arc::clone(&self.installs));
+        tokio::spawn(async move {
+            // A linked folder that gained a link while vornd was stopped does not start.
+            let _ = tokio::task::spawn_blocking(move || installs.recheck_linked()).await;
+            router.start_installed().await;
+        });
         self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
@@ -1368,7 +1372,10 @@ fn manifest_stamps(linked: &[(String, PathBuf)]) -> HashMap<PathBuf, (Option<Sys
 }
 
 /// Tells clients when a linked package's manifest is saved, so what it
-/// contributes shows as it is written.
+/// contributes shows as it is written, and checks each linked folder for a
+/// link again as it is relisted and when its manifest changes: one that
+/// gained a link is marked not loaded, which [`watch`] then sees as a
+/// changed pack and stops.
 async fn watch_linked(me: Weak<Extensions>) {
     let mut linked: Vec<(String, PathBuf)> = Vec::new();
     let mut stamps = HashMap::new();
@@ -1381,8 +1388,10 @@ async fn watch_linked(me: Weak<Extensions>) {
             return;
         };
         since_list += LINKED_CHECK;
-        if since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed) {
+        let relist = since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed);
+        if relist {
             since_list = Duration::ZERO;
+            recheck_linked(&extensions).await;
             let store = extensions.router.store().clone();
             linked = store
                 .ids()
@@ -1409,12 +1418,21 @@ async fn watch_linked(me: Weak<Extensions>) {
             })
             .map(|(id, _)| id)
             .collect();
+        if !moved.is_empty() && !relist {
+            recheck_linked(&extensions).await;
+        }
         for id in moved {
             debug!("[extensions] {id}'s manifest changed");
             extensions.contributions_changed(id);
         }
         stamps = now;
     }
+}
+
+/// Runs [`Installs::recheck_linked`] off the runtime.
+async fn recheck_linked(extensions: &Extensions) {
+    let installs = Arc::clone(&extensions.installs);
+    let _ = tokio::task::spawn_blocking(move || installs.recheck_linked()).await;
 }
 
 /// Syncs the sessions that are new or moved (every one when `all`), and releases the ones gone.

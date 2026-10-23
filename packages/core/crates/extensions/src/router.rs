@@ -709,13 +709,7 @@ impl Router {
             api: crate::api::API.to_owned(),
         };
         if let Some(component) = &service.component {
-            let (trust, read, file) =
-                (self.settings.trust.clone(), pack.clone(), component.clone());
-            let (bytes, vouched) =
-                tokio::task::spawn_blocking(move || trust.read_vouched(&read, &file))
-                    .await
-                    .map_err(|e| e.to_string())??;
-            let caller = caller(pack, crate::pack::is_reserved(&pack.id) && vouched);
+            let (bytes, caller) = self.read_as(pack, component).await?;
             return self
                 .start_component(
                     Source::Read(bytes.into()),
@@ -742,17 +736,23 @@ impl Router {
         Ok(Program::Child(child))
     }
 
-    /// Who installed `pack` is, for what it adds rather than runs: Vorn's
-    /// own when it is the pack this build pins for its id, its files checked
-    /// off the runtime. What it runs is checked as it is read (`start_service`).
-    pub async fn caller_of(&self, pack: &InstalledPack) -> Caller {
-        let builtin = crate::pack::is_reserved(&pack.id) && {
-            let (trust, pack) = (self.settings.trust.clone(), pack.clone());
-            tokio::task::spawn_blocking(move || trust.vouches_for(&pack))
+    /// `file` of `pack`, read once off the runtime, and who these bytes are
+    /// from: Vorn's own only when `pack` has a reserved id and they are the
+    /// very bytes its pin holds. Whatever runs or is added is what was checked.
+    pub async fn read_as(
+        &self,
+        pack: &InstalledPack,
+        file: &str,
+    ) -> Result<(Vec<u8>, Caller), String> {
+        let (trust, read, name) = (self.settings.trust.clone(), pack.clone(), file.to_owned());
+        let (bytes, vouched) =
+            tokio::task::spawn_blocking(move || trust.read_vouched(&read, &name))
                 .await
-                .unwrap_or(false)
-        };
-        caller(pack, builtin)
+                .map_err(|e| e.to_string())??;
+        Ok((
+            bytes,
+            caller(pack, crate::pack::is_reserved(&pack.id) && vouched),
+        ))
     }
 
     async fn start_bundled(&self, bundled: &Bundled) -> Result<Program, String> {

@@ -21,13 +21,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::gate::{enforced, CORE_METHODS};
 use crate::manifest::{file, Manifest, Permission};
 use crate::pack::{
     check_id, directory_bytes, is_safe_id, is_safe_version, read_dir_manifest, InstalledPack,
-    PackStore, CURRENT_FILE, SHIPPED_NAMESPACE,
+    PackStore, CURRENT_FILE, REFUSED_KEY, SHIPPED_NAMESPACE,
 };
 
 /// Long enough to read a sheet, short enough that walking away costs nothing.
@@ -907,6 +907,57 @@ impl Installs {
         self.store.inspect(&manifest.id)
     }
 
+    /// Checks every linked folder again as the link did, since one can gain
+    /// a link or special file after it was linked: one that did is marked
+    /// not loaded in its `current.json` until it holds none again. Answers
+    /// the ids whose mark changed. Blocks on the disk.
+    pub fn recheck_linked(&self) -> Vec<String> {
+        let mut changed = Vec::new();
+        for id in self.store.ids() {
+            let home = self.store.root().join(&id);
+            let Some(folder) = read_current(&home)
+                .and_then(|c| c.get("linked").and_then(Value::as_str).map(PathBuf::from))
+            else {
+                continue;
+            };
+            let refused = match walk(&folder, "", &mut Vec::new()) {
+                Ok(()) => None,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Some(e.to_string()),
+                // A folder that cannot be read now is not loaded anyway; its mark stays as it was.
+                Err(_) => continue,
+            };
+            let _placing = lock(&self.placing);
+            let Some(mut current) = read_current(&home) else {
+                continue;
+            };
+            // Linked again, or removed, while the folder was walked.
+            if current.get("linked").and_then(Value::as_str).map(Path::new) != Some(&folder) {
+                continue;
+            }
+            let was = current.get(REFUSED_KEY).and_then(Value::as_str);
+            if was == refused.as_deref() {
+                continue;
+            }
+            match &refused {
+                Some(why) => {
+                    warn!("[extensions] {id} is not loaded: {why}");
+                    current[REFUSED_KEY] = json!(why);
+                }
+                None => {
+                    info!("[extensions] {id} holds no link any more and loads again");
+                    if let Some(map) = current.as_object_mut() {
+                        map.remove(REFUSED_KEY);
+                    }
+                }
+            }
+            match write_current(&home, &current) {
+                Ok(()) => changed.push(id),
+                Err(e) => warn!("[extensions] cannot mark {id}: {e}"),
+            }
+        }
+        changed
+    }
+
     /// Removes extension `id` and every file Vorn keeps of it; a linked
     /// folder is the person's and stays. Its processes and rows are the
     /// caller's to stop and drop first.
@@ -966,7 +1017,6 @@ fn usable_subfolder(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Leaves only `path` of the clone at `dir`, moved up to be all of it.
 /// Refuses a tree holding a link or special file anywhere, as a pack holds
 /// only files and folders; a clone keeps what was committed, links included.
 fn refuse_links(dir: &Path, prefix: &str) -> Result<(), String> {
@@ -991,6 +1041,7 @@ fn refuse_links(dir: &Path, prefix: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Leaves only `path` of the clone at `dir`, moved up to be all of it.
 fn keep_only(dir: &Path, path: &str) -> Result<(), String> {
     // A committed link could name a folder anywhere; each part must be a real folder of the clone.
     let mut inner = dir.to_path_buf();
@@ -1313,6 +1364,8 @@ fn copy_folder(folder: &Path, dir: &Path) -> Result<(), String> {
     copy().map_err(|e| format!("cannot copy {}: {e}", folder.display()))
 }
 
+/// Each file under `dir` but what is never packed, by path; a link or
+/// special file anywhere is an `InvalidData` error naming it.
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -1332,9 +1385,10 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
         } else if kind.is_file() {
             out.push(rel);
         } else {
-            return Err(std::io::Error::other(format!(
-                "{rel} is a link or special file; a pack holds only files and folders"
-            )));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{rel} is a link or special file; a pack holds only files and folders"),
+            ));
         }
     }
     Ok(())
@@ -1594,6 +1648,33 @@ migrations = "migrations"
         assert!(err.contains("dir is a link"), "{err}");
         assert!(installs.inspect_link(folder.path()).is_err());
         assert!(installs.store().describe("test.marker").is_none());
+    }
+
+    #[test]
+    fn a_linked_folder_that_gains_a_link_is_not_loaded_until_it_is_gone() {
+        let outside = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        fs::write(
+            folder.path().join(file::FILE),
+            MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", ""),
+        )
+        .unwrap();
+        fs::create_dir(folder.path().join("lib")).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        installs.link(folder.path()).unwrap();
+        assert!(installs.recheck_linked().is_empty());
+
+        let planted = folder.path().join("lib/keys");
+        std::os::unix::fs::symlink(outside.path(), &planted).unwrap();
+        assert_eq!(installs.recheck_linked(), ["test.marker"]);
+        let err = installs.store().inspect("test.marker").unwrap_err();
+        assert!(err.contains("lib/keys is a link"), "{err}");
+        assert!(installs.recheck_linked().is_empty(), "marked once");
+
+        fs::remove_file(&planted).unwrap();
+        assert_eq!(installs.recheck_linked(), ["test.marker"]);
+        assert!(installs.store().inspect("test.marker").is_ok());
     }
 
     #[test]

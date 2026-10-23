@@ -7220,6 +7220,7 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "regress",
+ "rustix 1.1.5",
  "semver",
  "serde",
  "serde_json",
@@ -7237,6 +7238,7 @@ dependencies = [
  "vorn-tree",
  "wasmtime",
  "wasmtime-wasi",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

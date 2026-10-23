@@ -243,7 +243,12 @@ struct Current {
     installed_at: Value,
     linked_agent: Option<String>,
     linked_manifest: Option<String>,
+    /// Why a linked folder is not loaded: it gained a link since it was linked.
+    refused: Option<String>,
 }
+
+/// The key in `current.json` saying why a linked folder is not loaded.
+pub const REFUSED_KEY: &str = "refused";
 
 /// Reads the manifest a folder carries, `vorn-extension.toml`.
 pub fn read_dir_manifest(dir: &Path) -> Result<Manifest, String> {
@@ -363,6 +368,10 @@ impl PackStore {
                 .get("linkedManifest")
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            refused: parsed
+                .get(REFUSED_KEY)
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         })
     }
 
@@ -403,6 +412,12 @@ impl PackStore {
         let current = self
             .current(id)
             .ok_or_else(|| format!("No extension \"{id}\" is installed"))?;
+        if let (Some(folder), Some(why)) = (&current.linked, &current.refused) {
+            return Err(format!(
+                "{id} is not loaded from {}: {why}",
+                folder.display()
+            ));
+        }
         let (path, linked) = match (&current.linked, &current.version) {
             (Some(folder), _) => (folder.clone(), true),
             (None, Some(version)) => (self.root.join(id).join(version), false),

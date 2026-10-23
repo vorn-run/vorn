@@ -5,7 +5,9 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
+use std::ffi::OsString;
+use std::fs::{File, Metadata};
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -52,13 +54,28 @@ impl FileEntry {
 /// without dotfiles (but `.github`) and without what git ignores.
 /// Empty when the directory cannot be read.
 pub fn list_dir(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Vec<FileEntry> {
-    let ignored = git_ignored(dir, env, cache);
     let Ok(read) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
+    // Not followed: a link to a directory is not one, as for a Dirent.
+    let entries = read.flatten().map(|entry| {
+        let is_directory = entry.file_type().is_ok_and(|t| t.is_dir());
+        (entry.file_name(), is_directory)
+    });
+    listing(dir, entries, env, cache)
+}
+
+/// [`list_dir`] of entries already read: each name, and whether it is a directory.
+pub fn listing(
+    dir: &str,
+    entries: impl IntoIterator<Item = (OsString, bool)>,
+    env: &Arc<SafeEnv>,
+    cache: &IgnoreCache,
+) -> Vec<FileEntry> {
+    let ignored = git_ignored(dir, env, cache);
     let mut out = Vec::new();
-    for entry in read.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
+    for (name, is_directory) in entries {
+        let name = name.to_string_lossy().into_owned();
         if ALWAYS_EXCLUDE.contains(&name.as_str()) {
             continue;
         }
@@ -69,8 +86,6 @@ pub fn list_dir(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Vec<FileE
         if ignored.as_ref().is_some_and(|set| set.contains(&path)) {
             continue;
         }
-        // Not followed: a link to a directory is not one, as for a Dirent.
-        let is_directory = entry.file_type().is_ok_and(|t| t.is_dir());
         out.push(FileEntry {
             name,
             path,
@@ -144,18 +159,23 @@ fn git_ignored(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Option<Arc
 /// The start of a file as text, at most `max_bytes` of it, marked when cut;
 /// `None` for anything that is not a readable file of text.
 pub fn read_content(path: &str, max_bytes: u64) -> Option<String> {
-    let meta = std::fs::metadata(path).ok()?;
+    // Checked before the open, which would wait on a pipe.
+    if !std::fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
+    let file = File::open(path).ok()?;
+    read_text(&file, &file.metadata().ok()?, max_bytes)
+}
+
+/// [`read_content`] of a file already open, `meta` being what it said it was.
+pub fn read_text(file: &File, meta: &Metadata, max_bytes: u64) -> Option<String> {
     if !meta.is_file() {
         return None;
     }
     let size = meta.len();
     let want = usize::try_from(size.min(max_bytes)).ok()?;
     let mut buf = Vec::with_capacity(want);
-    std::fs::File::open(path)
-        .ok()?
-        .take(want as u64)
-        .read_to_end(&mut buf)
-        .ok()?;
+    file.take(want as u64).read_to_end(&mut buf).ok()?;
     if buf[..buf.len().min(BINARY_CHECK)].contains(&0) {
         return None;
     }
@@ -169,7 +189,11 @@ pub fn read_content(path: &str, max_bytes: u64) -> Option<String> {
 /// A file's size and modification time in whole milliseconds; `None` for
 /// anything that is not a file this can stat.
 pub fn stamp(path: &str) -> Option<Value> {
-    let meta = std::fs::metadata(path).ok()?;
+    stamp_of(&std::fs::metadata(path).ok()?)
+}
+
+/// [`stamp`] of what a file said it was.
+pub fn stamp_of(meta: &Metadata) -> Option<Value> {
     if !meta.is_file() {
         return None;
     }
@@ -193,7 +217,17 @@ pub fn stamp(path: &str) -> Option<Value> {
 /// Writes `content` over the file, creating it; the error names the failed
 /// call and the path.
 pub fn write_content(path: &str, content: &str) -> Value {
-    match std::fs::write(path, content) {
+    written(path, std::fs::write(path, content))
+}
+
+/// [`write_content`] into a file already open for writing and empty.
+pub fn write_to(mut file: &File, path: &str, content: &str) -> Value {
+    written(path, file.write_all(content.as_bytes()))
+}
+
+/// How a write to `path` went, as the explorer reads it.
+pub fn written(path: &str, result: std::io::Result<()>) -> Value {
+    match result {
         Ok(()) => json!({ "success": true }),
         Err(error) => json!({
             "success": false,
