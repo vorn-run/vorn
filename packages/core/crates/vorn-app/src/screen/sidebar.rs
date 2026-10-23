@@ -150,7 +150,7 @@ fn header(s: &Screen<'_>) -> El {
         .py(8.0)
         .role(Role::TabList, "View mode");
     let glass = super::chrome::glass(s);
-    let tabs = view_tabs(s, "sidebar-mode");
+    let tabs = view_tabs(s, "sidebar-mode", true);
     row = if glass {
         row.child(super::chrome::group(s, tabs))
     } else {
@@ -161,7 +161,7 @@ fn header(s: &Screen<'_>) -> El {
         .col()
         .shrink0()
         .child(bar)
-        .child(row)
+        .child_if(super::chrome::views(s).then_some(row))
         .child(div().h(1.0).w_full().bg(white(0.06)))
 }
 
@@ -1744,7 +1744,7 @@ mod tests {
 
 /// The view tabs: icon buttons, the chosen one labelled; on glass over the
 /// system's material the system draws their icons and label.
-pub(super) fn view_tabs(s: &Screen<'_>, place: &str) -> Vec<El> {
+pub(super) fn view_tabs(s: &Screen<'_>, place: &str, labels: bool) -> Vec<El> {
     let glass = super::chrome::glass(s);
     let mut tabs = Vec::new();
     for b in super::chrome::top_buttons(s) {
@@ -1779,7 +1779,7 @@ pub(super) fn view_tabs(s: &Screen<'_>, place: &str) -> Vec<El> {
             Some(svg) => b.child(div().size(14.0, 14.0).native_icon(svg, 14.0, fg)),
             None => b.child(ico(name, 14.0, 2.0, fg)),
         };
-        if on {
+        if on && labels {
             // Over glass the system draws the label; the app keeps its room.
             let ink = if svg.is_some() { white(0.0) } else { fg };
             let mut t = text(label, 12.0, ink)

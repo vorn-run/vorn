@@ -177,13 +177,20 @@ pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
     );
     let row = div().row().items_center();
     if glass(s) {
-        return row
-            .gap(8.0)
-            .ml(6.0)
-            .child(group(s, [toggle]))
-            .child(group(s, super::sidebar::view_tabs(s, "toolbar-mode")));
+        return row.gap(8.0).ml(6.0).child(group(s, [toggle])).child_if(
+            views(s).then(|| group(s, super::sidebar::view_tabs(s, "toolbar-mode", false))),
+        );
     }
-    row.gap(4.0).child(toggle).child(divider()).child(pills(s))
+    let row = row.gap(4.0).child(toggle);
+    if !views(s) {
+        return row;
+    }
+    row.child(divider()).child(pills(s))
+}
+
+/// Whether there is more than Sessions to switch to.
+pub(super) fn views(s: &Screen<'_>) -> bool {
+    top_buttons(s).len() > 1
 }
 
 /// The dock's popover, as the one menu open: a press outside closes it.
