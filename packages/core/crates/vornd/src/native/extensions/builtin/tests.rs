@@ -41,7 +41,7 @@ impl World for Core {
     fn storage(
         &self,
         caller: &Caller,
-        _: Option<std::path::PathBuf>,
+        _: Option<vorn_extensions::pack::Migrations>,
         call: StorageCall,
     ) -> Answer<Value> {
         let mut kept = guard(&self.kept);

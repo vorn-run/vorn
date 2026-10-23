@@ -13,6 +13,7 @@ use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{CallCtx, Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{self, Answer, Caller, StorageCall, World};
+use vorn_extensions::pack::Migrations;
 use vorn_extensions::reach::{self, Access, Opened, Places};
 use vorn_store::extension::{ExtensionTables, Grant};
 
@@ -1032,7 +1033,7 @@ impl World for Wired {
     fn storage(
         &self,
         caller: &Caller,
-        migrations: Option<PathBuf>,
+        migrations: Option<Migrations>,
         call: StorageCall,
     ) -> Answer<Value> {
         let (native, id) = (self.native.upgrade(), caller.extension.clone());
@@ -1054,8 +1055,8 @@ impl World for Wired {
                     .as_ref()
                     .ok_or_else(|| vorn_store::Error::Refused("its tables did not open".into()))?;
                 // Checked each call: a linked package gains files, and a reinstall starts with none run.
-                if let Some(dir) = migrations.filter(|d| d.is_dir()) {
-                    let ran = tables.migrate(&dir)?;
+                if let Some(migrations) = migrations {
+                    let ran = tables.migrate(migrations.names()?, |name| migrations.read(name))?;
                     if !ran.is_empty() {
                         info!("[extensions] {id} ran its migrations {}", ran.join(", "));
                     }

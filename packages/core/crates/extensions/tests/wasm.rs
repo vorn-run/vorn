@@ -59,7 +59,12 @@ impl World for Core {
     fn secret(&self, _: &Caller, _: &str, _: &str) -> Answer<Option<String>> {
         Box::pin(async { Ok(None) })
     }
-    fn storage(&self, caller: &Caller, _: Option<PathBuf>, call: StorageCall) -> Answer<Value> {
+    fn storage(
+        &self,
+        caller: &Caller,
+        _: Option<vorn_extensions::pack::Migrations>,
+        call: StorageCall,
+    ) -> Answer<Value> {
         let id = caller.extension.clone();
         Box::pin(async move {
             match call {

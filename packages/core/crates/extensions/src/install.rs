@@ -39,7 +39,7 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 /// What a failure shows of a command's output.
 const TAIL_BYTES: usize = 2000;
 /// Left out of a bundle: history, dependencies and build output a build makes again.
-const NOT_PACKED: [&str; 3] = [".git", "node_modules", "target"];
+pub(crate) const NOT_PACKED: [&str; 3] = [".git", "node_modules", "target"];
 /// Starts the lock an editor keeps beside a file it has open, a link to
 /// nothing; only such a link is left out of a pack.
 pub(crate) const EDITOR_LOCK: &str = ".#";
@@ -1391,11 +1391,14 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if NOT_PACKED.contains(&name.as_str()) {
-            continue;
-        }
         // `file_type` does not follow links; a pack holds only real files and folders.
         let kind = entry.file_type()?;
+        if NOT_PACKED.contains(&name.as_str()) {
+            if prefix.is_empty() && kind.is_symlink() && manifest_names(dir, &name) {
+                return Err(not_a_file(&name));
+            }
+            continue;
+        }
         if kind.is_symlink() && name.starts_with(EDITOR_LOCK) && !entry.path().exists() {
             continue;
         }
@@ -1409,13 +1412,37 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
         } else if kind.is_file() {
             out.push(rel);
         } else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("{rel} is a link or special file; a pack holds only files and folders"),
-            ));
+            return Err(not_a_file(&rel));
         }
     }
     Ok(())
+}
+
+fn not_a_file(rel: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("{rel} is a link or special file; a pack holds only files and folders"),
+    )
+}
+
+/// Whether the manifest in `folder` names a path through its entry `name`;
+/// one it cannot read names none, as it is refused on its own.
+fn manifest_names(folder: &Path, name: &str) -> bool {
+    fn names(value: &toml::Value, name: &str) -> bool {
+        match value {
+            toml::Value::String(s) => Path::new(s)
+                .components()
+                .find(|c| !matches!(c, std::path::Component::CurDir))
+                .is_some_and(|c| c.as_os_str() == name),
+            toml::Value::Array(items) => items.iter().any(|v| names(v, name)),
+            toml::Value::Table(table) => table.values().any(|v| names(v, name)),
+            _ => false,
+        }
+    }
+    fs::read_to_string(folder.join(file::FILE))
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .is_some_and(|table| table.values().any(|v| names(v, name)))
 }
 
 /// The bytes Vorn keeps of an installed extension, for `vorn ext list`.
@@ -1729,6 +1756,38 @@ migrations = "migrations"
         assert_eq!(installs.recheck_linked(), ["test.marker"]);
         let err = installs.store().inspect("test.marker").unwrap_err();
         assert!(err.contains("lib/.#schema.json is a link"), "{err}");
+    }
+
+    #[test]
+    fn a_left_out_folder_the_manifest_names_is_not_a_link() {
+        let outside = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "");
+        fs::write(folder.path().join(file::FILE), &manifest).unwrap();
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("target")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("node_modules")).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        // Named by nothing, a left-out link is passed over as before.
+        installs.link(folder.path()).unwrap();
+        assert!(installs.recheck_linked().is_empty());
+
+        fs::write(
+            folder.path().join(file::FILE),
+            manifest.replace("\"hello.sh\"", "\"./target/hello.sh\""),
+        )
+        .unwrap();
+        assert!(installs.recheck_linked().is_empty(), "seen once");
+        assert_eq!(installs.recheck_linked(), ["test.marker"]);
+        let err = installs.store().inspect("test.marker").unwrap_err();
+        assert!(err.contains("target is a link"), "{err}");
+        let err = installs.link(folder.path()).unwrap_err();
+        assert!(err.contains("cannot link: target is a link"), "{err}");
+
+        fs::remove_file(folder.path().join("target")).unwrap();
+        fs::create_dir(folder.path().join("target")).unwrap();
+        assert_eq!(installs.recheck_linked(), ["test.marker"]);
+        assert!(installs.store().inspect("test.marker").is_ok());
     }
 
     #[test]

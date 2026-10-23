@@ -281,6 +281,21 @@ pub use open::Looked;
 /// plain names; anything else, a link or a special file is refused.
 pub fn read_in(folder: &Path, file: &str) -> io::Result<Vec<u8>> {
     use std::io::Read;
+    let (mut opened, _) = open_in(folder, file, false)?;
+    let mut bytes = Vec::new();
+    opened.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// The entries of the folder `dir` names under `folder`, opened as
+/// [`read_in`] opens a file: each name, with whether it is a folder (a link
+/// to one is not).
+pub fn list_in(folder: &Path, dir: &str) -> io::Result<Vec<(OsString, bool)>> {
+    let (opened, real) = open_in(folder, dir, true)?;
+    open::entries(&opened, &real)
+}
+
+fn open_in(folder: &Path, file: &str, want_folder: bool) -> io::Result<(File, PathBuf)> {
     let mut names = Vec::new();
     for part in Path::new(file).components() {
         match part {
@@ -294,19 +309,16 @@ pub fn read_in(folder: &Path, file: &str) -> io::Result<Vec<u8>> {
             }
         }
     }
-    let mut opened = match open::open_under(folder, &names) {
-        Ok(file) => file,
-        Err(open::Failed::Link) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("{file} is a link; an extension's files are files"),
-            ))
-        }
-        Err(open::Failed::Io(e)) => return Err(e),
-    };
-    let mut bytes = Vec::new();
-    opened.read_to_end(&mut bytes)?;
-    Ok(bytes)
+    if file.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "no path"));
+    }
+    open::open_under(folder, &names, want_folder).map_err(|e| match e {
+        open::Failed::Link => io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{file} is a link; an extension's files are files"),
+        ),
+        open::Failed::Io(e) => e,
+    })
 }
 
 fn became_link(path: &Path) -> ExtError {
@@ -1104,6 +1116,39 @@ mod tests {
         }
         for file in ["../home/.zshrc", "/etc/hosts", "", "schemas"] {
             assert!(read_in(&pack, file).is_err(), "{file}");
+        }
+    }
+
+    #[test]
+    fn lists_an_extensions_folder_without_following_a_link_below_its_folder() {
+        use std::os::unix::fs::symlink;
+        let d = disk();
+        let pack = d.root.join("pack");
+        fs::create_dir_all(pack.join("db/migrations/old")).unwrap();
+        fs::write(pack.join("db/migrations/001.sql"), "").unwrap();
+        symlink(d.home.join(".zshrc"), pack.join("db/migrations/002.sql")).unwrap();
+        let named = d.root.join("named");
+        symlink(&pack, &named).unwrap();
+        let mut listed = list_in(&named, "db/migrations").unwrap();
+        listed.sort();
+        assert_eq!(
+            listed,
+            [
+                (OsString::from("001.sql"), false),
+                (OsString::from("002.sql"), false),
+                (OsString::from("old"), true),
+            ]
+        );
+        assert_eq!(list_in(&pack, ".").unwrap().len(), 1);
+
+        symlink(d.home.join(".ssh"), pack.join("linked")).unwrap();
+        symlink(pack.join("db"), pack.join("db2")).unwrap();
+        for dir in ["linked", "db2/migrations"] {
+            let err = list_in(&pack, dir).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{dir}: {err}");
+        }
+        for dir in ["../home", "/etc", "", "db/migrations/001.sql", "gone"] {
+            assert!(list_in(&pack, dir).is_err(), "{dir}");
         }
     }
 

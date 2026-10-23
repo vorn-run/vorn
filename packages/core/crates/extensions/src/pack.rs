@@ -151,10 +151,13 @@ impl InstalledPack {
         Some((program, args))
     }
 
-    /// The folder of its tables' migrations, when it keeps tables.
-    pub fn migrations(&self) -> Option<PathBuf> {
+    /// Its tables' migrations, when it keeps tables.
+    pub fn migrations(&self) -> Option<Migrations> {
         let storage = self.manifest.storage.as_ref()?;
-        Some(self.path.join(&storage.migrations))
+        Some(Migrations {
+            folder: self.path.clone(),
+            dir: storage.migrations.clone(),
+        })
     }
 
     /// The service's program, resolved; `None` when it declares none.
@@ -512,6 +515,50 @@ pub fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
     Ok(total)
 }
 
+/// A package's migrations folder, listed and read without following any
+/// link below the package, so a link put in it after it was checked is
+/// refused rather than run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Migrations {
+    folder: PathBuf,
+    dir: String,
+}
+
+impl Migrations {
+    /// The names of the files in it; none when it is missing or not a folder.
+    pub fn names(&self) -> std::io::Result<Vec<String>> {
+        match crate::reach::list_in(&self.folder, &self.dir) {
+            Ok(entries) => Ok(entries
+                .into_iter()
+                .filter(|(_, is_dir)| !is_dir)
+                .filter_map(|(name, _)| name.into_string().ok())
+                .collect()),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::NotADirectory
+                        | std::io::ErrorKind::InvalidInput
+                ) =>
+            {
+                Ok(Vec::new())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The text of the migration `name` in it.
+    pub fn read(&self, name: &str) -> std::io::Result<String> {
+        let bytes = crate::reach::read_in(&self.folder, &format!("{}/{name}", self.dir))?;
+        String::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{name} is not UTF-8"),
+            )
+        })
+    }
+}
+
 /// Packages written straight to disk, for tests here.
 #[cfg(test)]
 pub mod fixture {
@@ -776,5 +823,35 @@ mod tests {
         );
         assert!(is_safe_version("1.0.0-beta+1"));
         assert!(!is_safe_version("1..0") && !is_safe_version(".1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migrations_are_listed_and_read_without_following_a_link() {
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("any.sql"), "DROP TABLE tasks;").unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let of = |dir: &str| Migrations {
+            folder: folder.path().to_path_buf(),
+            dir: dir.into(),
+        };
+        assert!(of("migrations").names().unwrap().is_empty(), "none yet");
+        fs::create_dir(folder.path().join("migrations")).unwrap();
+        fs::write(folder.path().join("migrations/001.sql"), "SELECT 1;").unwrap();
+        fs::create_dir(folder.path().join("migrations/old")).unwrap();
+        assert_eq!(of("migrations").names().unwrap(), ["001.sql"]);
+        assert_eq!(of("migrations").read("001.sql").unwrap(), "SELECT 1;");
+        assert!(of("migrations/001.sql").names().unwrap().is_empty());
+
+        std::os::unix::fs::symlink(
+            outside.path().join("any.sql"),
+            folder.path().join("migrations/002.sql"),
+        )
+        .unwrap();
+        let err = of("migrations").read("002.sql").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "{err}");
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("linked")).unwrap();
+        let err = of("linked").names().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "{err}");
     }
 }
