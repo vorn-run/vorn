@@ -14,7 +14,7 @@ vorn-term-proto = { path = "../term-proto" }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-perl"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false }
+criterion = { version = "0.8", default-features = false }
 vorn-recovery = { path = "../recovery" }
 
 [[bench]]
