@@ -174,6 +174,7 @@ service component counts as Vorn's own only when the bytes Vorn read to run it
 are the pinned pack's; a service or command run as a program never does.
 Installing from a folder or a git repository, linking a folder, and packing all
 refuse a tree holding a symlink or special file, a committed one included.
+A linked folder that gains one is not loaded until it is gone again.
 
 The core is frozen against that API: `packages/core/freeze.toml` lists every
 crate of the core by its area and every feature still left in it, and
