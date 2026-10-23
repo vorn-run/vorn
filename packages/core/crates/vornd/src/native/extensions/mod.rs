@@ -197,9 +197,16 @@ pub trait Around: Send + Sync + 'static {
     fn pack_changed(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
     }
-    /// A package was removed: the connections made with it go with it.
-    fn pack_removed(&self, _id: &str) -> BoxFuture<'static, ()> {
+    /// A package is about to be removed: its connections' programs stop,
+    /// and nothing else changes yet.
+    fn pack_stopping(&self, _id: &str) -> BoxFuture<'static, ()> {
         Box::pin(async {})
+    }
+    /// A package was removed: the connections made with it, their secrets
+    /// and its tables go with it. A failure fails the removal, which another
+    /// removal finishes.
+    fn pack_removed(&self, _id: &str) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -523,13 +530,20 @@ impl Extensions {
                     }
                 })
                 .await
-                .map(|sheet| json!(sheet))
+                .map(|sheet| {
+                    let closed = self.router.confiner().closed_projects();
+                    with_sandbox(json!(sheet), self.router.sandbox_kind(), &closed)
+                })
             }
             "extension:install" => {
                 let (token, typed) = (
                     text(params, "token").to_owned(),
                     text(params, "confirm").to_owned(),
                 );
+                let id = self.installs.staged_manifest(&token).map(|m| m.id);
+                if let Err(err) = self.finish_removal(id).await {
+                    return Answer::Error(err);
+                }
                 let installs = Arc::clone(&self.installs);
                 match blocking(move || installs.confirm(&token, &typed)).await {
                     Ok(pack) => {
@@ -541,8 +555,22 @@ impl Extensions {
             }
             "extension:link" => {
                 let path = PathBuf::from(home_path(text(params, "path")));
+                // The manifest the sheet read, which is the one the person confirmed.
+                let read = params
+                    .get("manifest")
+                    .and_then(Value::as_str)
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_owned);
+                let (installs, folder) = (Arc::clone(&self.installs), path.clone());
+                let id = blocking(move || Ok::<_, String>(installs.link_id(&folder)))
+                    .await
+                    .ok()
+                    .flatten();
+                if let Err(err) = self.finish_removal(id).await {
+                    return Answer::Error(err);
+                }
                 let installs = Arc::clone(&self.installs);
-                match blocking(move || installs.link(&path)).await {
+                match blocking(move || installs.link_as_read(&path, read.as_deref())).await {
                     Ok(pack) => {
                         self.package_changed(&pack.id).await;
                         Ok(json!(pack))
@@ -765,10 +793,23 @@ impl Extensions {
                 let mut value = json!(pack);
                 value["running"] = json!(running.iter().any(|k| k.extension == pack.id));
                 value["sandboxed"] = json!(self.router.sandboxed(&pack.id));
-                value["sandboxAvailable"] = json!(
-                    vorn_extensions::sandbox::available()
-                        && vorn_extensions::sandbox::sandboxable(&pack.manifest)
-                );
+                // One rule for the switch and the listing: only a program the profile holds.
+                let runs = vorn_extensions::sandbox::sandboxable(&pack.manifest);
+                value["sandboxAvailable"] = json!(self.router.can_sandbox() && runs);
+                // How its own program runs; a package without one says nothing.
+                value["sandbox"] = match (
+                    runs,
+                    self.router.sandbox_kind(),
+                    self.router.sandboxed(&pack.id),
+                ) {
+                    (false, _, _) => Value::Null,
+                    (true, None, _) => json!("unsandboxed"),
+                    (true, Some(kind), true) => json!(kind.name()),
+                    (true, Some(_), false) => json!("off"),
+                };
+                if runs && self.router.sandboxed(&pack.id) {
+                    value["closedProjects"] = json!(self.router.confiner().closed_projects());
+                }
                 value["preferences"] = json!(self.router.listed_preferences(&pack.manifest));
                 if let Some(svg) = pack.logo_svg(false) {
                     value["logo"] = json!(svg);
@@ -787,6 +828,7 @@ impl Extensions {
     async fn remove(&self, id: &str) -> Result<Value, String> {
         if self.hosts.store().inspect(id).is_err()
             && !self.hosts.store().ids().iter().any(|i| i == id)
+            && !self.installs.left_behind(id)
         {
             return Err(format!("No extension \"{id}\" is installed"));
         }
@@ -797,19 +839,48 @@ impl Extensions {
         self.hosts.stop_extension(id).await;
         self.router.forget(id).await;
         self.router.forget_preferences(id);
-        let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
-        blocking(move || installs.remove(&owned)).await?;
+        // Its connector programs too, before its data goes, so none writes after.
+        self.around.pack_stopping(id).await;
+        // Its data before its package: while either is left it is still installed, so
+        // removing it again finishes the job and nothing a new install of it gets is old.
         let (router, owned) = (Arc::clone(&self.router), id.to_owned());
         if let Err(err) =
             blocking(move || router.forget_files(&owned).map_err(|e| e.to_string())).await
         {
             warn!("[extensions] could not remove the files of {id}: {err}");
+            return Err(format!("Could not remove the files {id} kept: {err}"));
         }
+        let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
+        blocking(move || installs.retire(&owned)).await?;
+        // Out of the installed set: its connections and tables go now, and none
+        // comes back with it; its folder goes last, so a failure here is retried.
+        let finished = match self.around.pack_removed(id).await {
+            Ok(()) => {
+                let (installs, owned) = (Arc::clone(&self.installs), id.to_owned());
+                blocking(move || installs.purge(&owned)).await
+            }
+            Err(err) => Err(format!("Could not remove what {id} left: {err}")),
+        };
         self.sync_adapters();
-        self.around.pack_removed(id).await;
         self.contributions_changed(id);
         self.removed.notify_one();
-        Ok(json!({ "removed": id }))
+        if let Err(err) = &finished {
+            warn!("[extensions] {err}");
+        }
+        finished.map(|()| json!({ "removed": id }))
+    }
+
+    /// Finishes a removal of `id` that stopped part way, before `id` is
+    /// installed again, so the new one inherits none of it; refused, with
+    /// why, when it still cannot finish.
+    async fn finish_removal(&self, id: Option<String>) -> Result<(), String> {
+        let Some(id) = id.filter(|id| self.installs.left_behind(id)) else {
+            return Ok(());
+        };
+        info!("[extensions] finishing the removal of {id} before installing it");
+        self.remove(&id).await.map(drop).map_err(|err| {
+            format!("{id} was not fully removed and still cannot be ({err}); nothing was installed")
+        })
     }
 
     /// After an install or a link, nothing runs its old files and its connector, if any, appears.
@@ -1107,7 +1178,17 @@ impl Extensions {
         self.router.reindex();
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
-        self.hosts.stop_extension(extension_id).await;
+        self.network_changed(extension_id).await;
+    }
+
+    /// Takes back the way out extension `id`'s programs shared and, when
+    /// they had one, stops them, so each starts again under the hosts its
+    /// manifest declares now.
+    async fn network_changed(&self, id: &str) {
+        if self.router.confiner().revoke(id) {
+            self.router.lifecycle().stop_extension(id).await;
+        }
+        self.hosts.stop_extension(id).await;
     }
 
     /// Runs the start hook of `id` when it is installed and its service is not
@@ -1436,6 +1517,7 @@ async fn watch_linked(me: Weak<Extensions>) {
         }
         for id in moved {
             debug!("[extensions] {id}'s manifest changed");
+            extensions.network_changed(id).await;
             extensions.contributions_changed(id);
         }
         stamps = now;
@@ -1625,7 +1707,17 @@ impl Around for Wired {
         })
     }
 
-    fn pack_removed(&self, id: &str) -> BoxFuture<'static, ()> {
+    fn pack_stopping(&self, id: &str) -> BoxFuture<'static, ()> {
+        let connectors = self.native.upgrade().and_then(|n| n.connectors().cloned());
+        let id = id.to_owned();
+        Box::pin(async move {
+            if let Some(connectors) = connectors {
+                connectors.inner().package_stopping(&id).await;
+            }
+        })
+    }
+
+    fn pack_removed(&self, id: &str) -> BoxFuture<'static, Result<(), String>> {
         let native = self.native.upgrade();
         let connectors = native.as_ref().and_then(|n| n.connectors().cloned());
         if let Some(n) = &native {
@@ -1635,20 +1727,21 @@ impl Around for Wired {
         let id = id.to_owned();
         Box::pin(async move {
             if let Some(connectors) = connectors {
-                connectors.inner().package_removed(&id).await;
+                connectors.inner().package_removed(&id).await?;
             }
-            let Some(db) = db else { return };
+            let Some(db) = db else { return Ok(()) };
             let owned = id.clone();
             let dropped = tokio::task::spawn_blocking(move || {
                 vorn_store::extension::ExtensionTables::forget(&db, &owned)
             })
-            .await;
-            match dropped {
-                Ok(Ok(n)) if n > 0 => info!("[extensions] dropped {n} tables of {id}"),
-                Ok(Ok(_)) => {}
-                Ok(Err(err)) => warn!("[extensions] could not drop the tables of {id}: {err}"),
-                Err(err) => warn!("[extensions] could not drop the tables of {id}: {err}"),
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r.map_err(|e| e.to_string()))
+            .map_err(|e| format!("could not drop its tables: {e}"))?;
+            if dropped > 0 {
+                info!("[extensions] dropped {dropped} tables of {id}");
             }
+            Ok(())
         })
     }
 
@@ -1670,3 +1763,92 @@ impl Around for Wired {
 
 #[cfg(test)]
 mod tests;
+
+/// An install sheet with how its program will run: `sandbox` is
+/// `sandboxed` or `unsandboxed`, and the closing words say what that means.
+/// A package that runs no program of its own (a Wasm component) is left as it is.
+fn with_sandbox(
+    mut sheet: Value,
+    can: Option<vorn_extensions::sandbox::Kind>,
+    closed: &[PathBuf],
+) -> Value {
+    let runs = sheet["commands"].as_array().is_some_and(|commands| {
+        commands.iter().any(|c| {
+            c["when"]
+                .as_str()
+                .is_some_and(|w| w == "service" || w.starts_with("action"))
+        })
+    });
+    if !runs {
+        return sheet;
+    }
+    let (word, said) = match can {
+        Some(kind) if kind.limits_network() => (
+            kind.name(),
+            "Its program runs sandboxed: it reads its own folder, writes only its data folder and your projects, and reaches only the hosts above. You can turn the sandbox off for it in Extensions.",
+        ),
+        Some(kind) => (
+            kind.name(),
+            "Its program runs sandboxed: it reads its own folder and writes only its data folder and your projects. This machine cannot limit its network, so it can reach any host. You can turn the sandbox off for it in Extensions.",
+        ),
+        None => (
+            "unsandboxed",
+            "Its program runs unsandboxed: this machine has no sandbox for programs, so it can reach whatever you can.",
+        ),
+    };
+    sheet["sandbox"] = json!(word);
+    let mut said = said.to_owned();
+    if can.is_some() {
+        for project in closed {
+            said.push(' ');
+            said.push_str(&closed_line(project));
+        }
+        sheet["closedProjects"] = json!(closed);
+    }
+    let before = sheet["runsAsYou"].as_str().unwrap_or_default().to_owned();
+    sheet["runsAsYou"] = json!(format!("{before} {said}").trim().to_owned());
+    sheet
+}
+
+/// What a sandboxed program cannot open, said plainly.
+fn closed_line(project: &Path) -> String {
+    format!(
+        "{} holds Vorn's data, so this extension's programs can't open it.",
+        project.display()
+    )
+}
+
+#[cfg(test)]
+mod sandbox_sheet {
+    use super::*;
+
+    #[test]
+    fn a_sheet_says_how_its_program_runs() {
+        let sheet = json!({ "runsAsYou": "X runs as you.", "commands": [{ "when": "service", "argv": ["node"] }] });
+        use vorn_extensions::sandbox::Kind;
+        let here = with_sandbox(sheet.clone(), Some(Kind::Seatbelt), &[]);
+        assert_eq!(here["sandbox"], "sandboxed");
+        assert!(here["runsAsYou"]
+            .as_str()
+            .unwrap()
+            .contains("reaches only the hosts above"));
+        // Landlock holds files only: the sheet never claims hosts it cannot keep to.
+        let files = with_sandbox(sheet.clone(), Some(Kind::Landlock), &[]);
+        assert_eq!(files["sandbox"], "files-only");
+        let said = files["runsAsYou"].as_str().unwrap();
+        assert!(said.contains("cannot limit its network") && !said.contains("only the hosts"));
+        let there = with_sandbox(sheet.clone(), None, &[]);
+        assert_eq!(there["sandbox"], "unsandboxed");
+        let component =
+            json!({ "runsAsYou": "C.", "commands": [{ "when": "build", "argv": ["cargo"] }] });
+        assert_eq!(with_sandbox(component.clone(), None, &[]), component);
+        // A project holding Vorn's data is named, and never given.
+        let home = PathBuf::from("/Users/me");
+        let named = with_sandbox(sheet, Some(Kind::Seatbelt), &[home]);
+        assert!(named["runsAsYou"]
+            .as_str()
+            .unwrap()
+            .ends_with("/Users/me holds Vorn's data, so this extension's programs can't open it."));
+        assert_eq!(named["closedProjects"], json!(["/Users/me"]));
+    }
+}

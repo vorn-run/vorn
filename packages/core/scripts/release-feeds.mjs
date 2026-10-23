@@ -2,16 +2,21 @@
 // Writes a release's update feed from its assets, after every platform has
 // packaged (package-native.mjs):
 //
-//   vorn-update.json   per platform, the asset with its sha256 and size
+//   vorn-update.json   per platform, the asset with its sha256 and size, and
+//                      `checksums`: every release file there by name, which
+//                      install.sh and install.ps1 check their download against
+//
+// sign-feed.mjs then signs it; the app trusts the feed only with that signature.
 //
 //   --dir <dir>      where the assets are, and where the feeds go (default: dist-native)
 //   --version <v>    default: the root package.json's
 //   --repo <o/r>     default: vorn-run/vorn
+//   --servers <list> server archives the feed must list, e.g. linux-arm64
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assetNames } from './package-native.mjs'
+import { assetNames, serverArchiveName } from './package-native.mjs'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 
@@ -37,9 +42,15 @@ export const NATIVE_KEYS = ['mac-arm64', 'mac-x64', 'win-x64', 'linux-x64']
 /** The native app's feed; `files` maps an asset's name to its { sha256, size }. */
 export function nativeFeed({ version, tag, repo: slug, releaseDate, files }) {
   const assets = releaseAssets(version)
+  const checksums = Object.fromEntries(
+    Object.keys(files)
+      .sort()
+      .map((name) => [name, files[name].sha256])
+  )
   return {
     version,
     releaseDate,
+    checksums,
     assets: NATIVE_KEYS.map((key) => {
       const name = assets[key]
       return {
@@ -89,6 +100,14 @@ function main() {
     else missing.push(name)
   }
   if (missing.length) throw new Error(`missing assets: ${missing.join(', ')}`)
+  // The server archives install.sh fetches; a release names the ones it must have.
+  for (const name of readdirSync(dir)) {
+    if (/^vorn-server-.*\.tar\.gz$/.test(name)) files[name] = digest(path.join(dir, name))
+  }
+  for (const target of (args.servers ?? '').split(',').filter(Boolean)) {
+    const name = serverArchiveName(version, ...target.split('-'))
+    if (!files[name]) throw new Error(`missing server archive: ${name}`)
+  }
   const written = feeds({
     version,
     tag: `v${version}`,

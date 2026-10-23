@@ -325,8 +325,10 @@ fn rss(roots: &[u32; 2]) -> (Parts, usize) {
 /// How many sessions vornd's debug report has asleep.
 async fn asleep(port: u16) -> Result<usize, Error> {
     let mut conn = TcpStream::connect(("127.0.0.1", port)).await?;
-    conn.write_all(b"GET /vornd/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .await?;
+    let req = format!(
+        "GET /vornd/sessions HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {CREDENTIAL}\r\nConnection: close\r\n\r\n"
+    );
+    conn.write_all(req.as_bytes()).await?;
     let mut body = String::new();
     tokio::time::timeout(WAIT, conn.read_to_string(&mut body))
         .await

@@ -156,7 +156,52 @@ pub fn install_file(
     }
     let text = serde_json::to_string_pretty(&install(settings, port, token, all, events))
         .map_err(io::Error::other)?;
-    std::fs::write(file, text)
+    write_private(file, &text)
+}
+
+/// Writes `text` to `file` readable by this user only, whole: through a
+/// new file beside it, renamed into place, so a reader never sees it half
+/// written and an existing file's wider mode is not kept.
+pub fn write_private(file: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write;
+    // A settings file kept as a link (dotfiles) is written where it points, and stays a link.
+    let file = &link_target(file);
+    let name = file
+        .file_name()
+        .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
+    let tmp = file.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options.open(&tmp).and_then(|mut f| {
+        f.write_all(text.as_bytes())?;
+        f.sync_all()
+    });
+    if let Err(err) = written.and_then(|()| std::fs::rename(&tmp, file)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// Where writing `file` lands: through every link, even one whose target is
+/// not there yet (that target is made), never over the link itself.
+fn link_target(file: &Path) -> std::path::PathBuf {
+    let mut at = file.to_path_buf();
+    for _ in 0..16 {
+        match std::fs::read_link(&at) {
+            Ok(next) => {
+                at = match at.parent() {
+                    Some(dir) if next.is_relative() => dir.join(next),
+                    _ => next,
+                };
+            }
+            Err(_) => break,
+        }
+    }
+    at
 }
 
 /// Uninstalls from the settings file; a file that is absent or not JSON is left alone.
@@ -168,12 +213,48 @@ pub fn uninstall_file(file: &Path, all: &[&str]) -> io::Result<()> {
         return Ok(());
     };
     let text = serde_json::to_string_pretty(&uninstall(settings, all)).map_err(io::Error::other)?;
-    std::fs::write(file, text)
+    write_private(file, &text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_file_that_carries_the_token_ends_up_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, "{}").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        install_file(&file, 1, "tok", &["Stop"], &["Stop"]).unwrap();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert!(std::fs::read_to_string(&file)
+            .unwrap()
+            .contains("Bearer tok"));
+        // Written whole: nothing left beside it.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_file_kept_as_a_link_stays_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles-settings.json");
+        std::fs::write(&real, "{}").unwrap();
+        let link = dir.path().join("settings.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        install_file(&link, 1, "tok", &["Stop"], &["Stop"]).unwrap();
+        assert!(std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(std::fs::read_to_string(&real)
+            .unwrap()
+            .contains("Bearer tok"));
+    }
 
     const EVENTS: [&str; 8] = [
         "PreToolUse",

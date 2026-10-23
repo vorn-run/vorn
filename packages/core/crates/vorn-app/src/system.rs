@@ -109,12 +109,14 @@ pub fn expand_home(path: &str) -> PathBuf {
 }
 
 /// A GET of `path` from vornd's HTTP port, as JSON.
-pub fn http_get_json(port: u16, path: &str) -> Option<Value> {
+pub fn http_get_json(port: u16, path: &str, token: &str) -> Option<Value> {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
     s.set_read_timeout(Some(web_time::Duration::from_secs(3)))
         .ok()?;
-    let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    let req = format!(
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
     s.write_all(req.as_bytes()).ok()?;
     let mut res = String::new();
     s.read_to_string(&mut res).ok()?;

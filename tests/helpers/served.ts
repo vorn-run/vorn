@@ -35,6 +35,22 @@ export function servedDir(prefix: string): string {
   return fs.realpathSync(fs.mkdtempSync(path.join(base, prefix)))
 }
 
+/**
+ * GETs one of vornd's own reports (`/vornd/health`, `/vornd/sessions`),
+ * which want the local credential vornd wrote in `dataDir`.
+ */
+export function vorndReport(port: number, route: string, dataDir: string): Promise<Response> {
+  let token = ''
+  try {
+    token = fs.readFileSync(path.join(dataDir, 'local-token'), 'utf-8').trim()
+  } catch {
+    // Not written yet: vornd answers 401, and a caller polling tries again.
+  }
+  return fetch(`http://127.0.0.1:${port}${route}`, {
+    headers: { authorization: `Bearer ${token}` }
+  })
+}
+
 export interface Served {
   port: number
   child: ChildProcess
@@ -96,7 +112,7 @@ export async function startServed(options: {
   if (options.sessiond && builtSessiond) {
     const deadline = Date.now() + 20_000
     for (;;) {
-      const report = await fetch(`http://127.0.0.1:${at}/vornd/sessions`)
+      const report = await vorndReport(at, '/vornd/sessions', dataDir)
         .then((r) => r.json() as Promise<{ connected?: boolean }>)
         .catch(() => null)
       if (report?.connected) break
@@ -111,7 +127,7 @@ export async function startServed(options: {
     home,
     stop: async () => {
       // The session holder outlives vornd by design; a test's must not.
-      const holder = await fetch(`http://127.0.0.1:${at}/vornd/health`)
+      const holder = await vorndReport(at, '/vornd/health', dataDir)
         .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
         .then((h) => h.sessiond?.current?.pid ?? null)
         .catch(() => null)

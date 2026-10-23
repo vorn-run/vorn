@@ -58,6 +58,8 @@ pub(super) enum TaskCall {
         offset: u64,
         read: Vec<Value>,
     },
+    /// `page:ticket` for a gate's review page, opened in the browser once answered.
+    Review,
 }
 
 impl App {
@@ -125,10 +127,20 @@ impl App {
             }
             return;
         }
+        if let TaskCall::Review = call {
+            match answer
+                .ok()
+                .and_then(|v| v["path"].as_str().map(str::to_owned))
+            {
+                Some(path) => open_url(&format!("http://127.0.0.1:{}{path}", self.port)),
+                None => self.st.toast("The review page could not be opened.", true),
+            }
+            return;
+        }
         let t = &mut self.st.tasks;
         match call {
             // Read above, before the task state is borrowed.
-            TaskCall::Page { .. } | TaskCall::Written => {}
+            TaskCall::Page { .. } | TaskCall::Written | TaskCall::Review => {}
             TaskCall::Runs(id) => {
                 if t.selected.as_deref() == Some(id.as_str()) {
                     t.runs = list(answer);
@@ -1075,13 +1087,18 @@ impl App {
                     self.st.toast("The review page could not be opened.", true);
                     return;
                 };
-                open_url(&format!(
-                    "http://127.0.0.1:{}/gate-view/{}/{}?t={}",
-                    self.port,
+                // The address carries a single-use ticket vornd swaps the token for.
+                let path = format!(
+                    "/gate-view/{}/{}?t={}",
                     runs::encode(&key),
                     runs::encode(&nid),
                     runs::encode(&t)
-                ));
+                );
+                self.call(
+                    Call::Task(TaskCall::Review),
+                    "page:ticket",
+                    json!({ "path": path }),
+                );
             }
             RunAct::Resume(key, nid) => {
                 let Some(run) = self.find_run(&key) else {

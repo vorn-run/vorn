@@ -99,6 +99,8 @@ pub struct Web {
     pruning: bool,
     /// The address each open page's part last asked for, before it was vetted.
     asked: HashMap<String, String>,
+    /// Artifact addresses vornd handed this run, each with a ticket not yet used.
+    pub(super) fresh: HashSet<String>,
     waiting: HashMap<u64, Wait>,
     pub(super) watching: HashMap<String, Watch>,
     /// What each view was last painted with (marks or pins), so an
@@ -122,6 +124,7 @@ impl Web {
             imported: false,
             pruning: false,
             asked: HashMap::new(),
+            fresh: HashSet::new(),
             waiting: HashMap::new(),
             watching: HashMap::new(),
             painted: HashMap::new(),
@@ -316,6 +319,7 @@ impl App {
         let gone = self.store.sessions_known && rows.iter().any(|id| !live.contains(id.as_str()));
         let mut pages = HashMap::new();
         let mut moved = Vec::new();
+        let mut stale = Vec::new();
         for session in rows.iter().filter(|id| live.contains(id.as_str())) {
             let asked = browser_key(&self.st.points, session)
                 .and_then(|k| self.st.points.tree(&k))
@@ -327,12 +331,22 @@ impl App {
                 _ => {
                     moved.push(session.clone());
                     self.web.asked.insert(session.clone(), asked.clone());
-                    self.shown_url(session, asked)
+                    // An artifact's address opens once: one restored or used before asks vornd for a fresh one.
+                    match stale_artifact(&mut self.web.fresh, &asked) {
+                        Some((id, version)) => {
+                            stale.push((session.clone(), id, version));
+                            "about:blank".to_owned()
+                        }
+                        None => self.shown_url(session, asked),
+                    }
                 }
             };
             pages.insert(session.clone(), url);
         }
         self.web.asked.retain(|s, _| pages.contains_key(s));
+        for (session, id, version) in stale {
+            self.show_version(&session, &id, version);
+        }
         let closed: Vec<String> = self
             .st
             .bench
@@ -928,6 +942,7 @@ impl App {
                     if let Some((id, _)) = artifact_address(&url) {
                         let tag = format!("{id}:{version}");
                         self.st.bench.live_mut(&session).refreshed.insert(tag);
+                        self.web.fresh.insert(url.clone());
                     }
                     if self.st.bench.pages.get(&session) != Some(&url) {
                         let what = json!({ "type": "go", "url": url, "version": version });
@@ -1073,6 +1088,15 @@ impl App {
                 if self.st.bench.live(&s).is_some_and(|l| l.loading) {
                     self.web.host.run(&key, "window.stop()");
                     self.st.bench.live_mut(&s).loading = false;
+                } else if let Some((id, version)) = self
+                    .st
+                    .bench
+                    .pages
+                    .get(&s)
+                    .and_then(|u| artifact_address(u))
+                {
+                    // Its ticket is spent: the same version again, under a fresh one.
+                    self.show_version(&s, &id, version);
                 } else {
                     self.web.host.reload(&key);
                 }
@@ -1464,9 +1488,25 @@ fn clip(r: Rect, to: Rect) -> Rect {
     }
 }
 
+/// The artifact `asked` shows when its ticket cannot open it again: any
+/// address vornd did not just hand this app, which is spent once used.
+fn stale_artifact(fresh: &mut HashSet<String>, asked: &str) -> Option<(String, u32)> {
+    artifact_address(asked).filter(|_| !fresh.remove(asked))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_artifact_address_opens_once_and_then_asks_for_a_fresh_one() {
+        let url = "http://127.0.0.1:4310/artifact/a1/3?ticket=k".to_owned();
+        let mut fresh: HashSet<String> = [url.clone()].into();
+        assert_eq!(stale_artifact(&mut fresh, &url), None);
+        // Loaded once, the same address (a reload, a restored tab) asks again.
+        assert_eq!(stale_artifact(&mut fresh, &url), Some(("a1".to_owned(), 3)));
+        assert_eq!(stale_artifact(&mut fresh, "https://example.com/"), None);
+    }
 
     #[test]
     fn a_page_view_takes_its_box_as_laid_out_not_scaled_again() {

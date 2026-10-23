@@ -16,7 +16,7 @@ mod scan;
 pub use checkpoint::{Checkpoint, Uncut};
 pub use emulator::{
     BlockedKind, ClipboardTarget, Counters, Effect, Emulator, Mark, ProgramReport, ProgramState,
-    ProgressState, Theme,
+    ProgressState, Theme, MAX_CLIPBOARD_WRITE,
 };
 pub use images::{Picture, Placed, Virtual};
 

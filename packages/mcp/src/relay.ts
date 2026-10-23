@@ -31,7 +31,8 @@ export async function vorndMcpUrl(deps: RelayDeps): Promise<URL | null> {
   try {
     const status = await deps.vorndStatus()
     if (status.state !== 'on') return null
-    const res = await deps.fetch(`http://127.0.0.1:${status.port}/vornd/health`, {
+    // `/health` answers anyone; vornd's own report wants the local token.
+    const res = await deps.fetch(`http://127.0.0.1:${status.port}/health`, {
       signal: AbortSignal.timeout(ASK_TIMEOUT_MS)
     })
     if (!res.ok) return null

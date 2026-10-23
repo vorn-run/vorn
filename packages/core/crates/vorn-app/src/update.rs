@@ -20,6 +20,13 @@
 //! has one, prerelease or not. `VORN_UPDATE_FEED` names a feed to read
 //! instead, for a test.
 //!
+//! The feed is trusted only once its Ed25519 signature,
+//! `vorn-update.json.sig` beside it, checks out against the release key
+//! built into the app (`update-key.pub`): the hashes it lists are what every
+//! download is checked against, so nothing in it counts before that. There
+//! is no unsigned path. A rehearsal that names its own feed names the key it
+//! signed it with too (`VORN_UPDATE_KEY`).
+//!
 //! `Vorn update` runs the same steps without a window ([`update_now`]).
 
 use std::io::Read;
@@ -39,8 +46,17 @@ use crate::settings::UpdateStatus;
 
 /// A feed to read instead of the release's.
 pub const FEED_ENV: &str = "VORN_UPDATE_FEED";
+/// The public key a feed named by [`FEED_ENV`] is signed with; read only beside it.
+pub const KEY_ENV: &str = "VORN_UPDATE_KEY";
+/// The signature's file: the feed's URL with this added.
+pub const SIGNATURE_SUFFIX: &str = ".sig";
+/// The release key's public half: 32 bytes of Ed25519, base64. Empty until
+/// the release key exists, and then no feed is trusted.
+#[cfg(not(target_arch = "wasm32"))]
+const RELEASE_KEY: &str = include_str!("../update-key.pub");
 /// The feed's file name among a release's assets.
 pub const FEED_ASSET: &str = "vorn-update.json";
+#[cfg(not(target_arch = "wasm32"))]
 const REPO: &str = "vorn-run/vorn";
 /// Where a person can fetch a release by hand.
 pub const RELEASES: &str = "https://github.com/vorn-run/vorn/releases";
@@ -179,11 +195,6 @@ pub fn beta_feed_url(releases: &Value) -> Option<String> {
 const IN_BROWSER: &str = "The browser runs the version vornd serves.";
 
 #[cfg(target_arch = "wasm32")]
-fn get_json(_url: &str) -> Result<Value, String> {
-    Err(IN_BROWSER.to_owned())
-}
-
-#[cfg(target_arch = "wasm32")]
 pub fn download(_asset: &Asset, _dir: &Path, _progress: &dyn Fn(u32)) -> Result<PathBuf, String> {
     Err(IN_BROWSER.to_owned())
 }
@@ -226,6 +237,28 @@ fn get_json(url: &str) -> Result<Value, String> {
     serde_json::from_str(&body).map_err(|e| format!("The update feed is not readable: {e}"))
 }
 
+/// The body at `url`, at most 1 MiB.
+#[cfg(not(target_arch = "wasm32"))]
+fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
+    const LIMIT: u64 = 1 << 20;
+    let mut response = agent(Duration::from_secs(60))
+        .get(url)
+        .call()
+        .map_err(|e| format!("Could not reach {}: {e}", host(url)))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        return Err(format!("{} answered HTTP {status}", host(url)));
+    }
+    let mut body = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take(LIMIT)
+        .read_to_end(&mut body)
+        .map_err(|e| e.to_string())?;
+    Ok(body)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn host(url: &str) -> String {
     url::Url::parse(url)
@@ -234,9 +267,18 @@ fn host(url: &str) -> String {
         .unwrap_or_else(|| url.to_owned())
 }
 
-/// The feed for `channel` ("stable" or "beta").
+/// A browser reads no feed: vornd's machine updates the app it serves.
+#[cfg(target_arch = "wasm32")]
+pub fn fetch_feed(_channel: &str) -> Result<Feed, String> {
+    Err(IN_BROWSER.to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// The feed for `channel` ("stable" or "beta"), once its signature checks out.
 pub fn fetch_feed(channel: &str) -> Result<Feed, String> {
-    let url = match std::env::var(FEED_ENV).ok().filter(|v| !v.is_empty()) {
+    let named = std::env::var(FEED_ENV).ok().filter(|v| !v.is_empty());
+    let key = feed_key(named.is_some(), std::env::var(KEY_ENV).ok().as_deref())?;
+    let url = match named {
         Some(url) => url,
         None if channel == "beta" => {
             let releases = get_json(&format!(
@@ -246,8 +288,42 @@ pub fn fetch_feed(channel: &str) -> Result<Feed, String> {
         }
         None => format!("https://github.com/{REPO}/releases/latest/download/{FEED_ASSET}"),
     };
-    serde_json::from_value(get_json(&url)?)
-        .map_err(|e| format!("The update feed is not readable: {e}"))
+    let body = get_bytes(&url)?;
+    let signature = get_bytes(&format!("{url}{SIGNATURE_SUFFIX}"))
+        .map_err(|e| format!("The update feed is not signed: {e}"))?;
+    verify_feed(&body, &signature, &key)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// The key a feed must be signed with: the release key built in, or, for a
+/// feed named by [`FEED_ENV`], the one [`KEY_ENV`] names beside it.
+fn feed_key(named_feed: bool, named_key: Option<&str>) -> Result<Vec<u8>, String> {
+    let text = match named_key.filter(|k| named_feed && !k.trim().is_empty()) {
+        Some(key) => key,
+        None => RELEASE_KEY,
+    };
+    data_encoding::BASE64
+        .decode(text.trim().as_bytes())
+        .ok()
+        .filter(|k| k.len() == 32)
+        .ok_or_else(|| {
+            format!("This build has no key to check updates with. Download new versions from {RELEASES}")
+        })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+/// `body` as a feed, once `signature` (base64 Ed25519 over exactly these
+/// bytes) checks out against `key`; nothing is read from it before.
+pub fn verify_feed(body: &[u8], signature: &[u8], key: &[u8]) -> Result<Feed, String> {
+    let signature = data_encoding::BASE64
+        .decode(signature.trim_ascii())
+        .map_err(|_| "The update feed's signature is not readable".to_owned())?;
+    ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
+        .verify(body, &signature)
+        .map_err(|_| {
+            "The update feed's signature does not match; the update was not trusted".to_owned()
+        })?;
+    serde_json::from_slice(body).map_err(|e| format!("The update feed is not readable: {e}"))
 }
 
 /// The update `feed` offers this install, if it is newer than `current`.
@@ -1006,6 +1082,52 @@ mod tests {
         assert!(!newer("0.8.0-beta.8", "0.8.0-beta.8"));
         assert!(!newer("0.7.4", "0.8.0-beta.8"));
         assert!(!newer("junk", "0.8.0"));
+    }
+
+    /// A key made here for the test from a fixed seed; it signs nothing real.
+    fn test_key() -> ring::signature::Ed25519KeyPair {
+        ring::signature::Ed25519KeyPair::from_seed_unchecked(&[7u8; 32]).unwrap()
+    }
+
+    #[test]
+    fn trusts_a_feed_only_with_a_signature_from_its_key() {
+        use ring::signature::KeyPair;
+        let pair = test_key();
+        let public = pair.public_key().as_ref().to_vec();
+        let body = br#"{"version":"9.0.0","assets":[]}"#;
+        let sig = data_encoding::BASE64.encode(pair.sign(body).as_ref());
+        let feed = verify_feed(body, sig.as_bytes(), &public).unwrap();
+        assert_eq!(feed.version, "9.0.0");
+        // One byte changed, a signature from another key, or none at all: refused.
+        let changed = br#"{"version":"9.0.1","assets":[]}"#;
+        assert!(verify_feed(changed, sig.as_bytes(), &public).is_err());
+        let other = ring::signature::Ed25519KeyPair::from_seed_unchecked(&[8u8; 32]).unwrap();
+        let theirs = data_encoding::BASE64.encode(other.sign(body).as_ref());
+        assert!(verify_feed(body, theirs.as_bytes(), &public).is_err());
+        assert!(verify_feed(body, b"", &public).is_err());
+        assert!(verify_feed(body, b"not base64!", &public).is_err());
+    }
+
+    #[test]
+    fn the_release_key_is_built_in() {
+        assert_eq!(feed_key(false, None).map(|k| k.len()), Ok(32));
+    }
+
+    #[test]
+    fn a_named_key_counts_only_beside_a_named_feed() {
+        use ring::signature::KeyPair;
+        let public = data_encoding::BASE64.encode(test_key().public_key().as_ref());
+        assert_eq!(
+            feed_key(true, Some(&public)).unwrap(),
+            test_key().public_key().as_ref()
+        );
+        // Without a named feed the release key is the only one, whatever the environment says.
+        let release = feed_key(false, Some(&public));
+        assert_ne!(
+            release.as_deref().ok(),
+            Some(test_key().public_key().as_ref())
+        );
+        assert!(feed_key(true, Some("short")).is_err());
     }
 
     #[test]

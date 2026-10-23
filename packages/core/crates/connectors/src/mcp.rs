@@ -36,6 +36,8 @@ pub struct Launch {
     /// The connection's own variables, `env` then `secretEnv`, which win
     /// over the safe environment.
     pub env: Vec<(String, String)>,
+    /// The secret values among them, taken out of the child's stderr before it is logged.
+    pub secrets: Vec<String>,
 }
 
 impl Launch {
@@ -59,14 +61,23 @@ impl Launch {
             _ => Vec::new(),
         };
         let mut env = parse_json_object(filters.get("env"));
+        let mut secrets = Vec::new();
         for (k, v) in secret_env {
+            if let Some(text) = v.as_str() {
+                secrets.push(text.to_owned());
+            }
             env.insert(k.clone(), v.clone());
         }
         let env = env
             .into_iter()
             .map(|(k, v)| (k, v.as_str().map(str::to_owned).unwrap_or_default()))
             .collect();
-        Ok(Launch { command, args, env })
+        Ok(Launch {
+            command,
+            args,
+            env,
+            secrets,
+        })
     }
 }
 
@@ -154,10 +165,17 @@ async fn start(
     let program = resolve(&launch.command, &env);
     let mut command = vorn_spawn::tokio_command(&program);
     command.args(&launch.args).env_clear().envs(env);
-    let (transport, _) = TokioChildProcess::builder(command)
-        .stderr(Stdio::inherit())
+    let (transport, stderr) = TokioChildProcess::builder(command)
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| spawn_error(&launch.command, &err))?;
+    if let Some(stderr) = stderr {
+        tokio::spawn(log_stderr(
+            stderr,
+            launch.command.clone(),
+            launch.secrets.clone(),
+        ));
+    }
     let config = ClientConfig::new(
         ClientCapabilities::default(),
         Implementation::new("vorn", "0.1.0"),
@@ -166,6 +184,37 @@ async fn start(
         Ok(Ok(service)) => Ok(service),
         Ok(Err(err)) => Err(init_error(&err)),
         Err(_) => Err(TIMED_OUT.into()),
+    }
+}
+
+/// The longest stderr line logged; the rest of a longer one is dropped.
+const MAX_STDERR_LINE: usize = 4096;
+
+/// Logs what a child writes to stderr, a line at a time, with `secrets`
+/// taken out, instead of letting it reach vornd's own stderr untouched.
+async fn log_stderr(stderr: tokio::process::ChildStderr, command: String, secrets: Vec<String>) {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    let mut reader = BufReader::new(stderr);
+    let mut redactor = vorn_extensions::child::Redactor::new(&secrets);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        // Bounded, so a child that never ends a line cannot grow it for ever; the redactor joins the pieces.
+        match (&mut reader)
+            .take(MAX_STDERR_LINE as u64 + 1)
+            .read_until(b'\n', &mut buf)
+            .await
+        {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let piece = redactor.push(&buf, buf.ends_with(b"\n"));
+        let text = String::from_utf8_lossy(&piece);
+        let line = text.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        info!("[mcp] {command} stderr: {line}");
     }
 }
 

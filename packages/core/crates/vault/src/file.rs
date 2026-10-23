@@ -86,13 +86,16 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .truncate(true)
         .mode(0o600)
         .open(path)?;
+    // A file left from before keeps its mode through open; this one must not.
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     file.write_all(bytes)?;
     file.sync_all()
 }
 
 #[cfg(not(unix))]
 fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    std::fs::write(path, bytes)
+    std::fs::write(path, bytes)?;
+    crate::private::restrict(path)
 }
 
 impl Keychain for FileKeychain {

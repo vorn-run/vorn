@@ -22,6 +22,7 @@ on:
       - 'packages/core/scripts/build-web.sh'
       - 'packages/core/scripts/release-feeds.mjs'
       - 'packages/core/scripts/update-path.mjs'
+      - 'packages/core/scripts/sign-feed.mjs'
       - 'packages/core/scripts/vorn.nsi'
       - 'packages/core/crates/vorn-app/src/cli_link.rs'
       - 'packages/core/crates/vorn-app/src/launch.rs'
@@ -309,8 +310,18 @@ jobs:
           gh release upload "$TAG" dist-native/Vorn-* dist-native/vorn_* --clobber
 
   # The update feed, from every platform's assets.
+  # The server alone for Linux ARM64 boards, built before the feed so the feed lists its checksum.
+  server-linux-arm64:
+    if: inputs.tag != ''
+    uses: ./.github/workflows/server-linux-arm64.yml
+    with:
+      tag: ${{ inputs.tag }}
+    secrets: inherit
+
   feeds:
-    needs: package
+    needs: [package, server-linux-arm64]
+    # A pull request builds no server archive; a release waits for it.
+    if: ${{ !cancelled() && needs.package.result == 'success' && (inputs.tag == '' || needs.server-linux-arm64.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -331,13 +342,39 @@ jobs:
           path: dist-native
           merge-multiple: true
 
+      - uses: actions/download-artifact@v8
+        if: inputs.tag != ''
+        with:
+          name: vorn-server-linux-arm64
+          path: dist-native
+
       - name: Write the feed
-        run: node packages/core/scripts/release-feeds.mjs --dir dist-native
+        env:
+          TAG: ${{ inputs.tag }}
+        run: node packages/core/scripts/release-feeds.mjs --dir dist-native ${TAG:+--servers linux-arm64}
+
+      # Apps trust a feed only with the release key's signature; a release without one fails here.
+      - name: Sign the feed
+        env:
+          VORN_UPDATE_SIGNING_KEY: ${{ secrets.VORN_UPDATE_SIGNING_KEY }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$VORN_UPDATE_SIGNING_KEY" ]; then
+            if [ -n "$TAG" ]; then
+              echo "::error title=Update feed::VORN_UPDATE_SIGNING_KEY is not set; installed apps would refuse this release's feed"
+              exit 1
+            fi
+            echo "::notice title=Update feed::not signed: no signing key in this run"
+            exit 0
+          fi
+          node packages/core/scripts/sign-feed.mjs --dir dist-native
 
       - uses: actions/upload-artifact@v7
         with:
           name: vorn-update-feeds
-          path: dist-native/vorn-update.json
+          path: |
+            dist-native/vorn-update.json
+            dist-native/vorn-update.json.sig
           if-no-files-found: error
 
   # The previous release, installed with a temp HOME and data dir, updates
@@ -345,6 +382,8 @@ jobs:
   update-path:
     name: update path ${{ matrix.name }}
     needs: [package, feeds]
+    # The server build is skipped on a pull request; that must not skip this.
+    if: ${{ !cancelled() && needs.feeds.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -392,7 +431,7 @@ jobs:
 
   # The feed goes up last, so no install sees a release its predecessor cannot update onto.
   publish-feeds:
-    if: inputs.tag != ''
+    if: ${{ !cancelled() && inputs.tag != '' && needs.feeds.result == 'success' && needs.update-path.result == 'success' }}
     needs: [feeds, update-path]
     runs-on: ubuntu-latest
     steps:
@@ -405,4 +444,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-        run: gh release upload "$TAG" dist-native/vorn-update.json --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" dist-native/vorn-update.json dist-native/vorn-update.json.sig --clobber --repo "$GITHUB_REPOSITORY"

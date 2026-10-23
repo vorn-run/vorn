@@ -274,6 +274,10 @@ pub struct Native {
     clients: OnceLock<Arc<crate::serve::clients::Clients>>,
     /// Raised when vornd itself changed the configuration.
     config_changed: tokio::sync::Notify,
+    /// How every program vornd starts for an extension or connector is sandboxed.
+    confiner: tokio::sync::OnceCell<vorn_extensions::sandbox::Confiner>,
+    /// The projects a sandboxed program may work in, kept as the configuration changes.
+    sandbox_projects: Arc<std::sync::RwLock<Vec<PathBuf>>>,
     /// Held from a configuration write or read to its `config:changed`, so
     /// clients hear the configurations in the order they were stored.
     pub(crate) config_order: tokio::sync::Mutex<()>,
@@ -356,6 +360,8 @@ impl Native {
             link: OnceLock::new(),
             clients: OnceLock::new(),
             config_changed: tokio::sync::Notify::new(),
+            confiner: tokio::sync::OnceCell::new(),
+            sandbox_projects: Arc::default(),
             config_order: tokio::sync::Mutex::new(()),
             desktop: OnceLock::new(),
             secrets,
@@ -468,6 +474,60 @@ impl Native {
     /// vornd changed the configuration: what depends on it reads it again.
     pub(crate) fn config_changed(&self) {
         self.config_changed.notify_one();
+    }
+
+    /// The configuration now is `config`: sandboxed programs may work in its
+    /// projects, as configured; each program start resolves them again.
+    pub(crate) fn config_is(&self, config: &Value) {
+        let projects: Vec<PathBuf> = config["projects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["path"].as_str())
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        *self
+            .sandbox_projects
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = projects;
+    }
+
+    /// How programs are sandboxed: vornd itself as Linux's helper, the home
+    /// and data folders hidden, and the network proxy, started the first time.
+    pub async fn confiner(&self, data: &Path) -> vorn_extensions::sandbox::Confiner {
+        use vorn_extensions::sandbox::Confiner;
+        let projects = Arc::clone(&self.sandbox_projects);
+        self.confiner
+            .get_or_init(|| async move {
+                let proxy = if vorn_extensions::sandbox::Kind::here()
+                    == vorn_extensions::sandbox::Kind::None
+                {
+                    None
+                } else {
+                    match vorn_extensions::netproxy::NetProxy::start().await {
+                        Ok(p) => Some(p),
+                        Err(err) => {
+                            tracing::warn!(
+                                "[extensions] sandboxed programs have no network: {err}"
+                            );
+                            None
+                        }
+                    }
+                };
+                Confiner {
+                    confine: cfg!(target_os = "linux")
+                        .then(std::env::current_exe)
+                        .and_then(Result::ok),
+                    home: Some(PathBuf::from(shell::home_dir())),
+                    data: Some(data.to_path_buf()),
+                    proxy,
+                    projects,
+                    ..Confiner::default()
+                }
+            })
+            .await
+            .clone()
     }
 
     /// Resolves at the next [`Native::config_changed`].
@@ -642,6 +702,9 @@ impl Native {
     pub fn set_database(&self, db: PathBuf) {
         if let Some(dir) = db.parent() {
             self.secrets.settle(dir);
+            if let Err(err) = vorn_remote::share_connections_in(dir) {
+                tracing::warn!(%err, "ssh commands log in one at a time: no private folder to share connections through");
+            }
             // The installed adapters, before the extension host has started.
             self.adapters().load_installed(&dir.join("connectors"));
         }

@@ -29,6 +29,31 @@ New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
 Write-Host "Downloading $Artifact..."
 Invoke-WebRequest -Uri $Url -OutFile $InstallerPath -UseBasicParsing
 
+# The release's update feed lists every file's SHA-256, and Vorn itself checks
+# the feed's signature. An installer that does not match is removed, never run.
+$FeedUrl = "https://github.com/$Repo/releases/download/$Version/vorn-update.json"
+try {
+    $Feed = Invoke-RestMethod -Uri $FeedUrl
+} catch {
+    Remove-Item -Force $InstallerPath -ErrorAction SilentlyContinue
+    Write-Error "$Version has no vorn-update.json to check the download against."
+    exit 1
+}
+$Want = $null
+if ($Feed.checksums) { $Want = $Feed.checksums.$Artifact }
+if (-not $Want) {
+    Remove-Item -Force $InstallerPath -ErrorAction SilentlyContinue
+    Write-Error "$Version's vorn-update.json lists no checksum for $Artifact, so it was not installed."
+    exit 1
+}
+$Got = (Get-FileHash -Algorithm SHA256 -LiteralPath $InstallerPath).Hash
+if ($Got -ne $Want.ToUpperInvariant()) {
+    Remove-Item -Force $InstallerPath -ErrorAction SilentlyContinue
+    Write-Error "$Artifact does not match its published SHA-256, so it was not installed."
+    exit 1
+}
+Write-Host "Checked $Artifact against its published SHA-256."
+
 try {
     Write-Host "Running installer..."
     $process = Start-Process -FilePath $InstallerPath -ArgumentList "/S" -Wait -PassThru

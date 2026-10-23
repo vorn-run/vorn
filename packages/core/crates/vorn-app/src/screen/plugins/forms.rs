@@ -157,15 +157,21 @@ fn label(t: &str) -> El {
         .role(Role::Label, t)
 }
 
-/// The label row: name, a red star when required, "· encrypted" for secrets.
-fn label_row(name: El, required: bool, secret: bool) -> El {
+/// The label row: name, a red star when required, how a secret is kept
+/// (`keychain` from `vault:status`).
+fn label_row(name: El, required: bool, secret: bool, keychain: Option<bool>) -> El {
     let mut row = div().row().items_center().gap(6.0).mb(4.0).child(name);
     if required {
         row = row.child(text("*", 12.0, k::RED_400).line_height(16.0).silent());
     }
     if secret {
+        let (word, ink) = if keychain == Some(false) {
+            ("· NOT ENCRYPTED", k::AMBER_400)
+        } else {
+            ("· ENCRYPTED", k::GRAY_600)
+        };
         row = row.child(
-            text("· ENCRYPTED", 9.0, k::GRAY_600)
+            text(word, 9.0, ink)
                 .tracking(0.05)
                 .line_height(12.0)
                 .silent(),
@@ -265,6 +271,7 @@ fn dynamic(s: &Screen<'_>, f: &BuiltinForm, spec: &Value) -> Option<El> {
             .role(Role::Label, name),
         required,
         kind == "password",
+        s.st.keychain,
     ));
     let placeholder = sv(spec, "placeholder").unwrap_or("");
     col = col.child(match kind {
@@ -537,6 +544,7 @@ fn sdk(s: &Screen<'_>, a: &Adding, f: &SdkForm) -> El {
                         .role(Role::Label, name),
                     required,
                     secret,
+                    s.st.keychain,
                 ))
                 .child(input(
                     s,

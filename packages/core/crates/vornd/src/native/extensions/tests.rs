@@ -26,6 +26,12 @@ struct Fake {
     killed: Mutex<Vec<String>>,
     written: Mutex<Vec<(String, String)>>,
     renamed: Mutex<Vec<(String, String)>>,
+    /// Each call about a removal, with whether the extension's data folder was there.
+    removed: Mutex<Vec<(&'static str, String, bool)>>,
+    /// The extensions with connections and tables of their own.
+    kept: Mutex<Vec<String>>,
+    /// Whether dropping those fails.
+    keep_failing: AtomicBool,
 }
 
 impl Fake {
@@ -45,6 +51,24 @@ impl Fake {
 }
 
 impl Around for Fake {
+    fn pack_stopping(&self, id: &str) -> BoxFuture<'static, ()> {
+        let data = std::env::temp_dir().join("vorn-extension-data").join(id);
+        guard(&self.removed).push(("stopping", id.to_owned(), data.exists()));
+        Box::pin(async {})
+    }
+
+    fn pack_removed(&self, id: &str) -> BoxFuture<'static, Result<(), String>> {
+        let data = std::env::temp_dir().join("vorn-extension-data").join(id);
+        guard(&self.removed).push(("removed", id.to_owned(), data.exists()));
+        let done = if self.keep_failing.load(Ordering::Relaxed) {
+            Err("the database is busy".to_owned())
+        } else {
+            guard(&self.kept).retain(|k| k != id);
+            Ok(())
+        };
+        Box::pin(async { done })
+    }
+
     fn live(&self) -> Option<Vec<Live>> {
         Some(guard(&self.live).clone())
     }
@@ -247,6 +271,7 @@ fn world() -> World {
             .collect(),
         bridge_origin: "http://127.0.0.1:9".into(),
         version: "test".into(),
+        confiner: vorn_extensions::sandbox::Confiner::default(),
     };
     let store = PackStore::new(packs.path());
     let lifecycle = Lifecycle::new(Policy::default());
@@ -490,6 +515,168 @@ async fn a_changed_pack_takes_its_panes_and_processes_with_it() {
     assert_eq!(w.ext.panes(), 0);
     assert_eq!(w.ext.hosts(), 0);
     assert_eq!(guard(&w.fake.killed).len(), 1);
+}
+
+/// A program that only runs, for the lifecycle to hold.
+struct Idle;
+
+impl vorn_extensions::lifecycle::Running for Idle {
+    fn name(&self) -> &str {
+        "idle"
+    }
+    fn exited(&self) -> bool {
+        false
+    }
+    fn close(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async {})
+    }
+}
+
+#[tokio::test]
+async fn a_removed_extensions_programs_stop_before_its_data_goes() {
+    let w = world();
+    let dir = w.ext.router.confiner().work_dir("y").unwrap();
+    fs::write(dir.join("written-while-running"), "x").unwrap();
+    result(w.call("extension:remove", json!({ "id": "y" })).await);
+    // Its connector programs stopped while the folder was there; its connections went after it.
+    assert_eq!(
+        guard(&w.fake.removed).as_slice(),
+        [
+            ("stopping", "y".to_owned(), true),
+            ("removed", "y".to_owned(), false)
+        ]
+    );
+    assert!(!dir.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_data_folder_that_will_not_go_keeps_the_extension_until_removed_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = world();
+    // An id of its own: the data folders of these tests share one temporary folder.
+    install(w.packs.path(), "zz", &extension("zz"));
+    let dir = w.ext.router.confiner().work_dir("zz").unwrap();
+    let locked = dir.join("locked");
+    fs::create_dir_all(&locked).unwrap();
+    fs::write(locked.join("kept"), "x").unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+    let removed = w.call("extension:remove", json!({ "id": "zz" })).await;
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        matches!(&removed, Answer::Error(e) if e.contains("Could not remove the files")),
+        "{removed:?}"
+    );
+    let calls: Vec<&str> = guard(&w.fake.removed).iter().map(|c| c.0).collect();
+    assert_eq!(calls, ["stopping"]);
+    // Still installed, so removing it again finishes: its data, then its connections.
+    assert!(w.packs.path().join("zz").exists());
+    result(w.call("extension:remove", json!({ "id": "zz" })).await);
+    assert!(!dir.exists());
+    assert!(!w.packs.path().join("zz").exists());
+    assert_eq!(
+        guard(&w.fake.removed).last(),
+        Some(&("removed", "zz".to_owned(), false))
+    );
+    // Installed again, it starts with nothing of before.
+    install(w.packs.path(), "zz", &extension("zz"));
+    let fresh = w.ext.router.confiner().work_dir("zz").unwrap();
+    assert_eq!(fs::read_dir(&fresh).unwrap().count(), 0);
+    let _ = fs::remove_dir_all(&fresh);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_removal_that_fails_keeps_the_extensions_connections() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = world();
+    // Its files cannot be removed.
+    fs::set_permissions(w.packs.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    let removed = w.call("extension:remove", json!({ "id": "x" })).await;
+    fs::set_permissions(w.packs.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(matches!(removed, Answer::Error(_)), "{removed:?}");
+    let calls: Vec<&str> = guard(&w.fake.removed).iter().map(|c| c.0).collect();
+    assert_eq!(calls, ["stopping"]);
+    result(w.call("extension:remove", json!({ "id": "x" })).await);
+    assert_eq!(guard(&w.fake.removed).last().map(|c| c.0), Some("removed"));
+}
+
+#[tokio::test]
+async fn a_removal_stopped_at_its_connections_is_finished_by_the_next() {
+    let w = world();
+    guard(&w.fake.kept).push("x".to_owned());
+    w.fake.keep_failing.store(true, Ordering::Relaxed);
+    let removed = w.call("extension:remove", json!({ "id": "x" })).await;
+    assert!(
+        matches!(&removed, Answer::Error(e) if e.contains("Could not remove what x left")),
+        "{removed:?}"
+    );
+    // Out of the list at once, so nothing makes its connections again.
+    assert!(w.ext.hosts.store().inspect("x").is_err());
+    assert!(w.ext.installs.left_behind("x"));
+    assert_eq!(*guard(&w.fake.kept), ["x"]);
+    w.fake.keep_failing.store(false, Ordering::Relaxed);
+    result(w.call("extension:remove", json!({ "id": "x" })).await);
+    assert!(guard(&w.fake.kept).is_empty());
+    assert!(!w.ext.installs.left_behind("x"));
+    assert!(!w.packs.path().join("x").exists() && !w.packs.path().join(".removed-x").exists());
+    let again = w.call("extension:remove", json!({ "id": "x" })).await;
+    assert!(
+        matches!(&again, Answer::Error(e) if e.starts_with("No extension")),
+        "{again:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_install_over_what_a_removal_left_starts_clean() {
+    let w = world();
+    let folder = tempfile::tempdir().unwrap();
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions/tests/fixtures/hello-bash");
+    for file in ["vorn-extension.toml", "greet.sh"] {
+        fs::copy(fixture.join(file), folder.path().join(file)).unwrap();
+    }
+    // A folder a removal left, with the sandbox turned off, plus connections and tables.
+    let home = w.packs.path().join("test.hello");
+    fs::create_dir_all(&home).unwrap();
+    vorn_extensions::sandbox::set(&home, false).unwrap();
+    guard(&w.fake.kept).push("test.hello".to_owned());
+    // While what it left cannot go, it is not installed over.
+    w.fake.keep_failing.store(true, Ordering::Relaxed);
+    let link = || w.call("extension:link", json!({ "path": folder.path() }));
+    let refused = link().await;
+    assert!(
+        matches!(&refused, Answer::Error(e) if e.contains("not fully removed")),
+        "{refused:?}"
+    );
+    assert!(w.ext.installs.left_behind("test.hello"));
+    assert_eq!(*guard(&w.fake.kept), ["test.hello"]);
+    w.fake.keep_failing.store(false, Ordering::Relaxed);
+    result(link().await);
+    assert!(vorn_extensions::sandbox::is_on(&home));
+    assert!(guard(&w.fake.kept).is_empty());
+    assert!(!w.ext.installs.left_behind("test.hello"));
+}
+
+#[tokio::test]
+async fn a_changed_pack_stops_its_service_so_it_starts_again_with_the_new_hosts() {
+    let w = world();
+    // It reaches the network through the proxy, as its manifest declared.
+    let proxy = vorn_extensions::netproxy::NetProxy::start().await.unwrap();
+    let grant = proxy.grant("x", vec!["api.example.com".into()]).unwrap();
+    guard(&w.ext.router.confiner().grants).insert("x".to_owned(), grant);
+    let lifecycle = w.ext.router.lifecycle();
+    let key = vorn_extensions::lifecycle::ServiceKey::new("x".to_owned(), "");
+    drop(
+        lifecycle
+            .get_or_start(&key, || async { Ok::<_, String>(Idle) })
+            .await
+            .unwrap(),
+    );
+    assert_eq!(lifecycle.running().len(), 1);
+    w.ext.pack_changed("x").await;
+    assert!(lifecycle.running().is_empty());
+    assert!(guard(&w.ext.router.confiner().grants).is_empty());
 }
 
 #[tokio::test]

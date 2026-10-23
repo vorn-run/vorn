@@ -53,6 +53,14 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         .child(share_card(s, n, on))
         .child(section("Devices"))
         .child(devices(s, n))
+        .child(
+            text(crate::network::IDLE_EXPIRY, 11.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .pl(4.0)
+                .mt(8.0)
+                .wrapping()
+                .silent(),
+        )
         .child(reach_card(s, n, on).mt(24.0))
         .child_if(n.error.as_deref().map(|e| {
             text(e, 12.0, c(look::DANGER))

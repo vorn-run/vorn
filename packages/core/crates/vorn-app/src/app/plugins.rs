@@ -1,5 +1,8 @@
 //! What the Extensions and Connections pages' controls do, and the answers to their calls.
 
+/// What vornd says when a linked folder's manifest changed after its sheet was read.
+const LINK_CHANGED_MARK: &str = "manifest changed after you read it";
+
 use serde_json::{json, Value};
 
 use super::{tasks::open_url, Act, App, Call, Src};
@@ -119,6 +122,10 @@ impl App {
                     );
                 }
             }
+            PlugAct::LinkAgain(path) => {
+                self.plug_show_page(ui);
+                self.plug_picked(ui, Origin::Link, &path);
+            }
             PlugAct::ReadSource => {
                 let Some(g) = p.source.as_mut().filter(|g| !g.busy) else {
                     return;
@@ -147,10 +154,11 @@ impl App {
                 if let Some(path) = &pending.link {
                     p.installing = true;
                     p.report = None;
+                    let read = s(&pending.preview, "manifest").unwrap_or("").to_owned();
                     self.call(
                         Call::Plug(PlugCall::ExtInstall { linked: true }),
                         "extension:link",
-                        json!({ "path": path }),
+                        json!({ "path": path, "manifest": read }),
                     );
                 } else if pending.git {
                     p.installing = true;
@@ -815,6 +823,19 @@ impl App {
             PlugCall::ExtInstall { linked } => {
                 p.installing = false;
                 match answer {
+                    // The folder changed under the sheet: read it again, saying why.
+                    Err(e) if linked && e.to_string().contains(LINK_CHANGED_MARK) => {
+                        let path = p.pending.as_ref().and_then(|x| x.link.clone());
+                        p.report = Some(e.to_string());
+                        if let (Some(path), Some(g)) = (path, p.source.as_mut()) {
+                            g.busy = true;
+                            self.call(
+                                Call::Plug(PlugCall::ReadSource(Origin::Link)),
+                                "extension:inspect",
+                                json!({ "url": path, "link": true }),
+                            );
+                        }
+                    }
                     Err(e) => p.report = Some(e.to_string()),
                     Ok(pack) => {
                         let name = s(&pack, "name").unwrap_or("The extension").to_owned();

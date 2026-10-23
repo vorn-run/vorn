@@ -54,6 +54,19 @@ vorn-extension.toml:4: api: built for vorn:extension@1.1; this Vorn speaks vorn:
   shows its message and does not start it.
 - **A one-shot command** is checked by its manifest alone.
 
+## Where a program runs
+
+A program starts in its own folder, which holds its manifest and code. It
+runs sandboxed by default: it reads that folder but never writes it. It
+writes to the folder `VORN_EXTENSION_DATA` names (its temporary files go to
+`TMPDIR` inside it) and to the projects it is handed. On macOS it reaches
+the network only through the hosts its manifest declares; on Linux the
+sandbox holds files only. A person can turn the sandbox off for an
+extension on its page in Extensions. A linked folder is your own working
+copy: a program whose project holds it can write it like any other file
+there, but the hosts and permissions it asks for since it was linked are
+not given until you link it again, and its page says what it asks for.
+
 ## TypeScript
 
 A program reads JSON-RPC from stdin, one message per line, and answers on

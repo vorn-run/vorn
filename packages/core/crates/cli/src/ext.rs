@@ -439,9 +439,9 @@ async fn list(ctx: &mut Context<'_>) -> Result<ExitCode, CommandError> {
                 "stopped"
             }
             .to_owned();
-            if p["sandboxed"] == true {
-                state.push_str(", sandboxed");
-            }
+            state.push_str(sandbox_state(p));
+            state.push_str(&widened_state(p));
+            state.push_str(&closed_state(p));
             vec![
                 text(p, "id").to_owned(),
                 text(p, "version").to_owned(),
@@ -541,9 +541,78 @@ pub async fn run(ctx: &mut Context<'_>) -> ExitCode {
     }
 }
 
+/// The projects its sandboxed programs cannot open, as each holds Vorn's data.
+fn closed_state(pack: &Value) -> String {
+    pack["closedProjects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|p| format!(", can't open {p} (it holds Vorn's data)"))
+        .collect()
+}
+
+/// What a linked folder asks for beyond what it had when it was linked.
+fn widened_state(pack: &Value) -> String {
+    let asks: Vec<&str> = pack["widened"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if asks.is_empty() {
+        return String::new();
+    }
+    format!(
+        ", asks for more since linked: {} (link it again to give it)",
+        asks.join(", ")
+    )
+}
+
+/// How `vorn ext list` names a package's sandbox, as the install sheet does.
+fn sandbox_state(pack: &Value) -> &'static str {
+    match pack["sandbox"].as_str() {
+        Some("sandboxed") => ", sandboxed",
+        Some("files-only") => ", sandboxed (network not limited)",
+        Some("unsandboxed") => ", unsandboxed",
+        Some("off") => ", sandbox off",
+        _ => "",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_which_projects_its_programs_cannot_open() {
+        let pack = serde_json::json!({ "closedProjects": ["/home/me"] });
+        assert_eq!(
+            closed_state(&pack),
+            ", can't open /home/me (it holds Vorn's data)"
+        );
+        assert_eq!(closed_state(&serde_json::json!({})), "");
+    }
+
+    #[test]
+    fn says_what_a_linked_folder_asks_for_since() {
+        let pack = serde_json::json!({ "widened": ["elsewhere.example"] });
+        assert_eq!(
+            widened_state(&pack),
+            ", asks for more since linked: elsewhere.example (link it again to give it)"
+        );
+        assert_eq!(widened_state(&serde_json::json!({})), "");
+    }
+
+    #[test]
+    fn names_the_sandbox_as_the_install_sheet_does() {
+        let say = |v: &str| sandbox_state(&serde_json::json!({ "sandbox": v }));
+        assert_eq!(say("sandboxed"), ", sandboxed");
+        assert_eq!(say("files-only"), ", sandboxed (network not limited)");
+        assert_eq!(say("unsandboxed"), ", unsandboxed");
+        assert_eq!(say("off"), ", sandbox off");
+        assert_eq!(sandbox_state(&serde_json::json!({})), "");
+    }
 
     #[test]
     fn renders_every_part_of_the_sheet() {

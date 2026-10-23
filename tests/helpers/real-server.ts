@@ -8,6 +8,7 @@ import path from 'node:path'
 import WebSocket from 'ws'
 import { BOOTSTRAP_ENV_VAR, WS_PORT_FILENAME } from '../../packages/shared/src/protocol'
 import type { RunDirs } from './sessions-parity'
+import { vorndReport } from './served'
 
 /**
  * A real server started as a child: vornd, serving a data directory, with
@@ -175,7 +176,8 @@ export async function startRealServer(
   server.vornd = server.port
   if (options.early) return server
   await until('the session holder, and the records read', async () => {
-    const res = await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+    const res = await vorndReport(server.vornd, '/vornd/health', dirs.data)
+    if (!res.ok) return false
     const health = (await res.json()) as {
       sessiond?: { current?: { pid?: number } }
       registry?: { fed?: boolean; decides?: boolean }
@@ -272,9 +274,9 @@ export async function vorndStopped(port: number): Promise<void> {
   )
 }
 
-/** The session holder's pid, as the vornd on `port` reports it. */
-export function holderPid(port: number): Promise<number | undefined> {
-  return fetch(`http://127.0.0.1:${port}/vornd/health`)
+/** The session holder's pid, as the vornd on `port` serving `dataDir` reports it. */
+export function holderPid(port: number, dataDir: string): Promise<number | undefined> {
+  return vorndReport(port, '/vornd/health', dataDir)
     .then((r) => r.json() as Promise<{ sessiond?: { current?: { pid?: number } } }>)
     .then((h) => h.sessiond?.current?.pid)
     .catch(() => undefined)
@@ -306,7 +308,7 @@ export async function stopHolder(pid: number | undefined): Promise<void> {
 
 /** Stops it. @param keepHolder Leaves the session holder and its sessions running, for a server to start again on. */
 export async function stopRealServer(server: RealServer, keepHolder = false): Promise<void> {
-  await stopServerChild(server.child, server.vornd, keepHolder)
+  await stopServerChild(server.child, server.vornd, server.dirs.data, keepHolder)
 }
 
 /**
@@ -316,9 +318,10 @@ export async function stopRealServer(server: RealServer, keepHolder = false): Pr
 export async function stopServerChild(
   child: ChildProcess,
   vorndPort: number,
+  dataDir: string,
   keepHolder = false
 ): Promise<void> {
-  const holder = await holderPid(vorndPort)
+  const holder = await holderPid(vorndPort, dataDir)
   const vorndPid = child.pid
   if (child.exitCode === null) {
     const exited = new Promise((r) => child.once('exit', r))

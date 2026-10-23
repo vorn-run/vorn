@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::mpsc;
 use vorn_grid_client::{Client, Got};
 use vorn_term_proto::msg::{
-    caps, Attach, AttachMode, ClientKind, ClientMsg, CopyFormat, GridPoint, Hello, InputEvent,
-    KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
+    caps, Attach, AttachMode, ClientKind, ClientMsg, CopyFormat, EventKind, GridPoint, Hello,
+    InputEvent, KeyAction, KeyCode, SelectKind, ServerMsg, Size, PROTO_MAJOR, PROTO_MINOR,
 };
 use vorn_term_proto::screen::Screen;
 
@@ -111,6 +111,8 @@ pub enum Reply {
     Copied(String),
     /// A paste the program cannot tell from typing: run it only once the person says so.
     ConfirmPaste { session: String, text: String },
+    /// A program put `text` on the clipboard with an escape code (OSC 52).
+    ProgramCopied { session: String, text: String },
 }
 
 /// How many recent pastes are kept for a confirmation that may come.
@@ -762,6 +764,17 @@ impl Grid {
                 Got::Message(ServerMsg::Selection { req, range, .. }) => {
                     if let Some(session) = st.answered(req) {
                         st.replies.push(Reply::Selection { session, range });
+                        changed = true;
+                    }
+                }
+                Got::Message(ServerMsg::Event {
+                    sid,
+                    kind: EventKind::Clipboard { text },
+                    ..
+                }) => {
+                    if let Some(p) = st.panes.iter().find(|p| p.sid == Some(sid)) {
+                        let session = p.session.clone();
+                        st.replies.push(Reply::ProgramCopied { session, text });
                         changed = true;
                     }
                 }

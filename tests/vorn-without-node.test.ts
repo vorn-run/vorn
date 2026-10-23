@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import WebSocket from 'ws'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { builtSessiond, builtVornd, startServed, type Served } from './helpers/served'
+import { builtSessiond, builtVornd, startServed, type Served, vorndReport } from './helpers/served'
 
 /**
  * Vorn with nothing but vornd and its session holder: no Node server
@@ -110,7 +110,7 @@ describe.runIf(builtVornd && builtSessiond && process.platform !== 'win32')(
         args: ['--web', web]
       })
       await until('the session holder', async () => {
-        const res = await fetch(`http://127.0.0.1:${served.port}/vornd/health`)
+        const res = await vorndReport(served.port, '/vornd/health', served.dataDir)
         const health = (await res.json()) as { sessiond?: { current?: { pid?: number } } }
         return !!health.sessiond?.current?.pid
       })
@@ -237,7 +237,7 @@ describe.runIf(builtVornd && builtSessiond && process.platform !== 'win32')(
     })
 
     it('reports itself healthy, with nothing behind it', async () => {
-      const res = await fetch(`http://127.0.0.1:${served.port}/vornd/health`)
+      const res = await vorndReport(served.port, '/vornd/health', served.dataDir)
       expect(res.status).toBe(200)
       const health = (await res.json()) as Record<string, unknown>
       expect(health.ok).toBe(true)
