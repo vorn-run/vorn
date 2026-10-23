@@ -800,8 +800,17 @@ impl Ui {
         // everything the app draws.
         let covers = el.backdrop_blur.is_some() || el.bg.is_some_and(|c| c.0[3] >= 0.5);
         if covers && !el.native_glass && !cells && !self.glass.is_empty() {
+            // Only the part left showing covers: a card scrolled under the
+            // top bar is clipped away there. A badge or dot on a button is
+            // smaller than its glass and leaves it.
+            let seen = bx.intersect(&cx.clip.scaled(k));
             let hit = |r: &Rect| {
-                r.x < bx.x + bx.w && bx.x < r.x + r.w && r.y < bx.y + bx.h && bx.y < r.y + r.h
+                seen.w >= r.w
+                    && seen.h >= r.h
+                    && r.x < seen.x + seen.w
+                    && seen.x < r.x + r.w
+                    && r.y < seen.y + seen.h
+                    && seen.y < r.y + r.h
             };
             self.glass.retain(|(r, _)| !hit(r));
             self.glass_icons.retain(|(r, ..)| !hit(r));
