@@ -1433,7 +1433,7 @@ fn manifest_names(folder: &Path, name: &str) -> bool {
             toml::Value::String(s) => Path::new(s)
                 .components()
                 .find(|c| !matches!(c, std::path::Component::CurDir))
-                .is_some_and(|c| c.as_os_str() == name),
+                .is_some_and(|c| c.as_os_str().eq_ignore_ascii_case(name)),
             toml::Value::Array(items) => items.iter().any(|v| names(v, name)),
             toml::Value::Table(table) => table.values().any(|v| names(v, name)),
             _ => false,

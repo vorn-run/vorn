@@ -1119,6 +1119,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn lists_an_extensions_folder_without_following_a_link_below_its_folder() {
         use std::os::unix::fs::symlink;

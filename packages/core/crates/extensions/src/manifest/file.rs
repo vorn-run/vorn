@@ -845,7 +845,11 @@ impl Raw {
             // A pack leaves these out, so migrations there would run only from a linked folder.
             if std::path::Path::new(&storage.migrations)
                 .iter()
-                .any(|part| crate::install::NOT_PACKED.iter().any(|n| part == *n))
+                .any(|part| {
+                    crate::install::NOT_PACKED
+                        .iter()
+                        .any(|n| part.eq_ignore_ascii_case(n))
+                })
             {
                 return Err(at(
                     "storage.migrations",
