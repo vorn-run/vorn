@@ -25,6 +25,7 @@ import { answerOf, type Answer } from './helpers/git-parity'
 import { catalogFetchedAt } from './helpers/agents-parity'
 import { fixtureRoot } from './helpers/git-parity'
 import { JsReference, posixSeparators } from './helpers/js-reference'
+import { agentListed, offerInCatalog } from './helpers/real-server'
 import { startServed, type Served } from './helpers/served'
 
 const TEST_CREDENTIAL = 'native-server-agents-credential'
@@ -257,6 +258,22 @@ function makeTools(root: string): { bin: string; shell: string } {
   return { bin, shell }
 }
 
+/** OpenCode, which Vorn does not install by default, installed from the catalog as a person would. */
+async function installOpenCode(port: number): Promise<void> {
+  const client = await Client.open(port)
+  try {
+    const done = await client.call('connector:installPack', {
+      kind: 'catalog',
+      id: 'vorn.agents.opencode'
+    })
+    if ((done.result as { ok?: boolean } | undefined)?.ok !== true) {
+      throw new Error(`installing vorn.agents.opencode: ${JSON.stringify(done)}`)
+    }
+  } finally {
+    client.close()
+  }
+}
+
 /** The agents' commands and the variables passed through, saved as the app saves them. */
 async function saveConfig(port: number): Promise<void> {
   const client = await Client.open(port)
@@ -320,6 +337,7 @@ describe.skipIf(!runnable)(
       process.env.SHELL = tools.shell
       warmPowerShell()
 
+      await offerInCatalog(fx.home, ['vorn.agents.opencode'])
       native = await startServed({
         dataDir: shared.dataDir,
         home: fx.home,
@@ -330,6 +348,8 @@ describe.skipIf(!runnable)(
           SHELL: process.env.SHELL!
         }
       })
+      await installOpenCode(native.port)
+      await agentListed(native.port, 'opencode', TEST_CREDENTIAL)
       await saveConfig(native.port)
     }, 60_000)
 

@@ -10,7 +10,7 @@ import {
 } from '../packages/shared/src/types'
 
 describe('shell as an AgentType', () => {
-  const AI_AGENTS: AiAgentType[] = ['claude', 'copilot', 'codex', 'opencode', 'gemini']
+  const AI_AGENTS: AiAgentType[] = ['claude', 'copilot', 'codex', 'gemini']
 
   describe('isAiAgent type guard', () => {
     it('returns true for every AI agent', () => {
@@ -49,7 +49,7 @@ describe('shell as an AgentType', () => {
     })
 
     it('returns true for every other AI agent', () => {
-      for (const a of ['claude', 'copilot', 'codex', 'opencode'] as AiAgentType[]) {
+      for (const a of ['claude', 'copilot', 'codex'] as AiAgentType[]) {
         expect(supportsExactSessionResume(a)).toBe(true)
       }
     })
@@ -64,7 +64,6 @@ describe('shell as an AgentType', () => {
       expect(supportsSessionIdPinning('claude')).toBe(true)
       expect(supportsSessionIdPinning('copilot')).toBe(true)
       expect(supportsSessionIdPinning('codex')).toBe(false)
-      expect(supportsSessionIdPinning('opencode')).toBe(false)
       expect(supportsSessionIdPinning('gemini')).toBe(false)
     })
   })
@@ -85,7 +84,6 @@ describe('shell as an AgentType', () => {
       expect(getRecentSessionActivityLabel('codex')).toBe('entry')
       expect(getRecentSessionActivityLabel('copilot')).toBe('turn')
       expect(getRecentSessionActivityLabel('gemini')).toBe('prompt')
-      expect(getRecentSessionActivityLabel('opencode')).toBe('message')
     })
   })
 })

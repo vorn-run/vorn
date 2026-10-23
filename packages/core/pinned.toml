@@ -6,6 +6,12 @@
 # fetches them into packages/core/shipped/catalog/ for the tests.
 
 [[extension]]
+id = "vorn.agents.opencode"
+path = "adapters/opencode"
+version = "1.0.0"
+sha256 = "763accacfb0b9bb31a461dceb52667f5ece240755cce1a3df3dce23906c678dc"
+
+[[extension]]
 id = "vorn.device"
 path = "device"
 version = "1.0.0"

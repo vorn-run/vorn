@@ -24,11 +24,10 @@ pub const DEV_SERVER_WORKFLOW_ID: &str = "system:dev-server-on-restore";
 
 /// The agents the recorded store answers name, `(id, command, headless args)`,
 /// in the order they were recorded in.
-const RECORDED_AGENTS: [(&str, &str, &[&str]); 5] = [
+const RECORDED_AGENTS: [(&str, &str, &[&str]); 4] = [
     ("claude", "claude", &["--dangerously-skip-permissions"]),
     ("copilot", "copilot", &["--allow-all"]),
     ("codex", "codex", &["-a", "never"]),
-    ("opencode", "opencode", &[]),
     ("gemini", "gemini", &["-y"]),
 ];
 

@@ -20,7 +20,7 @@ export interface AgentModelCatalog {
   error?: string
 }
 
-const MODEL_AGENTS: readonly string[] = ['claude', 'copilot', 'opencode', 'codex']
+const MODEL_AGENTS: readonly string[] = ['claude', 'copilot', 'codex']
 
 export function supportsModelSelection(agent: string): boolean {
   return MODEL_AGENTS.includes(agent)

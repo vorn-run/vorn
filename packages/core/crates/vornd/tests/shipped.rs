@@ -728,3 +728,33 @@ async fn an_agent_runs_in_a_plain_terminal_with_every_adapter_removed() {
     }
     c.call("terminal:kill", json!(shell)).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_agent_adapter_from_the_catalog_runs_its_agent_without_a_restart() {
+    let id = "vorn.agents.opencode";
+    let Some((version, sha256, bytes)) = common::catalog_pack(id) else {
+        eprintln!("skipped: {id} was not fetched (run packages/core/scripts/shipped.mjs)");
+        return;
+    };
+    assert!(
+        !vornd::shipped::SET.iter().any(|s| s.id == id),
+        "{id} is shipped"
+    );
+    let home = tempfile::tempdir().unwrap();
+    common::offer_in_catalog(home.path(), vec![(id, version, sha256, bytes)]);
+    let served = common::serve_at(tempfile::tempdir().unwrap(), home);
+    let mut c = Ws::open(served.port).await;
+    let listed = |list: &Value| ids(list, "id").iter().any(|a| a == "opencode");
+    assert!(!listed(&c.result("agent:list", json!({})).await));
+
+    install_from_catalog(&mut c, id).await;
+    let t = Instant::now();
+    while !listed(&c.result("agent:list", json!({})).await) {
+        assert!(t.elapsed() < PATIENCE, "opencode was never listed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let removed = c.result("extension:remove", json!({ "id": id })).await;
+    assert_eq!(removed["removed"], id);
+    assert!(!listed(&c.result("agent:list", json!({})).await));
+}
