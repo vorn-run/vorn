@@ -373,3 +373,66 @@ pub(crate) fn set_material(window: &Window, dark: Option<bool>, solid: (f64, f64
         true
     })
 }
+
+thread_local! {
+    /// The glass views under this thread's window, one a box, reused frame to frame.
+    static GLASS: std::cell::RefCell<Vec<Retained<NSView>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Puts the system's glass (NSGlassEffectView, macOS 26) under each box,
+/// given in device pixels with its corner radius; none on older systems.
+pub(crate) fn sync_glass(window: &Window, boxes: &[(crate::scene::Rect, f32)], scale: f64) {
+    let Some(cls) = objc2::runtime::AnyClass::get("NSGlassEffectView") else {
+        return;
+    };
+    let Some(content) = content_view(window) else {
+        return;
+    };
+    // SAFETY: the content view is winit's, live and used on the main thread.
+    let Some(frame) = (unsafe { content.superview() }) else {
+        return;
+    };
+    let height = content.frame().size.height;
+    GLASS.with(|g| {
+        let mut g = g.borrow_mut();
+        while g.len() > boxes.len() {
+            if let Some(v) = g.pop() {
+                // SAFETY: a view this module added, removed on the main thread.
+                unsafe { v.removeFromSuperview() };
+            }
+        }
+        // NSWindowBelow: under the content, over the material.
+        const BELOW: isize = -1;
+        for (i, (r, radius)) in boxes.iter().enumerate() {
+            let s = scale.max(1.0);
+            let rect = objc2_foundation::NSRect::new(
+                objc2_foundation::NSPoint::new(
+                    f64::from(r.x) / s,
+                    height - (f64::from(r.y) + f64::from(r.h)) / s,
+                ),
+                objc2_foundation::NSSize::new(f64::from(r.w) / s, f64::from(r.h) / s),
+            );
+            // SAFETY: AppKit's own view class made and placed on the main
+            // thread; the selectors and argument types are AppKit's.
+            unsafe {
+                if i == g.len() {
+                    let view: *mut AnyObject = objc2::msg_send![cls, alloc];
+                    let view: *mut AnyObject = objc2::msg_send![view, initWithFrame: rect];
+                    let Some(view) = Retained::from_raw(view.cast::<NSView>()) else {
+                        return;
+                    };
+                    let _: () = objc2::msg_send![
+                        &*frame,
+                        addSubview: &*view,
+                        positioned: BELOW,
+                        relativeTo: content
+                    ];
+                    g.push(view);
+                }
+                let v = &g[i];
+                v.setFrame(rect);
+                let _: () = objc2::msg_send![&**v, setCornerRadius: f64::from(*radius) / s];
+            }
+        }
+    });
+}

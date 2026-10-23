@@ -38,11 +38,12 @@ pub(super) fn tool(
             white(0.0).mix(white(0.06), hot),
         )
     };
+    let (pad, round) = if glass(s) { (6.0, 14.0) } else { (4.0, 6.0) };
     let b = div()
         .id(id)
         .on(Action::Click)
-        .p(4.0)
-        .rounded(6.0)
+        .p(pad)
+        .rounded(round)
         .bg(bg)
         .role(Role::Button, label)
         .child(ico(name, 16.0, stroke, fg));
@@ -52,6 +53,27 @@ pub(super) fn tool(
 /// A thin vertical rule between toolbar groups.
 pub(super) fn divider() -> El {
     div().w(1.0).h(16.0).bg(white(0.06)).mx(2.0).shrink0()
+}
+
+/// Whether toolbar buttons sit on glass: over the system's material.
+pub(super) fn glass(s: &Screen<'_>) -> bool {
+    s.ui.see_through() && crate::ui::palette::materials() != vorn_theme::Materials::Solid
+}
+
+/// Toolbar buttons that belong together: one glass capsule over the
+/// system's material, a plain row otherwise.
+pub(super) fn group(s: &Screen<'_>, buttons: impl IntoIterator<Item = El>) -> El {
+    let row = div().row().items_center();
+    let row = buttons.into_iter().fold(row, El::child);
+    if !glass(s) {
+        return row.gap(4.0);
+    }
+    row.gap(2.0)
+        .h(32.0)
+        .px(3.0)
+        .rounded(16.0)
+        .native_glass()
+        .shrink0()
 }
 
 fn menu_open(s: &Screen<'_>, kind: &MenuKind) -> bool {
@@ -817,9 +839,13 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
                     .absolute_right(2.0, 2.0),
             );
         }
-        right = right.child(opts).child(divider());
+        right = if glass(s) {
+            right.gap(8.0).child(group(s, [opts]))
+        } else {
+            right.child(opts).child(divider())
+        };
     }
-    right = right.child(tool(
+    let recent = tool(
         s,
         "toolbar",
         Act::Open(MenuKind::Recent),
@@ -828,9 +854,9 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
         "Recent sessions",
         None,
         menu_open(s, &MenuKind::Recent),
-    ));
-    if plus {
-        right = right.child(tool(
+    );
+    let new = plus.then(|| {
+        tool(
             s,
             "toolbar",
             Act::Open(MenuKind::Grid),
@@ -839,9 +865,11 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
             "New session",
             None,
             menu_open(s, &MenuKind::Grid),
-        ));
-    }
-    right.child_if(window_controls(s))
+        )
+    });
+    right
+        .child(group(s, std::iter::once(recent).chain(new)))
+        .child_if(window_controls(s))
 }
 
 /// TaskToolbar's trigger: ink-secondary, white with a dot while a filter is on.

@@ -109,6 +109,8 @@ pub struct Ui {
     /// The scene layers the last layout's overlays (menus, popovers,
     /// tooltips) drew into; empty when none was open.
     pub(crate) overlays: std::ops::Range<usize>,
+    /// Boxes this frame wants the system's glass under: device pixels and radius.
+    pub(crate) glass: Vec<(Rect, f32)>,
 }
 
 enum Measure<'a> {
@@ -242,6 +244,7 @@ impl Ui {
             cells: None,
             native: None,
             overlays: 0..0,
+            glass: Vec::new(),
         }
     }
 
@@ -415,6 +418,7 @@ impl Ui {
         self.wake.set(None);
         self.scene.clear();
         self.overlays = 0..0;
+        self.glass.clear();
         self.clear = clear;
         // Pictures the last frame did not draw give their entry back.
         self.pictures.retain(|_, p| std::mem::take(&mut p.used));
@@ -783,6 +787,9 @@ impl Ui {
         let stroke = |w: f32| if snap { border_px(w, k) } else { w * k };
         if cells {
             self.record_box(cx, el, rl, ring);
+        }
+        if el.native_glass && !cells {
+            self.glass.push((bx, radius * k));
         }
         if let Some(sigma) = el.backdrop_blur.filter(|_| !cells) {
             self.scene.backdrop_blur(bx, sigma * k, radius * k);

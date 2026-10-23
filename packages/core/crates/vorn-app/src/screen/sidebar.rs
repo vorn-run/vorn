@@ -128,15 +128,18 @@ fn header(s: &Screen<'_>) -> El {
         })
         .pr(12.0)
         .child(title)
-        .child(tool(
+        .child(super::chrome::group(
             s,
-            "sidebar",
-            Act::ToggleSidebar,
-            "panel-left",
-            2.0,
-            "Toggle sidebar",
-            Some(&format!("{m}B", m = mod_label())),
-            false,
+            [tool(
+                s,
+                "sidebar",
+                Act::ToggleSidebar,
+                "panel-left",
+                2.0,
+                "Toggle sidebar",
+                Some(&format!("{m}B", m = mod_label())),
+                false,
+            )],
         ));
     let bar = draggable(s, div().col().shrink0().child(bar));
     let mut row = div()

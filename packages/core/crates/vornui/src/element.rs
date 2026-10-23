@@ -267,6 +267,8 @@ pub struct El {
     /// Blur what is drawn under the box by this standard deviation, in
     /// logical pixels (`backdrop-filter: blur()`).
     pub(crate) backdrop_blur: Option<f32>,
+    /// The system's own glass under the box, where the platform has one.
+    pub(crate) native_glass: bool,
     /// What the box shows on a cells surface instead of its content and children.
     pub(crate) glyph: Option<Box<str>>,
     /// The glyph's ink, when it is not the content's.
@@ -306,6 +308,7 @@ pub fn div() -> El {
         shadows: Vec::new(),
         frames: None,
         backdrop_blur: None,
+        native_glass: false,
         glyph: None,
         glyph_tint: None,
         windowed: false,
@@ -821,6 +824,12 @@ impl El {
     /// translucent background.
     pub fn backdrop_blur(mut self, sigma: f32) -> El {
         self.backdrop_blur = (sigma > 0.0).then_some(sigma);
+        self
+    }
+    /// Puts the system's own glass (Liquid Glass on macOS 26) under the
+    /// box, within its rounded corners; nothing where there is none.
+    pub fn native_glass(mut self) -> El {
+        self.native_glass = true;
         self
     }
     /// The surface of a menu, popover or the palette, in the active theme's

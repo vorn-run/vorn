@@ -793,6 +793,16 @@ impl<A: App> Live<A> {
                 let px = (config.width, config.height);
                 let view = frame.texture.create_view(&Default::default());
                 let laid = draw(&mut self.ui, &mut self.app, now, px, Some(&view));
+                #[cfg(target_os = "macos")]
+                crate::macos::sync_glass(
+                    &self.window,
+                    if self.ui.see_through() {
+                        &self.ui.glass
+                    } else {
+                        &[]
+                    },
+                    self.window.scale_factor(),
+                );
                 self.window.pre_present_notify();
                 frame.present();
                 laid
