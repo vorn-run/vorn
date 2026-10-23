@@ -30,12 +30,6 @@ version = "1.0.0"
 sha256 = "d71f199cad90fd207023da1e287fe124cdb9f19574912f6d93cbaac7d850a16c"
 
 [[extension]]
-id = "vorn.agents.opencode"
-path = "adapters/opencode"
-version = "1.0.0"
-sha256 = "763accacfb0b9bb31a461dceb52667f5ece240755cce1a3df3dce23906c678dc"
-
-[[extension]]
 id = "vorn.agents.gemini"
 path = "adapters/gemini"
 version = "1.0.0"

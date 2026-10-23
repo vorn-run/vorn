@@ -197,6 +197,23 @@ export async function startRealServer(
   return server
 }
 
+/** Waits until the vornd on `port` runs agent `id`: an adapter installed a moment ago is read after its install answers. */
+export async function agentListed(
+  port: number,
+  id: string,
+  credential = TEST_CREDENTIAL
+): Promise<void> {
+  const client = await Watcher.open(port, credential)
+  try {
+    await until(`agent ${id} to be listed`, async () => {
+      const agents = await client.result<Array<{ id?: string }>>('agent:list')
+      return agents.some((a) => a.id === id)
+    })
+  } finally {
+    client.close()
+  }
+}
+
 /** Where scripts/shipped.mjs puts the packs of Vorn's own catalog extensions. */
 const catalogPacks = path.resolve(
   process.env.VORN_SHIPPED_DIR ?? path.resolve(__dirname, '../../packages/core/shipped'),

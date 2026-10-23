@@ -3,7 +3,7 @@
  * decides.
  *
  * vornd is started as the server on a home and a data directory of its own, and
- * runs the same stub agent under each of the five agent types: a
+ * runs the same stub agent under each of the four agent types Vorn installs: a
  * script that prints, on cue, a line that reads as running, a prompt that reads
  * as waiting and an error, then goes quiet until it is idle. Its cues come both
  * as notifications and as calls. Then the
@@ -28,7 +28,7 @@ import { builtSessiond, builtVornd, startServed, type Served } from './helpers/s
 const CREDENTIAL = 'native-status-test-credential'
 const runnable = !!builtVornd && !!builtSessiond && process.platform !== 'win32'
 
-const AGENTS = ['claude', 'codex', 'copilot', 'gemini', 'opencode'] as const
+const AGENTS = ['claude', 'codex', 'copilot', 'gemini'] as const
 type Agent = (typeof AGENTS)[number]
 
 /**

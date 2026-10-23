@@ -351,6 +351,28 @@ mod tests {
     }
 
     #[test]
+    fn one_that_leaves_the_set_for_the_catalog_stays_installed_and_removes_like_any_other() {
+        let before = Fixture::new(&[("vorn.a", "1.0.0", true), ("vorn.b", "1.0.0", true)]);
+        before.sync();
+        let pin = before.set()[1].pinned();
+        let mut after = Fixture {
+            packs: before.packs[..1].to_vec(),
+            ..before
+        };
+        after.also.push(pin);
+
+        assert_eq!(after.sync(), Synced::default());
+        let pack = after.installs().store().describe("vorn.b").unwrap();
+        assert_eq!(pack.version, "1.0.0");
+        assert!(after.installs().trust().vouches_for(&pack));
+
+        after.installs().remove("vorn.b").unwrap();
+        assert_eq!(after.sync(), Synced::default());
+        assert_eq!(after.version("vorn.b"), None);
+        assert_eq!(after.version("vorn.a").as_deref(), Some("1.0.0"));
+    }
+
+    #[test]
     fn a_newer_shipped_version_replaces_an_older_one_and_keeps_the_previous() {
         let old = Fixture::new(&[("vorn.a", "1.0.0", true)]);
         old.sync();

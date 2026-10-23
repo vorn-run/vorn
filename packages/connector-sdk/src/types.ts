@@ -515,8 +515,9 @@ export type ExtensionPermission =
   | 'card.rename'
   | 'agent.usage'
 
-/** Session types an extension can name; `shell` is a plain terminal. */
-export type ExtensionAgent = 'claude' | 'copilot' | 'codex' | 'opencode' | 'gemini' | 'shell'
+/** Session types an extension can name: an installed adapter's agent id (as `claude` or
+ *  `codex`), or `shell` for a plain terminal. */
+export type ExtensionAgent = string
 
 export type ExtensionPlatform = 'darwin' | 'linux' | 'win32'
 

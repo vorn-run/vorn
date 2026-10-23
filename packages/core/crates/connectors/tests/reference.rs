@@ -10,7 +10,7 @@ use vorn_connectors::{auth, catalog, connections as conns, http};
 /// The recordings name these agents, which must be known ids; claude's
 /// adapter also says which variables it sets in its sessions.
 fn read_shipped_adapters() {
-    for id in ["copilot", "codex", "opencode", "gemini"] {
+    for id in ["copilot", "codex", "gemini"] {
         vorn_agents::know(id);
     }
     let claude = "[agent]\nid = \"claude\"\nname = \"Claude Code\"\n[agent.launch]\ncommand = \"claude\"\n[agent.env]\nstrip = [\"CLAUDECODE\"]\nstrip_prefixes = [\"CLAUDE_CODE_\"]\n";

@@ -204,7 +204,7 @@ Vorn supports two ways of working. **Interactive**: open a grid of terminals and
 
 ### Multi-Agent Grid
 
-Run Claude, Copilot, Codex, OpenCode, and Gemini in a responsive grid layout. Resize, reorder, minimize, and filter by status. Focus any terminal fullscreen with one click, or switch to a tab view for sequential browsing. Real-time status detection shows whether each agent is running, waiting, idle, or in an error state.
+Run Claude, Copilot, Codex, and Gemini in a responsive grid layout. Resize, reorder, minimize, and filter by status. Focus any terminal fullscreen with one click, or switch to a tab view for sequential browsing. Real-time status detection shows whether each agent is running, waiting, idle, or in an error state.
 
 ### Panes Beside the Terminal
 
@@ -287,10 +287,9 @@ A minimal always-on-top overlay that stays visible while you work in other apps.
 | Claude Code    | `claude`     |
 | GitHub Copilot | `gh copilot` |
 | OpenAI Codex   | `codex`      |
-| OpenCode       | `opencode`   |
 | Google Gemini  | `gemini`     |
 
-Any CLI tool that runs in a terminal works with Vorn. These are the agents with built-in status detection and icons.
+Any CLI tool that runs in a terminal works with Vorn. These are the agents Vorn installs by default, with status detection and icons; others, OpenCode among them, install from the catalog in Settings › Extensions.
 
 ## Development
 

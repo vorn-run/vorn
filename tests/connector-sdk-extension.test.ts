@@ -215,7 +215,8 @@ describe('defineExtension', () => {
   })
 
   it('refuses a predicate this build cannot evaluate', () => {
-    expect(() => extension({ activates: { agent: ['emacs'] as never } })).toThrow(/unknown agent/)
+    expect(() => extension({ activates: { agent: ['Emacs!'] } })).toThrow(/unknown agent/)
+    expect(() => extension({ activates: { agent: ['acme-agent', 'shell'] } })).not.toThrow()
     expect(() => extension({ activates: { platform: ['plan9'] as never } })).toThrow(
       /unknown platform/
     )
@@ -257,6 +258,10 @@ describe('what a served extension answers', () => {
         url: 'https://github.com/vorn-run/vorn/pull/1'
       })
     ).toEqual({ openPane: 'report-s1' })
+    // An installed adapter's agent, which no list in the SDK names.
+    expect(
+      await server.call('extension/footer', { footer: 'checks', ...session, agent: 'acme-agent' })
+    ).toEqual({ items: [{ label: 'tests', value: 'passing', tone: 'ok' }] })
   })
 
   it('refuses a contribution it does not have, or a session it cannot run for', async () => {
@@ -266,8 +271,11 @@ describe('what a served extension answers', () => {
       message: 'review contributes no footer "nope"'
     })
     expect(
-      await server.fail('extension/footer', { footer: 'checks', ...session, agent: 'emacs' })
-    ).toMatchObject({ code: -32602, message: expect.stringContaining('"agent" must be one of') })
+      await server.fail('extension/footer', { footer: 'checks', ...session, agent: 'Emacs!' })
+    ).toMatchObject({
+      code: -32602,
+      message: expect.stringContaining('"agent" must be an agent id')
+    })
     expect(await server.fail('extension/handler', { handler: 'pr', ...session })).toEqual({
       code: -32602,
       message: '"url" must be a non-empty string'

@@ -1271,6 +1271,10 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
             extensions.pack_changed(id).await;
             extensions.start_if_stopped(id);
         }
+        // An adapter installed from the catalog reaches vornd only as a changed pack.
+        if !moved.is_empty() {
+            extensions.sync_adapters();
+        }
         reconcile(&extensions, &mut known, !moved.is_empty());
     }
 }

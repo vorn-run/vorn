@@ -2,9 +2,9 @@
 import type { PortableWorkflow } from './workflow-portability'
 
 /** An AI agent's id, as its adapter names it: one Vorn ships (`claude`,
- *  `copilot`, `codex`, `opencode`, `gemini`, `hermes`) or an installed
- *  adapter's. Use this for anything that applies exclusively to an AI CLI,
- *  not to plain shells; `agent:list` names the agents that are on. */
+ *  `copilot`, `codex`, `gemini`, `hermes`) or an installed adapter's. Use
+ *  this for anything that applies exclusively to an AI CLI, not to plain
+ *  shells; `agent:list` names the agents that are on. */
 export type AiAgentType = string
 
 /** Any session type that can back a terminal tab. `'shell'` is a plain PTY
@@ -59,8 +59,6 @@ export function getRecentSessionActivityLabel(agentType: AgentType): string {
       return 'turn'
     case 'gemini':
       return 'prompt'
-    case 'opencode':
-      return 'message'
     case 'shell':
       return 'line'
     default:
