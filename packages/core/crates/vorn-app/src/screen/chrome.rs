@@ -937,7 +937,11 @@ pub(super) fn top_bar(s: &Screen<'_>) -> El {
         div()
             .col()
             .shrink0()
-            .bg(c(look::SURFACE_BASE))
+            .bg(if s.ui.see_through() {
+                crate::ui::theme::shadow(0.0)
+            } else {
+                c(look::SURFACE_BASE)
+            })
             .child(bar)
             .child(div().h(1.0).w_full().bg(white(0.06))),
     )

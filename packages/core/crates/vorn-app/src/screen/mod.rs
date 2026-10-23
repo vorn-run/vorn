@@ -169,7 +169,10 @@ impl Screen<'_> {
         }
         // Over the system's material only the sidebar is see-through.
         let (root_bg, main_bg) = if self.ui.see_through() {
-            (crate::ui::theme::shadow(0.0), c(look::SURFACE_BASE))
+            (
+                crate::ui::theme::shadow(0.0),
+                crate::ui::theme::material::content(true),
+            )
         } else {
             (c(look::SURFACE_BASE), crate::ui::theme::shadow(0.0))
         };

@@ -321,6 +321,22 @@ pub mod material {
         }
     }
 
+    /// The content area's fill: the base colour, or over the system's
+    /// material the base mostly opaque, so the material shows faintly.
+    pub const NATIVE_CONTENT: f32 = 0.82;
+    pub const THEMED_CONTENT: f32 = 0.9;
+
+    pub fn content(see_through: bool) -> crate::scene::Rgba {
+        use vorn_theme::{Materials, Token};
+        let base = crate::palette::get(Token::SurfaceBase);
+        match crate::palette::materials() {
+            Materials::Solid => base,
+            _ if !see_through => base,
+            Materials::Native => base.alpha(NATIVE_CONTENT),
+            Materials::Themed => base.alpha(THEMED_CONTENT),
+        }
+    }
+
     /// This platform's tuning.
     pub fn tuning() -> Tuning {
         if cfg!(any(target_os = "macos", target_os = "ios")) {
