@@ -7,7 +7,7 @@
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
 //!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
 //!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
-//!               [--open theme-picker|theme-info|font-picker]
+//!               [--open theme-picker|theme-info|font-picker|extension:ID]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
 //!               [--keys K1,K2] [--click COL:ROW] [--png a.png] [--scale S]
 //!               [--layout tabs]
@@ -29,7 +29,8 @@
 //!
 //! `--settings appearance` opens Settings on that page after writing each
 //! `--set colorScheme="dark"` to the defaults (vornd keeps them), and
-//! `--open` opens one of its popovers from its control.
+//! `--open` opens one of its popovers from its control, or with
+//! `extension:vorn.tasks` that extension's page under `--settings extensions`.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -197,7 +198,15 @@ fn shot(args: &Args) -> Result<(), String> {
         app.frame(&mut ui, size);
     }
     if let Some(name) = args.get("open") {
-        app.shot_open(&mut ui, name)?;
+        // An extension's page waits for vornd to list it.
+        let until = Instant::now() + Duration::from_secs(10);
+        while let Err(e) = app.shot_open(&mut ui, name) {
+            if !name.starts_with("extension:") || Instant::now() > until {
+                return Err(e);
+            }
+            app.frame(&mut ui, size);
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
     let px = (
         (size.0 * scale).round() as u32,

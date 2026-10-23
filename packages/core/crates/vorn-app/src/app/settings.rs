@@ -39,10 +39,27 @@ impl App {
 
     /// `shot --open NAME`: an Appearance popover opened from its control, as
     /// a click on it would; `theme-picker` and `theme-info` use the first
-    /// theme row.
+    /// theme row. `extension:ID` selects that extension's page, and fails
+    /// until vornd has listed it.
     pub fn shot_open(&mut self, ui: &mut Ui, name: &str) -> Result<(), String> {
         use crate::state::MenuKind;
         use vorn_theme::Appearance as Look;
+        if let Some(id) = name.strip_prefix("extension:") {
+            if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+                self.run_plug(ui, crate::plugins::PlugAct::Refresh);
+            }
+            let p = &mut self.st.plugins;
+            let key = p
+                .listings
+                .iter()
+                .find(|l| l.id == id)
+                .map(|l| l.key.clone());
+            let key = key
+                .filter(|_| p.loads == 0)
+                .ok_or(format!("--open {name:?}: {id} is not listed"))?;
+            p.selected = Some(key);
+            return Ok(());
+        }
         let prefs = crate::appearance::prefs(self.store.config.get("defaults"));
         let look = crate::appearance::theme_rows(prefs.scheme)[0].look;
         let (place, kind) = match name {
@@ -57,7 +74,7 @@ impl App {
             "font-picker" => ("font-chip", MenuKind::FontPicker),
             _ => {
                 return Err(format!(
-                    "--open {name:?}: theme-picker, theme-info or font-picker"
+                    "--open {name:?}: theme-picker, theme-info, font-picker or extension:ID"
                 ))
             }
         };
