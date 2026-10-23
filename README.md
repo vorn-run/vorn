@@ -288,6 +288,7 @@ A minimal always-on-top overlay that stays visible while you work in other apps.
 | GitHub Copilot | `gh copilot` |
 | OpenAI Codex   | `codex`      |
 | Google Gemini  | `gemini`     |
+| Hermes         | `hermes`     |
 
 Any CLI tool that runs in a terminal works with Vorn. These are the agents Vorn installs by default, with status detection and icons; others, OpenCode among them, install from the catalog in Settings › Extensions.
 
