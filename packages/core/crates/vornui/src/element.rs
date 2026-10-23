@@ -823,21 +823,15 @@ impl El {
         self.backdrop_blur = (sigma > 0.0).then_some(sigma);
         self
     }
-    /// The surface of a menu, popover or the palette: opaque with Solid
-    /// materials, otherwise translucent over a blur of what is under it.
+    /// The surface of a menu, popover or the palette, in the active theme's
+    /// overlay colour: opaque with Solid materials, otherwise translucent
+    /// over a blur of what is under it.
     pub fn floating(self) -> El {
-        use vorn_theme::Materials;
-        let token = vorn_theme::Token::SurfaceOverlay;
+        let fill = crate::palette::get(vorn_theme::Token::SurfaceOverlay);
+        if crate::palette::materials() == vorn_theme::Materials::Solid {
+            return self.bg(fill);
+        }
         let tuning = crate::theme::material::tuning();
-        let fill = match crate::palette::materials() {
-            Materials::Solid => return self.bg(crate::palette::get(token)),
-            // Vorn's own neutral surface of the same lightness, not the theme's.
-            Materials::Native if crate::palette::dark() => {
-                Rgba::from(vorn_theme::vorn_dark().get(token))
-            }
-            Materials::Native => Rgba::from(vorn_theme::vorn_light().get(token)),
-            Materials::Themed => crate::palette::get(token),
-        };
         self.bg(fill.alpha(tuning.opacity))
             .backdrop_blur(tuning.sigma)
     }

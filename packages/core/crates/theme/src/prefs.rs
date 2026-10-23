@@ -33,10 +33,10 @@ pub enum Materials {
     /// Opaque surfaces everywhere.
     #[default]
     Solid,
-    /// The system's translucent sidebar, and menus, popovers and the palette
-    /// over a blur of what is behind them.
+    /// The system's translucent sidebar under a wash of the theme's panel,
+    /// and menus, popovers and the palette over a blur of what is behind them.
     Native,
-    /// As native, the translucency tinted with the theme's surfaces.
+    /// As native, the translucency tinted more strongly with the theme's surfaces.
     Themed,
 }
 

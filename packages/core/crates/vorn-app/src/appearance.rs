@@ -205,6 +205,25 @@ mod tests {
     }
 
     #[test]
+    fn switching_the_theme_recolours_the_native_sidebar() {
+        use crate::ui::theme::material;
+        let mut a = Appearance::default();
+        let with = |theme: &str| {
+            json!({ "darkTheme": theme, "interfaceStyle": "tinted", "materials": "native" })
+        };
+        a.apply(Some(&with("nord")), true, false, None);
+        let nord = material::sidebar(true);
+        a.apply(Some(&with("dracula")), true, false, None);
+        let dracula = material::sidebar(true);
+        assert_ne!(nord, dracula);
+        let panel = vorn_theme::find_bundled("dracula")
+            .unwrap()
+            .get(Token::SurfacePanel);
+        assert_eq!(dracula, crate::ui::Rgba::from(panel).alpha(material::NATIVE_TINT));
+        palette::install(Palette::default());
+    }
+
+    #[test]
     fn reduce_transparency_keeps_materials_solid() {
         let mut a = Appearance::default();
         let d = json!({ "materials": "native" });

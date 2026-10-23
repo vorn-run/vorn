@@ -238,6 +238,16 @@ pub(crate) fn clipboard_has_image() -> bool {
     }
 }
 
+/// The files on the system clipboard, as a file manager's copy leaves them.
+pub(crate) fn clipboard_files() -> Vec<std::path::PathBuf> {
+    // SAFETY: the general pasteboard is safe to read from any thread.
+    let pb = unsafe { NSPasteboard::generalPasteboard() };
+    if !has_files(&pb) {
+        return Vec::new();
+    }
+    files(&pb).unwrap_or_default()
+}
+
 /// Paints the window's own background `rgb` (0 to 1), so a window shown
 /// before its first frame is the app's colour rather than the system's.
 pub(crate) fn set_background(window: &Window, (r, g, b): (f64, f64, f64)) {

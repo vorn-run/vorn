@@ -302,15 +302,22 @@ pub mod material {
         opacity: 0.65,
     };
 
+    /// How much of the theme's panel colour lies over the system's sidebar
+    /// material: a wash with Native, so the theme still shows, and a tint
+    /// with Themed.
+    pub const NATIVE_TINT: f32 = 0.3;
+    pub const THEMED_TINT: f32 = 0.6;
+
     /// The sidebar's fill: its panel colour, or over the system's material
-    /// none at all (Native) or the theme's panel thinned (Themed).
+    /// the active theme's panel thinned, so switching themes recolours it.
     pub fn sidebar(see_through: bool) -> crate::scene::Rgba {
         use vorn_theme::{Materials, Token};
         let panel = crate::palette::get(Token::SurfacePanel);
         match crate::palette::materials() {
+            Materials::Solid => panel,
             _ if !see_through => panel,
-            Materials::Themed => panel.alpha(0.6),
-            Materials::Native | Materials::Solid => panel.alpha(0.0),
+            Materials::Native => panel.alpha(NATIVE_TINT),
+            Materials::Themed => panel.alpha(THEMED_TINT),
         }
     }
 
@@ -346,6 +353,33 @@ pub mod scrollbar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::palette::{self, Palette};
+    use crate::scene::Rgba;
+    use vorn_theme::{find_bundled, Materials, Token};
+
+    #[test]
+    fn switching_themes_recolours_a_see_through_sidebar() {
+        let sidebar = |id: &str, m: Materials, see_through: bool| {
+            palette::install(Palette::new(find_bundled(id).unwrap().clone(), m));
+            material::sidebar(see_through)
+        };
+        for m in [Materials::Native, Materials::Themed] {
+            let (nord, dracula) = (sidebar("nord", m, true), sidebar("dracula", m, true));
+            assert_ne!(nord, dracula, "{m:?}");
+            assert!(nord.0[3] > 0.0, "{m:?}: the theme shows over the material");
+        }
+        assert!(
+            sidebar("nord", Materials::Native, true).0[3]
+                < sidebar("nord", Materials::Themed, true).0[3],
+            "Native shows more of the system's material than Themed"
+        );
+        let panel = |id: &str| Rgba::from(find_bundled(id).unwrap().get(Token::SurfacePanel));
+        for m in [Materials::Solid, Materials::Native, Materials::Themed] {
+            assert_eq!(sidebar("nord", m, false), panel("nord"), "{m:?}: opaque");
+        }
+        assert_eq!(sidebar("nord", Materials::Solid, true), panel("nord"));
+        palette::install(Palette::default());
+    }
 
     #[test]
     fn easing_matches_css_endpoints_and_shape() {

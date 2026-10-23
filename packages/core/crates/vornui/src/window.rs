@@ -50,6 +50,10 @@ impl Clipboard for System {
     fn has_image(&mut self) -> bool {
         clipboard_has_image()
     }
+    #[cfg(target_os = "macos")]
+    fn files(&mut self) -> Vec<std::path::PathBuf> {
+        crate::macos::clipboard_files()
+    }
 }
 
 #[cfg(target_os = "macos")]
