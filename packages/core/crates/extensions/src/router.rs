@@ -474,8 +474,12 @@ impl Router {
         else {
             return Ok(());
         };
-        self.prepare(&Source::File(pack.path.join(component)), pack.name())
+        let folder = pack.path.clone();
+        let bytes = tokio::task::spawn_blocking(move || crate::reach::read_in(&folder, &component))
             .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("{}: {e}", pack.name()))?;
+        self.prepare(&Source::Read(bytes.into()), pack.name()).await
     }
 
     #[cfg(feature = "wasm")]

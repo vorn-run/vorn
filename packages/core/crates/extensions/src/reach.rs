@@ -275,6 +275,40 @@ const CLOSED_LOOKED: usize = 50_000;
 
 pub use open::Looked;
 
+/// The file `file` names under `folder`, an extension's own: `folder` is
+/// followed, but no link below it, so a file its manifest names is read from
+/// the pack even if a link was put in its place. `file` is a relative path of
+/// plain names; anything else, a link or a special file is refused.
+pub fn read_in(folder: &Path, file: &str) -> io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut names = Vec::new();
+    for part in Path::new(file).components() {
+        match part {
+            Component::Normal(name) => names.push(name),
+            Component::CurDir => {}
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{file} is not a path inside the extension"),
+                ))
+            }
+        }
+    }
+    let mut opened = match open::open_under(folder, &names) {
+        Ok(file) => file,
+        Err(open::Failed::Link) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{file} is a link; an extension's files are files"),
+            ))
+        }
+        Err(open::Failed::Io(e)) => return Err(e),
+    };
+    let mut bytes = Vec::new();
+    opened.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 fn became_link(path: &Path) -> ExtError {
     ExtError::new(
         "denied",
@@ -1047,6 +1081,30 @@ mod tests {
         fs::hard_link(d.home.join("elsewhere/b.txt"), &mine).unwrap();
         assert!(opened(&p, &mine, Access::Read).unwrap().is_ok());
         assert!(opened(&p, &mine, Access::Write).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reads_an_extensions_file_without_following_a_link_below_its_folder() {
+        use std::os::unix::fs::symlink;
+        let d = disk();
+        let pack = d.root.join("pack");
+        fs::create_dir_all(pack.join("schemas")).unwrap();
+        fs::write(pack.join("schemas/in.json"), "{}").unwrap();
+        let named = d.root.join("named");
+        symlink(&pack, &named).unwrap();
+        assert_eq!(read_in(&named, "schemas/in.json").unwrap(), b"{}");
+        assert_eq!(read_in(&pack, "./schemas/in.json").unwrap(), b"{}");
+
+        symlink(d.home.join(".zshrc"), pack.join(".#schema.json")).unwrap();
+        symlink(d.home.join(".ssh"), pack.join("keys")).unwrap();
+        for file in [".#schema.json", "keys/id_ed25519"] {
+            let err = read_in(&pack, file).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{file}: {err}");
+        }
+        for file in ["../home/.zshrc", "/etc/hosts", "", "schemas"] {
+            assert!(read_in(&pack, file).is_err(), "{file}");
+        }
     }
 
     #[test]

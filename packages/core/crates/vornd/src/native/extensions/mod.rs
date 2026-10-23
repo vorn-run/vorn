@@ -15,7 +15,6 @@ pub mod routes;
 pub mod world;
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -460,8 +459,9 @@ impl Extensions {
         out
     }
 
-    /// The layouts installed extensions offer: `(extension id, layout id, title, file)`.
-    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf)> {
+    /// The layouts installed extensions offer: `(extension id, layout id,
+    /// title, the extension's folder, the file in it)`.
+    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf, String)> {
         let store = self.router.store();
         let mut out = Vec::new();
         for id in store.ids() {
@@ -476,7 +476,8 @@ impl Extensions {
                     id.clone(),
                     l.base.id.clone(),
                     l.base.title.clone(),
-                    pack.path.join(&l.file),
+                    pack.path.clone(),
+                    l.file.clone(),
                 ));
             }
         }
@@ -682,8 +683,8 @@ impl Extensions {
                 let schema = tool
                     .input
                     .as_ref()
-                    .and_then(|p| fs::read_to_string(pack.path.join(p)).ok())
-                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .and_then(|p| vorn_extensions::reach::read_in(&pack.path, p).ok())
+                    .and_then(|t| serde_json::from_slice::<Value>(&t).ok())
                     .filter(Value::is_object)
                     .unwrap_or_else(|| json!({ "type": "object" }));
                 out.push(McpListed {

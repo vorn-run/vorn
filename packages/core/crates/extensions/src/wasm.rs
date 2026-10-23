@@ -323,21 +323,11 @@ fn deserialize(rt: &Runtime, code: &Path) -> Result<Component, String> {
     unsafe { Component::deserialize(&rt.engine, bytes) }.map_err(|e| format!("{e:#}"))
 }
 
-/// The bytes of `source`: borrowed when they are already in memory.
-async fn read(source: &Source) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+/// The bytes of `source`.
+fn read(source: &Source) -> &[u8] {
     match source {
-        Source::Bundled(bytes) => Ok(std::borrow::Cow::Borrowed(*bytes)),
-        Source::Read(bytes) => Ok(std::borrow::Cow::Borrowed(bytes)),
-        Source::File(path) => {
-            let path = path.clone();
-            tokio::task::spawn_blocking(move || {
-                std::fs::read(&path)
-                    .map(std::borrow::Cow::Owned)
-                    .map_err(|e| format!("{}: {e}", path.display()))
-            })
-            .await
-            .map_err(|e| e.to_string())?
-        }
+        Source::Bundled(bytes) => bytes,
+        Source::Read(bytes) => bytes,
     }
 }
 
@@ -349,8 +339,8 @@ async fn load(
     compiler: &Compiler,
 ) -> Result<Component, String> {
     let rt = runtime()?;
-    let bytes = read(source).await?;
-    let d = digest(&bytes);
+    let bytes = read(source);
+    let d = digest(bytes);
     if let Some(c) = rt.loaded(&d) {
         return Ok(c);
     }
@@ -374,7 +364,7 @@ async fn load(
             if let Some(Err(why)) = stale {
                 warn!("[extensions] {name}: the compiled copy no longer loads ({why})");
             }
-            compile(compiler, name, &bytes, cache).await?;
+            compile(compiler, name, bytes, cache).await?;
             let code = code.clone();
             tokio::task::spawn_blocking(move || deserialize(rt, &code))
                 .await

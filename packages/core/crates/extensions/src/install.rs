@@ -40,8 +40,9 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const TAIL_BYTES: usize = 2000;
 /// Left out of a bundle: history, dependencies and build output a build makes again.
 const NOT_PACKED: [&str; 3] = [".git", "node_modules", "target"];
-/// Starts the lock an editor keeps beside a file it has open, a link to nothing.
-const EDITOR_LOCK: &str = ".#";
+/// Starts the lock an editor keeps beside a file it has open, a link to
+/// nothing; only such a link is left out of a pack.
+pub(crate) const EDITOR_LOCK: &str = ".#";
 /// The most a pack may unpack to; Vorn's own are well under a megabyte.
 const ARCHIVE_MAX_BYTES: u64 = 64 << 20;
 /// The most files a pack may hold.
@@ -93,7 +94,8 @@ impl Trust {
         file: &str,
     ) -> Result<(Vec<u8>, bool), String> {
         let path = pack.path.join(file);
-        let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let bytes = crate::reach::read_in(&pack.path, file)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
         let key: Vec<String> = Path::new(file)
             .components()
             .filter_map(|c| match c {
@@ -270,8 +272,9 @@ pub struct Installs {
     /// Held from an install's last check to its `current.json`, so two
     /// installs at once cannot both claim one agent.
     placing: Mutex<()>,
-    /// The linked folders the last [`Installs::recheck_linked`] found a
-    /// link in, by id: one is refused only once a second check finds it too.
+    /// What the last [`Installs::recheck_linked`] found in each linked
+    /// folder, naming the path, by id: one is refused only once the next
+    /// check finds that same path still a link.
     linking: Mutex<HashMap<String, String>>,
 }
 
@@ -941,14 +944,14 @@ impl Installs {
                 continue;
             }
             let was = current.get(REFUSED_KEY).and_then(Value::as_str);
+            // The same link found by the check before; one seen once may be gone by the next.
             let seen_before = {
                 let mut linking = lock(&self.linking);
                 match &found {
-                    Some(why) => linking.insert(id.clone(), why.clone()).is_some(),
+                    Some(why) => linking.insert(id.clone(), why.clone()).as_ref() == Some(why),
                     None => linking.remove(&id).is_some(),
                 }
             };
-            // A link seen once may be gone by the next check, as a save's is.
             if found.is_some() && was.is_none() && !seen_before {
                 continue;
             }
@@ -1388,7 +1391,12 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if NOT_PACKED.contains(&name.as_str()) || name.starts_with(EDITOR_LOCK) {
+        if NOT_PACKED.contains(&name.as_str()) {
+            continue;
+        }
+        // `file_type` does not follow links; a pack holds only real files and folders.
+        let kind = entry.file_type()?;
+        if kind.is_symlink() && name.starts_with(EDITOR_LOCK) && !entry.path().exists() {
             continue;
         }
         let rel = if prefix.is_empty() {
@@ -1396,8 +1404,6 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
         } else {
             format!("{prefix}/{name}")
         };
-        // `file_type` does not follow links; a pack holds only real files and folders.
-        let kind = entry.file_type()?;
         if kind.is_dir() {
             walk(&entry.path(), &rel, out)?;
         } else if kind.is_file() {
@@ -1699,8 +1705,16 @@ migrations = "migrations"
             "an editor's lock is not packed"
         );
 
+        let named = folder.path().join("lib/.#schema.json");
+        fs::write(outside.path().join("any.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("any.json"), &named).unwrap();
+        assert!(installs.recheck_linked().is_empty(), "seen once");
+        fs::remove_file(&named).unwrap();
         std::os::unix::fs::symlink(outside.path(), &planted).unwrap();
-        assert!(installs.recheck_linked().is_empty());
+        assert!(
+            installs.recheck_linked().is_empty(),
+            "another link, seen once"
+        );
         assert_eq!(installs.recheck_linked(), ["test.marker"]);
         let err = installs.store().inspect("test.marker").unwrap_err();
         assert!(err.contains("lib/keys is a link"), "{err}");
@@ -1709,6 +1723,12 @@ migrations = "migrations"
         fs::remove_file(&planted).unwrap();
         assert_eq!(installs.recheck_linked(), ["test.marker"]);
         assert!(installs.store().inspect("test.marker").is_ok());
+
+        std::os::unix::fs::symlink(outside.path().join("any.json"), &named).unwrap();
+        assert!(installs.recheck_linked().is_empty());
+        assert_eq!(installs.recheck_linked(), ["test.marker"]);
+        let err = installs.store().inspect("test.marker").unwrap_err();
+        assert!(err.contains("lib/.#schema.json is a link"), "{err}");
     }
 
     #[test]

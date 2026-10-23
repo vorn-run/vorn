@@ -45,8 +45,6 @@ impl Compiler {
 /// Where a component's `.wasm` is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
-    /// A file inside a package.
-    File(PathBuf),
     /// Bytes compiled into the host: an extension Vorn ships.
     Bundled(&'static [u8]),
     /// A package's file read once, so what was checked of it is what runs.

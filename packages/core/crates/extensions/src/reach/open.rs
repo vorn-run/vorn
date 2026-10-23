@@ -93,9 +93,9 @@ pub(super) fn identity_at(path: &Path) -> Option<Identity> {
 }
 
 #[cfg(unix)]
-pub(super) use unix::{entries, open, stat};
+pub(super) use unix::{entries, open, open_under, stat};
 #[cfg(windows)]
-pub(super) use windows::{entries, open, stat};
+pub(super) use windows::{entries, open, open_under, stat};
 
 #[cfg(unix)]
 mod unix {
@@ -203,6 +203,28 @@ mod unix {
         let file = File::from(fd);
         let kind = file.metadata()?.file_type();
         if !(kind.is_file() || kind.is_dir()) {
+            return Err(not_file_or_folder());
+        }
+        Ok(file)
+    }
+
+    /// The file at `names` under `folder`, for reading: `folder` itself is
+    /// followed, and no part below it.
+    pub(in crate::reach) fn open_under(folder: &Path, names: &[&OsStr]) -> Result<File, Failed> {
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+        let mut dir = openat(CWD, folder, flags, Mode::empty()).map_err(io::Error::from)?;
+        let Some((last, folders)) = names.split_last() else {
+            return Err(not_file_or_folder());
+        };
+        for name in folders {
+            dir = through(&dir, name).map_err(|e| failed(&dir, name, e))?;
+        }
+        let flags =
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK;
+        let file = File::from(
+            openat(&dir, *last, flags, Mode::empty()).map_err(|e| failed(&dir, last, e))?,
+        );
+        if !file.metadata()?.is_file() {
             return Err(not_file_or_folder());
         }
         Ok(file)
@@ -442,6 +464,24 @@ mod windows {
             _ => opener(mask(access), false).open(real)?,
         };
         settle(first, real, mask(access))
+    }
+
+    /// The file at `names` under `folder`, for reading: `folder` itself is
+    /// followed, and no part below it ([`settle`] checks the handle's path).
+    pub(in crate::reach) fn open_under(
+        folder: &Path,
+        names: &[&std::ffi::OsStr],
+    ) -> Result<File, Failed> {
+        if names.is_empty() {
+            return Err(not_file_or_folder());
+        }
+        let mut real = std::fs::canonicalize(folder)?;
+        real.extend(names);
+        let file = open(&real, Access::Read)?;
+        if !file.metadata()?.is_file() {
+            return Err(not_file_or_folder());
+        }
+        Ok(file)
     }
 
     /// Looks at the resolved `real` through a handle that may only read its
