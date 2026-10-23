@@ -5,7 +5,9 @@
 //! vorn-app update [--channel stable|beta] [--data-dir D]
 //! vorn-app --version | --help
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
-//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off] [--layout tabs]
+//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
+//!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
+//!               [--open theme-picker|theme-info|font-picker]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
 //!               [--keys K1,K2] [--click COL:ROW] [--png a.png] [--scale S]
 //!               [--layout tabs]
@@ -24,6 +26,10 @@
 //! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
 //! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself. A paste
 //! among them reads `--clipboard`.
+//!
+//! `--settings appearance` opens Settings on that page after writing each
+//! `--set colorScheme="dark"` to the defaults (vornd keeps them), and
+//! `--open` opens one of its popovers from its control.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -120,11 +126,23 @@ impl Args {
         }
     }
 
-    /// `--layout tabs` shows the sessions as tabs.
+    /// `--layout tabs|list` shows the sessions as tabs or as a list.
     fn layout(&self, app: &mut App) {
-        if self.get("layout") == Some("tabs") {
-            app.st.layout = vorn_app::state::LayoutMode::Tabs;
+        if let Some(l @ ("tabs" | "list")) = self.get("layout") {
+            app.st.layout = vorn_app::state::LayoutMode::from_key(l);
         }
+    }
+
+    /// Every `--set KEY=JSON`, in order.
+    fn sets(&self) -> Result<Vec<(&str, &str)>, String> {
+        self.flags
+            .iter()
+            .filter(|(k, _)| k == "set")
+            .map(|(_, v)| {
+                v.split_once('=')
+                    .ok_or(format!("--set {v:?} needs KEY=JSON"))
+            })
+            .collect()
     }
 }
 
@@ -172,6 +190,14 @@ fn shot(args: &Args) -> Result<(), String> {
     for k in args.get("keys").into_iter().flat_map(|k| k.split(',')) {
         app.frame(&mut ui, size);
         app.send(&mut ui, key(k));
+    }
+    if let Some(page) = args.get("settings") {
+        app.shot_settings(page, &args.sets()?)?;
+        app.frame(&mut ui, size);
+        app.frame(&mut ui, size);
+    }
+    if let Some(name) = args.get("open") {
+        app.shot_open(&mut ui, name)?;
     }
     let px = (
         (size.0 * scale).round() as u32,

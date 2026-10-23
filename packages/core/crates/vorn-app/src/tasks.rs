@@ -277,7 +277,8 @@ impl Source {
     }
 }
 
-/// List or Board (`defaults.taskViewMode`).
+/// List or Board; the Tasks extension's Default view preference picks it
+/// to start.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Mode {
     #[default]
@@ -286,20 +287,11 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn from_config(config: &Value) -> Mode {
-        match config
-            .pointer("/defaults/taskViewMode")
-            .and_then(Value::as_str)
-        {
-            Some("kanban") => Mode::Board,
+    /// The mode the Tasks extension's `default_view` preference names.
+    pub fn from_preference(value: &Value) -> Mode {
+        match value.as_str() {
+            Some("board") => Mode::Board,
             _ => Mode::List,
-        }
-    }
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Mode::List => "list",
-            Mode::Board => "kanban",
         }
     }
 }
@@ -683,6 +675,8 @@ impl Default for Commit {
 #[derive(Debug, Default)]
 pub struct Tasks {
     pub mode: Mode,
+    /// The Default view last applied, so only a change to it moves the view.
+    pub default_view: Option<Mode>,
     /// The status filter; none is All.
     pub filter: Option<String>,
     pub source: Source,
@@ -747,19 +741,27 @@ pub struct Tasks {
 }
 
 impl Tasks {
-    pub fn new(config: &Value) -> Tasks {
+    pub fn new() -> Tasks {
         Tasks {
-            mode: Mode::from_config(config),
             diff_open: true,
             runs_open: true,
             ..Tasks::default()
         }
     }
 
+    /// Shows `view` when the Default view preference first reads or changes
+    /// to it; a view chosen in Tasks lasts until then.
+    pub fn set_default_view(&mut self, view: Mode) {
+        if self.default_view != Some(view) {
+            self.default_view = Some(view);
+            self.mode = view;
+        }
+    }
+
     /// Whether a filter differs from its default (the toolbar's dot).
     pub fn options_changed(&self) -> bool {
         self.filter.is_some()
-            || self.mode != Mode::List
+            || self.mode != self.default_view.unwrap_or(Mode::List)
             || self.source != Source::All
             || self.archived
     }
@@ -1056,6 +1058,22 @@ mod tests {
             "updatedAt": "2025-03-05T14:30:00.000Z",
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn the_default_view_preference_picks_the_mode_tasks_opens_on() {
+        assert_eq!(Mode::from_preference(&json!("board")), Mode::Board);
+        assert_eq!(Mode::from_preference(&json!("list")), Mode::List);
+        assert_eq!(Mode::from_preference(&Value::Null), Mode::List);
+        let mut t = Tasks::new();
+        t.set_default_view(Mode::Board);
+        assert_eq!(t.mode, Mode::Board);
+        t.mode = Mode::List;
+        t.set_default_view(Mode::Board);
+        assert_eq!(t.mode, Mode::List, "a view chosen in Tasks lasts");
+        t.set_default_view(Mode::List);
+        t.set_default_view(Mode::Board);
+        assert_eq!(t.mode, Mode::Board, "a changed preference moves it");
     }
 
     #[test]

@@ -536,7 +536,7 @@ impl App {
         let st = State {
             sidebar: true,
             layout: LayoutMode::from_config(&store.config),
-            tasks: crate::tasks::Tasks::new(&store.config),
+            tasks: crate::tasks::Tasks::new(),
             settings: crate::settings::Settings::new(),
             // A first run, or one before this guide, opens the welcome guide.
             dialog: (!crate::onboarding::seen(&store.config)).then_some(Dialog::Welcome),

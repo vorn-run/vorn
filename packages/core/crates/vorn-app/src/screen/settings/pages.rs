@@ -198,7 +198,11 @@ fn colour_rows(s: &Screen<'_>) -> Vec<El> {
     let prefs = a::prefs(defaults(s));
     let seg = |label, body: &str, scheme: Scheme| {
         let on = prefs.scheme == scheme;
-        let fg = if on { c(look::WHITE) } else { c(look::GRAY_500) };
+        let fg = if on {
+            c(look::WHITE)
+        } else {
+            c(look::GRAY_500)
+        };
         Seg {
             label,
             icon: Some(glyph_icon(body, 14.0, fg)),
@@ -253,12 +257,7 @@ fn theme_control(s: &Screen<'_>, side: Look) -> El {
         glyph::INFO,
         "Theme details",
     );
-    div()
-        .row()
-        .items_center()
-        .gap(6.0)
-        .child(chip)
-        .child(info)
+    div().row().items_center().gap(6.0).child(chip).child(info)
 }
 
 /// A dropdown chip's frame, lit while hovered or open.
@@ -342,7 +341,13 @@ fn look_rows(s: &Screen<'_>) -> Vec<El> {
         .role(Role::RadioGroup, "Surfaces")
         .child(surface_tile(s, Materials::Solid, "Solid", m, false))
         .child(surface_tile(s, Materials::Native, "Glass", m, reduced))
-        .child(surface_tile(s, Materials::Themed, "Tinted glass", m, reduced));
+        .child(surface_tile(
+            s,
+            Materials::Themed,
+            "Tinted glass",
+            m,
+            reduced,
+        ));
     let surfaces_tip = if cfg!(windows) {
         "Solid surfaces, the system's glass under the sidebar and menus, or that glass tinted by the theme. The sidebar changes at the next launch."
     } else {
@@ -397,7 +402,11 @@ fn surface_tile(
     let base = c(look::SURFACE_BASE);
     let (desk, sidebar, content) = match m {
         Materials::Solid => (None, c(look::SURFACE_PANEL), base),
-        Materials::Native => (Some((term.ansi[4], term.ansi[5])), white(0.10), base.alpha(0.85)),
+        Materials::Native => (
+            Some((term.ansi[4], term.ansi[5])),
+            white(0.10),
+            base.alpha(0.85),
+        ),
         Materials::Themed => (
             Some((term.ansi[4], term.ansi[5])),
             c(look::SURFACE_PANEL).alpha(0.7),
@@ -555,11 +564,10 @@ fn terminal_preview(family: &str, size: i64) -> El {
 
 /// The chip naming the terminal font in its own face.
 fn font_chip(s: &Screen<'_>, family: &str) -> El {
-    let open = s
-        .st
-        .menu
-        .as_ref()
-        .is_some_and(|m| m.kind == MenuKind::FontPicker);
+    let open =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::FontPicker);
     let id = s.acts.on("font-chip", Act::Open(MenuKind::FontPicker));
     chip(s, id, family, open)
         .child(
@@ -739,7 +747,7 @@ pub(crate) fn theme_info(s: &Screen<'_>, id: &str) -> El {
                 .rounded(3.0)
                 .bg(Rgba::from(rgb))
                 .border(1.0, white(0.08))
-                .role(Role::Image, &format!("Colour {i}")),
+                .role(Role::Image, format!("Colour {i}")),
         );
     }
     let title = format!("{} \u{b7} terminal palette", t.name);
@@ -951,15 +959,11 @@ pub(crate) fn font_picker(s: &Screen<'_>) -> El {
             .on("font-option", seg_act(crate::appearance::FONT_FAMILY, v));
         let on = f.name == current;
         let hot = if on { 0.0 } else { s.ui.hover(id) };
-        let mut top = div()
-            .row()
-            .items_center()
-            .justify_between()
-            .child(
-                text(&f.name, 11.0, c(look::GRAY_400))
-                    .line_height(14.0)
-                    .silent(),
-            );
+        let mut top = div().row().items_center().justify_between().child(
+            text(&f.name, 11.0, c(look::GRAY_400))
+                .line_height(14.0)
+                .silent(),
+        );
         if f.ligatures {
             top = top.child(
                 div().px(6.0).rounded(3.0).border(1.0, white(0.12)).child(
@@ -2461,4 +2465,49 @@ fn connector_mark(id: &str, size: f32, color: Rgba) -> El {
         _ => "external-link",
     };
     ico(name, size, 2.0, color)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn written(a: SetAct) -> (String, String) {
+        match a {
+            SetAct::Default(k, v) => (k, v),
+            other => panic!("not a default: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_look_card_writes_the_keys_and_values_appearance_always_stored() {
+        let pairs = |k: &str, v: &str| (k.to_owned(), v.to_owned());
+        assert_eq!(
+            written(surface_act(Materials::Solid)),
+            pairs("materials", "\"solid\"")
+        );
+        assert_eq!(
+            written(surface_act(Materials::Native)),
+            pairs("materials", "\"native\"")
+        );
+        assert_eq!(
+            written(surface_act(Materials::Themed)),
+            pairs("materials", "\"themed\"")
+        );
+        assert_eq!(
+            written(chrome_act(true)),
+            pairs("interfaceStyle", "\"tinted\"")
+        );
+        assert_eq!(
+            written(chrome_act(false)),
+            pairs("interfaceStyle", "\"neutral\"")
+        );
+        assert_eq!(
+            written(contrast_act(true)),
+            pairs("contrastCorrection", "true")
+        );
+        assert_eq!(
+            written(contrast_act(false)),
+            pairs("contrastCorrection", "false")
+        );
+    }
 }

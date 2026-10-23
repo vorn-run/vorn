@@ -25,6 +25,50 @@ pub(super) enum SetCall {
 }
 
 impl App {
+    /// `shot --settings PAGE [--set key=json]…`: the defaults written, then
+    /// Settings open on `page`.
+    pub fn shot_settings(&mut self, page: &str, set: &[(&str, &str)]) -> Result<(), String> {
+        let cat = Category::from_id(page).ok_or(format!("no settings page {page:?}"))?;
+        for (key, v) in set {
+            let value: Value = serde_json::from_str(v).map_err(|e| format!("--set {key}: {e}"))?;
+            self.write_defaults(|d| d[*key] = value);
+        }
+        self.open_settings(cat);
+        Ok(())
+    }
+
+    /// `shot --open NAME`: an Appearance popover opened from its control, as
+    /// a click on it would; `theme-picker` and `theme-info` use the first
+    /// theme row.
+    pub fn shot_open(&mut self, ui: &mut Ui, name: &str) -> Result<(), String> {
+        use crate::state::MenuKind;
+        use vorn_theme::Appearance as Look;
+        let prefs = crate::appearance::prefs(self.store.config.get("defaults"));
+        let look = crate::appearance::theme_rows(prefs.scheme)[0].look;
+        let (place, kind) = match name {
+            "theme-picker" => ("theme-chip", MenuKind::ThemePicker(look)),
+            "theme-info" => {
+                let id = match look {
+                    Look::Light => prefs.light,
+                    Look::Dark => prefs.dark,
+                };
+                ("theme-info", MenuKind::ThemeInfo(id))
+            }
+            "font-picker" => ("font-chip", MenuKind::FontPicker),
+            _ => {
+                return Err(format!(
+                    "--open {name:?}: theme-picker, theme-info or font-picker"
+                ))
+            }
+        };
+        let src = super::Src {
+            id: Some(crate::act::Acts::id(place, &Act::Open(kind.clone()))),
+            at: None,
+        };
+        self.open_menu(ui, kind, src);
+        Ok(())
+    }
+
     pub(super) fn set_answered(&mut self, call: SetCall, answer: Result<Value, RpcError>) {
         let st = &mut self.st.settings;
         match call {

@@ -773,7 +773,9 @@ pub struct MonoFamily {
 /// families a person picks live as long as the app.
 pub fn intern_family(name: &str) -> &'static str {
     static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
-    let mut names = NAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut names = NAMES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(n) = names.iter().find(|n| **n == name) {
         return n;
     }

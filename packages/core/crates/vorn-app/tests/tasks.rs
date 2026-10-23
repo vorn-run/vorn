@@ -244,10 +244,6 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
         control("task-mode", task(TaskAct::Mode(Mode::Board))),
     );
     assert_eq!(app.st.tasks.mode, Mode::Board);
-    shot.until(&mut app, "the mode saved", |app, _| {
-        let c = app.rpc().call("config:load", Value::Null).ok()?;
-        (c["defaults"]["taskViewMode"] == "kanban").then_some(())
-    });
     shot.send(&mut app, key("Escape", 0, None));
     shot.save(&mut app, "tasks-board");
     support::every_size(&mut app, "tasks-board", &["Todo"]);

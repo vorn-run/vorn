@@ -208,6 +208,21 @@ pub fn apply(rows: &mut Vec<Row>, op: &Value) {
     }
 }
 
+/// The value of extension `id`'s preference `key` in `lists` (built-ins and
+/// packs), or null when none contributes it.
+pub fn preference(lists: &[&[Value]], id: &str, key: &str) -> Value {
+    lists
+        .iter()
+        .copied()
+        .flatten()
+        .filter(|e| e.get("id").and_then(Value::as_str) == Some(id))
+        .filter_map(|e| e.get("preferences").and_then(Value::as_array))
+        .flatten()
+        .find(|p| p.get("id").and_then(Value::as_str) == Some(key))
+        .and_then(|p| p.get("value").cloned())
+        .unwrap_or(Value::Null)
+}
+
 /// Sets preference `key` of the extension `id` in `list` (built-ins or packs) to `value`.
 pub fn set_preference(list: &mut [Value], id: &str, key: &str, value: &Value) {
     let prefs = list
@@ -812,6 +827,25 @@ pub enum Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_view_is_read_from_the_tasks_extension_preferences() {
+        let tasks = json!({ "id": "vorn.tasks", "preferences": [
+            { "id": "top_bar", "type": "bool", "value": true },
+            { "id": "default_view", "type": "choice", "value": "board" },
+        ]});
+        let other = json!({ "id": "vorn.other", "preferences": [
+            { "id": "default_view", "type": "choice", "value": "list" },
+        ]});
+        let packs = [other, tasks];
+        let view = preference(&[&[], &packs], "vorn.tasks", "default_view");
+        assert_eq!(view, json!("board"));
+        assert_eq!(
+            crate::tasks::Mode::from_preference(&view),
+            crate::tasks::Mode::Board
+        );
+        assert_eq!(preference(&[&packs], "vorn.tasks", "missing"), Value::Null);
+    }
 
     fn point(kind: &str) -> Value {
         json!({ "extension": "x", "extensionName": "X", "kind": kind, "id": "p",

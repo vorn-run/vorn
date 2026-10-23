@@ -1697,17 +1697,16 @@ pub(super) fn list(s: &Screen<'_>) -> El {
     if shown.is_empty() {
         return no_match();
     }
-    let active = s
-        .st
-        .selected
-        .as_deref()
-        .and_then(|id| {
-            shown
-                .iter()
-                .copied()
-                .find(|&i| s.store.sessions[i].info.id == id)
-        })
-        .unwrap_or(shown[0]);
+    let active =
+        s.st.selected
+            .as_deref()
+            .and_then(|id| {
+                shown
+                    .iter()
+                    .copied()
+                    .find(|&i| s.store.sessions[i].info.id == id)
+            })
+            .unwrap_or(shown[0]);
     let mut rows = div()
         .id(Id::new("session-list"))
         .col()
@@ -1727,13 +1726,13 @@ pub(super) fn list(s: &Screen<'_>) -> El {
         .grow()
         .min_h(0.0)
         .child(rows)
-        .child(
-            div()
-                .col()
-                .grow()
-                .min_w0()
-                .child(body(s, active, &s.store.sessions[active], false, 1.0)),
-        )
+        .child(div().col().grow().min_w0().child(body(
+            s,
+            active,
+            &s.store.sessions[active],
+            false,
+            1.0,
+        )))
 }
 
 /// One session in the list layout: its status and title.

@@ -1711,37 +1711,6 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
 /// The handle on the sidebar's right edge that resizes it.
 pub const SIDEBAR_HANDLE: Id = Id(0x7369_6465_6261_7268);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn project(color: &str) -> ProjectConfig {
-        serde_json::from_value(serde_json::json!({
-            "name": "p",
-            "path": "/p",
-            "preferredAgents": [],
-            "iconColor": color,
-        }))
-        .expect("project")
-    }
-
-    #[test]
-    fn every_picker_icon_has_a_glyph() {
-        for name in PICKER_ICONS {
-            assert!(look::icon_map(name).is_some(), "{name}");
-        }
-    }
-
-    #[test]
-    fn project_colour_reads_the_configured_hex() {
-        assert_eq!(
-            project_color(&project("#ec4899")),
-            Some(Rgba::hex(0xec4899))
-        );
-        assert_eq!(project_color(&project("nope")), None);
-    }
-}
-
 /// The view tabs: icon buttons, the chosen one labelled; on glass over the
 /// system's material the system draws their icons and label.
 pub(super) fn view_tabs(s: &Screen<'_>, place: &str, labels: bool) -> Vec<El> {
@@ -1794,4 +1763,35 @@ pub(super) fn view_tabs(s: &Screen<'_>, place: &str, labels: bool) -> Vec<El> {
         tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
     }
     tabs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(color: &str) -> ProjectConfig {
+        serde_json::from_value(serde_json::json!({
+            "name": "p",
+            "path": "/p",
+            "preferredAgents": [],
+            "iconColor": color,
+        }))
+        .expect("project")
+    }
+
+    #[test]
+    fn every_picker_icon_has_a_glyph() {
+        for name in PICKER_ICONS {
+            assert!(look::icon_map(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn project_colour_reads_the_configured_hex() {
+        assert_eq!(
+            project_color(&project("#ec4899")),
+            Some(Rgba::hex(0xec4899))
+        );
+        assert_eq!(project_color(&project("nope")), None);
+    }
 }

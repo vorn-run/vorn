@@ -1275,9 +1275,17 @@ fn haystack(l: &Listing) -> String {
             parts.extend(items.iter().filter_map(|i| s(i, "title")));
         }
     }
-    if let Some(themes) = l.contributes.as_ref().and_then(|c| c.get("themes")?.as_array()) {
+    if let Some(themes) = l
+        .contributes
+        .as_ref()
+        .and_then(|c| c.get("themes")?.as_array())
+    {
         parts.push("theme");
-        parts.extend(themes.iter().filter_map(|t| s(t, "name").or_else(|| s(t, "title"))));
+        parts.extend(
+            themes
+                .iter()
+                .filter_map(|t| s(t, "name").or_else(|| s(t, "title"))),
+        );
     }
     parts.extend(
         l.permissions

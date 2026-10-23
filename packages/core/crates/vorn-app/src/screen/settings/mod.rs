@@ -7,8 +7,8 @@ mod pages;
 
 pub use agents::agent_field_id;
 pub use pages::theme_tile_id;
-pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
 pub(crate) use pages::{font_picker, select_items, shell_panel, theme_info, theme_picker};
+pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
 
 use super::{c, white, Screen};
 use crate::act::Act;
@@ -414,7 +414,11 @@ pub(in crate::screen) fn card(rows: Vec<El>) -> El {
         .bg(white(0.03))
         .border(1.0, white(0.06));
     for (i, r) in rows.into_iter().enumerate() {
-        el = el.child(if i == 0 { r } else { r.border_top(1.0, white(0.06)) });
+        el = el.child(if i == 0 {
+            r
+        } else {
+            r.border_top(1.0, white(0.06))
+        });
     }
     el
 }
@@ -433,7 +437,7 @@ pub(in crate::screen) fn card_row(
         .role(Role::Label, label);
     let name = match tip {
         Some(t) => {
-            let id = Id::new("row-tip").child(&label);
+            let id = Id::new("row-tip").child(label);
             crate::ui::tooltip(s.ui, name, id, t, None)
         }
         None => name,

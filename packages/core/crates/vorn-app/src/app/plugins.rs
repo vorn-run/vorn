@@ -754,6 +754,7 @@ impl App {
                     p.progress.remove(&id);
                 }
                 self.plug_loaded();
+                self.sync_task_view();
             }
             PlugCall::Catalog { load } => {
                 if let Ok(v) = &answer {

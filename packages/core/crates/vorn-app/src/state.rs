@@ -738,6 +738,9 @@ mod tests {
         let c = json!({ "defaults": { "layoutMode": "tabs" } });
         assert_eq!(LayoutMode::from_config(&c), LayoutMode::Tabs);
         assert_eq!(LayoutMode::from_config(&json!({})), LayoutMode::Grid);
+        for mode in [LayoutMode::Grid, LayoutMode::Tabs, LayoutMode::List] {
+            assert_eq!(LayoutMode::from_key(mode.key()), mode);
+        }
         assert_eq!(basename("/a/b/demo/"), "demo");
         assert_eq!(basename(r"C:\src\demo"), "demo");
     }

@@ -361,8 +361,6 @@ export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return status === 'done' || status === 'cancelled'
 }
 
-export type TaskViewMode = 'list' | 'kanban'
-
 export const MINIMIZED_PLACEMENTS = ['canvas', 'toolbar', 'both'] as const
 export type MinimizedPlacement = (typeof MINIMIZED_PLACEMENTS)[number]
 
@@ -1495,8 +1493,7 @@ export interface AppConfig {
     reopenSessions?: boolean
     // Open Vorn at sign-in. Off until asked; a no-op on Linux.
     startAtLogin?: boolean
-    taskViewMode?: TaskViewMode
-    layoutMode?: 'grid' | 'tabs'
+    layoutMode?: 'grid' | 'tabs' | 'list'
     /** Each workspace's grid: its columns, or the Flexible split tree. Kept per viewer. */
     gridLayout?: Record<string, { view?: 'grid' | 'flexible'; columns?: number; tree?: unknown }>
     minimizedPlacement?: MinimizedPlacement

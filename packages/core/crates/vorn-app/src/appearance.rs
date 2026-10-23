@@ -80,7 +80,11 @@ pub enum ThemeFilter {
 }
 
 impl ThemeFilter {
-    pub const ALL: [ThemeFilter; 3] = [ThemeFilter::Dark, ThemeFilter::Light, ThemeFilter::Installed];
+    pub const ALL: [ThemeFilter; 3] = [
+        ThemeFilter::Dark,
+        ThemeFilter::Light,
+        ThemeFilter::Installed,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -282,13 +286,19 @@ mod tests {
     #[test]
     fn a_fixed_scheme_shows_one_theme_row_and_system_shows_both() {
         let rows = |s| -> Vec<(&str, Look, &str)> {
-            theme_rows(s).iter().map(|r| (r.label, r.look, r.key)).collect()
+            theme_rows(s)
+                .iter()
+                .map(|r| (r.label, r.look, r.key))
+                .collect()
         };
         assert_eq!(rows(Scheme::Dark), [("Theme", Look::Dark, DARK)]);
         assert_eq!(rows(Scheme::Light), [("Theme", Look::Light, LIGHT)]);
         assert_eq!(
             rows(Scheme::System),
-            [("Light Theme", Look::Light, LIGHT), ("Dark Theme", Look::Dark, DARK)]
+            [
+                ("Light Theme", Look::Light, LIGHT),
+                ("Dark Theme", Look::Dark, DARK)
+            ]
         );
     }
 
@@ -320,7 +330,10 @@ mod tests {
         .unwrap();
         let installed = [acme];
         let ids = |f, q| -> Vec<String> {
-            picker_themes(&installed, f, q).iter().map(|t| t.id.clone()).collect()
+            picker_themes(&installed, f, q)
+                .iter()
+                .map(|t| t.id.clone())
+                .collect()
         };
         let all = ids(None, "");
         assert_eq!(all.len(), vorn_theme::bundled().len() + 1);
@@ -361,7 +374,10 @@ mod tests {
         let t = listed_theme(&entry).expect("reads");
         assert_eq!((t.id.as_str(), t.name.as_str()), ("acme", "Acme"));
         assert_eq!(t.terminal.background.to_u32(), 0x101010);
-        assert_eq!((t.publisher.as_str(), t.version.as_str()), ("Acme Co", "2.1.0"));
+        assert_eq!(
+            (t.publisher.as_str(), t.version.as_str()),
+            ("Acme Co", "2.1.0")
+        );
     }
 
     #[test]
