@@ -74,6 +74,11 @@ tokens! {
     SliderTrack = "slider-track",
     /// What shadows and scrims are made of.
     Shadow = "shadow",
+    /// Over the system's material, with Native: the sidebar's wash, the
+    /// content area's fill and the glass buttons' tint, alpha included.
+    MaterialSidebar = "material-sidebar",
+    MaterialContent = "material-content",
+    MaterialGlass = "material-glass",
     Gray100 = "gray-100",
     Gray200 = "gray-200",
     Gray300 = "gray-300",
@@ -155,6 +160,9 @@ impl Token {
                 | ScrollThumbHover
                 | SliderTrack
                 | Shadow
+                | MaterialSidebar
+                | MaterialContent
+                | MaterialGlass
                 | Gray100
                 | Gray200
                 | Gray300

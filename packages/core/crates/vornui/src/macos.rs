@@ -382,9 +382,6 @@ thread_local! {
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
-/// How much black lies in the glass in the dark appearance.
-const GLASS_DARK_TINT: f64 = 0.35;
-
 extern "C" fn pass_through(_: &AnyObject, _: Sel, _: objc2_foundation::NSPoint) -> *mut AnyObject {
     std::ptr::null_mut()
 }
@@ -512,13 +509,13 @@ pub(crate) fn sync_glass(
                 let v = &g[i];
                 v.setFrame(rect);
                 let _: () = objc2::msg_send![&**v, setCornerRadius: f64::from(*radius) / s];
-                // A dark wash in the dark appearance, so the glass sits with the app.
-                let tint = crate::palette::dark().then(|| {
+                let [r, g, b, a] = crate::palette::get(vorn_theme::Token::MaterialGlass).0;
+                let tint = (a > 0.0).then(|| {
                     objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(
-                        0.0,
-                        0.0,
-                        0.0,
-                        GLASS_DARK_TINT,
+                        r.into(),
+                        g.into(),
+                        b.into(),
+                        a.into(),
                     )
                 });
                 let _: () = objc2::msg_send![&**v, setTintColor: tint.as_deref()];

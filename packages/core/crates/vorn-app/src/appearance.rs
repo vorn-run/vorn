@@ -406,13 +406,10 @@ mod tests {
         a.apply(Some(&with("dracula")), true, false, None);
         let dracula = material::sidebar(true);
         assert_ne!(nord, dracula);
-        let panel = vorn_theme::find_bundled("dracula")
+        let tint = vorn_theme::find_bundled("dracula")
             .unwrap()
-            .get(Token::SurfacePanel);
-        assert_eq!(
-            dracula,
-            crate::ui::Rgba::from(panel).alpha(material::NATIVE_TINT)
-        );
+            .get(Token::MaterialSidebar);
+        assert_eq!(dracula, crate::ui::Rgba::from(tint));
         palette::install(Palette::default());
     }
 

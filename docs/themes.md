@@ -34,7 +34,7 @@ ansi = [
 
 `[theme.terminal]` needs the foreground, the background and all 16 ANSI colours. `[theme.ui]` may set any of the interface tokens below; a token it leaves out is derived from the ones it sets and from the terminal palette, so a short `[theme.ui]` is a whole theme. A mistake is reported with its line and field, as `vorn-extension.toml:10: theme.ui.accnet: ...`.
 
-Colours are `#rrggbb`, or `#rrggbbaa` for the tokens drawn over others (lines, selection, shadow).
+Colours are `#rrggbb`, or `#rrggbbaa` for the tokens drawn over others (lines, selection, shadow, materials).
 
 ## Interface tokens
 
@@ -43,6 +43,7 @@ Colours are `#rrggbb`, or `#rrggbbaa` for the tokens drawn over others (lines, s
 - Lines: `line-faint`, `line-soft`, `line-base`, `line-strong`, `line-hover`
 - Meaning: `accent`, `accent-strong`, `danger`, `status-slate`, `status-blue`, `status-sage`, `diff-add`, `diff-remove`
 - Controls: `selection`, `focus-ring`, `scroll-thumb`, `scroll-thumb-hover`, `slider-track`, `shadow`
+- Materials, with Native: `material-sidebar`, `material-content` and `material-glass`, each with its alpha, for how much of the theme lies over the system's material in the sidebar, the content area and the glass buttons
 - The scales: `gray-100` to `gray-900`, and `red`, `orange`, `amber`, `yellow`, `green`, `emerald`, `cyan`, `sky`, `blue`, `violet`, `purple` and `pink` steps
 - Code: `syntax-text`, `syntax-comment`, `syntax-string`, `syntax-number`, `syntax-keyword`, `syntax-storage`, `syntax-constant`, `syntax-function`, `syntax-variable`, `syntax-property`, `syntax-type`, `syntax-punct`, `syntax-list`
 

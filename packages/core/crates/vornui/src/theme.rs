@@ -302,11 +302,9 @@ pub mod material {
         opacity: 0.65,
     };
 
-    /// How much of the theme's panel colour lies over the system's sidebar
-    /// material: a wash with Native, so the theme still shows, and a tint
-    /// with Themed.
-    pub const NATIVE_TINT: f32 = 0.78;
-    pub const THEMED_TINT: f32 = 0.6;
+    /// How much of the way from Native's `material-sidebar` to opaque the
+    /// Themed sidebar goes: 0.3 becomes 0.6.
+    pub const THEMED_TINT: f32 = 3.0 / 7.0;
 
     /// The sidebar's fill: its panel colour, or over the system's material
     /// the active theme's panel thinned, so switching themes recolours it.
@@ -316,14 +314,16 @@ pub mod material {
         match crate::palette::materials() {
             Materials::Solid => panel,
             _ if !see_through => panel,
-            Materials::Native => panel.alpha(NATIVE_TINT),
-            Materials::Themed => panel.alpha(THEMED_TINT),
+            Materials::Native => crate::palette::get(Token::MaterialSidebar),
+            Materials::Themed => {
+                let a = crate::palette::get(Token::MaterialSidebar).0[3];
+                panel.alpha(a + (1.0 - a) * THEMED_TINT)
+            }
         }
     }
 
     /// The content area's fill: the base colour, or over the system's
     /// material the base mostly opaque, so the material shows faintly.
-    pub const NATIVE_CONTENT: f32 = 0.82;
     pub const THEMED_CONTENT: f32 = 0.9;
 
     pub fn content(see_through: bool) -> crate::scene::Rgba {
@@ -332,7 +332,7 @@ pub mod material {
         match crate::palette::materials() {
             Materials::Solid => base,
             _ if !see_through => base,
-            Materials::Native => base.alpha(NATIVE_CONTENT),
+            Materials::Native => crate::palette::get(Token::MaterialContent),
             Materials::Themed => base.alpha(THEMED_CONTENT),
         }
     }
