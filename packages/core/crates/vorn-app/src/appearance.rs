@@ -238,16 +238,18 @@ mod tests {
     fn the_next_launch_reads_the_last_stored_materials() {
         let dir = std::env::temp_dir().join(format!("vorn-materials-{}", std::process::id()));
         let f = launch_file(&dir);
-        assert_eq!(launch_materials(&f), Materials::Solid);
+        assert_eq!(launch_materials(&f), Materials::Native);
         let mut a = Appearance::default();
         a.keep_materials(None, &f);
         assert!(!f.exists(), "nothing is kept before the settings load");
         a.keep_materials(Some(&json!({ "materials": "native" })), &f);
         assert_eq!(launch_materials(&f), Materials::Native);
+        a.keep_materials(Some(&json!({ "materials": "solid" })), &f);
+        assert_eq!(launch_materials(&f), Materials::Solid);
         a.keep_materials(Some(&json!({})), &f);
-        assert_eq!(launch_materials(&f), Materials::Solid);
+        assert_eq!(launch_materials(&f), Materials::Native);
         std::fs::write(&f, "glass").unwrap();
-        assert_eq!(launch_materials(&f), Materials::Solid);
+        assert_eq!(launch_materials(&f), Materials::Native);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
