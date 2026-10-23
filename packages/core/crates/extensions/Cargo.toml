@@ -37,8 +37,8 @@ vorn-theme = { path = "../theme" }
 # model, and WASI preview 2 with nothing granted. The compiler is a separate
 # feature that only the vorn command turns on, so vornd runs only components
 # Vorn already compiled into its cache.
-wasmtime = { version = "=49.0.3", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
-wasmtime-wasi = { version = "=49.0.3", optional = true, default-features = false, features = ["p2"] }
+wasmtime = { version = "=49.0.4", optional = true, default-features = false, features = ["runtime", "component-model", "std"] }
+wasmtime-wasi = { version = "=49.0.4", optional = true, default-features = false, features = ["p2"] }
 
 [features]
 wasm = ["dep:wasmtime", "dep:wasmtime-wasi"]
