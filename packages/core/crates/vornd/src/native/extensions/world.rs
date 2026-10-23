@@ -544,13 +544,13 @@ impl World for Wired {
                 }
                 "git.status" => {
                     let project = project.ok_or_else(|| needs(m, "the project to read"))?;
+                    let dir = reached(&native, &caller, &project, Access::Read).await?;
                     let git = vorn_git::repo::Git {
                         bin: native.env.git_bin(),
                         env: native.env.get(),
                         ssh: None,
                     };
                     tokio::task::spawn_blocking(move || {
-                        let dir = PathBuf::from(&project);
                         json!({ "branch": git.branch(&dir), "dirty": git.is_worktree_dirty(&dir) })
                     })
                     .await
@@ -605,12 +605,14 @@ impl World for Wired {
                     let dir = text(&args, "worktree")
                         .or(project)
                         .ok_or_else(|| needs(m, "the worktree to read"))?;
+                    let dir = reached(&native, &caller, &dir, Access::Read).await?;
                     ask(&native, "git:diffFull", json!(dir)).await
                 }
                 "git.commit" => {
                     let dir = text(&args, "worktree")
                         .or(project)
                         .ok_or_else(|| needs(m, "the worktree to commit in"))?;
+                    let dir = reached(&native, &caller, &dir, Access::Write).await?;
                     let message =
                         text(&args, "message").ok_or_else(|| needs(m, "the commit message"))?;
                     let unstaged = args
@@ -651,6 +653,7 @@ impl World for Wired {
                     let dir = text(&args, "worktree")
                         .or(project)
                         .ok_or_else(|| needs(m, "the repository to read"))?;
+                    let dir = reached(&native, &caller, &dir, Access::Read).await?;
                     ask(&native, "git:listBranches", json!(dir)).await
                 }
                 "files.write" => {

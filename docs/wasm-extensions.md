@@ -433,17 +433,33 @@ stdio, `data` and what `get` answers are base64 strings.
 
 `files.*` take absolute paths, resolved (`..` and symlinks followed) before
 they are checked, and passed on as the extension named them. A `..` after a
-folder that is not there, or a link that leads nowhere, is refused. An
-extension reads and writes the folders of Vorn's projects and their
-worktrees, its own files' folder, and the folder (and below) that the shell
-of a session it started or has a pane on is in; it reads a file a person
-chose for it in a file dialog. The home folder, and any folder above it,
-never counts as a project; a shell in the home folder lets the extension read
-below it but not write, and one above it only its own files. `files.list` and `files.stat` answer names, sizes and
-times anywhere. Reading or writing anywhere else needs `process.run`. Vorn's
-data, `~/.ssh` and other credential files and folders (cloud, registry and
-git credentials), what runs at login, and the shell's startup files
-(`.zshrc`, `.bashrc`, `.profile` and the like) are never reached.
+folder that is not there, or a link that leads nowhere, is refused; on
+Windows any `..` is refused. An extension reads and writes the folders of
+Vorn's projects and their worktrees, its own files' folder, and the folder
+(and below) that the shell of a session it started or has a pane on is in;
+it reads a file a person chose for it in a file dialog. The home folder, and
+any folder above it, never counts as a project; a shell in the home folder
+lets the extension read below it but not write, and a shell above it only
+the files directly in that folder. `git.status`, `git.diff` and
+`git.branches` read, and `git.commit` writes, under the same rule.
+`files.list` and `files.stat` answer names, sizes and times anywhere.
+Reading or writing anywhere else needs `process.run`.
+
+Never reached, not even with `process.run`: Vorn's data, and in the home
+folder:
+
+- keys and credentials: `.ssh`, `.gnupg`, `.aws`, `.azure`,
+  `.config/gcloud`, `.kube`, `.docker`, `.netrc`, `.git-credentials`,
+  `.npmrc`, `.pypirc`, `.pgpass`, `.cargo/credentials`,
+  `.cargo/credentials.toml`, `.gem/credentials`, `.config/gh`,
+  `.claude.json`;
+- what runs at login: `Library/LaunchAgents`, `.config/autostart`,
+  `.config/systemd`, `AppData/Roaming/Microsoft/Windows/Start
+  Menu/Programs/Startup`, `Documents/PowerShell`,
+  `Documents/WindowsPowerShell`;
+- the shell's startup files: `.bashrc`, `.bash_aliases`, `.bash_profile`,
+  `.bash_login`, `.bash_logout`, `.profile`, `.zshrc`, `.zshenv`,
+  `.zprofile`, `.zlogin`, `.zlogout`, `.config/fish`.
 
 - `files.list` (`{path}`) answers a folder's entries, `{name, path,
 isDirectory}`, folders first, without what git ignores; `files.stat`

@@ -41,11 +41,20 @@ const CLOSED_IN_HOME: &[&str] = &[
     ".pgpass",
     ".claude.json",
     ".config/gh",
+    ".config/gcloud",
+    ".azure",
+    ".cargo/credentials",
+    ".cargo/credentials.toml",
+    ".gem/credentials",
     ".config/fish",
     ".config/autostart",
     ".config/systemd",
     "Library/LaunchAgents",
+    "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup",
+    "Documents/PowerShell",
+    "Documents/WindowsPowerShell",
     ".bashrc",
+    ".bash_aliases",
     ".bash_profile",
     ".bash_login",
     ".bash_logout",
@@ -62,8 +71,9 @@ const CLOSED_IN_HOME: &[&str] = &[
 pub struct Places {
     /// Every project's folder and its worktrees': read and written.
     pub roots: Vec<PathBuf>,
-    /// The folders the shells of its sessions are in: read and written,
-    /// or, for the home folder, only the files directly in it read.
+    /// The folders the shells of its sessions are in: read and written; for
+    /// the home folder, read below but never written; above it, only the
+    /// files directly in that folder read.
     pub here: Vec<PathBuf>,
     /// The home folder, which with every folder above it is never a root.
     pub home: Option<PathBuf>,
@@ -111,6 +121,11 @@ pub fn resolve(path: &Path) -> Result<PathBuf, ExtError> {
             Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
             Component::ParentDir if missing => {
                 return Err(refused("goes up from a folder that is not there"));
+            }
+            // Windows takes `..` out by name before it follows a link or junction,
+            // so the path it opens may not be the one checked here.
+            Component::ParentDir if cfg!(windows) => {
+                return Err(refused("goes up with .., which Windows reads before links"));
             }
             Component::ParentDir => {
                 out.pop();
@@ -232,10 +247,9 @@ pub struct Given {
     acting: HashMap<String, usize>,
 }
 
+/// Puts `item` last, as the newest, dropping the oldest past [`KEPT`].
 fn keep<T: PartialEq>(list: &mut VecDeque<T>, item: T) {
-    if list.contains(&item) {
-        return;
-    }
+    list.retain(|i| *i != item);
     if list.len() == KEPT {
         list.pop_front();
     }
@@ -307,6 +321,13 @@ impl Given {
     /// Whether `extension` is answering a person's click or choice now.
     pub fn acting(&self, extension: &str) -> bool {
         self.acting.contains_key(extension)
+    }
+
+    /// Session `id` ended: no extension started or shows it any more.
+    pub fn ended(&mut self, id: &str) {
+        for list in self.sessions.values_mut().chain(self.shown.values_mut()) {
+            list.retain(|s| s != id);
+        }
     }
 
     /// Forgets `extension`, as it is removed.
@@ -447,6 +468,7 @@ mod tests {
             resolve(Path::new("relative")).unwrap_err().code,
             "bad-request"
         );
+        #[cfg(not(windows))]
         assert_eq!(
             resolve(&d.project.join("../app/./a.txt")).unwrap(),
             d.project.join("a.txt")
@@ -472,6 +494,21 @@ mod tests {
         }
         let outside = d.home.join("elsewhere/b.txt");
         assert!(p.reach("x", &outside, Access::Read, false).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_any_dot_dot_on_windows() {
+        let d = disk();
+        let p = places(&d);
+        let deep = d.project.join("l/m/n");
+        fs::create_dir_all(&deep).unwrap();
+        let up = d.project.join(r"l\m\n\..\..\..\a.txt");
+        let err = p.reach("x", &up, Access::Write, true).unwrap_err();
+        assert_eq!(err.code, "bad-request", "{}", err.message);
+        assert_eq!(resolve(&deep.join("..")).unwrap_err().code, "bad-request");
+        let named = d.project.join(r"l\m\a.txt");
+        assert_eq!(p.reach("x", &named, Access::Write, false), Ok(named));
     }
 
     #[test]
@@ -570,6 +607,19 @@ mod tests {
             "Library/LaunchAgents/run.plist",
             ".config/autostart/run.desktop",
             ".config/systemd/user/run.service",
+            ".config/gcloud/credentials.db",
+            ".azure/accessTokens.json",
+            ".cargo/credentials",
+            ".cargo/credentials.toml",
+            ".gem/credentials",
+            ".bash_aliases",
+            ".bash_login",
+            ".zlogin",
+            ".zprofile",
+            ".config/fish/config.fish",
+            "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/run.bat",
+            "Documents/PowerShell/Microsoft.PowerShell_profile.ps1",
+            "Documents/WindowsPowerShell/profile.ps1",
         ] {
             let p = Places {
                 closed: closed(&d.home, &[]),
@@ -632,5 +682,24 @@ mod tests {
         g.forget("x");
         assert!(g.handed("x").is_empty());
         assert!(!g.attached("x", "s2"));
+    }
+
+    #[test]
+    fn keeps_the_sessions_shown_lately_and_drops_those_that_ended() {
+        let mut g = Given::default();
+        g.show("x", "s1");
+        g.started("x", "s2");
+        for i in 0..KEPT - 1 {
+            g.show("x", &format!("n{i}"));
+        }
+        g.show("x", "s1");
+        g.show("x", "late");
+        assert!(g.attached("x", "s1"), "showing it again keeps it");
+        assert!(!g.attached("x", "n0"), "the oldest goes past the cap");
+        g.show("y", "s1");
+        g.ended("s1");
+        g.ended("s2");
+        assert!(!g.attached("x", "s1") && !g.attached("y", "s1"));
+        assert!(!g.starter_of("x", "s2") && g.attached("x", "late"));
     }
 }

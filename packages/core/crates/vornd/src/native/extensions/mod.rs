@@ -1061,6 +1061,7 @@ impl Extensions {
     /// Everything held for a session that ended, and its project's processes once none is left.
     async fn release(&self, session: &Live) {
         guard(&self.syncs).remove(&session.id);
+        guard(&self.given).ended(&session.id);
         {
             let mut bands = guard(&self.bands);
             for key in bands.footers.stop_session(&session.id) {
