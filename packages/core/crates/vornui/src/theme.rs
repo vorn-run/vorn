@@ -305,7 +305,7 @@ pub mod material {
     /// How much of the theme's panel colour lies over the system's sidebar
     /// material: a wash with Native, so the theme still shows, and a tint
     /// with Themed.
-    pub const NATIVE_TINT: f32 = 0.3;
+    pub const NATIVE_TINT: f32 = 0.78;
     pub const THEMED_TINT: f32 = 0.6;
 
     /// The sidebar's fill: its panel colour, or over the system's material
