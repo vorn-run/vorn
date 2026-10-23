@@ -81,7 +81,7 @@ pub struct Places {
     pub own: Option<PathBuf>,
     /// What a person handed the extension: read.
     pub handed: Vec<PathBuf>,
-    /// Never reached, not even with `process.run`.
+    /// Never reached through `files.*`, even with `process.run`.
     pub closed: Vec<PathBuf>,
 }
 
@@ -152,6 +152,21 @@ pub fn resolve(path: &Path) -> Result<PathBuf, ExtError> {
     Ok(out)
 }
 
+/// Whether the resolved `path` is in a git folder: one named `.git`, or one
+/// git would read as a repository's (a `HEAD` beside `objects` or a
+/// `commondir`), which a worktree's `.git` file or a bare clone points to.
+fn in_git(path: &Path) -> bool {
+    let named_git = |c: Component| match c {
+        Component::Normal(n) => n.to_string_lossy().eq_ignore_ascii_case(".git"),
+        _ => false,
+    };
+    path.components().any(named_git)
+        || path.ancestors().any(|dir| {
+            dir.join("HEAD").is_file()
+                && (dir.join("objects").is_dir() || dir.join("commondir").is_file())
+        })
+}
+
 /// Whether `path` is `dir` or inside it, by name as the disk compares
 /// names: without case on macOS and Windows.
 fn within(path: &Path, dir: &Path) -> bool {
@@ -186,6 +201,16 @@ impl Places {
         access: Access,
         runs_commands: bool,
     ) -> Result<(), ExtError> {
+        // Git runs what a repository's config names, so writing there runs programs.
+        if access == Access::Write && !runs_commands && in_git(path) {
+            return Err(ExtError::new(
+                "denied",
+                format!(
+                    "{extension} writes inside a repository's git folder only with process.run, and {} is in one",
+                    path.display()
+                ),
+            ));
+        }
         if self.own.as_deref().is_some_and(|own| path.starts_with(own)) {
             return Ok(());
         }
@@ -200,7 +225,7 @@ impl Places {
             dir.parent().is_none() || self.home.as_deref().is_some_and(|h| h.starts_with(dir))
         };
         let inside = |set: &[PathBuf]| set.iter().any(|r| !holds_home(r) && path.starts_with(r));
-        // A shell in the home folder still shows what is below it; above home, only its own files.
+        // A shell in the home folder still shows what is below it; above home, only the files directly in it.
         let above_home = |dir: &Path| holds_home(dir) && self.home.as_deref() != Some(dir);
         let reads_here = self.here.iter().any(|h| {
             if above_home(h) {
@@ -426,6 +451,46 @@ mod tests {
             let shut = closed(&d.home, &[holding]);
             assert!(!shut.contains(holding));
             assert!(shut.contains(&d.home.join(".vorn")));
+        }
+    }
+
+    #[test]
+    fn writes_in_a_git_folder_only_with_process_run() {
+        let d = disk();
+        let p = places(&d);
+        let git = d.project.join(".git");
+        fs::create_dir_all(git.join("worktrees/w")).unwrap();
+        fs::write(git.join("config"), "[core]\n").unwrap();
+        let worktree = d.project.join("w");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", git.join("worktrees/w").display()),
+        )
+        .unwrap();
+        fs::write(git.join("worktrees/w/commondir"), "../..\n").unwrap();
+        let apart = d.project.join("apart");
+        fs::create_dir_all(apart.join("objects")).unwrap();
+        fs::write(apart.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        let linked = d.project.join("linked");
+        fs::create_dir_all(&linked).unwrap();
+        fs::write(linked.join(".git"), format!("gitdir: {}", apart.display())).unwrap();
+        for path in [
+            git.join("config"),
+            git.join("hooks/pre-commit"),
+            worktree.join(".git"),
+            git.join("worktrees/w/HEAD"),
+            apart.join("hooks/pre-commit"),
+            apart.join("config"),
+        ] {
+            let err = admit(&p, &path, Access::Write, false).unwrap_err();
+            assert_eq!(err.code, "denied", "{}", path.display());
+            assert!(err.message.contains("process.run"), "{}", err.message);
+            assert_eq!(admit(&p, &path, Access::Write, true), Ok(()));
+            assert_eq!(admit(&p, &path, Access::Read, false), Ok(()));
+        }
+        for path in [worktree.join("src/a.rs"), d.project.join(".gitignore")] {
+            assert_eq!(admit(&p, &path, Access::Write, false), Ok(()));
         }
     }
 

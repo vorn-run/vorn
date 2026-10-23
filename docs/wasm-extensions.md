@@ -441,11 +441,15 @@ it reads a file a person chose for it in a file dialog. The home folder, and
 any folder above it, never counts as a project; a shell in the home folder
 lets the extension read below it but not write, and a shell above it only
 the files directly in that folder. `git.status`, `git.diff` and
-`git.branches` read, and `git.commit` writes, under the same rule.
+`git.branches` read, and `git.commit` and `worktrees.reclaim`, `.prune` and
+`.remove` write, under the same rule. Writing inside a repository's git
+folder (`.git`, the folder a worktree's `.git` file points to, and the
+repository's common folder) needs `process.run`, since git runs what its
+config names.
 `files.list` and `files.stat` answer names, sizes and times anywhere.
 Reading or writing anywhere else needs `process.run`.
 
-Never reached, not even with `process.run`: Vorn's data, and in the home
+Never reached through `files.*`, even with `process.run`: Vorn's data, and in the home
 folder:
 
 - keys and credentials: `.ssh`, `.gnupg`, `.aws`, `.azure`,

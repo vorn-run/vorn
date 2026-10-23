@@ -157,7 +157,7 @@ colon (`acme.tickets:`), and `workflow.run` runs only those. Running anyone
 else's workflow, or seeding a step that runs commands or agents (a script, an
 agent, or a type no extension declares, which runs as an agent), also needs
 `process.run`, which the install sheet shows as running programs; a step is
-checked at every depth of the workflow. So does starting a session, reading
+checked at every depth of the workflow. So do starting a session, reading
 or writing files outside Vorn's projects, and reaching the terminal of a
 session the extension did not start. Vorn's own workflow ids start with
 `import:`, `connector:`, `system:` and `file:`, so `import`, `connector`,

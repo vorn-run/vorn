@@ -568,6 +568,7 @@ impl World for Wired {
                 "worktrees.reclaim" | "worktrees.prune" => {
                     let path =
                         text(&args, "worktree").ok_or_else(|| needs(m, "the worktree to clean"))?;
+                    let path = reached(&native, &caller, &path, Access::Write).await?;
                     let method = if m == "worktrees.reclaim" {
                         "worktree:reclaimArtifacts"
                     } else {
@@ -579,6 +580,8 @@ impl World for Wired {
                     let worktree = text(&args, "worktree")
                         .ok_or_else(|| needs(m, "the worktree to remove"))?;
                     let project = project.ok_or_else(|| needs(m, "the project it belongs to"))?;
+                    let worktree = reached(&native, &caller, &worktree, Access::Write).await?;
+                    let project = reached(&native, &caller, &project, Access::Write).await?;
                     let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
                     let params =
                         json!({ "projectPath": project, "worktreePath": worktree, "force": force });

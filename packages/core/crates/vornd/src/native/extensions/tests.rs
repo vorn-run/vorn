@@ -613,7 +613,7 @@ async fn a_tree_drawn_for_a_live_session_attaches_its_extension_to_it() {
 }
 
 #[tokio::test]
-async fn git_reaches_only_the_projects_an_extension_reads_and_writes() {
+async fn git_and_worktrees_reach_only_the_projects_an_extension_reads_and_writes() {
     let w = world();
     let data = tempfile::tempdir().unwrap();
     let db = data.path().join("vorn.db");
@@ -642,6 +642,12 @@ async fn git_reaches_only_the_projects_an_extension_reads_and_writes() {
         ("git.branches", json!({ "worktree": outside })),
         ("git.status", json!({ "project": outside })),
         ("git.commit", commit(&outside)),
+        ("worktrees.reclaim", json!({ "worktree": outside })),
+        ("worktrees.prune", json!({ "worktree": outside })),
+        (
+            "worktrees.remove",
+            json!({ "worktree": outside, "project": w.project() }),
+        ),
     ] {
         let refused = gate.call(&caller(false), method, args.clone()).await;
         assert!(denied(&refused), "{method}: {refused:?}");
@@ -653,6 +659,7 @@ async fn git_reaches_only_the_projects_an_extension_reads_and_writes() {
         ("git.branches", json!({ "worktree": w.project() })),
         ("git.status", json!({ "project": w.project() })),
         ("git.commit", commit(&w.project())),
+        ("worktrees.prune", json!({ "worktree": w.project() })),
     ] {
         let reached = gate.call(&caller(false), method, args).await;
         assert!(!denied(&reached), "{method}: {reached:?}");
