@@ -149,6 +149,8 @@ fn header(s: &Screen<'_>) -> El {
         .px(12.0)
         .py(8.0)
         .role(Role::TabList, "View mode");
+    let glass = super::chrome::glass(s);
+    let mut tabs = Vec::new();
     for b in super::chrome::top_buttons(s) {
         let (on, name, label, keys) = (b.on, b.icon.as_str(), b.label.as_str(), b.keys);
         let id = s.acts.on("sidebar-mode", b.act);
@@ -165,8 +167,8 @@ fn header(s: &Screen<'_>) -> El {
             .items_center()
             .gap(6.0)
             .px(10.0)
-            .py(6.0)
-            .rounded(8.0)
+            .py(if glass { 5.0 } else { 6.0 })
+            .rounded(if glass { 13.0 } else { 8.0 })
             .bg(if on {
                 white(0.10)
             } else {
@@ -178,8 +180,13 @@ fn header(s: &Screen<'_>) -> El {
         if on {
             b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
         }
-        row = row.child(tooltip(s.ui, b, id, label, keys.as_deref()));
+        tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
     }
+    row = if glass {
+        row.child(super::chrome::group(s, tabs))
+    } else {
+        tabs.into_iter().fold(row, El::child)
+    };
     // `border-b` under the whole header, the view pills included.
     div()
         .col()

@@ -98,7 +98,7 @@ pub(super) fn top_buttons(s: &Screen<'_>) -> Vec<TopButton> {
     let sessions = TopButton {
         act: Act::View(MainView::Sessions),
         view: MainView::Sessions,
-        icon: "monitor".to_owned(),
+        icon: "square-terminal".to_owned(),
         label: "Sessions".to_owned(),
         keys: Some(format!("{m}S", m = mod_label())),
         on: s.st.view == MainView::Sessions,
@@ -165,22 +165,25 @@ fn pills(s: &Screen<'_>) -> El {
 /// SidebarToggle, a divider and the view pills: what the toolbar starts
 /// with while the sidebar is closed.
 pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
-    div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .child(tool(
-            s,
-            "toolbar",
-            Act::ToggleSidebar,
-            "panel-left",
-            2.0,
-            "Toggle sidebar",
-            Some(&format!("{m}B", m = mod_label())),
-            false,
-        ))
-        .child(divider())
-        .child(pills(s))
+    let toggle = tool(
+        s,
+        "toolbar",
+        Act::ToggleSidebar,
+        "panel-left",
+        2.0,
+        "Toggle sidebar",
+        Some(&format!("{m}B", m = mod_label())),
+        false,
+    );
+    let row = div().row().items_center();
+    if glass(s) {
+        return row
+            .gap(8.0)
+            .ml(6.0)
+            .child(group(s, [toggle]))
+            .child(pills(s));
+    }
+    row.gap(4.0).child(toggle).child(divider()).child(pills(s))
 }
 
 /// The dock's popover, as the one menu open: a press outside closes it.
