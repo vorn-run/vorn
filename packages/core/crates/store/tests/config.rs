@@ -110,6 +110,7 @@ fn appearance_choices_survive_a_save() {
         ("interfaceStyle", json!("tinted")),
         ("contrastCorrection", json!(true)),
         ("materials", json!("solid")),
+        ("terminalFontFamily", json!("Menlo")),
     ] {
         round_trips(key, value);
     }

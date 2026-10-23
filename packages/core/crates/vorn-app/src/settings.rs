@@ -119,6 +119,13 @@ pub enum SetAct {
     Notify(String, bool),
     /// The terminal font size, one step down or up.
     FontSize(i32),
+    /// A theme from the picker, by id: its side's key, and the scheme when
+    /// a fixed one is of the other side.
+    PickTheme(String),
+    /// A theme picker chip, on or off.
+    ThemeFilter(crate::appearance::ThemeFilter),
+    /// The theme picker's Get more themes…: the catalog's themes.
+    MoreThemes,
     TestSound,
     ShellMenu,
     PickShell(String),
@@ -602,6 +609,10 @@ pub struct Settings {
     pub appearance: crate::appearance::Appearance,
     /// The theme tile under the pointer, drawn until the pointer leaves it.
     pub theme_preview: Option<String>,
+    /// The theme picker's chip on, if any.
+    pub theme_filter: Option<crate::appearance::ThemeFilter>,
+    /// The installed monospace families, read when the font list first opens.
+    pub fonts: Option<std::rc::Rc<[crate::ui::MonoFamily]>>,
 }
 
 impl Settings {

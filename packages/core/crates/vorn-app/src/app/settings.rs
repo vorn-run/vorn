@@ -226,12 +226,9 @@ impl App {
                     return;
                 };
                 if key == "layoutMode" {
-                    self.st.layout = if value == "tabs" {
-                        crate::state::LayoutMode::Tabs
-                    } else {
-                        crate::state::LayoutMode::Grid
-                    };
-                    if value == "tabs" {
+                    let mode = crate::state::LayoutMode::from_key(value.as_str().unwrap_or(""));
+                    self.st.layout = mode;
+                    if mode != crate::state::LayoutMode::Grid {
                         self.st.focused = None;
                     }
                 }
@@ -257,6 +254,35 @@ impl App {
                     .unwrap_or(13);
                 let next = (cur + i64::from(delta)).clamp(8, 24);
                 self.write_defaults(|d| d["fontSize"] = json!(next));
+            }
+            SetAct::PickTheme(id) => {
+                let installed = self.st.settings.appearance.installed();
+                let Some(look) = crate::appearance::find(installed, &id).map(|t| t.appearance)
+                else {
+                    return;
+                };
+                let scheme = crate::appearance::prefs(self.store.config.get("defaults")).scheme;
+                let writes = crate::appearance::pick_theme(scheme, &id, look);
+                self.st.settings.theme_preview = None;
+                self.write_defaults(|d| {
+                    for (k, v) in writes {
+                        d[k] = v;
+                    }
+                });
+            }
+            SetAct::ThemeFilter(f) => {
+                let on = &mut self.st.settings.theme_filter;
+                *on = (*on != Some(f)).then_some(f);
+            }
+            SetAct::MoreThemes => {
+                self.open_settings(Category::Connectors);
+                ui.set_focus(None);
+                let p = &mut self.st.plugins;
+                p.tab = crate::plugins::Tab::Browse;
+                p.kind = Some(crate::plugins::Kind::Extension);
+                "theme".clone_into(&mut p.query);
+                p.selected = None;
+                p.adding = None;
             }
             SetAct::TestSound => crate::system::bell(),
             SetAct::ShellMenu => {}

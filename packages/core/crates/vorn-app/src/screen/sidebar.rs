@@ -253,7 +253,7 @@ fn session_line(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
     use crate::components::sidebar::{session_row, Detail, SessionRow, SessionRowIds, StepRow};
     use crate::components::Status;
     let sid = session.info.id.as_str();
-    let tabs = s.st.layout == crate::state::LayoutMode::Tabs;
+    let tabs = s.st.layout != crate::state::LayoutMode::Grid;
     let act = if tabs {
         Act::Select(sid.to_owned())
     } else {

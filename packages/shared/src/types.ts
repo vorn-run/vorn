@@ -1594,6 +1594,8 @@ export interface AppConfig {
     interfaceStyle?: 'neutral' | 'tinted'
     contrastCorrection?: boolean
     materials?: 'solid' | 'native' | 'themed'
+    /** The family the terminal draws in; the bundled monospace face when unset. */
+    terminalFontFamily?: string
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>

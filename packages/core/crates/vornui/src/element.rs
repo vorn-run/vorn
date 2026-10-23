@@ -736,6 +736,15 @@ impl El {
         self
     }
 
+    /// Drawn in the installed family `name`, for a text element (a font
+    /// picker's row in its own face).
+    pub fn family(mut self, name: &str) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.family = Some(crate::text::intern_family(name));
+        }
+        self
+    }
+
     /// Slanted, for a text element (a preview tab's name).
     pub fn italic(mut self) -> El {
         if let Content::Text { style, .. } = &mut self.content {

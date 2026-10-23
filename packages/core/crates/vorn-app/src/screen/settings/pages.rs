@@ -3,8 +3,10 @@
 
 use serde_json::Value;
 
-use super::{button, header, row, segmented, set, svg, toggle, Seg};
-use crate::act::Act;
+use vorn_theme::{Appearance as Look, Chrome, Materials, Scheme, Theme};
+
+use super::{button, card, card_row, header, row, section, segmented, set, svg, toggle, Seg};
+use crate::act::{Act, Acts};
 use crate::look;
 use crate::screen::menus::Item;
 use crate::screen::{agent_icon, c, ico, white, Screen};
@@ -13,7 +15,9 @@ use crate::settings::{
     UpdateAction, UpdateStatus,
 };
 use crate::state::{now_ms, MenuKind};
-use crate::ui::{div, icon, image, text, Action, El, Id, Rgba, Role, Sense, TextStyle};
+use crate::ui::{
+    div, field, icon, image, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle,
+};
 
 fn defaults<'a>(s: &Screen<'a>) -> Option<&'a Value> {
     s.store.config.get("defaults")
@@ -74,7 +78,7 @@ pub const ROW_SLIDER: Id = Id(0x726f_7768_6569_6768);
 /// The notification volume slider's track.
 pub const VOLUME_SLIDER: Id = Id(0x766f_6c75_6d65_7364);
 
-/// A range input as Chromium draws one with `accent-blue-500`.
+/// A range input: the accent up to a white knob.
 fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
     let frac = frac.clamp(0.0, 1.0);
     let knob = 16.0;
@@ -98,157 +102,75 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
                 .absolute(0.0, 4.0)
                 .size(x + knob / 2.0, 8.0)
                 .rounded(4.0)
-                .bg(c(look::BLUE_500)),
+                .bg(c(look::BRONZO)),
         )
         .child(
             div()
                 .absolute(x, 0.0)
                 .size(knob, knob)
                 .rounded(knob / 2.0)
-                .bg(c(look::BLUE_500)),
+                .bg(Rgba::white(1.0))
+                .border(1.0, Rgba::BLACK.alpha(0.12)),
         )
 }
 
-fn small_svg(body: &str) -> El {
-    icon(svg(body, 2.0), 14.0, c(look::GRAY_500))
+/// Inline icons the page draws, stroked on a 24 grid.
+mod glyph {
+    pub const MONITOR: &str =
+        r#"<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>"#;
+    pub const SUN: &str = r#"<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>"#;
+    pub const MOON: &str = r#"<path d="M12 3a6 6 0 009 9 9 9 0 11-9-9z"/>"#;
+    pub const INFO: &str = r#"<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>"#;
+    pub const PALETTE: &str = r#"<path d="M12 22a10 10 0 110-20c5.5 0 10 4 10 9a5 5 0 01-5 5h-1.8a1.7 1.7 0 00-1.2 2.9A1.7 1.7 0 0112 22z"/><circle cx="7.5" cy="10.5" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16.5" cy="10.5" r="1"/>"#;
+    pub const CONTRAST: &str =
+        r##"<circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 010 20z" fill="#ffffff"/>"##;
+    pub const CHEVRON_DOWN: &str = r#"<path d="M6 9l6 6 6-6"/>"#;
+    pub const CHEVRON_UP: &str = r#"<path d="M18 15l-6-6-6 6"/>"#;
+    pub const SEARCH: &str = r#"<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>"#;
 }
+
+fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
+    icon(svg(body, 2.0), size, color)
+}
+
+/// What each Surfaces tile stores under `materials`.
+pub(super) fn surface_act(m: Materials) -> SetAct {
+    default_act(crate::appearance::MATERIALS, format!("\"{}\"", m.key()))
+}
+
+/// What the Theme colours on surfaces toggle stores under `interfaceStyle`.
+pub(super) fn chrome_act(on: bool) -> SetAct {
+    let chrome = if on { Chrome::Tinted } else { Chrome::Neutral };
+    default_act(crate::appearance::CHROME, format!("\"{}\"", chrome.key()))
+}
+
+/// What the Readable contrast toggle stores under `contrastCorrection`.
+pub(super) fn contrast_act(on: bool) -> SetAct {
+    default_act(crate::appearance::CONTRAST, on)
+}
+
+/// The sizes the Aa steps write to `fontSize`, the glyph size each is
+/// drawn at, and its name.
+const FONT_PRESETS: [(i64, f32, &str); 3] = [
+    (11, 11.0, "Small"),
+    (13, 14.0, "Medium"),
+    (16, 18.0, "Large"),
+];
+
+/// The field the theme picker searches in.
+pub const THEME_SEARCH: Id = Id(0x7468_656d_6573_7263);
 
 pub(super) fn appearance(s: &Screen<'_>) -> El {
-    let size = num(s, "fontSize").unwrap_or(f64::from(look::TERM_FONT));
-    let font = div()
-        .row()
-        .items_center()
-        .gap(8.0)
-        .child(stepper(s, "-", -1))
-        .child(
-            div().w(32.0).row().justify_center().child(
-                text(format!("{size}"), 14.0, c(look::GRAY_200))
-                    .line_height(20.0)
-                    .silent(),
-            ),
-        )
-        .child(stepper(s, "+", 1));
-    let h = s.st.settings.row_height.round();
-    let rows = div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .child(slider(
-            ROW_SLIDER,
-            128.0,
-            (h - 100.0) / 500.0,
-            "Card Row Height",
-        ))
-        .child(
-            div().w(48.0).row().justify_end().child(
-                text(format!("{h}px"), 14.0, c(look::GRAY_400))
-                    .line_height(20.0)
-                    .silent(),
-            ),
-        );
-    let layout = defaults(s)
-        .and_then(|d| d.get("layoutMode"))
-        .and_then(Value::as_str)
-        .unwrap_or("grid");
-    let task_view = defaults(s)
-        .and_then(|d| d.get("taskViewMode"))
-        .and_then(Value::as_str)
-        .unwrap_or("list");
-    let seg_icon = |active: bool, body: &str| {
-        let _ = active;
-        small_svg(body)
-    };
-    let layout_seg = segmented(
-        s,
-        "layout-mode",
-        vec![
-            Seg {
-                label: "Grid",
-                icon: Some(seg_icon(
-                    true,
-                    r#"<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>"#,
-                )),
-                act: seg_act("layoutMode", "\"grid\""),
-                on: layout == "grid",
-                disabled: false,
-            },
-            Seg {
-                label: "Tabs",
-                icon: Some(seg_icon(
-                    true,
-                    r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 3v6"/>"#,
-                )),
-                act: seg_act("layoutMode", "\"tabs\""),
-                on: layout == "tabs",
-                disabled: false,
-            },
-        ],
-        12.0,
-    );
-    let task_seg = segmented(
-        s,
-        "task-view",
-        vec![
-            Seg {
-                label: "List",
-                icon: Some(small_svg(
-                    r#"<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>"#,
-                )),
-                act: seg_act("taskViewMode", "\"list\""),
-                on: task_view == "list",
-                disabled: false,
-            },
-            Seg {
-                label: "Kanban",
-                icon: Some(small_svg(
-                    r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/>"#,
-                )),
-                act: seg_act("taskViewMode", "\"kanban\""),
-                on: task_view == "kanban",
-                disabled: false,
-            },
-        ],
-        12.0,
-    );
-    let mut rows_col = div().col().gap(4.0);
-    if let Some(d) = s.term_drawing {
-        rows_col = rows_col.child(drawing_row(s, d));
-    }
-    rows_col = rows_col.child(colour_rows(s));
     div()
         .col()
-        .child(header("Appearance", "Customize how Vorn looks", None))
-        .child(
-            rows_col
-                .child(row(
-                    "Font Size",
-                    "Terminal font size in pixels",
-                    None,
-                    font,
-                    false,
-                ))
-                .child(row(
-                    "Card Row Height",
-                    &format!("Terminal card height in pixels ({h}px)"),
-                    None,
-                    rows,
-                    false,
-                ))
-                .child(row(
-                    "Layout Mode",
-                    "Choose between grid or tab layout for sessions",
-                    None,
-                    layout_seg,
-                    false,
-                ))
-                .child(row(
-                    "Default Task View",
-                    "Choose between list or kanban board for tasks",
-                    None,
-                    task_seg,
-                    false,
-                )),
-        )
+        .child(header("Appearance", "", None))
+        .child(card(colour_rows(s)))
+        .child(section("Look"))
+        .child(card(look_rows(s)))
+        .child(section("Terminal"))
+        .child(card(terminal_rows(s)))
+        .child(section("Sessions"))
+        .child(card(session_rows(s)))
 }
 
 /// The id of a theme's preview tile, which the app reads the hover of.
@@ -256,185 +178,717 @@ pub fn theme_tile_id(theme: &str) -> Id {
     Id::new(&format!("theme-tile:{theme}"))
 }
 
-/// A choice stored as a string in `defaults`, and its options.
-fn text_seg(s: &Screen<'_>, key: &str, fallback: &str, opts: &[(&'static str, &str)]) -> El {
-    let chosen = defaults(s)
-        .and_then(|d| d.get(key))
-        .and_then(Value::as_str)
-        .unwrap_or(fallback);
-    let segs = opts
-        .iter()
-        .map(|(label, v)| Seg {
-            label,
-            icon: None,
-            act: seg_act(key, format!("\"{v}\"")),
-            on: chosen == *v,
-            disabled: false,
-        })
-        .collect();
-    segmented(s, key, segs, 12.0)
+/// The theme stored for `side`, or Vorn's own for it.
+fn chosen_theme<'a>(s: &Screen<'a>, side: Look) -> &'a Theme {
+    let prefs = crate::appearance::prefs(defaults(s));
+    let id = match side {
+        Look::Light => prefs.light,
+        Look::Dark => prefs.dark,
+    };
+    let installed = s.st.settings.appearance.installed();
+    crate::appearance::find(installed, &id).unwrap_or(match side {
+        Look::Light => vorn_theme::vorn_light(),
+        Look::Dark => vorn_theme::vorn_dark(),
+    })
 }
 
-/// Colour scheme, the light and dark themes, interface style, contrast,
-/// materials, and the palette now drawn.
-fn colour_rows(s: &Screen<'_>) -> El {
+/// The colour scheme, then a theme row for each side it can show.
+fn colour_rows(s: &Screen<'_>) -> Vec<El> {
     use crate::appearance as a;
-    use vorn_theme::Appearance as Look;
     let prefs = a::prefs(defaults(s));
-    let scheme = text_seg(
+    let seg = |label, body: &str, scheme: Scheme| {
+        let on = prefs.scheme == scheme;
+        let fg = if on { c(look::WHITE) } else { c(look::GRAY_500) };
+        Seg {
+            label,
+            icon: Some(glyph_icon(body, 14.0, fg)),
+            act: seg_act(a::SCHEME, format!("\"{}\"", scheme.key())),
+            on,
+            disabled: false,
+        }
+    };
+    let scheme = segmented(
         s,
         a::SCHEME,
-        prefs.scheme.key(),
-        &[("System", "system"), ("Light", "light"), ("Dark", "dark")],
+        vec![
+            seg("System", glyph::MONITOR, Scheme::System),
+            seg("Light", glyph::SUN, Scheme::Light),
+            seg("Dark", glyph::MOON, Scheme::Dark),
+        ],
+        10.0,
     );
-    let chrome = text_seg(
+    let mut rows = vec![card_row(s, None, "Appearance", None, scheme)];
+    for r in a::theme_rows(prefs.scheme) {
+        let mark = (prefs.scheme == Scheme::System).then(|| {
+            let body = match r.look {
+                Look::Light => glyph::SUN,
+                Look::Dark => glyph::MOON,
+            };
+            glyph_icon(body, 14.0, c(look::GRAY_500))
+        });
+        rows.push(card_row(s, mark, r.label, None, theme_control(s, r.look)));
+    }
+    rows
+}
+
+/// The theme chip that opens the picker, and the (i) beside it.
+fn theme_control(s: &Screen<'_>, side: Look) -> El {
+    let t = chosen_theme(s, side);
+    let kind = MenuKind::ThemePicker(side);
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let id = s.acts.on("theme-chip", Act::Open(kind));
+    let chip = chip(s, id, &t.name, open)
+        .pl(5.0)
+        .child(theme_swatch(t, 18.0))
+        .child(
+            text(&t.name, 13.0, c(look::GRAY_200))
+                .line_height(18.0)
+                .silent(),
+        )
+        .child(chevron(open));
+    let info = icon_button(
+        s,
+        s.acts
+            .on("theme-info", Act::Open(MenuKind::ThemeInfo(t.id.clone()))),
+        glyph::INFO,
+        "Theme details",
+    );
+    div()
+        .row()
+        .items_center()
+        .gap(6.0)
+        .child(chip)
+        .child(info)
+}
+
+/// A dropdown chip's frame, lit while hovered or open.
+fn chip(s: &Screen<'_>, id: Id, name: &str, open: bool) -> El {
+    let lit = s.ui.hover(id).max(if open { 1.0 } else { 0.0 });
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .h(28.0)
+        .pl(10.0)
+        .pr(8.0)
+        .rounded(4.0)
+        .bg(white(0.04).mix(white(0.08), lit))
+        .border(1.0, white(0.08))
+        .role(Role::Button, name)
+        .ring(4.0)
+}
+
+fn chevron(open: bool) -> El {
+    let body = if open {
+        glyph::CHEVRON_UP
+    } else {
+        glyph::CHEVRON_DOWN
+    };
+    glyph_icon(body, 12.0, c(look::GRAY_500))
+}
+
+/// A theme's window colour with its accent in the corner.
+fn theme_swatch(t: &Theme, size: f32) -> El {
+    use vorn_theme::Token as T;
+    let dot = (size / 3.0).round();
+    div()
+        .size(size, size)
+        .shrink0()
+        .rounded(3.0)
+        .clip()
+        .bg(Rgba::from(t.get(T::SurfaceBase)))
+        .border(1.0, white(0.12))
+        .child(
+            div()
+                .absolute(size - dot - 3.0, size - dot - 3.0)
+                .size(dot, dot)
+                .rounded(dot / 2.0)
+                .bg(Rgba::from(t.get(T::Accent))),
+        )
+}
+
+/// A neutral 26 px icon button: gray, white on a faint wash when hovered.
+fn icon_button(s: &Screen<'_>, id: Id, body: &str, label: &str) -> El {
+    let hot = s.ui.hover(id);
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .size(26.0, 26.0)
+        .shrink0()
+        .center()
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.06), hot))
+        .role(Role::Button, label)
+        .ring(4.0)
+        .child(glyph_icon(
+            body,
+            14.0,
+            c(look::GRAY_400).mix(c(look::WHITE), hot),
+        ));
+    tooltip(s.ui, b, id, label, None)
+}
+
+/// Surfaces, theme colours on them, and readable contrast.
+fn look_rows(s: &Screen<'_>) -> Vec<El> {
+    use crate::appearance as a;
+    let prefs = a::prefs(defaults(s));
+    let reduced = s.ui.reduced_transparency();
+    let m = prefs.materials;
+    let tiles = div()
+        .row()
+        .gap(8.0)
+        .role(Role::RadioGroup, "Surfaces")
+        .child(surface_tile(s, Materials::Solid, "Solid", m, false))
+        .child(surface_tile(s, Materials::Native, "Glass", m, reduced))
+        .child(surface_tile(s, Materials::Themed, "Tinted glass", m, reduced));
+    let surfaces_tip = if cfg!(windows) {
+        "Solid surfaces, the system's glass under the sidebar and menus, or that glass tinted by the theme. The sidebar changes at the next launch."
+    } else {
+        "Solid surfaces, the system's glass under the sidebar and menus, or that glass tinted by the theme."
+    };
+    let tinted = prefs.chrome == Chrome::Tinted;
+    let chrome = toggle(
         s,
         a::CHROME,
-        prefs.chrome.key(),
-        &[("Neutral", "neutral"), ("Themed", "tinted")],
+        tinted,
+        set(chrome_act(!tinted)),
+        false,
+        "Theme colours on surfaces",
     );
-    let reduced = s.ui.reduced_transparency();
-    let materials = text_seg(
+    let contrast = toggle(
         s,
-        a::MATERIALS,
-        prefs.materials.key(),
-        &[
-            ("Solid", "solid"),
-            ("Native", "native"),
-            ("Themed", "themed"),
-        ],
+        a::CONTRAST,
+        prefs.contrast,
+        set(contrast_act(!prefs.contrast)),
+        false,
+        "Readable contrast",
     );
-    div()
-        .col()
-        .child(row(
-            "Colour Scheme",
-            "Follow the system, or always use the light or the dark theme",
-            None,
-            scheme,
-            false,
-        ))
-        .child(theme_row(s, a::LIGHT, "Light Theme", Look::Light, &prefs.light))
-        .child(theme_row(s, a::DARK, "Dark Theme", Look::Dark, &prefs.dark))
-        .child(row(
-            "Interface Style",
-            "Neutral keeps Vorn's own surfaces; Themed tints them with the theme",
-            None,
-            chrome,
-            false,
-        ))
-        .child(switch_row(
+    vec![
+        card_row(s, None, "Surfaces", Some(surfaces_tip), tiles).py(12.0),
+        card_row(
             s,
-            a::CONTRAST,
-            prefs.contrast,
-            "Contrast Correction",
-            "Lift text that reads below 4.5:1, keeping its hue",
-            None,
-        ))
-        .child(row(
-            "Materials",
-            if cfg!(windows) {
-                "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme. The sidebar changes at the next launch"
-            } else {
-                "Solid surfaces, the system's translucent sidebar and blurred menus, or both tinted by the theme"
-            },
-            reduced.then_some("Reduce transparency is on in the system settings, so surfaces stay solid."),
-            materials,
-            reduced,
-        ))
-        .child(palette_row())
+            Some(glyph_icon(glyph::PALETTE, 14.0, c(look::GRAY_500))),
+            "Theme colours on surfaces",
+            Some("Draw the sidebar, panels and cards in the theme's own colours instead of neutral grays."),
+            chrome,
+        ),
+        card_row(
+            s,
+            Some(glyph_icon(glyph::CONTRAST, 14.0, c(look::GRAY_500))),
+            "Readable contrast",
+            Some("Lift text that reads below 4.5:1 against its background, keeping its hue."),
+            contrast,
+        ),
+    ]
 }
 
-/// A row of tiles, one per theme of `look`, each drawn in its own colours.
-fn theme_row(
+/// One Surfaces choice: a small window drawn solid, over glass, or over
+/// tinted glass, in the theme's own colours.
+fn surface_tile(
     s: &Screen<'_>,
-    key: &str,
-    title: &str,
-    kind: vorn_theme::Appearance,
-    chosen: &str,
+    m: Materials,
+    label: &str,
+    chosen: Materials,
+    disabled: bool,
 ) -> El {
-    let installed = s.st.settings.appearance.installed();
-    let mut tiles = div().row().wrap_children().gap(8.0).mt(12.0);
-    for t in vorn_theme::bundled()
-        .iter()
-        .chain(installed)
-        .filter(|t| t.appearance == kind)
-    {
-        tiles = tiles.child(theme_tile(s, key, t, t.id == chosen));
-    }
-    div()
-        .col()
-        .py(16.0)
-        .border_bottom(1.0, white(0.06))
-        .child(
-            text(title, 14.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(20.0)
-                .role(Role::Label, title),
-        )
-        .child(
-            text(
-                "Point at a theme to preview it; click to use it",
-                12.0,
-                c(look::GRAY_500),
-            )
-            .line_height(16.0)
-            .mt(2.0)
-            .silent(),
-        )
-        .child(tiles)
-}
-
-/// A theme's preview: its window, sidebar, ink and accent, and its eight
-/// terminal colours, with its name under it.
-fn theme_tile(s: &Screen<'_>, key: &str, t: &vorn_theme::Theme, on: bool) -> El {
-    use vorn_theme::Token as T;
-    let id = theme_tile_id(&t.id);
-    s.acts
-        .bind(id, set(default_act(key, format!("\"{}\"", t.id))));
-    let hot = s.ui.hover(id);
-    let rgba = |token| Rgba::from(t.get(token));
-    let line = |w: f32, token| div().size(w, 3.0).rounded(1.5).bg(rgba(token));
-    let mut ansi = div().row().gap(2.0);
-    for &c in &t.terminal.ansi[1..7] {
-        ansi = ansi.child(div().size(8.0, 8.0).rounded(2.0).bg(Rgba::from(c)));
-    }
-    let edge = if on {
-        white(0.45)
-    } else {
-        white(0.08).mix(white(0.2), hot)
+    let term = crate::ui::palette::terminal();
+    let base = c(look::SURFACE_BASE);
+    let (desk, sidebar, content) = match m {
+        Materials::Solid => (None, c(look::SURFACE_PANEL), base),
+        Materials::Native => (Some((term.ansi[4], term.ansi[5])), white(0.10), base.alpha(0.85)),
+        Materials::Themed => (
+            Some((term.ansi[4], term.ansi[5])),
+            c(look::SURFACE_PANEL).alpha(0.7),
+            base.alpha(0.85),
+        ),
     };
-    let preview = div()
-        .row()
-        .size(120.0, 72.0)
-        .rounded(4.0)
-        .clip()
-        .bg(rgba(T::SurfaceBase))
-        .border(1.0, edge)
+    let line = |w: f32, a: f32| div().size(w, 3.0).rounded(1.5).bg(white(a));
+    let mut pic = div().size(128.0, 80.0).rounded(4.0).clip().bg(base);
+    if let Some((a, b)) = desk {
+        pic = pic
+            .child(div().absolute(0.0, 0.0).size(128.0, 80.0).bg(a))
+            .child(div().absolute(64.0, 0.0).size(64.0, 80.0).bg(b));
+    }
+    pic = pic
         .child(
             div()
-                .col()
-                .gap(4.0)
-                .w(32.0)
-                .h_full()
-                .p(6.0)
-                .bg(rgba(T::SurfacePanel))
-                .child(line(18.0, T::InkSecondary))
-                .child(line(14.0, T::InkFaint))
-                .child(line(16.0, T::InkFaint)),
-        )
-        .child(
-            div()
+                .absolute(0.0, 0.0)
+                .size(36.0, 80.0)
                 .col()
                 .gap(5.0)
-                .p(8.0)
-                .grow()
-                .child(line(48.0, T::Ink))
-                .child(line(36.0, T::InkSecondary))
-                .child(div().size(20.0, 6.0).rounded(2.0).bg(rgba(T::Accent)))
-                .child(ansi),
+                .p(7.0)
+                .bg(sidebar)
+                .border_right(1.0, white(0.08))
+                .child(line(18.0, 0.5))
+                .child(line(14.0, 0.3))
+                .child(line(16.0, 0.3)),
+        )
+        .child(
+            div()
+                .absolute(36.0, 0.0)
+                .size(92.0, 80.0)
+                .col()
+                .gap(5.0)
+                .p(9.0)
+                .bg(content)
+                .child(line(52.0, 0.6))
+                .child(line(38.0, 0.35))
+                .child(div().size(20.0, 6.0).rounded(2.0).bg(c(look::BRONZO))),
         );
-    let name = if on {
-        c(look::GRAY_100)
+    let tip = disabled
+        .then_some("Reduce transparency is on in the system settings, so surfaces stay solid.");
+    let act = set(surface_act(m));
+    let on = m == chosen && !disabled;
+    tile(s, "surface", act, pic, label, on, disabled, tip)
+}
+
+/// A picture choice: the picture ringed in the accent when chosen, and its
+/// label under it on a faint pill.
+#[allow(clippy::too_many_arguments)]
+fn tile(
+    s: &Screen<'_>,
+    place: &str,
+    act: Act,
+    pic: El,
+    label: &str,
+    on: bool,
+    disabled: bool,
+    tip: Option<&str>,
+) -> El {
+    let id = Acts::id(place, &act);
+    if !disabled {
+        s.acts.bind(id, act);
+    }
+    let hot = s.ui.hover(id);
+    let edge = if on {
+        c(look::BRONZO)
+    } else {
+        white(0.0).mix(white(0.16), hot)
+    };
+    let ink = if on {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_400)
+    };
+    let mut el = div()
+        .id(id)
+        .col()
+        .items_center()
+        .gap(6.0)
+        .role(Role::RadioButton, label)
+        .selected(on)
+        .child(div().p(2.0).rounded(6.0).border(2.0, edge).child(pic))
+        .child(
+            div()
+                .px(8.0)
+                .py(1.0)
+                .rounded(4.0)
+                .bg(white(if on { 0.12 } else { 0.0 }))
+                .child(text(label, 12.0, ink).line_height(16.0).silent()),
+        );
+    el = if disabled {
+        el.opacity(0.4).disabled(true)
+    } else {
+        el.on(Action::Click).ring(4.0)
+    };
+    match tip {
+        Some(t) => tooltip(s.ui, el, id, t, None),
+        None => el,
+    }
+}
+
+/// The preview, the font, its size, and on a terminal UI how it draws.
+fn terminal_rows(s: &Screen<'_>) -> Vec<El> {
+    let size = num(s, "fontSize").unwrap_or(13.0).round() as i64;
+    let family = s.ui.text.term_family();
+    let mut rows = vec![
+        terminal_preview(family, size),
+        card_row(s, None, "Font", None, font_chip(s, family)),
+        card_row(s, None, "Size", None, size_control(s, size)),
+    ];
+    if let Some(d) = s.term_drawing {
+        rows.push(drawing_row(s, d));
+    }
+    rows
+}
+
+/// Two terminal lines in the theme's colours and the chosen face and size.
+fn terminal_preview(family: &str, size: i64) -> El {
+    let term = crate::ui::palette::terminal();
+    let px = look::TERM_FONT * size as f32 / 13.0;
+    let span = |t: &str, color: Rgba| {
+        text(t, px, color)
+            .family(family)
+            .line_height((px * 1.5).round())
+            .silent()
+    };
+    let fg = term.foreground;
+    div()
+        .col()
+        .mx(12.0)
+        .mt(12.0)
+        .mb(4.0)
+        .px(12.0)
+        .py(10.0)
+        .rounded(4.0)
+        .bg(term.background)
+        .border(1.0, white(0.06))
+        .role(Role::Image, "Terminal preview")
+        .child(
+            div()
+                .row()
+                .child(span("~/dev/vorn ", term.ansi[2]))
+                .child(span("main ", term.ansi[4]))
+                .child(span("\u{276f} ", term.ansi[3]))
+                .child(span("cargo test -p vornui", fg)),
+        )
+        .child(
+            div()
+                .row()
+                .child(span("test result: ", fg.alpha(0.55)))
+                .child(span("ok", term.ansi[2]))
+                .child(span(". 216 passed; 0 failed => 1.12s", fg)),
+        )
+}
+
+/// The chip naming the terminal font in its own face.
+fn font_chip(s: &Screen<'_>, family: &str) -> El {
+    let open = s
+        .st
+        .menu
+        .as_ref()
+        .is_some_and(|m| m.kind == MenuKind::FontPicker);
+    let id = s.acts.on("font-chip", Act::Open(MenuKind::FontPicker));
+    chip(s, id, family, open)
+        .child(
+            text(family, 13.0, c(look::GRAY_200))
+                .family(family)
+                .line_height(18.0)
+                .silent(),
+        )
+        .child(chevron(open))
+}
+
+/// Three Aa steps, then the exact size with a step down and up.
+fn size_control(s: &Screen<'_>, size: i64) -> El {
+    let mut steps = div()
+        .row()
+        .items_center()
+        .gap(2.0)
+        .p(2.0)
+        .rounded(4.0)
+        .bg(white(0.04))
+        .role(Role::RadioGroup, "Size");
+    for (v, glyph_px, label) in FONT_PRESETS {
+        let on = size == v;
+        let id = s.acts.on("font-preset", seg_act("fontSize", v));
+        let hot = s.ui.hover(id);
+        let fg = if on {
+            c(look::WHITE)
+        } else {
+            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
+        };
+        steps = steps.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .h(28.0)
+                .w(36.0)
+                .center()
+                .rounded(3.0)
+                .bg(white(if on { 0.1 } else { 0.0 }))
+                .role(Role::RadioButton, label)
+                .selected(on)
+                .child(
+                    text("Aa", glyph_px, fg)
+                        .line_height(glyph_px + 4.0)
+                        .silent(),
+                ),
+        );
+    }
+    let exact = div()
+        .row()
+        .items_center()
+        .gap(4.0)
+        .child(stepper(s, "\u{2212}", -1))
+        .child(
+            div().w(44.0).row().justify_center().child(
+                text(format!("{size} px"), 12.0, c(look::GRAY_300))
+                    .line_height(16.0)
+                    .silent(),
+            ),
+        )
+        .child(stepper(s, "+", 1));
+    div()
+        .row()
+        .items_center()
+        .gap(12.0)
+        .child(steps)
+        .child(exact)
+}
+
+/// Layout as three pictures, and the card height.
+fn session_rows(s: &Screen<'_>) -> Vec<El> {
+    let layout = defaults(s)
+        .and_then(|d| d.get("layoutMode"))
+        .and_then(Value::as_str)
+        .unwrap_or("grid");
+    let tiles = div()
+        .row()
+        .gap(8.0)
+        .role(Role::RadioGroup, "Layout")
+        .child(layout_tile(s, "grid", "Grid", layout))
+        .child(layout_tile(s, "tabs", "Tabs", layout))
+        .child(layout_tile(s, "list", "List", layout));
+    let h = s.st.settings.row_height.round();
+    let height = div()
+        .row()
+        .items_center()
+        .gap(12.0)
+        .child(slider(
+            ROW_SLIDER,
+            180.0,
+            (h - 100.0) / 500.0,
+            "Card height",
+        ))
+        .child(
+            div().w(48.0).row().justify_end().child(
+                text(format!("{h} px"), 12.0, c(look::GRAY_300))
+                    .line_height(16.0)
+                    .silent(),
+            ),
+        );
+    vec![
+        card_row(s, None, "Layout", None, tiles).py(12.0),
+        card_row(s, None, "Card height", None, height),
+    ]
+}
+
+/// A layout drawn small: four cards, one card under tabs, or a list
+/// beside the chosen session.
+fn layout_tile(s: &Screen<'_>, key: &str, label: &str, chosen: &str) -> El {
+    let block = |w: f32, h: f32, a: f32| div().size(w, h).rounded(2.0).bg(white(a));
+    let pair = || {
+        div()
+            .row()
+            .gap(4.0)
+            .child(block(47.0, 27.0, 0.12))
+            .child(block(47.0, 27.0, 0.12))
+    };
+    let pic = div()
+        .size(110.0, 70.0)
+        .rounded(4.0)
+        .clip()
+        .bg(c(look::SURFACE_BASE))
+        .p(6.0)
+        .gap(4.0);
+    let pic = match key {
+        "grid" => pic.col().child(pair()).child(pair()),
+        "tabs" => pic
+            .col()
+            .child(
+                div()
+                    .row()
+                    .gap(3.0)
+                    .child(block(24.0, 8.0, 0.24))
+                    .child(block(24.0, 8.0, 0.1))
+                    .child(block(24.0, 8.0, 0.1)),
+            )
+            .child(block(98.0, 46.0, 0.12)),
+        _ => pic
+            .row()
+            .child(
+                div()
+                    .col()
+                    .gap(3.0)
+                    .child(block(28.0, 8.0, 0.24))
+                    .child(block(28.0, 8.0, 0.1))
+                    .child(block(28.0, 8.0, 0.1))
+                    .child(block(28.0, 8.0, 0.1)),
+            )
+            .child(block(66.0, 58.0, 0.12)),
+    };
+    let act = seg_act("layoutMode", format!("\"{key}\""));
+    tile(s, "layout", act, pic, label, chosen == key, false, None)
+}
+
+/// Where a theme comes from, as the (i) popover's footer says it.
+fn provenance(t: &Theme) -> String {
+    if t.publisher.is_empty() {
+        format!("Vorn \u{b7} v{} \u{b7} bundled", env!("CARGO_PKG_VERSION"))
+    } else if t.version.is_empty() {
+        format!("{} \u{b7} installed", t.publisher)
+    } else {
+        format!("{} \u{b7} v{} \u{b7} installed", t.publisher, t.version)
+    }
+}
+
+/// The (i) popover: a theme's 16 terminal colours and where it comes from.
+pub(crate) fn theme_info(s: &Screen<'_>, id: &str) -> El {
+    let installed = s.st.settings.appearance.installed();
+    let Some(t) = crate::appearance::find(installed, id) else {
+        return div();
+    };
+    let mut grid = div().row().wrap_children().gap(5.0);
+    for (i, &rgb) in t.terminal.ansi.iter().enumerate() {
+        grid = grid.child(
+            div()
+                .size(26.0, 20.0)
+                .rounded(3.0)
+                .bg(Rgba::from(rgb))
+                .border(1.0, white(0.08))
+                .role(Role::Image, &format!("Colour {i}")),
+        );
+    }
+    let title = format!("{} \u{b7} terminal palette", t.name);
+    crate::ui::widgets::popover("Theme details")
+        .w(268.0)
+        .p(12.0)
+        .gap(10.0)
+        .child(
+            text(title, 12.0, c(look::GRAY_100))
+                .weight(600)
+                .line_height(16.0),
+        )
+        .child(grid)
+        .child(text(provenance(t), 11.0, c(look::GRAY_500)).line_height(14.0))
+}
+
+/// The theme chip's popover: search, filter chips, the tiles, and more
+/// themes from the catalog.
+pub(crate) fn theme_picker(s: &Screen<'_>, side: Look) -> El {
+    use crate::appearance::{self as a, ThemeFilter};
+    let installed = s.st.settings.appearance.installed();
+    let total = vorn_theme::bundled().len() + installed.len();
+    let filter = s.st.settings.theme_filter;
+    let chosen = chosen_theme(s, side).id.as_str();
+    let focus = if s.ui.focused(THEME_SEARCH) { 1.0 } else { 0.0 };
+    let placeholder = format!("Search {total} themes");
+    let style = TextStyle {
+        line_height: 16.0,
+        ..TextStyle::ui(12.0)
+    };
+    let search = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .pl(10.0)
+        .pr(8.0)
+        .py(6.0)
+        .rounded(4.0)
+        .bg(white(0.05))
+        .border(1.0, white(0.1).mix(white(0.2), focus))
+        .frames(THEME_SEARCH)
+        .child(glyph_icon(glyph::SEARCH, 12.0, c(look::GRAY_500)))
+        .child(div().grow().min_w0().child(field(
+            THEME_SEARCH,
+            &placeholder,
+            &placeholder,
+            style,
+            look::GRAY_200,
+        )));
+    let mut chips = div().row().gap(6.0).role(Role::RadioGroup, "Filter");
+    for f in ThemeFilter::ALL {
+        let on = filter == Some(f);
+        let id = s.acts.on("theme-filter", set(SetAct::ThemeFilter(f)));
+        let hot = if on { 0.0 } else { s.ui.hover(id) };
+        let ink = if on {
+            c(look::WHITE)
+        } else {
+            c(look::GRAY_400)
+        };
+        chips = chips.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .h(24.0)
+                .px(10.0)
+                .center()
+                .rounded(4.0)
+                .bg(white(if on { 0.12 } else { 0.04 }).mix(white(0.08), hot))
+                .border(1.0, white(if on { 0.16 } else { 0.06 }))
+                .role(Role::RadioButton, f.label())
+                .selected(on)
+                .child(text(f.label(), 12.0, ink).line_height(16.0).silent()),
+        );
+    }
+    let list = a::picker_themes(installed, filter, s.ui.edit_text(THEME_SEARCH));
+    let mut grid = div().row().wrap_children().gap(10.0);
+    if list.is_empty() {
+        grid = grid.child(
+            text("No themes match", 12.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .py(24.0),
+        );
+    }
+    for t in list {
+        grid = grid.child(picker_tile(s, t, t.id == chosen));
+    }
+    let more_id = s.acts.on("more-themes", set(SetAct::MoreThemes));
+    let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
+    let footer = div()
+        .row()
+        .items_center()
+        .justify_between()
+        .px(12.0)
+        .py(8.0)
+        .border_top(1.0, white(0.06))
+        .child(
+            div()
+                .id(more_id)
+                .on(Action::Click)
+                .role(Role::Link, "Get more themes")
+                .ring(2.0)
+                .child(
+                    text("Get more themes\u{2026}", 12.0, more_ink)
+                        .line_height(16.0)
+                        .silent(),
+                ),
+        )
+        .child(
+            text("Hover to preview", 11.0, c(look::GRAY_500))
+                .line_height(14.0)
+                .silent(),
+        );
+    crate::ui::widgets::popover("Themes")
+        .w(430.0)
+        .child(
+            div()
+                .col()
+                .gap(10.0)
+                .p(12.0)
+                .border_bottom(1.0, white(0.06))
+                .child(search)
+                .child(chips),
+        )
+        .child(
+            div()
+                .id(Id::new("theme-grid"))
+                .max_h(250.0)
+                .scroll_y()
+                .p(12.0)
+                .child(grid),
+        )
+        .child(footer)
+}
+
+/// One theme in the picker: its window colour with its accent and a
+/// terminal colour, its name under it.
+fn picker_tile(s: &Screen<'_>, t: &Theme, on: bool) -> El {
+    use vorn_theme::Token as T;
+    let id = theme_tile_id(&t.id);
+    s.acts.bind(id, set(SetAct::PickTheme(t.id.clone())));
+    let hot = s.ui.hover(id);
+    let dot = |color: Rgba| div().size(8.0, 8.0).rounded(4.0).bg(color);
+    let edge = if on {
+        c(look::BRONZO)
+    } else {
+        white(0.08).mix(white(0.24), hot)
+    };
+    let ink = if on {
+        c(look::WHITE)
     } else {
         c(look::GRAY_400)
     };
@@ -442,73 +896,105 @@ fn theme_tile(s: &Screen<'_>, key: &str, t: &vorn_theme::Theme, on: bool) -> El 
         .id(id)
         .on(Action::Click)
         .col()
-        .gap(6.0)
+        .gap(4.0)
+        .w(92.0)
         .role(Role::RadioButton, &t.name)
         .selected(on)
         .ring(4.0)
-        .child(preview)
-        .child(text(&t.name, 12.0, name).line_height(16.0).silent())
+        .child(
+            div()
+                .row()
+                .items_end()
+                .justify_end()
+                .gap(4.0)
+                .size(92.0, 44.0)
+                .p(6.0)
+                .rounded(4.0)
+                .bg(Rgba::from(t.get(T::SurfaceBase)))
+                .border(if on { 2.0 } else { 1.0 }, edge)
+                .child(dot(Rgba::from(t.get(T::Accent))))
+                .child(dot(Rgba::from(t.terminal.ansi[2]))),
+        )
+        .child(
+            text(&t.name, 11.0, ink)
+                .line_height(14.0)
+                .truncate()
+                .silent(),
+        )
 }
 
-/// The terminal palette now drawn: 16 ANSI colours, then foreground,
-/// background, cursor and selection, each with its value.
-fn palette_row() -> El {
-    let term = crate::ui::palette::terminal();
-    let swatch = |label: String, color: Rgba| {
-        div()
+/// The font chip's popover: each installed monospace family in its own
+/// face, with a sample line and whether it joins ligatures.
+pub(crate) fn font_picker(s: &Screen<'_>) -> El {
+    const SAMPLE: &str = "fn main() -> Result<()> {} != 0";
+    let current = s.ui.text.term_family();
+    let mut col = div()
+        .id(Id::new("font-list"))
+        .col()
+        .max_h(360.0)
+        .scroll_y()
+        .py(4.0)
+        .role(Role::ListBox, "Fonts");
+    let fonts = s.st.settings.fonts.as_deref().unwrap_or(&[]);
+    if fonts.is_empty() {
+        col = col.child(
+            text("No monospace fonts found", 12.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .px(12.0)
+                .py(8.0),
+        );
+    }
+    for f in fonts {
+        let v = Value::from(f.name.as_str());
+        let id = s
+            .acts
+            .on("font-option", seg_act(crate::appearance::FONT_FAMILY, v));
+        let on = f.name == current;
+        let hot = if on { 0.0 } else { s.ui.hover(id) };
+        let mut top = div()
             .row()
             .items_center()
-            .gap(6.0)
-            .w(144.0)
+            .justify_between()
             .child(
-                div()
-                    .size(14.0, 14.0)
-                    .rounded(3.0)
-                    .bg(color)
-                    .border(1.0, white(0.08)),
-            )
-            .child(
-                text(
-                    format!("{label} #{:06x}", color.to_hex()),
-                    12.0,
-                    c(look::GRAY_400),
-                )
-                .line_height(16.0)
-                .silent(),
-            )
-    };
-    let mut grid = div().row().wrap_children().gap(6.0).mt(12.0);
-    for (i, &color) in term.ansi.iter().enumerate() {
-        grid = grid.child(swatch(format!("{i:>2}"), color));
+                text(&f.name, 11.0, c(look::GRAY_400))
+                    .line_height(14.0)
+                    .silent(),
+            );
+        if f.ligatures {
+            top = top.child(
+                div().px(6.0).rounded(3.0).border(1.0, white(0.12)).child(
+                    text("Ligatures", 10.0, c(look::GRAY_400))
+                        .line_height(14.0)
+                        .silent(),
+                ),
+            );
+        }
+        col = col.child(
+            div()
+                .id(id)
+                .on(Action::Click)
+                .col()
+                .gap(4.0)
+                .mx(4.0)
+                .px(10.0)
+                .py(8.0)
+                .rounded(4.0)
+                .bg(white(if on { 0.08 } else { 0.0 }).mix(white(0.05), hot))
+                .role(Role::ListBoxOption, &f.name)
+                .selected(on)
+                .child(top)
+                .child(
+                    text(SAMPLE, 14.0, c(look::GRAY_100))
+                        .family(&f.name)
+                        .line_height(20.0)
+                        .truncate()
+                        .silent(),
+                ),
+        );
     }
-    for (label, color) in [
-        ("fg", term.foreground),
-        ("bg", term.background),
-        ("cursor", term.cursor),
-        ("sel", term.selection),
-    ] {
-        grid = grid.child(swatch(label.to_owned(), color));
-    }
-    div()
-        .col()
-        .py(16.0)
-        .child(
-            text("Terminal Palette", 14.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(20.0)
-                .role(Role::Label, "Terminal Palette"),
-        )
-        .child(
-            text(
-                "The theme's colours as the terminal draws them now",
-                12.0,
-                c(look::GRAY_500),
-            )
-            .line_height(16.0)
-            .mt(2.0)
-            .silent(),
-        )
-        .child(grid)
+    crate::ui::widgets::popover("Terminal font")
+        .w(330.0)
+        .child(col)
 }
 
 /// The terminal UI's Drawing choice: pixels look like the desktop app,
@@ -536,17 +1022,11 @@ fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {
         12.0,
     );
     let note = match (d.supported, d.pixels) {
-        (false, _) => "This terminal does not show images",
-        (true, true) => "Drawing pixels now",
-        (true, false) => "Drawing text now",
+        (false, _) => "Pixels look like the desktop app where the terminal shows images; Text works in any terminal. This terminal does not show images.",
+        (true, true) => "Pixels look like the desktop app where the terminal shows images; Text works in any terminal. Drawing pixels now.",
+        (true, false) => "Pixels look like the desktop app where the terminal shows images; Text works in any terminal. Drawing text now.",
     };
-    row(
-        "Drawing",
-        "Pixels look like the desktop app where the terminal shows images; Text works in any terminal",
-        Some(note),
-        choice,
-        false,
-    )
+    card_row(s, None, "Drawing", Some(note), choice)
 }
 
 /// The family's sigil in a 24 px frame.

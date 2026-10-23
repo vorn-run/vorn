@@ -305,6 +305,14 @@ pub const GROUP_NAME: Id = Id(0x6772_6f75_7000_0001);
 /// The workspace switcher's name field.
 pub const WS_NAME: Id = Id(0x7773_6e61_6d00_0001);
 
+/// The terminal font family Settings stores, empty for the bundled face.
+fn term_family(config: &Value) -> &str {
+    config
+        .pointer("/defaults/terminalFontFamily")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
+
 /// Sets `defaults.activeWorkspace`, making `defaults` when there is none.
 fn set_active_workspace(config: &mut Value, id: String) {
     if !config.get("defaults").is_some_and(Value::is_object) {
@@ -1579,6 +1587,9 @@ impl App {
                         | MenuKind::ViewOptions
                         | MenuKind::TaskOptions
                         | MenuKind::ExtInstall
+                        | MenuKind::ThemePicker(_)
+                        | MenuKind::ThemeInfo(_)
+                        | MenuKind::FontPicker
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
@@ -1616,6 +1627,15 @@ impl App {
                 ui.set_edit_text(MODEL_ID, "");
                 self.list_models(false);
             }
+            MenuKind::ThemePicker(look) => {
+                self.st.settings.theme_filter = Some(crate::appearance::ThemeFilter::of(*look));
+                ui.set_edit_text(crate::screen::settings::THEME_SEARCH, "");
+            }
+            MenuKind::FontPicker => {
+                if self.st.settings.fonts.is_none() {
+                    self.st.settings.fonts = Some(ui.text.monospace_families());
+                }
+            }
             MenuKind::LaunchWorktree => {
                 if let Some((_, path)) = self.composer_project() {
                     self.call(
@@ -1641,6 +1661,14 @@ impl App {
             .is_some_and(|m| m.kind == MenuKind::LaunchModel)
         {
             ui.set_focus(Some(MODEL_ID));
+        }
+        if self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| matches!(m.kind, MenuKind::ThemePicker(_)))
+        {
+            ui.set_focus(Some(crate::screen::settings::THEME_SEARCH));
         }
     }
 
@@ -2702,6 +2730,8 @@ impl App {
                                         | Act::AskDeleteWorkspace(_)
                                         | Act::DeleteWorkspace(_)
                                 )
+                            || matches!(m.kind, MenuKind::ThemePicker(_))
+                                && matches!(act, Act::Set(crate::settings::SetAct::ThemeFilter(_)))
                             || matches!(m.kind, MenuKind::SidebarOptions)
                                 && matches!(
                                     act,
@@ -3394,6 +3424,7 @@ impl App {
             .and_then(Value::as_f64)
             .map_or(look::TERM_FONT, |f| look::TERM_FONT * f as f32 / 13.0);
         ui.text.set_term_size(font);
+        ui.text.set_term_family(term_family(&self.store.config));
         self.size = size;
         self.agents.load(
             ui,
@@ -3716,6 +3747,26 @@ fn list(answer: Result<Value, RpcError>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stored_font_family_reaches_the_terminal_text() {
+        let mono = crate::ui::theme::font::MONO;
+        let mut text =
+            vornui::TextSystem::new(1.0, crate::ui::theme::font::UI, mono, look::TERM_FONT);
+        text.set_term_family(term_family(&json!({})));
+        assert_eq!(text.term_family(), mono);
+        let Some(other) = text
+            .monospace_families()
+            .iter()
+            .find(|f| f.name != mono)
+            .map(|f| f.name.clone())
+        else {
+            return;
+        };
+        let config = json!({ "defaults": { "terminalFontFamily": other } });
+        text.set_term_family(term_family(&config));
+        assert_eq!(text.term_family(), other);
+    }
 
     #[test]
     fn shortcuts_match_the_renderer() {

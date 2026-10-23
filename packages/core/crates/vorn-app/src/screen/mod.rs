@@ -213,6 +213,9 @@ impl Screen<'_> {
                 crate::state::MenuKind::GroupIcon(g) => sidebar::group_icon_picker(self, g),
                 crate::state::MenuKind::Workspace => sidebar::workspace_panel(self),
                 crate::state::MenuKind::SetShell => settings::shell_panel(self),
+                crate::state::MenuKind::ThemePicker(look) => settings::theme_picker(self, *look),
+                crate::state::MenuKind::ThemeInfo(ref id) => settings::theme_info(self, id),
+                crate::state::MenuKind::FontPicker => settings::font_picker(self),
                 crate::state::MenuKind::LaunchModel => composer::model_panel(self),
                 crate::state::MenuKind::Branch(_) => git::branch_panel(self),
                 crate::state::MenuKind::OpenIn(ref sid) => git::open_in_panel(self, sid),
@@ -249,6 +252,7 @@ impl Screen<'_> {
         let st = self.st;
         let body = match st.view {
             MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
+            MainView::Sessions if st.layout == LayoutMode::List => cards::list(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
             MainView::Workflows => workflows::view(self),

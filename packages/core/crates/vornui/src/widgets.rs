@@ -805,7 +805,7 @@ mod tests {
 }
 
 /// A [`toggle`]'s look alone, for a row that is the switch itself (a menu
-/// entry): 40 by 24, blue when on, a 16 px knob.
+/// entry): 40 by 24, Vorn's accent when on, a 16 px knob.
 pub fn switch_track(on: bool) -> El {
     div()
         .w(40.0)
@@ -813,7 +813,7 @@ pub fn switch_track(on: bool) -> El {
         .shrink0()
         .rounded(radius::FULL)
         .bg(if on {
-            color::BLUE_500.rgba()
+            color::BRONZO.rgba()
         } else {
             crate::theme::bright(0.1)
         })
@@ -829,7 +829,7 @@ pub fn switch_track(on: bool) -> El {
 /// A switch on a terminal: the word "on" or "off" in its track's colour.
 fn switch_cells(on: bool) -> El {
     let (fg, bg) = if on {
-        (color::WHITE.rgba(), color::BLUE_500.rgba())
+        (color::WHITE.rgba(), color::BRONZO.rgba())
     } else {
         (color::GRAY_400.rgba(), crate::theme::bright(0.1))
     };
@@ -842,7 +842,7 @@ fn switch_cells(on: bool) -> El {
         .child(text(if on { "on" } else { "off" }, 12.0, fg).silent())
 }
 
-/// `ToggleSwitch`: a `w-10 h-6` track, blue when on, its knob sliding
+/// `ToggleSwitch`: a `w-10 h-6` track, Vorn's accent when on, its knob sliding
 /// from `translate-x-1` to `translate-x-5`; on a terminal it reads "on" or
 /// "off". Clicking reports `Click` on `id`; the caller flips the value.
 pub fn toggle(ui: &Ui, id: Id, name: &str, on: bool, disabled: bool) -> El {

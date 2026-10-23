@@ -28,6 +28,9 @@ pub struct TextStyle {
     /// Letter spacing in ems (Tailwind's `tracking-wider` is 0.05).
     pub tracking: f32,
     pub italic: bool,
+    /// A face by family name instead of the UI or mono one (a font
+    /// picker's rows); [`intern_family`] gives the name.
+    pub family: Option<&'static str>,
 }
 
 impl TextStyle {
@@ -40,6 +43,7 @@ impl TextStyle {
             mono: false,
             tracking: 0.0,
             italic: false,
+            family: None,
         }
     }
 
@@ -145,6 +149,7 @@ struct ShapeKey {
     mono: bool,
     tracking: u32,
     italic: bool,
+    family: Option<&'static str>,
     max_w: Option<u32>,
 }
 
@@ -187,6 +192,12 @@ pub struct TextSystem {
     pub gamma: TextGamma,
     ui_family: &'static str,
     mono_family: &'static str,
+    /// The terminal's face: the mono one unless a setting names another.
+    term_family: &'static str,
+    /// The family last asked for, which may not be installed.
+    term_asked: &'static str,
+    /// [`TextSystem::monospace_families`]' answer, read once.
+    mono_list: Option<Rc<[MonoFamily]>>,
     shaped: HashMap<ShapeKey, Rc<Shaped>>,
     /// Shaped strings used since the last [`TextSystem::trim`].
     used: HashSet<*const Shaped>,
@@ -240,6 +251,9 @@ impl TextSystem {
             gamma: TextGamma::platform(),
             ui_family: ui,
             mono_family: mono,
+            term_family: mono,
+            term_asked: "",
+            mono_list: None,
             shaped: HashMap::new(),
             used: HashSet::new(),
             rasters: HashMap::new(),
@@ -259,11 +273,17 @@ impl TextSystem {
 
     fn attrs(&self, weight: u16, mono: bool, italic: bool) -> Attrs<'static> {
         let family = if mono {
-            Family::Name(self.mono_family)
+            self.mono_family
         } else {
-            Family::Name(self.ui_family)
+            self.ui_family
         };
-        let mut a = Attrs::new().family(family).weight(Weight(weight));
+        Self::attrs_in(family, weight, italic)
+    }
+
+    fn attrs_in(family: &'static str, weight: u16, italic: bool) -> Attrs<'static> {
+        let mut a = Attrs::new()
+            .family(Family::Name(family))
+            .weight(Weight(weight));
         if italic {
             a = a.style(Style::Italic);
         }
@@ -275,7 +295,7 @@ impl TextSystem {
     fn measure_cell(&mut self) -> Cell {
         let size = self.term_size * self.scale;
         let line = (size * 1.2).ceil();
-        let attrs = self.attrs(400, true, false);
+        let attrs = Self::attrs_in(self.term_family, 400, false);
         let mut b = Buffer::new(&mut self.fonts, Metrics::new(size, line));
         b.set_text("M", &attrs, Shaping::Advanced, None);
         b.shape_until_scroll(&mut self.fonts, false);
@@ -336,15 +356,19 @@ impl TextSystem {
             mono: style.mono,
             tracking: style.tracking.to_bits(),
             italic: style.italic,
+            family: style.family,
             max_w: max_w.map(|w| (w * s).ceil() as u32),
         };
         if let Some(sh) = self.shaped.get(&key) {
             self.used.insert(Rc::as_ptr(sh));
             return sh.clone();
         }
-        let mut attrs = self.attrs(style.weight, style.mono, style.italic);
+        let mut attrs = match style.family {
+            Some(f) => Self::attrs_in(f, style.weight, style.italic),
+            None => self.attrs(style.weight, style.mono, style.italic),
+        };
         let mut tracking = style.tracking;
-        if !style.mono && self.ui_family == crate::theme::font::SF {
+        if !style.mono && style.family.is_none() && self.ui_family == crate::theme::font::SF {
             tracking += crate::theme::font::sf_tracking(style.size, style.weight);
         }
         if tracking != 0.0 {
@@ -544,12 +568,101 @@ impl TextSystem {
         self.cell = self.measure_cell();
     }
 
+    /// The terminal's font family.
+    pub fn term_family(&self) -> &'static str {
+        self.term_family
+    }
+
+    /// Draws terminal cells in `family`, or in the mono face when it is
+    /// empty or not installed; cells are measured again when it changes.
+    pub fn set_term_family(&mut self, family: &str) {
+        // Called every frame: the face lookup runs only when the name changes.
+        if family == self.term_asked {
+            return;
+        }
+        self.term_asked = intern_family(family);
+        let family = if self.has_family(family) {
+            self.term_asked
+        } else {
+            self.mono_family
+        };
+        if family == self.term_family {
+            return;
+        }
+        self.term_family = family;
+        self.ascii.fill(None);
+        self.clusters.clear();
+        self.cell = self.measure_cell();
+    }
+
+    /// Whether a face of `family` is installed.
+    pub fn has_family(&self, family: &str) -> bool {
+        !family.is_empty()
+            && self
+                .fonts
+                .db()
+                .faces()
+                .any(|f| f.families.iter().any(|(n, _)| n == family))
+    }
+
+    /// The installed monospace families by name, each with whether it joins
+    /// `!=`, `->` and `=>` into ligatures; read once, then kept.
+    pub fn monospace_families(&mut self) -> Rc<[MonoFamily]> {
+        if let Some(list) = &self.mono_list {
+            return list.clone();
+        }
+        let mut names: Vec<String> = self
+            .fonts
+            .db()
+            .faces()
+            .filter(|f| f.monospaced)
+            .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
+            // A leading dot names a face the system keeps for itself.
+            .filter(|n| !n.starts_with('.'))
+            .collect();
+        if !names.iter().any(|n| n == self.mono_family) {
+            names.push(self.mono_family.to_owned());
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        names.dedup();
+        let list: Rc<[MonoFamily]> = names
+            .into_iter()
+            .map(|name| MonoFamily {
+                ligatures: self.joins(&name),
+                name,
+            })
+            .collect();
+        self.mono_list = Some(list.clone());
+        list
+    }
+
+    /// Whether `family` shapes a programming pair differently together than
+    /// apart: a ligature, or a contextual alternate that draws as one.
+    fn joins(&mut self, family: &str) -> bool {
+        let attrs = Attrs::new().family(Family::Name(family));
+        let mut glyphs = |text: &str| -> Vec<u16> {
+            let mut b = Buffer::new(&mut self.fonts, Metrics::new(16.0, 20.0));
+            b.set_text(text, &attrs, Shaping::Advanced, None);
+            b.shape_until_scroll(&mut self.fonts, false);
+            b.layout_runs()
+                .flat_map(|r| r.glyphs.iter().map(|g| g.glyph_id))
+                .collect()
+        };
+        ["!=", "->", "=>"].iter().any(|pair| {
+            let apart: Vec<u16> = pair
+                .chars()
+                .flat_map(|c| glyphs(c.encode_utf8(&mut [0; 4])))
+                .collect();
+            glyphs(pair) != apart
+        })
+    }
+
     /// A terminal cluster's pieces: in the terminal font, or for a symbol
     /// that is text by default (U+23FA) and came back from a colour emoji
     /// face, in the first text symbol face that draws it in one colour.
     fn shape_cell(&mut self, atlases: &mut Atlases, text: &str, style: u8) -> Vec<CellPiece> {
         let weight = if style & BOLD != 0 { 700 } else { 400 };
-        let attrs = self.attrs(weight, true, style & ITALIC != 0);
+        let attrs = Self::attrs_in(self.term_family, weight, style & ITALIC != 0);
         let pieces = self.shape_cell_in(atlases, text, &attrs);
         if !pieces.iter().any(|p| p.raster.colored) || !text_presentation(text) {
             return pieces;
@@ -646,6 +759,27 @@ impl TextSystem {
             put(scene, p, x, y, color, self.gamma);
         }
     }
+}
+
+/// An installed monospace family, as a font picker lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonoFamily {
+    pub name: String,
+    /// Draws programming pairs such as `->` as ligatures.
+    pub ligatures: bool,
+}
+
+/// `name` as a `&'static str`, kept once per distinct name: the few
+/// families a person picks live as long as the app.
+pub fn intern_family(name: &str) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(n) = names.iter().find(|n| **n == name) {
+        return n;
+    }
+    let leaked: &'static str = Box::leak(name.into());
+    names.push(leaked);
+    leaked
 }
 
 /// Faces with one-colour symbols, tried in order for a cluster that should
@@ -792,6 +926,42 @@ mod tests {
         assert!(!text_presentation("\u{231a}"));
         assert!(!text_presentation("\u{1f680}"));
         assert!(!text_presentation("\u{1f1fa}\u{1f1f8}"));
+    }
+
+    #[test]
+    fn a_family_is_interned_once() {
+        let a = intern_family("Some Mono");
+        let b = intern_family(&String::from("Some Mono"));
+        assert!(std::ptr::eq(a, b));
+    }
+
+    #[test]
+    fn the_terminal_family_falls_back_to_mono_when_missing() {
+        let mono = crate::theme::font::MONO;
+        let mut t = TextSystem::new(1.0, crate::theme::font::UI, mono, 12.0);
+        assert_eq!(t.term_family(), mono);
+        t.set_term_family("No Such Family 1234");
+        assert_eq!(t.term_family(), mono);
+        t.set_term_family("");
+        assert_eq!(t.term_family(), mono);
+    }
+
+    #[test]
+    fn the_terminal_cells_use_the_family_set() {
+        let mono = crate::theme::font::MONO;
+        let mut t = TextSystem::new(1.0, crate::theme::font::UI, mono, 12.0);
+        let list = t.monospace_families();
+        assert!(list.iter().any(|f| f.name == mono));
+        assert!(list.windows(2).all(|w| w[0].name != w[1].name));
+        let Some(other) = list.iter().find(|f| f.name != mono) else {
+            return;
+        };
+        t.set_term_family(&other.name);
+        assert_eq!(t.term_family(), other.name);
+        assert_eq!(
+            TextSystem::attrs_in(t.term_family(), 400, false).family,
+            Family::Name(other.name.as_str())
+        );
     }
 
     #[test]

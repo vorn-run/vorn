@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::Value;
-use vorn_theme::{Chrome, Materials, Prefs, Scheme, Section, Theme};
+use vorn_theme::{Appearance as Look, Chrome, Materials, Prefs, Scheme, Section, Theme};
 use vornui::palette::{self, Palette};
 
 /// The `defaults` keys Appearance stores.
@@ -16,6 +16,123 @@ pub const DARK: &str = "darkTheme";
 pub const CHROME: &str = "interfaceStyle";
 pub const CONTRAST: &str = "contrastCorrection";
 pub const MATERIALS: &str = "materials";
+/// The terminal's font family; the bundled monospace face when unset.
+pub const FONT_FAMILY: &str = "terminalFontFamily";
+
+/// One theme row of Settings › Appearance: its label, the side of the
+/// scheme it picks for, and the key that choice is stored under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemeRow {
+    pub label: &'static str,
+    pub look: Look,
+    pub key: &'static str,
+}
+
+const LIGHT_ROW: ThemeRow = ThemeRow {
+    label: "Light Theme",
+    look: Look::Light,
+    key: LIGHT,
+};
+const DARK_ROW: ThemeRow = ThemeRow {
+    label: "Dark Theme",
+    look: Look::Dark,
+    key: DARK,
+};
+
+/// The theme rows `scheme` shows: one Theme row for a fixed scheme, a
+/// light and a dark one when it follows the system.
+pub fn theme_rows(scheme: Scheme) -> &'static [ThemeRow] {
+    match scheme {
+        Scheme::System => &[LIGHT_ROW, DARK_ROW],
+        Scheme::Light => &[ThemeRow {
+            label: "Theme",
+            ..LIGHT_ROW
+        }],
+        Scheme::Dark => &[ThemeRow {
+            label: "Theme",
+            ..DARK_ROW
+        }],
+    }
+}
+
+/// What picking theme `id`, drawn on a `look` window, writes: the theme
+/// under its side's key, and under a fixed scheme of the other side the
+/// scheme too, so the one Theme row shows the theme picked.
+pub fn pick_theme(scheme: Scheme, id: &str, look: Look) -> Vec<(&'static str, Value)> {
+    let (key, side) = match look {
+        Look::Light => (LIGHT, Scheme::Light),
+        Look::Dark => (DARK, Scheme::Dark),
+    };
+    let mut out = vec![(key, Value::from(id))];
+    if scheme != Scheme::System && scheme != side {
+        out.push((SCHEME, Value::from(side.key())));
+    }
+    out
+}
+
+/// The theme picker's filter chips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ThemeFilter {
+    Dark,
+    Light,
+    /// The themes extensions brought.
+    Installed,
+}
+
+impl ThemeFilter {
+    pub const ALL: [ThemeFilter; 3] = [ThemeFilter::Dark, ThemeFilter::Light, ThemeFilter::Installed];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeFilter::Dark => "Dark",
+            ThemeFilter::Light => "Light",
+            ThemeFilter::Installed => "Installed",
+        }
+    }
+
+    /// The chip a picker for a `look` row opens on.
+    pub fn of(look: Look) -> ThemeFilter {
+        match look {
+            Look::Dark => ThemeFilter::Dark,
+            Look::Light => ThemeFilter::Light,
+        }
+    }
+}
+
+/// The themes the picker lists: Vorn's, then the installed, kept when they
+/// pass `filter` and their name holds every word of `query`.
+pub fn picker_themes<'a>(
+    installed: &'a [Theme],
+    filter: Option<ThemeFilter>,
+    query: &str,
+) -> Vec<&'a Theme> {
+    let q = query.to_lowercase();
+    let words: Vec<&str> = q.split_whitespace().collect();
+    vorn_theme::bundled()
+        .iter()
+        .map(|t| (t, false))
+        .chain(installed.iter().map(|t| (t, true)))
+        .filter(|&(t, extra)| match filter {
+            None => true,
+            Some(ThemeFilter::Dark) => t.appearance == Look::Dark,
+            Some(ThemeFilter::Light) => t.appearance == Look::Light,
+            Some(ThemeFilter::Installed) => extra,
+        })
+        .filter(|(t, _)| {
+            let name = t.name.to_lowercase();
+            words.iter().all(|w| name.contains(w))
+        })
+        .map(|(t, _)| t)
+        .collect()
+}
+
+/// A theme by id, Vorn's before the installed.
+pub fn find<'a>(installed: &'a [Theme], id: &str) -> Option<&'a Theme> {
+    vorn_theme::bundled()
+        .iter()
+        .chain(installed)
+        .find(|t| t.id == id)
+}
 
 /// The appearance settings stored in `defaults`; the default for any value
 /// missing or unknown.
@@ -63,7 +180,11 @@ pub fn listed_theme(entry: &Value) -> Option<Theme> {
     let id = entry.get("id")?.as_str()?;
     let name = entry.get("title").and_then(Value::as_str).unwrap_or(id);
     let section = Section::deserialize(entry.get("theme")?).ok()?;
-    Theme::from_section(id, name, &section).ok()
+    let mut theme = Theme::from_section(id, name, &section).ok()?;
+    let text = |k: &str| entry.get(k).and_then(Value::as_str).unwrap_or_default();
+    text("publisher").clone_into(&mut theme.publisher);
+    text("version").clone_into(&mut theme.version);
+    Some(theme)
 }
 
 /// Everything the palette depends on, so it is resolved again only when one changes.
@@ -159,6 +280,60 @@ mod tests {
     use vorn_theme::Token;
 
     #[test]
+    fn a_fixed_scheme_shows_one_theme_row_and_system_shows_both() {
+        let rows = |s| -> Vec<(&str, Look, &str)> {
+            theme_rows(s).iter().map(|r| (r.label, r.look, r.key)).collect()
+        };
+        assert_eq!(rows(Scheme::Dark), [("Theme", Look::Dark, DARK)]);
+        assert_eq!(rows(Scheme::Light), [("Theme", Look::Light, LIGHT)]);
+        assert_eq!(
+            rows(Scheme::System),
+            [("Light Theme", Look::Light, LIGHT), ("Dark Theme", Look::Dark, DARK)]
+        );
+    }
+
+    #[test]
+    fn picking_a_theme_of_the_other_side_moves_a_fixed_scheme_to_it() {
+        assert_eq!(
+            pick_theme(Scheme::Dark, "nord", Look::Dark),
+            [(DARK, json!("nord"))]
+        );
+        assert_eq!(
+            pick_theme(Scheme::Dark, "solarized-light", Look::Light),
+            [(LIGHT, json!("solarized-light")), (SCHEME, json!("light"))]
+        );
+        assert_eq!(
+            pick_theme(Scheme::System, "solarized-light", Look::Light),
+            [(LIGHT, json!("solarized-light"))]
+        );
+    }
+
+    #[test]
+    fn the_picker_filters_by_side_origin_and_name() {
+        let acme = listed_theme(&json!({
+            "kind": "themes", "id": "acme", "title": "Acme Night",
+            "theme": { "appearance": "dark", "terminal": {
+                "foreground": "#eeeeee", "background": "#101010",
+                "ansi": ["#000000", "#cc0000", "#00cc00", "#cccc00", "#0000cc", "#cc00cc", "#00cccc", "#cccccc",
+                         "#555555", "#ff5555", "#55ff55", "#ffff55", "#5555ff", "#ff55ff", "#55ffff", "#ffffff"] } }
+        }))
+        .unwrap();
+        let installed = [acme];
+        let ids = |f, q| -> Vec<String> {
+            picker_themes(&installed, f, q).iter().map(|t| t.id.clone()).collect()
+        };
+        let all = ids(None, "");
+        assert_eq!(all.len(), vorn_theme::bundled().len() + 1);
+        assert_eq!(ids(Some(ThemeFilter::Installed), ""), ["acme"]);
+        assert!(ids(Some(ThemeFilter::Light), "")
+            .iter()
+            .all(|id| find(&installed, id).unwrap().appearance == Look::Light));
+        assert!(ids(Some(ThemeFilter::Dark), "").contains(&"acme".to_owned()));
+        assert_eq!(ids(None, "NIGHT acme"), ["acme"]);
+        assert!(ids(Some(ThemeFilter::Light), "acme").is_empty());
+    }
+
+    #[test]
     fn stored_choices_are_read() {
         let d = json!({ "colorScheme": "light", "darkTheme": "nord", "materials": "native" });
         let p = prefs(Some(&d));
@@ -177,7 +352,7 @@ mod tests {
     #[test]
     fn a_listed_theme_reads_as_vornd_sent_it() {
         let entry = json!({
-            "kind": "themes", "id": "acme", "title": "Acme",
+            "kind": "themes", "id": "acme", "title": "Acme", "publisher": "Acme Co", "version": "2.1.0",
             "theme": { "appearance": "dark", "terminal": {
                 "foreground": "#eeeeee", "background": "#101010",
                 "ansi": ["#000000", "#cc0000", "#00cc00", "#cccc00", "#0000cc", "#cc00cc", "#00cccc", "#cccccc",
@@ -186,6 +361,7 @@ mod tests {
         let t = listed_theme(&entry).expect("reads");
         assert_eq!((t.id.as_str(), t.name.as_str()), ("acme", "Acme"));
         assert_eq!(t.terminal.background.to_u32(), 0x101010);
+        assert_eq!((t.publisher.as_str(), t.version.as_str()), ("Acme Co", "2.1.0"));
     }
 
     #[test]

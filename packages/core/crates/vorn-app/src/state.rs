@@ -74,12 +74,14 @@ impl Sort {
     }
 }
 
-/// Cards in a grid, or one at a time under tabs (`defaults.layoutMode`).
+/// Cards in a grid, one at a time under tabs, or one per row in a list
+/// (`defaults.layoutMode`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum LayoutMode {
     #[default]
     Grid,
     Tabs,
+    List,
 }
 
 impl LayoutMode {
@@ -88,7 +90,16 @@ impl LayoutMode {
             .pointer("/defaults/layoutMode")
             .and_then(Value::as_str)
         {
-            Some("tabs") => LayoutMode::Tabs,
+            Some(v) => LayoutMode::from_key(v),
+            None => LayoutMode::Grid,
+        }
+    }
+
+    /// The mode a stored `layoutMode` names; Grid for any other.
+    pub fn from_key(key: &str) -> LayoutMode {
+        match key {
+            "tabs" => LayoutMode::Tabs,
+            "list" => LayoutMode::List,
             _ => LayoutMode::Grid,
         }
     }
@@ -97,6 +108,7 @@ impl LayoutMode {
         match self {
             LayoutMode::Grid => "grid",
             LayoutMode::Tabs => "tabs",
+            LayoutMode::List => "list",
         }
     }
 }
@@ -209,6 +221,12 @@ pub enum MenuKind {
     SetShell,
     /// A settings `<select>`, by the default it writes.
     SetSelect(String),
+    /// Settings › Appearance's theme picker, for a theme row of that scheme.
+    ThemePicker(vorn_theme::Appearance),
+    /// A theme's terminal palette, publisher and version, by theme id.
+    ThemeInfo(String),
+    /// Settings › Appearance's terminal font list.
+    FontPicker,
     /// A session's branch switcher.
     Branch(String),
     /// The editors a session's project opens in.

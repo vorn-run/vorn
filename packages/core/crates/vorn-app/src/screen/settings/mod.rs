@@ -7,8 +7,8 @@ mod pages;
 
 pub use agents::agent_field_id;
 pub use pages::theme_tile_id;
-pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
-pub(crate) use pages::{select_items, shell_panel};
+pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
+pub(crate) use pages::{font_picker, select_items, shell_panel, theme_info, theme_picker};
 
 use super::{c, white, Screen};
 use crate::act::Act;
@@ -392,6 +392,70 @@ pub(in crate::screen) fn row(
         el = el.opacity(0.4);
     }
     el
+}
+
+/// A title above a [`card`]: `text-[13px] font-semibold`, faint.
+pub(in crate::screen) fn section(title: &str) -> El {
+    text(title, 13.0, c(look::GRAY_500))
+        .weight(600)
+        .line_height(18.0)
+        .pl(4.0)
+        .mt(24.0)
+        .mb(8.0)
+        .role(Role::Heading, title)
+}
+
+/// Rows grouped on an inset card: a faint fill and border, a hairline
+/// between rows.
+pub(in crate::screen) fn card(rows: Vec<El>) -> El {
+    let mut el = div()
+        .col()
+        .rounded(4.0)
+        .bg(white(0.03))
+        .border(1.0, white(0.06));
+    for (i, r) in rows.into_iter().enumerate() {
+        el = el.child(if i == 0 { r } else { r.border_top(1.0, white(0.06)) });
+    }
+    el
+}
+
+/// One row of a [`card`]: an optional icon and the label at the left,
+/// `control` at the right; `tip` explains the row when its label is hovered.
+pub(in crate::screen) fn card_row(
+    s: &Screen<'_>,
+    mark: Option<El>,
+    label: &str,
+    tip: Option<&str>,
+    control: El,
+) -> El {
+    let name = text(label, 13.0, c(look::GRAY_200))
+        .line_height(18.0)
+        .role(Role::Label, label);
+    let name = match tip {
+        Some(t) => {
+            let id = Id::new("row-tip").child(&label);
+            crate::ui::tooltip(s.ui, name, id, t, None)
+        }
+        None => name,
+    };
+    div()
+        .row()
+        .items_center()
+        .justify_between()
+        .gap(16.0)
+        .min_h(48.0)
+        .px(14.0)
+        .py(8.0)
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .min_w0()
+                .child_if(mark)
+                .child(name),
+        )
+        .child(control)
 }
 
 /// The one switch, [`widgets::toggle`](crate::ui::widgets::toggle).

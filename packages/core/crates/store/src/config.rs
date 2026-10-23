@@ -201,6 +201,7 @@ impl Store {
                 "interfaceStyle",
                 "contrastCorrection",
                 "materials",
+                "terminalFontFamily",
             ],
         );
         Ok(out)
