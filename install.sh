@@ -14,6 +14,42 @@ get_latest_version() {
     | sed 's/.*"tag_name": *"//;s/".*//'
 }
 
+# The release's update feed lists every file's SHA-256 (`checksums`), and Vorn
+# itself checks the feed's signature. A download that does not match is removed.
+FEED_NAME="vorn-update.json"
+
+fetch_feed() {
+  if ! curl -fsSL -o "$1" "https://github.com/${REPO}/releases/download/${VERSION}/${FEED_NAME}"; then
+    echo "Error: ${VERSION} has no ${FEED_NAME} to check the download against."
+    exit 1
+  fi
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+# verify FILE NAME FEED: FILE must hash to what FEED lists for NAME.
+verify() {
+  want="$(grep -F "\"$2\": \"" "$3" | head -n 1 | sed 's/.*": *"\([0-9a-fA-F]*\)".*/\1/')"
+  if [ -z "$want" ]; then
+    rm -f "$1"
+    echo "Error: ${VERSION}'s ${FEED_NAME} lists no checksum for $2, so it was not installed."
+    exit 1
+  fi
+  got="$(sha256_of "$1")"
+  if [ "$got" != "$want" ]; then
+    rm -f "$1"
+    echo "Error: $2 does not match its published SHA-256, so it was not installed."
+    exit 1
+  fi
+  echo "Checked $2 against its published SHA-256."
+}
+
 # -F: a directory holding a dot -- ~/.local/bin, say -- is not a regex.
 on_path() {
   echo ":$PATH:" | grep -qF ":$1:"
@@ -66,6 +102,8 @@ install_server() {
       echo "Error: ${VERSION} has no ${ARCHIVE}. Set VORN_VERSION=vX.Y.Z to a release that lists one."
       exit 1
     fi
+    fetch_feed "${TMPDIR_INSTALL}/${FEED_NAME}"
+    verify "${TMPDIR_INSTALL}/${ARCHIVE}" "$ARCHIVE" "${TMPDIR_INSTALL}/${FEED_NAME}"
   fi
   tar -xzf "${TMPDIR_INSTALL}/${ARCHIVE}" -C "$TMPDIR_INSTALL"
 
@@ -145,6 +183,8 @@ case "$OS" in
 
     echo "Downloading ${ARTIFACT}..."
     curl -fSL --progress-bar -o "${TMPDIR_INSTALL}/${ARTIFACT}" "$URL"
+    fetch_feed "${TMPDIR_INSTALL}/${FEED_NAME}"
+    verify "${TMPDIR_INSTALL}/${ARTIFACT}" "$ARTIFACT" "${TMPDIR_INSTALL}/${FEED_NAME}"
 
     echo "Mounting DMG..."
     MOUNT_POINT="$(hdiutil attach "${TMPDIR_INSTALL}/${ARTIFACT}" -nobrowse | tail -1 | sed 's/.*	//')"
@@ -197,9 +237,14 @@ SHIM
     LIB_DIR="${HOME}/.local/lib/vorn"
 
     mkdir -p "$BIN_DIR" "$LIB_DIR"
+    TMPDIR_INSTALL="$(mktemp -d)"
 
     echo "Downloading ${ARTIFACT}..."
-    curl -fSL --progress-bar -o "${LIB_DIR}/${APP_NAME}.AppImage" "$URL"
+    curl -fSL --progress-bar -o "${TMPDIR_INSTALL}/${ARTIFACT}" "$URL"
+    fetch_feed "${TMPDIR_INSTALL}/${FEED_NAME}"
+    verify "${TMPDIR_INSTALL}/${ARTIFACT}" "$ARTIFACT" "${TMPDIR_INSTALL}/${FEED_NAME}"
+    mv "${TMPDIR_INSTALL}/${ARTIFACT}" "${LIB_DIR}/${APP_NAME}.AppImage"
+    rm -rf "$TMPDIR_INSTALL"
     chmod +x "${LIB_DIR}/${APP_NAME}.AppImage"
 
     cat > "${BIN_DIR}/vorn" <<'SHIM'

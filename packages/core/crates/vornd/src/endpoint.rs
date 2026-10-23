@@ -312,10 +312,20 @@ impl Daemon {
             return;
         };
         let bridge_origin = format!("http://{addr}");
+        let n = Arc::clone(native);
+        let config = tokio::task::spawn_blocking(move || {
+            crate::native::config::with_store(&n, |store| store.load_config())
+        })
+        .await;
+        if let Ok(Ok(config)) = config {
+            native.config_is(&config);
+        }
+        let confiner = native.confiner(&db_dir).await;
         let settings = HostSettings {
             base_env: native.child_env(),
             bridge_origin: bridge_origin.clone(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
+            confiner: confiner.clone(),
         };
         // Connectors and extensions are one kind of package, kept in one store.
         let store = PackStore::new(db_dir.join("connectors"));
@@ -336,6 +346,7 @@ impl Daemon {
         router_settings.preferences = Some(db_dir.join("extension-preferences.json"));
         let installs = native.installs(&db_dir);
         router_settings.trust = installs.trust().clone();
+        router_settings.confiner = confiner;
         let router = Router::new(
             store.clone(),
             lifecycle,
@@ -547,8 +558,16 @@ async fn handle(
     req: Request<Incoming>,
     peer: SocketAddr,
 ) -> Result<Response<Body>, Infallible> {
-    if !peer.ip().is_loopback() && !public_route(req.uri().path()) {
-        return Ok(crate::serve::http::not_found());
+    if !public_route(req.uri().path()) {
+        if !peer.ip().is_loopback() {
+            return Ok(crate::serve::http::not_found());
+        }
+        if !loopback_host(req.headers()) {
+            return Ok(plain(
+                StatusCode::FORBIDDEN,
+                "this route answers only requests addressed to this machine",
+            ));
+        }
     }
     let serving = daemon.serving.get().cloned();
     if is_websocket_upgrade(req.headers()) {
@@ -567,6 +586,9 @@ async fn handle(
                 serving.data_dir(),
             ));
         }
+    }
+    if is_report_path(path) && !reader_of_reports(&daemon, req.headers(), peer).await {
+        return Ok(plain(StatusCode::UNAUTHORIZED, "a token is required"));
     }
     #[cfg(feature = "engine")]
     if path == crate::engine::SESSIONS_PATH && req.method() == Method::GET {
@@ -610,6 +632,44 @@ async fn handle(
         return Ok(mcp(&daemon, req).await);
     }
     Ok(crate::serve::http::not_found())
+}
+
+/// Whether the request's bearer may read vornd's reports: the local token,
+/// or a device token in use on this machine (a browser here holds one).
+async fn reader_of_reports(daemon: &Daemon, headers: &HeaderMap, peer: SocketAddr) -> bool {
+    if daemon.is_desktop(headers) {
+        return true;
+    }
+    let Some(raw) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(vorn_reach::token::bearer_from)
+        .map(str::to_owned)
+    else {
+        return false;
+    };
+    let native = Arc::clone(&daemon.native);
+    tokio::task::spawn_blocking(move || native.authenticate(&raw, peer.ip()))
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+}
+
+/// vornd's own reports, which only a holder of a token reads.
+fn is_report_path(path: &str) -> bool {
+    path == HEALTH_PATH || path == "/vornd/sessions"
+}
+
+/// Whether the request's one `Host` names this machine by a loopback address.
+fn loopback_host(headers: &HeaderMap) -> bool {
+    let mut hosts = headers.get_all(header::HOST).iter();
+    match (hosts.next(), hosts.next()) {
+        (Some(host), None) => host
+            .to_str()
+            .is_ok_and(vorn_reach::origin::is_loopback_host),
+        _ => false,
+    }
 }
 
 /// The routes a peer on another machine may reach.
@@ -958,6 +1018,24 @@ mod tests {
         for this in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
             assert!(!must_use_tls(this.parse().unwrap()), "{this}");
         }
+    }
+
+    #[test]
+    fn a_loopback_route_wants_one_loopback_host() {
+        let with = |hosts: &[&'static str]| {
+            let mut h = HeaderMap::new();
+            for v in hosts {
+                h.append(header::HOST, HeaderValue::from_static(v));
+            }
+            loopback_host(&h)
+        };
+        assert!(with(&["127.0.0.1:4310"]));
+        assert!(with(&["localhost:4310"]));
+        assert!(!with(&[]));
+        assert!(!with(&["rebound.example:4310"]));
+        assert!(!with(&["127.0.0.1:4310", "rebound.example"]));
+        assert!(is_report_path("/vornd/health") && is_report_path("/vornd/sessions"));
+        assert!(!is_report_path("/health"));
     }
 
     #[test]

@@ -30,6 +30,7 @@ fn fixture(mode: &str) -> Option<SdkLaunch> {
         },
         source: Source::Command,
         protocol: None,
+        redact: Vec::new(),
     })
 }
 

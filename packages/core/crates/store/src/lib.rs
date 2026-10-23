@@ -36,7 +36,7 @@ pub use agents::AgentSettings;
 pub use config::VIEWER_SETTING_KEYS;
 pub use connectors::MAX_INBOX_ATTEMPTS;
 pub use hosts::{remote_host, Placement, ProjectHost, ProjectHosts};
-pub use sql::now_iso;
+pub use sql::{now_iso, parse_iso_millis};
 pub use tokens::DeviceTokens;
 pub use worktrees::WorktreeSettings;
 

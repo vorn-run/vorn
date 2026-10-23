@@ -133,6 +133,7 @@ async fn every_connector_installs_from_git_and_passes_its_recorded_checks() {
             },
             source: Source::Pack,
             protocol: pack.manifest.protocol,
+            redact: Vec::new(),
         };
         let client = connector::open(&launch, &id, "test", Timeouts::default())
             .await

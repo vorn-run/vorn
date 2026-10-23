@@ -202,6 +202,10 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Why a link was refused: its manifest changed after its sheet was read.
+pub const LINK_CHANGED: &str =
+    "The folder's manifest changed after you read it; read what it asks for again before linking";
+
 /// A command an extension runs, and when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SheetCommand {
@@ -249,6 +253,10 @@ pub struct Sheet {
     pub runs_as_you: String,
     /// What the person types to confirm.
     pub confirm: String,
+    /// A linked folder's manifest as this sheet read it (sha256): linking
+    /// confirms only that one, never one written since.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<String>,
 }
 
 #[derive(Debug)]
@@ -734,6 +742,7 @@ impl Installs {
                 m.name
             ),
             confirm: m.id.clone(),
+            manifest: None,
         }
     }
 
@@ -883,14 +892,25 @@ impl Installs {
     /// Describes what linking `folder` would run, reading it where it is;
     /// nothing is staged, so the sheet carries no token.
     pub fn inspect_link(&self, folder: &Path) -> Result<Sheet, String> {
-        let (folder, manifest) = self.linkable(folder)?;
-        Ok(self.sheet("", &manifest, &json!({ "linked": folder })))
+        let (folder, manifest, read) = self.linkable(folder)?;
+        let mut sheet = self.sheet("", &manifest, &json!({ "linked": folder }));
+        sheet.manifest = Some(read);
+        Ok(sheet)
     }
 
     /// Runs `folder` in place as its manifest's extension; edits are live.
     pub fn link(&self, folder: &Path) -> Result<InstalledPack, String> {
+        self.link_as_read(folder, None)
+    }
+
+    /// [`Installs::link`], refused when the manifest is no longer the one
+    /// the sheet read (`read`, its sha256): the person confirmed that one.
+    pub fn link_as_read(&self, folder: &Path, read: Option<&str>) -> Result<InstalledPack, String> {
         let _placing = lock(&self.placing);
-        let (folder, manifest) = self.linkable(folder)?;
+        let (folder, manifest, now) = self.linkable(folder)?;
+        if read.is_some_and(|r| r != now) {
+            return Err(LINK_CHANGED.to_owned());
+        }
         let home = self.store.root().join(&manifest.id);
         if let Some(current) = read_current(&home) {
             if current.get("linked").and_then(Value::as_str).map(Path::new) != Some(&folder) {
@@ -901,7 +921,11 @@ impl Installs {
             }
         }
         fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-        let mut current = json!({ "linked": folder, "installedAt": now_ms() });
+        let mut current = json!({
+            "linked": folder,
+            "installedAt": now_ms(),
+            "linkedDeclares": crate::pack::declared(&manifest),
+        });
         if let Some(agent) = manifest.agent_id() {
             current["linkedAgent"] = json!(agent);
             let text = fs::read(folder.join(file::FILE)).map_err(|e| e.to_string())?;
@@ -1086,14 +1110,18 @@ fn keep_only(dir: &Path, path: &str) -> Result<(), String> {
 
 impl Installs {
     /// `folder` resolved, and the manifest it would be linked as.
-    fn linkable(&self, folder: &Path) -> Result<(PathBuf, Manifest), String> {
+    /// The folder, its manifest and the sha256 of the bytes it was read from, read once.
+    fn linkable(&self, folder: &Path) -> Result<(PathBuf, Manifest, String), String> {
         let folder = folder
             .canonicalize()
             .map_err(|e| format!("cannot link {}: {e}", folder.display()))?;
         walk(&folder, "", &mut Vec::new()).map_err(|e| format!("cannot link: {e}"))?;
-        let manifest = read_dir_manifest(&folder)?;
+        let toml = folder.join(file::FILE);
+        let text = fs::read_to_string(&toml)
+            .map_err(|_| format!("{} has no {}", folder.display(), file::FILE))?;
+        let manifest = file::parse(&text).map_err(|e| e.to_string())?;
         self.admit(&manifest, None)?;
-        Ok((folder, manifest))
+        Ok((folder, manifest, sha256_hex(text.as_bytes())))
     }
 
     fn read_staged_manifest(
@@ -1942,6 +1970,75 @@ migrations = "migrations"
         }
         let left: Vec<_> = fs::read_dir(root.path()).unwrap().flatten().collect();
         assert!(left.is_empty(), "{left:?}");
+    }
+
+    #[test]
+    fn a_link_confirms_only_the_manifest_its_sheet_read() {
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "");
+        fs::write(folder.path().join(file::FILE), &manifest).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let sheet = installs.inspect_link(folder.path()).unwrap();
+        let read = sheet.manifest.clone().unwrap();
+        // Widened between reading the sheet and confirming it.
+        fs::write(
+            folder.path().join(file::FILE),
+            manifest.replace(
+                "\"api.example.com\"",
+                "\"api.example.com\", \"more.example\"",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            installs
+                .link_as_read(folder.path(), Some(&read))
+                .unwrap_err(),
+            LINK_CHANGED
+        );
+        assert!(installs.store.describe("test.marker").is_none());
+        let again = installs.inspect_link(folder.path()).unwrap();
+        let pack = installs
+            .link_as_read(folder.path(), again.manifest.as_deref())
+            .unwrap();
+        assert_eq!(pack.manifest.declares.network.len(), 2);
+    }
+
+    #[test]
+    fn a_linked_manifest_gains_nothing_it_did_not_ask_for_when_linked() {
+        let folder = tempfile::tempdir().unwrap();
+        let manifest = MANIFEST.replace("[build]\ncommand = [\"sh\", \"build.sh\"]\n", "");
+        fs::write(folder.path().join(file::FILE), &manifest).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(PackStore::new(root.path()), "git", env());
+        let pack = installs.link(folder.path()).unwrap();
+        assert!(pack.widened.is_empty());
+        let uses = pack.manifest.permissions.clone();
+        // Rewritten in place, as a program with the folder in its project could.
+        let wider = manifest
+            .replace(
+                "network = [\"api.example.com\"]",
+                "network = [\"api.example.com\", \"elsewhere.example\"]",
+            )
+            .replace(
+                "uses = [\"sessions.read\",",
+                "uses = [\"terminal.send\", \"sessions.read\",",
+            );
+        fs::write(folder.path().join(file::FILE), wider).unwrap();
+        let held = installs.store.inspect("test.marker").unwrap();
+        // Named, so the app and `vorn ext list` can say what it asks for.
+        assert_eq!(held.widened, ["elsewhere.example", "terminal.send"]);
+        assert_eq!(
+            serde_json::to_value(&held).unwrap()["widened"],
+            json!(["elsewhere.example", "terminal.send"])
+        );
+        assert_eq!(held.manifest.declares.network, ["api.example.com"]);
+        assert_eq!(held.manifest.permissions, uses);
+        // Linked again, through the sheet, the new set is given.
+        installs.link(folder.path()).unwrap();
+        let relinked = installs.store.inspect("test.marker").unwrap();
+        assert!(relinked.widened.is_empty());
+        assert_eq!(relinked.manifest.declares.network.len(), 2);
     }
 
     #[test]

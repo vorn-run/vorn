@@ -677,20 +677,7 @@ pub fn answer(native: &Native, method: &str, params: &Value) -> Answer {
 }
 
 fn write_private(file: &Path, text: &str) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(file)?;
-        f.write_all(text.as_bytes())
-    }
-    #[cfg(not(unix))]
-    std::fs::write(file, text)
+    vorn_hooks::settings::write_private(file, text)
 }
 
 fn terminal_view(t: &TerminalSession) -> Terminal {

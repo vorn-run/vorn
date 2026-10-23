@@ -1,7 +1,10 @@
 //! The work model's pages over HTTP: an artifact's version
-//! (`/artifact/<id>/<version>?t=`), a gate's review page
-//! (`/gate-view/<run>/<node>?t=`), and a workflow's webhook
+//! (`/artifact/<id>/<version>?ticket=`), a gate's review page
+//! (`/gate-view/<run>/<node>?ticket=`), and a workflow's webhook
 //! (`/wf-hooks/<workflow>/<token>`).
+//!
+//! A page opens with a single-use ticket ([`vorn_work::tickets`]), never its
+//! lasting token, so an address in a history or a log opens nothing.
 //!
 //! Pages are served under a policy that lets them reach
 //! nothing ([`vorn_work::gates::CSP`]); a webhook is taken from this machine
@@ -120,16 +123,21 @@ fn segments(path: &str, prefix: &str) -> Vec<String> {
 /// Answers a request to one of the work model's paths.
 pub async fn answer(work: &Work, req: Request<Incoming>, peer: SocketAddr) -> Response<Body> {
     let path = route_path(req.uri().path()).unwrap_or_default();
-    let token = query(&req)
-        .get("t")
+    let ticket = query(&req)
+        .get(vorn_work::tickets::KEY)
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_owned();
     if let Some(rest) = path.strip_prefix("/artifact/") {
         let parts = segments(rest, "");
         let html = match (req.method(), parts.as_slice()) {
-            (&Method::GET, [id, version]) if !token.is_empty() => match version.parse::<u32>() {
-                Ok(n) if n > 0 => work.artifact_page(id, n, &token).await,
+            (&Method::GET, [id, version]) if !ticket.is_empty() => match version.parse::<u32>() {
+                Ok(n) if n > 0 => {
+                    match work.redeem(&ticket, &format!("/artifact/{id}/{version}")) {
+                        Some(token) => work.artifact_page(id, n, &token).await,
+                        None => return spent(),
+                    }
+                }
                 _ => None,
             },
             _ => None,
@@ -145,8 +153,11 @@ pub async fn answer(work: &Work, req: Request<Incoming>, peer: SocketAddr) -> Re
     if let Some(rest) = path.strip_prefix("/gate-view/") {
         let parts = segments(rest, "");
         let file = match (req.method(), parts.as_slice()) {
-            (&Method::GET, [run, node]) if !token.is_empty() => {
-                work.gate_page(run, node, &token).await
+            (&Method::GET, [run, node]) if !ticket.is_empty() => {
+                match work.redeem(&ticket, &format!("/gate-view/{run}/{node}")) {
+                    Some(token) => work.gate_page(run, node, &token).await,
+                    None => return spent(),
+                }
             }
             _ => None,
         };
@@ -163,6 +174,16 @@ pub async fn answer(work: &Work, req: Request<Incoming>, peer: SocketAddr) -> Re
         };
     }
     webhook(work, req, peer, &path).await
+}
+
+/// A ticket used before, too old, or never minted for this page.
+fn spent() -> Response<Body> {
+    let mut res = page(
+        "<!doctype html><meta charset=utf-8><title>Link used</title>\
+         <p>This link was already opened or has expired. Open the page again from Vorn.</p>",
+    );
+    *res.status_mut() = StatusCode::GONE;
+    res
 }
 
 async fn webhook(

@@ -29,7 +29,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { AppConfig } from '../packages/shared/src/types'
 import { comparable, randomArgs, refusedArgs, seeded, uuidsIn } from './helpers/mcp-parity'
 import { inCatalog, offerInCatalog } from './helpers/real-server'
-import { servedDir, startServed, type Served } from './helpers/served'
+import { servedDir, startServed, type Served, vorndReport } from './helpers/served'
 
 const TEST_CREDENTIAL = 'native-server-mcp-test-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
@@ -311,7 +311,7 @@ async function vorndSide(port: number, credentials: Record<string, string>): Pro
 
 /** What vornd's health check says of its MCP server. */
 async function mcpHealth(v: Served): Promise<{ sessions?: number } | null> {
-  const res = await fetch(`http://127.0.0.1:${v.port}/vornd/health`)
+  const res = await vorndReport(v.port, '/vornd/health', v.dataDir)
   return ((await res.json()) as { mcp?: { sessions?: number } | null }).mcp ?? null
 }
 

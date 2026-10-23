@@ -62,6 +62,7 @@ fn world() -> World {
                 .collect(),
             bridge_origin: "http://127.0.0.1:9".into(),
             version: "test".into(),
+            confiner: vorn_extensions::sandbox::Confiner::default(),
         },
     );
     World {

@@ -100,10 +100,11 @@ async fn a_tool_call_comes_back_through_vornds_own_socket() {
 /// vornd's health report.
 async fn health(addr: SocketAddr) -> Value {
     let client = Client::builder(TokioExecutor::new()).build_http::<Full<Bytes>>();
-    let res = client
-        .get(format!("http://{addr}/vornd/health").parse().unwrap())
-        .await
+    let req = hyper::Request::get(format!("http://{addr}/vornd/health"))
+        .header("authorization", BEARER)
+        .body(Full::new(Bytes::new()))
         .unwrap();
+    let res = client.request(req).await.unwrap();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
 }

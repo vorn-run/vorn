@@ -141,6 +141,19 @@ pub struct HostSettings {
     pub bridge_origin: String,
     /// The version the hello names.
     pub version: String,
+    /// How its children are sandboxed: to their own folder and project, and
+    /// to the bridge's port.
+    pub confiner: crate::sandbox::Confiner,
+}
+
+/// The port an `http://host:port` origin names.
+fn url_port(origin: &str) -> Option<u16> {
+    origin
+        .rsplit_once(':')?
+        .1
+        .trim_end_matches('/')
+        .parse()
+        .ok()
 }
 
 /// The services of this kind are scoped by project in the lifecycle.
@@ -187,6 +200,34 @@ impl Hosts {
             .await
     }
 
+    /// `launch` sandboxed to the extension's folder, its project and the bridge,
+    /// unless the person turned the sandbox off for it or there is none here.
+    fn confined(
+        &self,
+        pack: &InstalledPack,
+        project: &str,
+        launch: Launch,
+    ) -> Result<Launch, String> {
+        let confiner = &self.settings.confiner;
+        let mut launch = launch;
+        confiner.name_data(&pack.id, &mut launch);
+        if !confiner.available() || !crate::sandbox::is_on(&self.store.root().join(&pack.id)) {
+            return Ok(launch);
+        }
+        let mut reach = confiner.reach(&pack.path, &pack.id, false);
+        reach
+            .write
+            .push(std::fs::canonicalize(project).unwrap_or_else(|_| project.into()));
+        if let Some(port) = url_port(&self.settings.bridge_origin) {
+            reach.ports.push(port);
+        }
+        let hosts = pack.manifest.declares.network.clone();
+        confiner.share(&pack.id, hosts, &mut launch, &mut reach);
+        confiner
+            .wrap(launch, &reach)
+            .ok_or_else(|| format!("{} cannot be sandboxed here", pack.name()))
+    }
+
     async fn start(&self, key: &HostKey) -> Result<Host, String> {
         let id = &key.extension_id;
         let pack = self
@@ -223,6 +264,7 @@ impl Hosts {
             cwd: PathBuf::from(&key.project_path),
             env,
         };
+        let launch = self.confined(&pack, &key.project_path, launch)?;
         let child = Child::start(&launch, format!("[extensions] {name}"))?;
         let hello = child
             .request(

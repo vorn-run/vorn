@@ -186,18 +186,23 @@ describe.runIf(runnable)('the work model in vornd', () => {
     const gate = run.nodeStates.find((n) => n.nodeId === 'review')!
     expect(gate.message).toBe('Look at draft')
     expect(gate.viewToken).toMatch(/^[0-9a-f]{32}$/)
+    const review = `/gate-view/${started.runId}/review`
     for (const port of [server.port, server.vornd]) {
-      const page = await fetch(
-        `http://127.0.0.1:${port}/gate-view/${started.runId}/review?t=${gate.viewToken}`
-      )
+      // An address opens the page with a ticket, once; the lasting token never travels in it.
+      const { path: ticketed } = await direct.result<{ path: string }>('page:ticket', {
+        path: `${review}?t=${gate.viewToken}`
+      })
+      expect(ticketed).not.toContain(gate.viewToken!)
+      const page = await fetch(`http://127.0.0.1:${port}${ticketed}`)
       expect(page.status).toBe(200)
       expect(page.headers.get('content-security-policy')).toContain("default-src 'none'")
       expect(await page.text()).toContain('<h1>draft')
+      expect((await fetch(`http://127.0.0.1:${port}${ticketed}`)).status).toBe(410)
     }
-    const wrong = await fetch(
-      `http://127.0.0.1:${server.port}/gate-view/${started.runId}/review?t=nope`
-    )
-    expect(wrong.status).toBe(404)
+    const byToken = await fetch(`http://127.0.0.1:${server.port}${review}?t=${gate.viewToken}`)
+    expect(byToken.status).toBe(404)
+    const made = await fetch(`http://127.0.0.1:${server.port}${review}?ticket=nope`)
+    expect(made.status).toBe(410)
     expect(viaVornd.toldBy('workflow:runUpdated').length).toBeGreaterThan(0)
 
     expect(
@@ -290,8 +295,8 @@ describe.runIf(runnable)('the work model in vornd', () => {
     expect(page.status).toBe(200)
     expect(page.headers.get('content-security-policy')).toContain("default-src 'none'")
     expect(await page.text()).toBe('<h1>Figures</h1>')
-    const onVornd = await fetch(published.url.replace(`:${server.port}/`, `:${server.vornd}/`))
-    expect(await onVornd.text()).toBe('<h1>Figures</h1>')
+    // The address opens the page once; another read of it gets a fresh one.
+    expect((await fetch(published.url)).status).toBe(410)
     const listed = await direct.result<Array<{ id: string }>>('artifact:list', {
       sessionId: shell.id
     })
@@ -299,9 +304,12 @@ describe.runIf(runnable)('the work model in vornd', () => {
     const again = await direct.result<{ url: string }>('artifact:versionUrl', {
       artifactId: published.artifact.id
     })
-    expect(again.url).toBe(published.url)
-    const bad = await fetch(published.url.replace(/t=[^&]+/, 't=nope'))
-    expect(bad.status).toBe(404)
+    expect(again.url).toContain('?ticket=')
+    expect(again.url).not.toBe(published.url)
+    const onVornd = await fetch(again.url.replace(`:${server.port}/`, `:${server.vornd}/`))
+    expect(await onVornd.text()).toBe('<h1>Figures</h1>')
+    const bad = await fetch(published.url.replace(/ticket=[^&]+/, 'ticket=nope'))
+    expect(bad.status).toBe(410)
     await viaVornd.result('terminal:kill', shell.id)
   })
 

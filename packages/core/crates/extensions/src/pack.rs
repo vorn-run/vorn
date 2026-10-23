@@ -39,6 +39,9 @@ pub struct InstalledPack {
     /// The sha256 of a linked folder's manifest when it was linked: one
     /// edited since claimed its agent after every other adapter.
     pub linked_manifest: Option<String>,
+    /// What a linked folder's manifest asks for beyond what it had when it
+    /// was linked (hosts, permissions); none of it is given until it is linked again.
+    pub widened: Vec<String>,
     pub bytes: u64,
 }
 
@@ -86,6 +89,9 @@ impl Serialize for InstalledPack {
         map.serialize_entry("env", &m.env)?;
         if let Some(api) = &m.api {
             map.serialize_entry("api", api)?;
+        }
+        if !self.widened.is_empty() {
+            map.serialize_entry("widened", &self.widened)?;
         }
         if self.linked {
             map.serialize_entry("linked", &true)?;
@@ -248,6 +254,65 @@ struct Current {
     linked_manifest: Option<String>,
     /// Why a linked folder is not loaded: it gained a link since it was linked.
     refused: Option<String>,
+    /// What a linked folder's manifest declared when it was linked.
+    linked_declares: Option<Value>,
+}
+
+/// Holds a linked manifest to what it declared when it was linked (`was`,
+/// [`declared`]): hosts and permissions added since are dropped, and named
+/// in what it answers (`elsewhere.example`, `terminal.send`).
+pub fn hold_to(manifest: &mut Manifest, was: &Value) -> Vec<String> {
+    let strings = |k: &str| -> Vec<String> {
+        was[k]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect()
+    };
+    let mut dropped = Vec::new();
+    let mut keep =
+        |list: &mut Vec<String>, allowed: Vec<String>, label: &dyn Fn(&str) -> String| {
+            list.retain(|x| {
+                let ok = allowed.contains(x);
+                if !ok {
+                    dropped.push(label(x));
+                }
+                ok
+            });
+        };
+    let d = &mut manifest.declares;
+    keep(&mut d.network, strings("network"), &|h| h.to_owned());
+    keep(&mut d.network_from, strings("networkFrom"), &|n| {
+        format!("hosts from {n}")
+    });
+    keep(&mut d.uses, strings("uses"), &|u| u.to_owned());
+    if let Some(perms) = manifest.permissions.as_mut() {
+        let allowed = was["permissions"].as_array().cloned().unwrap_or_default();
+        perms.retain(|p| {
+            let v = serde_json::to_value(p).unwrap_or(Value::Null);
+            let ok = allowed.contains(&v);
+            if !ok {
+                if let Some(name) = v.as_str() {
+                    dropped.push(name.to_owned());
+                }
+            }
+            ok
+        });
+    }
+    dropped.sort();
+    dropped.dedup();
+    dropped
+}
+
+/// What `manifest` declares that [`hold_to`] holds a linked folder to.
+pub fn declared(manifest: &Manifest) -> Value {
+    serde_json::json!({
+        "network": manifest.declares.network,
+        "networkFrom": manifest.declares.network_from,
+        "uses": manifest.declares.uses,
+        "permissions": manifest.permissions,
+    })
 }
 
 /// The key in `current.json` saying why a linked folder is not loaded.
@@ -375,6 +440,7 @@ impl PackStore {
                 .get(REFUSED_KEY)
                 .and_then(Value::as_str)
                 .map(str::to_owned),
+            linked_declares: parsed.get("linkedDeclares").cloned(),
         })
     }
 
@@ -426,7 +492,12 @@ impl PackStore {
             (None, Some(version)) => (self.root.join(id).join(version), false),
             (None, None) => return Err(format!("No extension \"{id}\" is installed")),
         };
-        let manifest = read_dir_manifest(&path)?;
+        let mut manifest = read_dir_manifest(&path)?;
+        // A linked folder is the person's to edit, and may sit where programs write.
+        let widened = match (&current.linked_declares, linked) {
+            (Some(was), true) => hold_to(&mut manifest, was),
+            _ => Vec::new(),
+        };
         if manifest.id != id {
             return Err(format!(
                 "{} says its id is {}, not {id}",
@@ -454,6 +525,7 @@ impl PackStore {
             installed_at: current.installed_at,
             linked_agent: current.linked_agent,
             linked_manifest: current.linked_manifest,
+            widened,
             bytes,
         })
     }

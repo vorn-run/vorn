@@ -7002,12 +7002,14 @@ dependencies = [
 name = "vorn-app"
 version = "0.8.0-beta.21"
 dependencies = [
+ "data-encoding",
  "embed-resource",
  "futures-util",
  "gtk",
  "js-sys",
  "libc",
  "objc2-web-kit",
+ "ring",
  "semver",
  "serde",
  "serde_json",
@@ -7387,6 +7389,7 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "vorn-spawn",
 ]
 
@@ -7510,6 +7513,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tracing",
+ "vorn-spawn",
  "windows-native-keyring-store",
  "zbus-secret-service-keyring-store",
 ]

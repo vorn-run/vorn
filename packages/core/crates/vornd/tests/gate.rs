@@ -919,7 +919,18 @@ impl Vornd {
     fn get(&self, path: &str) -> Value {
         let mut s = TcpStream::connect(("127.0.0.1", self.port)).expect("connect to vornd");
         s.set_read_timeout(Some(PATIENCE)).unwrap();
-        let req = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        // vornd's reports want the local credential it wrote beside its data.
+        let token = std::fs::read_to_string(
+            self.log
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join("local-token"),
+        )
+        .unwrap_or_default();
+        let req = format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+            token.trim()
+        );
         s.write_all(req.as_bytes()).expect("send");
         let mut res = String::new();
         s.read_to_string(&mut res).expect("read the answer");

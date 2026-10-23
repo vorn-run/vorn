@@ -36,6 +36,8 @@ pub enum PlugAct {
     Sandbox(String, bool),
     /// Open an installed extension's folder.
     ShowFolder(String),
+    /// Link a folder again, through the sheet, to give what its manifest asks for since.
+    LinkAgain(String),
     /// Browse the connectors, to add a connection to one.
     AddConnection,
     Rollback(String),
@@ -1165,6 +1167,35 @@ pub fn pack_origin(pack: &Value) -> String {
     }
 }
 
+/// The projects this extension's sandboxed programs cannot open, each said
+/// as a sentence: each holds Vorn's data.
+pub fn closed_lines(pack: &Value) -> Vec<String> {
+    pack.get("closedProjects")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(|p| format!("{p} holds Vorn's data, so this extension's programs can't open it."))
+        .collect()
+}
+
+/// What a linked folder's manifest asks for beyond what it had when it was
+/// linked, as a sentence; `None` when nothing.
+pub fn widened_line(pack: &Value) -> Option<String> {
+    let asks: Vec<&str> = pack
+        .get("widened")?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    (!asks.is_empty()).then(|| {
+        format!(
+            "Asks for more since it was linked: {}. Link it again to give it.",
+            asks.join(", ")
+        )
+    })
+}
+
 /// An installed pack's second line: where it came from, whether it runs, and what it adds.
 pub fn pack_line(l: &Listing) -> String {
     let Some(pack) = l.pack.as_ref() else {
@@ -1174,8 +1205,19 @@ pub fn pack_line(l: &Listing) -> String {
     if pack.get("running") == Some(&Value::Bool(true)) {
         parts.push("running".to_owned());
     }
-    if pack.get("sandboxed") == Some(&Value::Bool(true)) {
-        parts.push("sandboxed".to_owned());
+    match pack.get("sandbox").and_then(Value::as_str) {
+        Some("sandboxed") => parts.push("sandboxed".to_owned()),
+        Some("files-only") => parts.push("sandboxed, network not limited".to_owned()),
+        Some("unsandboxed") => parts.push("unsandboxed".to_owned()),
+        Some("off") => parts.push("sandbox off".to_owned()),
+        _ => {}
+    }
+    if pack
+        .get("widened")
+        .and_then(Value::as_array)
+        .is_some_and(|w| !w.is_empty())
+    {
+        parts.push("asks for more".to_owned());
     }
     if l.kind == Kind::Extension {
         parts.push(count(places(l.contributes.as_ref()), "place"));
@@ -1756,6 +1798,24 @@ impl Pending {
             }
             if let Some(adds) = adds_line(&strings(pv.get("adds"))) {
                 rows.push(row("Adds", adds, held("adds")));
+            }
+            match s(pv, "sandbox") {
+                Some("sandboxed") => rows.push(row(
+                    "Sandbox",
+                    "reads its own folder; writes its data folder and your projects; reaches the hosts above".to_owned(),
+                    true,
+                )),
+                Some("files-only") => rows.push(row(
+                    "Sandbox",
+                    "reads its own folder; writes its data folder and your projects, but not one holding Vorn's data; network not limited here".to_owned(),
+                    true,
+                )),
+                Some("unsandboxed") => rows.push(row(
+                    "Sandbox",
+                    "none on this machine: it runs unsandboxed".to_owned(),
+                    false,
+                )),
+                _ => {}
             }
         } else {
             let declared = if pv.get("permissions").is_some() {
@@ -2403,6 +2463,27 @@ impl Plugins {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_which_projects_its_programs_cannot_open() {
+        let pack = serde_json::json!({ "closedProjects": ["/Users/me"] });
+        assert_eq!(
+            closed_lines(&pack),
+            ["/Users/me holds Vorn's data, so this extension's programs can't open it."]
+        );
+        assert!(closed_lines(&serde_json::json!({})).is_empty());
+    }
+
+    #[test]
+    fn a_linked_folder_that_asks_for_more_says_what() {
+        let pack = serde_json::json!({ "widened": ["elsewhere.example", "terminal.send"] });
+        assert_eq!(
+            widened_line(&pack).as_deref(),
+            Some("Asks for more since it was linked: elsewhere.example, terminal.send. Link it again to give it.")
+        );
+        assert_eq!(widened_line(&serde_json::json!({})), None);
+        assert_eq!(widened_line(&serde_json::json!({ "widened": [] })), None);
+    }
 
     fn builtins() -> Vec<Value> {
         vec![

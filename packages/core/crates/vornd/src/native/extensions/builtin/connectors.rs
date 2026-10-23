@@ -12,7 +12,7 @@ use std::sync::{Arc, Weak};
 use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::info;
 use vorn_connectors::builtin::{self, Answer as BuiltinAnswer, Connectors};
 use vorn_connectors::host::{Fields, Host, Pending, Services, TableWork};
 use vorn_connectors::page;
@@ -373,24 +373,14 @@ impl Host for Wired {
 /// The bridge's services for the built-in, started once vornd has a
 /// database and its own address.
 pub async fn services(native: &Arc<Native>, data_dir: &Path, origin: String) -> Services {
-    let proxy = if vorn_extensions::sandbox::available() {
-        match vorn_extensions::netproxy::NetProxy::start().await {
-            Ok(p) => Some(p),
-            Err(err) => {
-                warn!("[connectors] sandboxed connectors have no network: {err}");
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let confiner = native.confiner(data_dir).await;
     let home = PathBuf::from(crate::native::shell::home_dir());
     Services {
         lifecycle: Arc::clone(native.lifecycle()),
         installs: native.installs(data_dir),
         windows: Arc::clone(native.windows()),
         polls: Arc::clone(native.polls()),
-        proxy,
+        confiner,
         origin,
         version: env!("CARGO_PKG_VERSION").to_owned(),
         catalog_cache: home.join(".vorn").join("connector-catalog.json"),

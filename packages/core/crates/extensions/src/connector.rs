@@ -75,6 +75,8 @@ pub struct SdkLaunch {
     pub launch: Launch,
     pub source: Source,
     pub protocol: Option<u64>,
+    /// Secret values in the child's environment, kept out of what its stderr logs.
+    pub redact: Vec<String>,
 }
 
 /// Why a child could not be opened in a protocol this build speaks.
@@ -158,7 +160,8 @@ pub async fn open(
         }
         _ => {}
     }
-    let child = Child::start(&launch.launch, key.to_owned()).map_err(OpenError::Failed)?;
+    let child = Child::start_redacting(&launch.launch, key.to_owned(), None, launch.redact.clone())
+        .map_err(OpenError::Failed)?;
     let command = launch.launch.program.to_string_lossy().into_owned();
     let hello = child
         .request(
@@ -394,6 +397,7 @@ pub async fn probe(
         },
         source: Source::Command,
         protocol: None,
+        redact: Vec::new(),
     };
     let client = match open(&launch, &key, host_version, timeouts).await {
         Ok(client) => client,
@@ -448,6 +452,7 @@ mod tests {
             },
             source: Source::Pack,
             protocol: None,
+            redact: Vec::new(),
         };
         let err = open(&launch, "Pack", "1", Timeouts::default())
             .await
