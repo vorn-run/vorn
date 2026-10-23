@@ -208,9 +208,7 @@ mod tests {
     fn switching_the_theme_recolours_the_native_sidebar() {
         use crate::ui::theme::material;
         let mut a = Appearance::default();
-        let with = |theme: &str| {
-            json!({ "darkTheme": theme, "interfaceStyle": "tinted", "materials": "native" })
-        };
+        let with = |theme: &str| json!({ "darkTheme": theme, "interfaceStyle": "tinted", "materials": "native" });
         a.apply(Some(&with("nord")), true, false, None);
         let nord = material::sidebar(true);
         a.apply(Some(&with("dracula")), true, false, None);
@@ -219,7 +217,10 @@ mod tests {
         let panel = vorn_theme::find_bundled("dracula")
             .unwrap()
             .get(Token::SurfacePanel);
-        assert_eq!(dracula, crate::ui::Rgba::from(panel).alpha(material::NATIVE_TINT));
+        assert_eq!(
+            dracula,
+            crate::ui::Rgba::from(panel).alpha(material::NATIVE_TINT)
+        );
         palette::install(Palette::default());
     }
 
