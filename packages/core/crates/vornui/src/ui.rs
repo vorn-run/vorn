@@ -113,6 +113,8 @@ pub struct Ui {
     pub(crate) glass: Vec<(Rect, f32)>,
     /// Icons the system draws in that glass: device-pixel box, SVG, colour.
     pub(crate) glass_icons: Vec<(Rect, std::rc::Rc<str>, Rgba)>,
+    /// Labels the system draws in that glass: device-pixel box, text, size, colour.
+    pub(crate) glass_labels: Vec<(Rect, std::rc::Rc<str>, f32, Rgba)>,
 }
 
 enum Measure<'a> {
@@ -248,6 +250,7 @@ impl Ui {
             overlays: 0..0,
             glass: Vec::new(),
             glass_icons: Vec::new(),
+            glass_labels: Vec::new(),
         }
     }
 
@@ -423,6 +426,7 @@ impl Ui {
         self.overlays = 0..0;
         self.glass.clear();
         self.glass_icons.clear();
+        self.glass_labels.clear();
         self.clear = clear;
         // Pictures the last frame did not draw give their entry back.
         self.pictures.retain(|_, p| std::mem::take(&mut p.used));
@@ -792,6 +796,17 @@ impl Ui {
         if cells {
             self.record_box(cx, el, rl, ring);
         }
+        // A surface drawn over glass hides it: the glass views sit above
+        // everything the app draws.
+        let covers = el.backdrop_blur.is_some() || el.bg.is_some_and(|c| c.0[3] >= 0.5);
+        if covers && !el.native_glass && !cells && !self.glass.is_empty() {
+            let hit = |r: &Rect| {
+                r.x < bx.x + bx.w && bx.x < r.x + r.w && r.y < bx.y + bx.h && bx.y < r.y + r.h
+            };
+            self.glass.retain(|(r, _)| !hit(r));
+            self.glass_icons.retain(|(r, ..)| !hit(r));
+            self.glass_labels.retain(|(r, ..)| !hit(r));
+        }
         if el.native_glass && !cells {
             self.glass.push((bx, radius * k));
         }
@@ -804,6 +819,9 @@ impl Ui {
                 h: s,
             };
             self.glass_icons.push((at, svg.clone(), *color));
+        }
+        if let Some((t, size, color)) = el.native_label.as_ref().filter(|_| !cells) {
+            self.glass_labels.push((bx, t.clone(), size * k, *color));
         }
         if let Some(sigma) = el.backdrop_blur.filter(|_| !cells) {
             self.scene.backdrop_blur(bx, sigma * k, radius * k);

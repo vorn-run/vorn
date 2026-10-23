@@ -150,44 +150,7 @@ fn header(s: &Screen<'_>) -> El {
         .py(8.0)
         .role(Role::TabList, "View mode");
     let glass = super::chrome::glass(s);
-    let mut tabs = Vec::new();
-    for b in super::chrome::top_buttons(s) {
-        let (on, name, label, keys) = (b.on, b.icon.as_str(), b.label.as_str(), b.keys);
-        let id = s.acts.on("sidebar-mode", b.act);
-        let hot = s.ui.hover(id);
-        let fg = if on {
-            c(look::WHITE)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
-        };
-        let mut b = div()
-            .id(id)
-            .on(Action::Click)
-            .min_w(if glass { 34.0 } else { 0.0 })
-            .min_h(if glass { 26.0 } else { 0.0 })
-            .row()
-            .items_center()
-            .gap(6.0)
-            .px(10.0)
-            .py(if glass { 5.0 } else { 6.0 })
-            .rounded(if glass { 13.0 } else { 8.0 })
-            .bg(if on {
-                white(0.10)
-            } else {
-                white(0.0).mix(white(0.04), hot)
-            })
-            .role(Role::Tab, label)
-            .selected(on);
-        let svg = glass.then(|| look::icon(name, 2.0)).flatten();
-        b = match &svg {
-            Some(svg) => b.native_icon(svg, 14.0, fg),
-            None => b.child(ico(name, 14.0, 2.0, fg)),
-        };
-        if on && svg.is_none() {
-            b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
-        }
-        tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
-    }
+    let tabs = view_tabs(s, "sidebar-mode");
     row = if glass {
         row.child(super::chrome::group(s, tabs))
     } else {
@@ -1777,4 +1740,58 @@ mod tests {
         );
         assert_eq!(project_color(&project("nope")), None);
     }
+}
+
+/// The view tabs: icon buttons, the chosen one labelled; on glass over the
+/// system's material the system draws their icons and label.
+pub(super) fn view_tabs(s: &Screen<'_>, place: &str) -> Vec<El> {
+    let glass = super::chrome::glass(s);
+    let mut tabs = Vec::new();
+    for b in super::chrome::top_buttons(s) {
+        let (on, name, label, keys) = (b.on, b.icon.as_str(), b.label.as_str(), b.keys);
+        let id = s.acts.on(place, b.act);
+        let hot = s.ui.hover(id);
+        let fg = if on {
+            c(look::WHITE)
+        } else {
+            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
+        };
+        let mut b = div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(6.0)
+            .px(10.0)
+            .py(if glass { 4.0 } else { 6.0 })
+            .rounded(if glass { 13.0 } else { 8.0 })
+            .bg(if glass {
+                white(0.0)
+            } else if on {
+                white(0.10)
+            } else {
+                white(0.0).mix(white(0.04), hot)
+            })
+            .role(Role::Tab, label)
+            .selected(on);
+        let svg = glass.then(|| look::icon(name, 2.0)).flatten();
+        b = match &svg {
+            Some(svg) => b.child(div().size(14.0, 14.0).native_icon(svg, 14.0, fg)),
+            None => b.child(ico(name, 14.0, 2.0, fg)),
+        };
+        if on {
+            // Over glass the system draws the label; the app keeps its room.
+            let ink = if svg.is_some() { white(0.0) } else { fg };
+            let mut t = text(label, 12.0, ink)
+                .weight(500)
+                .line_height(18.0)
+                .silent();
+            if svg.is_some() {
+                t = t.native_label(label, 12.0, fg);
+            }
+            b = b.child(t);
+        }
+        tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
+    }
+    tabs
 }

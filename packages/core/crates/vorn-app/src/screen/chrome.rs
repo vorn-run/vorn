@@ -181,7 +181,7 @@ pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
             .gap(8.0)
             .ml(6.0)
             .child(group(s, [toggle]))
-            .child(pills(s));
+            .child(group(s, super::sidebar::view_tabs(s, "toolbar-mode")));
     }
     row.gap(4.0).child(toggle).child(divider()).child(pills(s))
 }

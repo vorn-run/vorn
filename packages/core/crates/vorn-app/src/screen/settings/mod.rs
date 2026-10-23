@@ -134,6 +134,40 @@ fn nav_button(s: &Screen<'_>, id: Id, label: &str, glyph: El, on: bool, rest: Rg
         .child(text(label, 13.0, fg).line_height(19.5).silent())
 }
 
+/// Back to app: a chevron and its label, on glass over the system's material.
+fn back_button(s: &Screen<'_>, back: Id, fg: Rgba) -> El {
+    let chevron = r#"<polyline points="15 18 9 12 15 6"/>"#;
+    let b = div()
+        .id(back)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .role(Role::Button, "Back to app");
+    let glass = super::chrome::glass(s)
+        .then(|| crate::ui::icons::lucide("chevron-left", 2.0))
+        .flatten();
+    let Some(svg) = glass else {
+        return b
+            .gap(8.0)
+            .child(icon(svg(chevron, 2.0), 16.0, fg))
+            .child(text("Back to app", 14.0, fg).line_height(20.0).silent());
+    };
+    b.h(32.0)
+        .pl(8.0)
+        .pr(12.0)
+        .rounded(16.0)
+        .native_glass()
+        .child(div().size(16.0, 16.0).native_icon(&svg, 16.0, fg))
+        .child(
+            text("Back to app", 13.0, white(0.0))
+                .weight(500)
+                .line_height(18.0)
+                .native_label("Back to app", 13.0, fg)
+                .silent(),
+        )
+}
+
 fn sidebar(s: &Screen<'_>) -> El {
     let back = s.acts.on("settings", set(SetAct::Close));
     let back_fg = c(look::GRAY_400).mix(c(look::WHITE), s.ui.hover(back));
@@ -147,25 +181,7 @@ fn sidebar(s: &Screen<'_>) -> El {
         .pr(12.0)
         .shrink0()
         .border_bottom(1.0, white(0.06))
-        .child(
-            div()
-                .id(back)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(8.0)
-                .role(Role::Button, "Back to app")
-                .child(icon(
-                    svg(r#"<polyline points="15 18 9 12 15 6"/>"#, 2.0),
-                    16.0,
-                    back_fg,
-                ))
-                .child(
-                    text("Back to app", 14.0, back_fg)
-                        .line_height(20.0)
-                        .silent(),
-                ),
-        );
+        .child(back_button(s, back, back_fg));
     let mut list = div()
         .id(Id::new("settings-nav"))
         .col()
@@ -224,7 +240,11 @@ fn sidebar(s: &Screen<'_>) -> El {
         .w(224.0)
         .h_full()
         .shrink0()
-        .bg(c(look::SURFACE_SUNKEN))
+        .bg(if s.ui.see_through() {
+            crate::ui::theme::material::sidebar(true)
+        } else {
+            c(look::SURFACE_SUNKEN)
+        })
         .border_right(1.0, white(0.06))
         .role(Role::Navigation, "Settings")
         .child(header)
@@ -269,11 +289,16 @@ fn page_with(s: &Screen<'_>, body: El) -> El {
         .row()
         .w_full()
         .h_full()
-        .bg(c(look::SURFACE_OVERLAY))
+        .bg(if s.ui.see_through() {
+            crate::ui::theme::shadow(0.0)
+        } else {
+            c(look::SURFACE_OVERLAY)
+        })
         .child(sidebar(s))
         .child(
             div()
                 .id(CONTENT)
+                .bg(crate::ui::theme::material::content(s.ui.see_through()))
                 .col()
                 .items_center()
                 .grow()

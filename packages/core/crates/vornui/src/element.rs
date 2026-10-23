@@ -271,6 +271,8 @@ pub struct El {
     pub(crate) native_glass: bool,
     /// An icon the system draws inside its glass: SVG, logical size and colour.
     pub(crate) native_icon: Option<(std::rc::Rc<str>, f32, Rgba)>,
+    /// A label the system draws in its glass: text, logical size and colour.
+    pub(crate) native_label: Option<(std::rc::Rc<str>, f32, Rgba)>,
     /// What the box shows on a cells surface instead of its content and children.
     pub(crate) glyph: Option<Box<str>>,
     /// The glyph's ink, when it is not the content's.
@@ -312,6 +314,7 @@ pub fn div() -> El {
         backdrop_blur: None,
         native_glass: false,
         native_icon: None,
+        native_label: None,
         glyph: None,
         glyph_tint: None,
         windowed: false,
@@ -839,6 +842,12 @@ impl El {
     /// at the box's centre, so it takes the glass's vibrancy.
     pub fn native_icon(mut self, svg: &str, size: f32, color: impl Into<Rgba>) -> El {
         self.native_icon = Some((svg.into(), size, color.into()));
+        self
+    }
+    /// Text the system draws in its glass over the box, in its own font at
+    /// `size` logical pixels; the box keeps the room the app laid out.
+    pub fn native_label(mut self, text: &str, size: f32, color: impl Into<Rgba>) -> El {
+        self.native_label = Some((text.into(), size, color.into()));
         self
     }
     /// The surface of a menu, popover or the palette, in the active theme's

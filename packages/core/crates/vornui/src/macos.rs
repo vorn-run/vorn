@@ -437,6 +437,12 @@ pub(crate) fn sync_glass(
     window: &Window,
     boxes: &[(crate::scene::Rect, f32)],
     icons: &[(crate::scene::Rect, std::rc::Rc<str>, crate::scene::Rgba)],
+    labels: &[(
+        crate::scene::Rect,
+        std::rc::Rc<str>,
+        f32,
+        crate::scene::Rgba,
+    )],
     scale: f64,
 ) {
     let Some(cls) = glass_class() else {
@@ -531,6 +537,39 @@ pub(crate) fn sync_glass(
                     );
                     let _: () = objc2::msg_send![iv, setContentTintColor: &*tint];
                     let _: () = objc2::msg_send![inner, addSubview: iv];
+                }
+                for (lr, text, size, color) in labels {
+                    let (lx, ly, lw, lh) = pt(lr);
+                    if lx < x || ly < y || lx + lw > x + w + 0.5 || ly + lh > y + h + 0.5 {
+                        continue;
+                    }
+                    let t = NSString::from_str(text);
+                    let tf: *mut AnyObject =
+                        objc2::msg_send![objc2::class!(NSTextField), labelWithString: &*t];
+                    let font: *mut AnyObject = objc2::msg_send![
+                        objc2::class!(NSFont),
+                        systemFontOfSize: f64::from(*size) / s,
+                        weight: 0.23f64
+                    ];
+                    let _: () = objc2::msg_send![tf, setFont: font];
+                    let [cr, cg, cb, ca] = color.0;
+                    let ink = objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(
+                        f64::from(cr),
+                        f64::from(cg),
+                        f64::from(cb),
+                        f64::from(ca),
+                    );
+                    let _: () = objc2::msg_send![tf, setTextColor: &*ink];
+                    let fit: objc2_foundation::NSSize = objc2::msg_send![tf, fittingSize];
+                    let at = objc2_foundation::NSRect::new(
+                        objc2_foundation::NSPoint::new(
+                            lx - x,
+                            h - (ly - y) - lh + (lh - fit.height) / 2.0,
+                        ),
+                        objc2_foundation::NSSize::new(lw.max(fit.width), fit.height),
+                    );
+                    let _: () = objc2::msg_send![tf, setFrame: at];
+                    let _: () = objc2::msg_send![inner, addSubview: tf];
                 }
             }
         }

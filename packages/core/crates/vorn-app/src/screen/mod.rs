@@ -181,7 +181,11 @@ impl Screen<'_> {
             .w_full()
             .h_full()
             .bg(root_bg)
-            .child(row.child(main.bg(main_bg)));
+            // Settings over the material covers the app, so it is not drawn under it.
+            .child_if(
+                (!(self.st.settings.open && self.ui.see_through()))
+                    .then(|| row.child(main.bg(main_bg))),
+            );
         if self.st.view == MainView::Tasks {
             root = root.child_if(tasks::ghost(self));
         }

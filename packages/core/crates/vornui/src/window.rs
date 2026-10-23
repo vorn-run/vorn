@@ -799,10 +799,11 @@ impl<A: App> Live<A> {
                         &self.window,
                         &self.ui.glass,
                         &self.ui.glass_icons,
+                        &self.ui.glass_labels,
                         self.window.scale_factor(),
                     );
                 } else {
-                    crate::macos::sync_glass(&self.window, &[], &[], 1.0);
+                    crate::macos::sync_glass(&self.window, &[], &[], &[], 1.0);
                 }
                 self.window.pre_present_notify();
                 frame.present();
