@@ -454,9 +454,8 @@ folder:
   `.cargo/credentials.toml`, `.gem/credentials`, `.config/gh`,
   `.claude.json`;
 - what runs at login: `Library/LaunchAgents`, `.config/autostart`,
-  `.config/systemd`, `AppData/Roaming/Microsoft/Windows/Start
-  Menu/Programs/Startup`, `Documents/PowerShell`,
-  `Documents/WindowsPowerShell`;
+  `.config/systemd`, `Documents/PowerShell`, `Documents/WindowsPowerShell`,
+  and `AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`;
 - the shell's startup files: `.bashrc`, `.bash_aliases`, `.bash_profile`,
   `.bash_login`, `.bash_logout`, `.profile`, `.zshrc`, `.zshenv`,
   `.zprofile`, `.zlogin`, `.zlogout`, `.config/fish`.
