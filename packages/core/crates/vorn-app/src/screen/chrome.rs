@@ -55,6 +55,19 @@ pub(super) fn divider() -> El {
     div().w(1.0).h(16.0).bg(white(0.06)).mx(2.0).shrink0()
 }
 
+/// A label in a toolbar control: drawn by the system inside glass, so it
+/// takes the glass's vibrancy, else by the app.
+pub(super) fn label(s: &Screen<'_>, t: &str, size: f32, line: f32, fg: Rgba) -> El {
+    if glass(s) {
+        return text(t, size, white(0.0))
+            .weight(500)
+            .line_height(line)
+            .native_label(t, size, fg)
+            .silent();
+    }
+    text(t, size, fg).line_height(line).silent()
+}
+
 /// Whether toolbar buttons sit on glass: over the system's material.
 pub(super) fn glass(s: &Screen<'_>) -> bool {
     s.ui.see_through() && crate::ui::palette::materials() != vorn_theme::Materials::Solid
@@ -814,18 +827,18 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
     }
     let mut right = div().row().items_center().gap(4.0);
     if s.st.view == MainView::Tasks {
+        let add = tool(
+            s,
+            "toolbar",
+            Act::Task(crate::tasks::TaskAct::New("todo".into())),
+            "plus",
+            2.0,
+            "Add task",
+            None,
+            false,
+        );
         return right
-            .child(task_options(s))
-            .child(tool(
-                s,
-                "toolbar",
-                Act::Task(crate::tasks::TaskAct::New("todo".into())),
-                "plus",
-                2.0,
-                "Add task",
-                None,
-                false,
-            ))
+            .child(group(s, [task_options(s), add]))
             .child_if(window_controls(s));
     }
     if s.st.view == MainView::Sessions {
@@ -899,14 +912,21 @@ fn task_options(s: &Screen<'_>) -> El {
             white(0.0).mix(white(0.06), hot),
         )
     };
-    let mut b = div()
+    let b = div()
         .id(id)
         .on(Action::Click)
-        .p(4.0)
-        .rounded(6.0)
         .bg(bg)
-        .role(Role::Button, "View options")
-        .child(ico("sliders-horizontal", 16.0, 1.5, fg));
+        .role(Role::Button, "View options");
+    let mut b = match glass(s)
+        .then(|| look::icon("sliders-horizontal", 1.5))
+        .flatten()
+    {
+        Some(svg) => b.size(28.0, 28.0).rounded(14.0).native_icon(&svg, 16.0, fg),
+        None => b
+            .p(4.0)
+            .rounded(6.0)
+            .child(ico("sliders-horizontal", 16.0, 1.5, fg)),
+    };
     if changed && !open {
         b = b.child(
             div()
