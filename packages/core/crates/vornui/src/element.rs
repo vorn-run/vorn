@@ -269,6 +269,8 @@ pub struct El {
     pub(crate) backdrop_blur: Option<f32>,
     /// The system's own glass under the box, where the platform has one.
     pub(crate) native_glass: bool,
+    /// An icon the system draws inside its glass: SVG, logical size and colour.
+    pub(crate) native_icon: Option<(std::rc::Rc<str>, f32, Rgba)>,
     /// What the box shows on a cells surface instead of its content and children.
     pub(crate) glyph: Option<Box<str>>,
     /// The glyph's ink, when it is not the content's.
@@ -309,6 +311,7 @@ pub fn div() -> El {
         frames: None,
         backdrop_blur: None,
         native_glass: false,
+        native_icon: None,
         glyph: None,
         glyph_tint: None,
         windowed: false,
@@ -830,6 +833,12 @@ impl El {
     /// box, within its rounded corners; nothing where there is none.
     pub fn native_glass(mut self) -> El {
         self.native_glass = true;
+        self
+    }
+    /// An icon (`svg`, `size` logical pixels) the system draws in its glass
+    /// at the box's centre, so it takes the glass's vibrancy.
+    pub fn native_icon(mut self, svg: &str, size: f32, color: impl Into<Rgba>) -> El {
+        self.native_icon = Some((svg.into(), size, color.into()));
         self
     }
     /// The surface of a menu, popover or the palette, in the active theme's

@@ -111,6 +111,8 @@ pub struct Ui {
     pub(crate) overlays: std::ops::Range<usize>,
     /// Boxes this frame wants the system's glass under: device pixels and radius.
     pub(crate) glass: Vec<(Rect, f32)>,
+    /// Icons the system draws in that glass: device-pixel box, SVG, colour.
+    pub(crate) glass_icons: Vec<(Rect, std::rc::Rc<str>, Rgba)>,
 }
 
 enum Measure<'a> {
@@ -245,6 +247,7 @@ impl Ui {
             native: None,
             overlays: 0..0,
             glass: Vec::new(),
+            glass_icons: Vec::new(),
         }
     }
 
@@ -419,6 +422,7 @@ impl Ui {
         self.scene.clear();
         self.overlays = 0..0;
         self.glass.clear();
+        self.glass_icons.clear();
         self.clear = clear;
         // Pictures the last frame did not draw give their entry back.
         self.pictures.retain(|_, p| std::mem::take(&mut p.used));
@@ -790,6 +794,16 @@ impl Ui {
         }
         if el.native_glass && !cells {
             self.glass.push((bx, radius * k));
+        }
+        if let Some((svg, size, color)) = el.native_icon.as_ref().filter(|_| !cells) {
+            let s = size * k;
+            let at = Rect {
+                x: bx.x + (bx.w - s) / 2.0,
+                y: bx.y + (bx.h - s) / 2.0,
+                w: s,
+                h: s,
+            };
+            self.glass_icons.push((at, svg.clone(), *color));
         }
         if let Some(sigma) = el.backdrop_blur.filter(|_| !cells) {
             self.scene.backdrop_blur(bx, sigma * k, radius * k);

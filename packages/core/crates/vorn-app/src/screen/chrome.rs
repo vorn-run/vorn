@@ -38,15 +38,15 @@ pub(super) fn tool(
             white(0.0).mix(white(0.06), hot),
         )
     };
-    let (pad, round) = if glass(s) { (6.0, 14.0) } else { (4.0, 6.0) };
     let b = div()
         .id(id)
         .on(Action::Click)
-        .p(pad)
-        .rounded(round)
         .bg(bg)
-        .role(Role::Button, label)
-        .child(ico(name, 16.0, stroke, fg));
+        .role(Role::Button, label);
+    let b = match glass(s).then(|| look::icon(name, stroke)).flatten() {
+        Some(svg) => b.size(28.0, 28.0).rounded(14.0).native_icon(&svg, 16.0, fg),
+        None => b.p(4.0).rounded(6.0).child(ico(name, 16.0, stroke, fg)),
+    };
     tooltip(s.ui, b, id, label, shortcut)
 }
 

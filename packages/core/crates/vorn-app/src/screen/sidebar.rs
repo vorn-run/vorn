@@ -163,6 +163,8 @@ fn header(s: &Screen<'_>) -> El {
         let mut b = div()
             .id(id)
             .on(Action::Click)
+            .min_w(if glass { 34.0 } else { 0.0 })
+            .min_h(if glass { 26.0 } else { 0.0 })
             .row()
             .items_center()
             .gap(6.0)
@@ -175,9 +177,13 @@ fn header(s: &Screen<'_>) -> El {
                 white(0.0).mix(white(0.04), hot)
             })
             .role(Role::Tab, label)
-            .selected(on)
-            .child(ico(name, 14.0, 2.0, fg));
-        if on {
+            .selected(on);
+        let svg = glass.then(|| look::icon(name, 2.0)).flatten();
+        b = match &svg {
+            Some(svg) => b.native_icon(svg, 14.0, fg),
+            None => b.child(ico(name, 14.0, 2.0, fg)),
+        };
+        if on && svg.is_none() {
             b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
         }
         tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
