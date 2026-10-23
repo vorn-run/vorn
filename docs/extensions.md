@@ -174,6 +174,17 @@ service component counts as Vorn's own only when the bytes Vorn read to run it
 are the pinned pack's; a service or command run as a program never does.
 Installing from a folder or a git repository, linking a folder, and packing all
 refuse a tree holding a symlink or special file, a committed one included.
+A linked folder that gains one among the files it would pack, the same one
+still there at the next check (about 2 s later), is not loaded until it is
+gone again. An editor's lock (`.#name`, a link to nothing) is never packed,
+and a manifest never names a path with a `.#` part. `.git`, `node_modules`
+and `target` are never packed; one at the top of the folder that is a link
+is refused like any other when the manifest names a path through it, and
+`storage.migrations` never names a folder inside one. A file the manifest
+names (a component, a tool's input schema, an agent's icon, a layout, a
+migration) is read, and the migrations folder listed, without following a
+link below the extension's folder; a migration that is a link is not run,
+and the extension's storage calls fail naming it until it is gone.
 
 The core is frozen against that API: `packages/core/freeze.toml` lists every
 crate of the core by its area and every feature still left in it, and

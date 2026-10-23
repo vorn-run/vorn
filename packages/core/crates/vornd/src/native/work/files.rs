@@ -1044,11 +1044,28 @@ impl Work {
             return;
         };
         let conns = connections(self).await;
-        for (extension, id, text) in contributed {
+        for (extension, id, file) in contributed {
             let key = format!("{extension}/{id}");
             if self.files.lock().seeded.contains(&key) {
                 continue;
             }
+            let Ok(pack) = router.pack(&extension) else {
+                continue;
+            };
+            // Read once: the bytes checked against the pin are the ones seeded.
+            let (text, caller) = match router.read_as(&pack, &file).await {
+                Ok((bytes, caller)) => match String::from_utf8(bytes) {
+                    Ok(text) => (text, caller),
+                    Err(err) => {
+                        warn!(%err, %extension, %file, "a shipped workflow is not text");
+                        continue;
+                    }
+                },
+                Err(err) => {
+                    warn!(%err, %extension, %file, "a shipped workflow cannot be read");
+                    continue;
+                }
+            };
             let bindings = Bindings {
                 connections: &conns,
                 project: None,
@@ -1066,10 +1083,6 @@ impl Work {
                 wf.get("id").and_then(Value::as_str).unwrap_or(&id)
             );
             wf["id"] = json!(stored_id);
-            let Ok(pack) = router.pack(&extension) else {
-                continue;
-            };
-            let caller = router.caller_of(&pack).await;
             let runs = |t: &str| crate::native::extensions::world::runs_commands(&native, t);
             if let Err(err) = vorn_extensions::gate::admit_seed(&caller, &wf, runs) {
                 warn!(%extension, workflow = %stored_id, "a shipped workflow is not added: {}", err.message);

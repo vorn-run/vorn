@@ -59,7 +59,12 @@ impl World for Core {
     fn secret(&self, _: &Caller, _: &str, _: &str) -> Answer<Option<String>> {
         Box::pin(async { Ok(None) })
     }
-    fn storage(&self, caller: &Caller, _: Option<PathBuf>, call: StorageCall) -> Answer<Value> {
+    fn storage(
+        &self,
+        caller: &Caller,
+        _: Option<vorn_extensions::pack::Migrations>,
+        call: StorageCall,
+    ) -> Answer<Value> {
         let id = caller.extension.clone();
         Box::pin(async move {
             match call {
@@ -580,6 +585,23 @@ async fn a_pack_vorn_pins_owns_its_namespace_and_hears_its_start_and_stop() {
     let list = json!({ "method": "sessions.list", "args": {} });
 
     let router = router_trusting(trust.clone());
+    // A file read of Vorn's own is its own only as the very bytes pinned.
+    let installed = store.describe("vorn.probe").unwrap();
+    let text = fs::read_to_string(installed.path.join("vorn-extension.toml")).unwrap();
+    let (bytes, caller) = router
+        .read_as(&installed, "vorn-extension.toml")
+        .await
+        .unwrap();
+    assert_eq!((bytes, caller.builtin), (text.clone().into_bytes(), true));
+    let edited = text.replace("start = \"started\"", "start = \"edited\"");
+    fs::write(installed.path.join("vorn-extension.toml"), &edited).unwrap();
+    let (bytes, caller) = router
+        .read_as(&installed, "vorn-extension.toml")
+        .await
+        .unwrap();
+    assert_eq!((bytes, caller.builtin), (edited.into_bytes(), false));
+    fs::write(installed.path.join("vorn-extension.toml"), &text).unwrap();
+
     router.start_installed().await;
     assert_eq!(
         router.rows("vorn.probe", "hooks"),

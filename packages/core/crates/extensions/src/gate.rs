@@ -5,7 +5,6 @@
 //! vault) is a [`World`] vornd provides, so the rules are tested without it.
 
 use std::future::Future;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -165,7 +164,7 @@ pub trait World: Send + Sync + 'static {
     fn storage(
         &self,
         _caller: &Caller,
-        _migrations: Option<PathBuf>,
+        _migrations: Option<crate::pack::Migrations>,
         _call: StorageCall,
     ) -> Answer<Value> {
         Box::pin(async {

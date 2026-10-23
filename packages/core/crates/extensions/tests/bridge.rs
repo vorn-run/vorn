@@ -70,7 +70,7 @@ impl World for Fake {
     fn storage(
         &self,
         caller: &Caller,
-        _migrations: Option<std::path::PathBuf>,
+        _migrations: Option<vorn_extensions::pack::Migrations>,
         call: StorageCall,
     ) -> Answer<Value> {
         let answer = match call {

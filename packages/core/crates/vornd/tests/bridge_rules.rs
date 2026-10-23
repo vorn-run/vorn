@@ -267,7 +267,29 @@ async fn the_bridge_holds_a_program_to_what_it_declares() {
     assert!(linked.get("error").is_none(), "{linked}");
     let insert =
         json!({ "sql": "INSERT INTO x_test_0rules_notes (body) VALUES (?)", "params": ["again"] });
-    assert_eq!(c.relay("storage.exec", insert).await["result"], 1);
+    assert_eq!(c.relay("storage.exec", insert.clone()).await["result"], 1);
+
+    // A migration put in as a link is not run, and its tables are not used until it is gone.
+    #[cfg(unix)]
+    {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(
+            outside.path().join("more.sql"),
+            "CREATE TABLE x_test_0rules_more (a);",
+        )
+        .unwrap();
+        let planted = folder.path().join("migrations/002_more.sql");
+        std::os::unix::fs::symlink(outside.path().join("more.sql"), &planted).unwrap();
+        let refused = c.relay("storage.exec", insert.clone()).await;
+        let message = refused["error"]["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("migrations/002_more.sql is a link"),
+            "{refused}"
+        );
+        assert!(!tables(&db).contains(&"x_test_0rules_more".to_owned()));
+        std::fs::remove_file(&planted).unwrap();
+        assert_eq!(c.relay("storage.exec", insert).await["result"], 1);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -15,7 +15,6 @@ pub mod routes;
 pub mod world;
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -394,8 +393,12 @@ impl Extensions {
         self.router.reindex();
         self.sync_adapters();
         self.builtins.start();
-        let router = Arc::clone(&self.router);
-        tokio::spawn(async move { router.start_installed().await });
+        let (router, installs) = (Arc::clone(&self.router), Arc::clone(&self.installs));
+        tokio::spawn(async move {
+            // A linked folder that gained a link while vornd was stopped does not start.
+            let _ = tokio::task::spawn_blocking(move || installs.recheck_linked()).await;
+            router.start_installed().await;
+        });
         self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
@@ -456,8 +459,9 @@ impl Extensions {
         out
     }
 
-    /// The layouts installed extensions offer: `(extension id, layout id, title, file)`.
-    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf)> {
+    /// The layouts installed extensions offer: `(extension id, layout id,
+    /// title, the extension's folder, the file in it)`.
+    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf, String)> {
         let store = self.router.store();
         let mut out = Vec::new();
         for id in store.ids() {
@@ -472,7 +476,8 @@ impl Extensions {
                     id.clone(),
                     l.base.id.clone(),
                     l.base.title.clone(),
-                    pack.path.join(&l.file),
+                    pack.path.clone(),
+                    l.file.clone(),
                 ));
             }
         }
@@ -678,8 +683,8 @@ impl Extensions {
                 let schema = tool
                     .input
                     .as_ref()
-                    .and_then(|p| fs::read_to_string(pack.path.join(p)).ok())
-                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .and_then(|p| vorn_extensions::reach::read_in(&pack.path, p).ok())
+                    .and_then(|t| serde_json::from_slice::<Value>(&t).ok())
                     .filter(Value::is_object)
                     .unwrap_or_else(|| json!({ "type": "object" }));
                 out.push(McpListed {
@@ -1368,7 +1373,10 @@ fn manifest_stamps(linked: &[(String, PathBuf)]) -> HashMap<PathBuf, (Option<Sys
 }
 
 /// Tells clients when a linked package's manifest is saved, so what it
-/// contributes shows as it is written.
+/// contributes shows as it is written, and checks each linked folder for a
+/// link again as it is relisted and when its manifest changes: one that
+/// gained a link is marked not loaded, which [`watch`] then sees as a
+/// changed pack and stops.
 async fn watch_linked(me: Weak<Extensions>) {
     let mut linked: Vec<(String, PathBuf)> = Vec::new();
     let mut stamps = HashMap::new();
@@ -1381,8 +1389,10 @@ async fn watch_linked(me: Weak<Extensions>) {
             return;
         };
         since_list += LINKED_CHECK;
-        if since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed) {
+        let relist = since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed);
+        if relist {
             since_list = Duration::ZERO;
+            recheck_linked(&extensions).await;
             let store = extensions.router.store().clone();
             linked = store
                 .ids()
@@ -1409,12 +1419,21 @@ async fn watch_linked(me: Weak<Extensions>) {
             })
             .map(|(id, _)| id)
             .collect();
+        if !moved.is_empty() && !relist {
+            recheck_linked(&extensions).await;
+        }
         for id in moved {
             debug!("[extensions] {id}'s manifest changed");
             extensions.contributions_changed(id);
         }
         stamps = now;
     }
+}
+
+/// Runs [`Installs::recheck_linked`] off the runtime.
+async fn recheck_linked(extensions: &Extensions) {
+    let installs = Arc::clone(&extensions.installs);
+    let _ = tokio::task::spawn_blocking(move || installs.recheck_linked()).await;
 }
 
 /// Syncs the sessions that are new or moved (every one when `all`), and releases the ones gone.

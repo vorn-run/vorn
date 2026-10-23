@@ -677,15 +677,18 @@ fn is_id(id: &str) -> bool {
 }
 
 /// A path inside the package: relative, and never climbing out of it.
+/// A path inside the extension, none of whose parts is an editor's lock
+/// (`.#name`), which is never packed.
 fn is_relative_path(path: &str) -> bool {
     let p = std::path::Path::new(path);
     !path.is_empty()
         && p.is_relative()
-        && p.components().all(|c| {
-            matches!(
-                c,
-                std::path::Component::Normal(_) | std::path::Component::CurDir
-            )
+        && p.components().all(|c| match c {
+            std::path::Component::Normal(n) => !n
+                .as_encoded_bytes()
+                .starts_with(crate::install::EDITOR_LOCK.as_bytes()),
+            std::path::Component::CurDir => true,
+            _ => false,
         })
 }
 
@@ -837,6 +840,23 @@ impl Raw {
                 return Err(at(
                     "storage.migrations",
                     "names a folder inside the package".into(),
+                ));
+            }
+            // A pack leaves these out, so migrations there would run only from a linked folder.
+            if std::path::Path::new(&storage.migrations)
+                .iter()
+                .any(|part| {
+                    crate::install::NOT_PACKED
+                        .iter()
+                        .any(|n| part.eq_ignore_ascii_case(n))
+                })
+            {
+                return Err(at(
+                    "storage.migrations",
+                    format!(
+                        "names a folder a pack leaves out ({})",
+                        crate::install::NOT_PACKED.join(", ")
+                    ),
                 ));
             }
         }
@@ -2573,13 +2593,56 @@ events = ["session.status"]
             err("component = \"target/x.wasm\"", "component = \"x.wasm\"\ncommand = [\"node\"]"),
             "vorn-extension.toml:7: service.component: runs in place of service.command; name one of them"
         );
-        for outside in ["../x.wasm", "/x.wasm", "x.so"] {
+        for outside in [
+            "../x.wasm",
+            "/x.wasm",
+            "x.so",
+            ".#x.wasm",
+            "target/.#t/x.wasm",
+        ] {
             assert_eq!(
                 err("target/x.wasm", outside),
                 "vorn-extension.toml:7: service.component: names a .wasm file inside the package",
                 "{outside}"
             );
         }
+    }
+
+    #[test]
+    fn migrations_are_a_folder_a_pack_keeps() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[declares]
+uses = ["storage"]
+
+[storage]
+migrations = "db/migrations"
+
+[actions.go]
+title = "Go"
+command = ["sh", "go.sh"]
+"#;
+        let m = parse(text).unwrap();
+        assert_eq!(m.storage.as_ref().unwrap().migrations, "db/migrations");
+        let err = |to: &str| {
+            parse(&text.replace("db/migrations", to))
+                .unwrap_err()
+                .to_string()
+        };
+        for left_out in ["node_modules/x", "target", "db/.git/m"] {
+            assert_eq!(
+                err(left_out),
+                "vorn-extension.toml:10: storage.migrations: names a folder a pack leaves out (.git, node_modules, target)",
+                "{left_out}"
+            );
+        }
+        assert_eq!(
+            err(".#m"),
+            "vorn-extension.toml:10: storage.migrations: names a folder inside the package"
+        );
     }
 
     #[test]

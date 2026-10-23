@@ -432,6 +432,20 @@ mod tests {
         let (bytes, vouched) = installs.trust().read_vouched(&pack, "hello.sh").unwrap();
         assert_eq!((bytes.as_slice(), vouched), (&b"echo changed\n"[..], false));
         assert!(installs.trust().read_vouched(&pack, "gone.wasm").is_err());
+        #[cfg(unix)]
+        {
+            fs::remove_file(pack.path.join("hello.sh")).unwrap();
+            std::os::unix::fs::symlink(
+                pack.path.join(crate::manifest::file::FILE),
+                pack.path.join("hello.sh"),
+            )
+            .unwrap();
+            let err = installs
+                .trust()
+                .read_vouched(&pack, "hello.sh")
+                .unwrap_err();
+            assert!(err.contains("is a link"), "{err}");
+        }
     }
 
     #[test]

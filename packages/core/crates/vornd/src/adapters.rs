@@ -162,8 +162,8 @@ pub fn read_installed(store: &PackStore) -> Vec<Installed> {
             continue;
         }
         let icon = icon_path(&agent)
-            .filter(|p| !p.contains("..") && !Path::new(p).is_absolute())
-            .and_then(|p| std::fs::read_to_string(pack.path.join(p)).ok());
+            .and_then(|p| vorn_extensions::reach::read_in(&pack.path, &p).ok())
+            .and_then(|b| String::from_utf8(b).ok());
         installed.push(Installed {
             extension: pack.id,
             agent,

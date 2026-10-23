@@ -2,7 +2,8 @@
 //! call, the network `net.fetch` reaches, and the vault its credentials come
 //! from. The gate has already checked every call against the manifest.
 
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -12,11 +13,12 @@ use vorn_connectors::fetch::{Http, Request as HttpRequest};
 use vorn_extensions::api::types::{CallCtx, Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{self, Answer, Caller, StorageCall, World};
-use vorn_extensions::reach::{self, Access, Places};
+use vorn_extensions::pack::Migrations;
+use vorn_extensions::reach::{self, Access, Opened, Places};
 use vorn_store::extension::{ExtensionTables, Grant};
 
 use crate::native::config::Viewer;
-use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
+use crate::native::{file, secrets::Known, Answer as NativeAnswer, Native};
 
 /// How long one `net.fetch` may take.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -72,15 +74,6 @@ fn lent(id: &str) -> &'static [Grant] {
     } else {
         &[]
     }
-}
-
-/// `files.read` with `encoding: base64`: the file's bytes, `{base64}`.
-async fn read_bytes(path: PathBuf) -> Result<Value, ExtError> {
-    tokio::task::spawn_blocking(move || std::fs::read(path))
-        .await
-        .map_err(|e| ExtError::new("failed", e.to_string()))?
-        .map(|bytes| json!({ "base64": vorn_extensions::api::base64::encode(&bytes) }))
-        .map_err(|e| ExtError::new("failed", e.to_string()))
 }
 
 /// `task.changed`: the events a task's write fires, emitted as the core's,
@@ -202,6 +195,48 @@ async fn reached(
     path: &str,
     access: Access,
 ) -> Result<PathBuf, ExtError> {
+    let path = PathBuf::from(path);
+    on_places(native, caller, move |places, extension, runs| {
+        places.reach(extension, &path, access, runs)
+    })
+    .await?
+}
+
+/// `path` opened for `access` once `caller` may reach it ([`reached`]), the
+/// handle then given to `then` off the runtime: what it reads or writes is
+/// the file checked, not whatever the name points at by then.
+async fn opened<T: Send + 'static>(
+    native: &Arc<Native>,
+    caller: &Caller,
+    path: &str,
+    access: Access,
+    then: impl FnOnce(std::io::Result<Opened>) -> T + Send + 'static,
+) -> Result<T, ExtError> {
+    let path = PathBuf::from(path);
+    on_places(native, caller, move |places, extension, runs| {
+        places.open(extension, &path, access, runs).map(then)
+    })
+    .await?
+}
+
+/// `path` as git prints one: on Windows without the `\\?\` prefix and with `/`.
+fn file_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if cfg!(windows) {
+        path.strip_prefix(r"\\?\")
+            .unwrap_or(&path)
+            .replace('\\', "/")
+    } else {
+        path.into_owned()
+    }
+}
+
+/// Runs `check` off the runtime on the places `caller` may reach.
+async fn on_places<T: Send + 'static>(
+    native: &Arc<Native>,
+    caller: &Caller,
+    check: impl FnOnce(Places, &str, bool) -> T + Send + 'static,
+) -> Result<T, ExtError> {
     let host = host_of(native)?;
     let projects = on_store(native, "files", |s| s.call("dbListProjects", json!([]))).await?;
     let mut roots: Vec<String> = Vec::new();
@@ -231,11 +266,7 @@ async fn reached(
         .database()
         .and_then(std::path::Path::parent)
         .map(std::path::Path::to_path_buf);
-    let (extension, runs, path) = (
-        caller.extension.clone(),
-        caller.runs_commands,
-        PathBuf::from(path),
-    );
+    let (extension, runs) = (caller.extension.clone(), caller.runs_commands);
     tokio::task::spawn_blocking(move || {
         let resolved = |list: Vec<String>| -> Vec<PathBuf> {
             list.iter()
@@ -251,10 +282,10 @@ async fn reached(
             handed,
             closed: reach::closed(&home, &data),
         };
-        places.reach(&extension, &path, access, runs)
+        check(places, &extension, runs)
     })
     .await
-    .map_err(|e| ExtError::new("failed", e.to_string()))?
+    .map_err(|e| ExtError::new("failed", e.to_string()))
 }
 
 /// Starts `req` for extension `extension` the way the app and the MCP tools
@@ -629,27 +660,56 @@ impl World for Wired {
                 "files.read" => {
                     let path =
                         text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
-                    let path = reached(&native, &caller, &path, Access::Read).await?;
                     if text(&args, "encoding").as_deref() == Some("base64") {
-                        return read_bytes(path).await;
+                        let read = |o: std::io::Result<Opened>| -> std::io::Result<Vec<u8>> {
+                            let mut bytes = Vec::new();
+                            o?.file().read_to_end(&mut bytes)?;
+                            Ok(bytes)
+                        };
+                        return opened(&native, &caller, &path, Access::Read, read)
+                            .await?
+                            .map(|b| json!({ "base64": vorn_extensions::api::base64::encode(&b) }))
+                            .map_err(|e| ExtError::new("failed", e.to_string()));
                     }
-                    let mut params = json!({ "filePath": path });
-                    if let Some(max) = args.get("maxBytes").filter(|v| v.is_u64()) {
-                        params["maxBytes"] = max.clone();
-                    }
-                    ask(&native, "file:readContent", params).await
+                    let max = args
+                        .get("maxBytes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(file::MAX_READ_BYTES);
+                    let text = opened(&native, &caller, &path, Access::Read, move |o| {
+                        o.ok()
+                            .and_then(|o| file::read_text(o.file(), o.metadata(), max))
+                    })
+                    .await?;
+                    Ok(json!(text))
                 }
                 "files.list" => {
                     let dir = text(&args, "path")
                         .ok_or_else(|| needs(m, "the absolute folder to list"))?;
-                    let dir = reached(&native, &caller, &dir, Access::Look).await?;
-                    ask(&native, "file:listDir", json!({ "dirPath": dir })).await
+                    let (lister, named) = (Arc::clone(&native), dir.clone());
+                    let list = move |o: std::io::Result<Opened>| {
+                        let Ok(o) = o else { return Vec::new() };
+                        let entries = o.entries().unwrap_or_default();
+                        let real = file_path(o.real());
+                        file::listing(&named, &real, entries, &lister.env, &lister.ignored)
+                    };
+                    let entries = opened(&native, &caller, &dir, Access::Look, list).await?;
+                    Ok(Value::Array(
+                        entries.iter().map(file::FileEntry::to_json).collect(),
+                    ))
                 }
                 "files.stat" => {
-                    let path =
-                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
-                    let path = reached(&native, &caller, &path, Access::Look).await?;
-                    ask(&native, "file:stamp", json!({ "filePath": path })).await
+                    let path = PathBuf::from(
+                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?,
+                    );
+                    let looked = on_places(&native, &caller, move |places, extension, runs| {
+                        places.stat(extension, &path, runs)
+                    })
+                    .await??;
+                    let stamp = looked
+                        .ok()
+                        .filter(|l| l.is_file)
+                        .and_then(|l| file::stamp_of(l.len, l.modified?));
+                    Ok(stamp.unwrap_or(Value::Null))
                 }
                 "shell.executables" => ask(&native, "shell:listExecutables", Value::Null).await,
                 "git.branches" => {
@@ -665,13 +725,13 @@ impl World for Wired {
                     let content = args
                         .get("content")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| needs(m, "the content to write"))?;
-                    let path = reached(&native, &caller, &path, Access::Write).await?;
-                    ask(
-                        &native,
-                        "file:writeContent",
-                        json!({ "filePath": path, "content": content }),
-                    )
+                        .ok_or_else(|| needs(m, "the content to write"))?
+                        .to_owned();
+                    let named = path.clone();
+                    opened(&native, &caller, &path, Access::Write, move |o| match o {
+                        Ok(o) => file::write_to(o.file(), &named, &content),
+                        Err(e) => file::written(&named, Err(e)),
+                    })
                     .await
                 }
                 "secrets.get" => {
@@ -973,7 +1033,7 @@ impl World for Wired {
     fn storage(
         &self,
         caller: &Caller,
-        migrations: Option<PathBuf>,
+        migrations: Option<Migrations>,
         call: StorageCall,
     ) -> Answer<Value> {
         let (native, id) = (self.native.upgrade(), caller.extension.clone());
@@ -995,8 +1055,8 @@ impl World for Wired {
                     .as_ref()
                     .ok_or_else(|| vorn_store::Error::Refused("its tables did not open".into()))?;
                 // Checked each call: a linked package gains files, and a reinstall starts with none run.
-                if let Some(dir) = migrations.filter(|d| d.is_dir()) {
-                    let ran = tables.migrate(&dir)?;
+                if let Some(migrations) = migrations {
+                    let ran = tables.migrate(migrations.names()?, |name| migrations.read(name))?;
                     if !ran.is_empty() {
                         info!("[extensions] {id} ran its migrations {}", ran.join(", "));
                     }
