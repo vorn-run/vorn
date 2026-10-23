@@ -465,10 +465,10 @@ folder:
   `.zprofile`, `.zlogin`, `.zlogout`, `.config/fish`.
 
 A file is opened through the very path that was checked, without following
-a link at any step, so a link put in its place since is refused. `files.write`
-refuses a file with more than one name (a hard link), and `files.read` one
-whose other name is in the list above; on Windows `files.read` refuses any
-file with more than one name.
+a link at any step, so a link put in its place since is refused; `files.stat`
+looks at it from its folder without opening it. `files.write` refuses a file
+with more than one name (a hard link), and `files.read` one whose other name
+is in the list above.
 
 - `files.list` (`{path}`) answers a folder's entries, `{name, path,
 isDirectory}`, folders first, without what git ignores; `files.stat`

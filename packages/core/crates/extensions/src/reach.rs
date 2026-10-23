@@ -12,8 +12,7 @@
 //! What was checked is then opened without following a link ([`open`]) and
 //! used through that handle, never by name again. A file with more than one
 //! name (hard links) is never written, since its other names may be
-//! anywhere; one is read unless another of its names is in a closed place
-//! (on Windows, where that cannot be looked up cheaply, never read).
+//! anywhere; one is read unless another of its names is in a closed place.
 
 mod open;
 
@@ -274,6 +273,18 @@ impl Places {
 /// of a file read; past it, the file is taken to have one there.
 const CLOSED_LOOKED: usize = 50_000;
 
+pub use open::Looked;
+
+fn became_link(path: &Path) -> ExtError {
+    ExtError::new(
+        "denied",
+        format!(
+            "{} changed into a link after it was checked",
+            path.display()
+        ),
+    )
+}
+
 /// A file or folder a `files.*` call reached, open: read, written or listed
 /// through this handle, never by its name again.
 #[derive(Debug)]
@@ -292,6 +303,11 @@ impl Opened {
     /// What the handle said it was as it was opened.
     pub fn metadata(&self) -> &Metadata {
         &self.meta
+    }
+
+    /// The path opened, resolved: links followed, as the disk names it.
+    pub fn real(&self) -> &Path {
+        &self.real
     }
 
     /// The entries of an open folder, each name with whether it is a folder
@@ -317,15 +333,7 @@ impl Places {
         self.admit(extension, &real, access, runs_commands)?;
         let file = match open::open(&real, access) {
             Ok(file) => file,
-            Err(open::Failed::Link) => {
-                return Err(ExtError::new(
-                    "denied",
-                    format!(
-                        "{} changed into a link after it was checked",
-                        path.display()
-                    ),
-                ))
-            }
+            Err(open::Failed::Link) => return Err(became_link(path)),
             Err(open::Failed::Io(e)) => return Ok(Err(e)),
         };
         let meta = match file.metadata() {
@@ -352,14 +360,20 @@ impl Places {
                     ),
                 ));
             }
-            if names > 1 && self.closed_holds(&meta) {
-                return Err(ExtError::new(
-                    "denied",
-                    format!(
-                        "{} is another name of a file that is not open to extensions",
-                        path.display()
-                    ),
-                ));
+            if names > 1 {
+                match open::identity(&meta, &file) {
+                    Ok(id) if !self.closed_holds(id) => {}
+                    Ok(_) => {
+                        return Err(ExtError::new(
+                            "denied",
+                            format!(
+                                "{} is another name of a file that is not open to extensions",
+                                path.display()
+                            ),
+                        ))
+                    }
+                    Err(e) => return Ok(Err(e)),
+                }
             }
         }
         if access == Access::Write {
@@ -370,59 +384,61 @@ impl Places {
         Ok(Ok(Opened { file, meta, real }))
     }
 
-    /// Whether the file `meta` describes has a name in a closed place, as
-    /// far as can be shown: on Windows, and past [`CLOSED_LOOKED`] entries,
-    /// it is taken to have one.
-    fn closed_holds(&self, meta: &Metadata) -> bool {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let (dev, ino) = (meta.dev(), meta.ino());
-            let mut folders = Vec::new();
-            for place in &self.closed {
-                let Ok(m) = std::fs::symlink_metadata(place) else {
-                    continue;
-                };
-                if m.dev() != dev {
-                    continue;
-                }
-                if m.ino() == ino && m.is_file() {
+    /// Looks at `path` once `extension` may reach it ([`Places::reach`]),
+    /// in its folder opened as [`Places::open`] opens one, without opening
+    /// the file itself: a file it may not read still tells its size and
+    /// time. The outer error is a refusal; the inner one, what the disk said.
+    pub fn stat(
+        &self,
+        extension: &str,
+        path: &Path,
+        runs_commands: bool,
+    ) -> Result<io::Result<Looked>, ExtError> {
+        let real = resolve(path)?;
+        self.admit(extension, &real, Access::Look, runs_commands)?;
+        match open::stat(&real) {
+            Ok(looked) => Ok(Ok(looked)),
+            Err(open::Failed::Link) => Err(became_link(path)),
+            Err(open::Failed::Io(e)) => Ok(Err(e)),
+        }
+    }
+
+    /// Whether the file `id` names has a name in a closed place, as far as
+    /// can be shown: past [`CLOSED_LOOKED`] entries, it is taken to have one.
+    fn closed_holds(&self, id: open::Identity) -> bool {
+        let mut folders = Vec::new();
+        for place in &self.closed {
+            let Ok(m) = std::fs::symlink_metadata(place) else {
+                continue;
+            };
+            if m.is_dir() {
+                folders.push(place.clone());
+            } else if m.is_file() && open::identity_at(place) == Some(id) {
+                return true;
+            }
+        }
+        let mut left = CLOSED_LOOKED;
+        while let Some(dir) = folders.pop() {
+            let Ok(read) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in read.flatten() {
+                if left == 0 {
                     return true;
                 }
-                if m.is_dir() {
-                    folders.push(place.clone());
-                }
-            }
-            let mut left = CLOSED_LOOKED;
-            while let Some(dir) = folders.pop() {
-                let Ok(read) = std::fs::read_dir(&dir) else {
+                left -= 1;
+                // Not followed: an entry's own type, a link's included.
+                let Ok(kind) = entry.file_type() else {
                     continue;
                 };
-                for entry in read.flatten() {
-                    if left == 0 {
-                        return true;
-                    }
-                    left -= 1;
-                    // Not followed: an entry's own metadata, a link's included.
-                    let Ok(m) = entry.metadata() else { continue };
-                    if m.dev() != dev {
-                        continue;
-                    }
-                    if m.is_file() && m.ino() == ino {
-                        return true;
-                    }
-                    if m.is_dir() {
-                        folders.push(entry.path());
-                    }
+                if kind.is_dir() {
+                    folders.push(entry.path());
+                } else if kind.is_file() && open::identity_at(&entry.path()) == Some(id) {
+                    return true;
                 }
             }
-            false
         }
-        #[cfg(not(unix))]
-        {
-            let _ = meta;
-            true
-        }
+        false
     }
 }
 
@@ -1003,7 +1019,6 @@ mod tests {
         assert_eq!(fs::read_to_string(outside.join("b.txt")).unwrap(), "b");
     }
 
-    #[cfg(unix)]
     #[test]
     fn never_writes_a_file_with_other_names_nor_reads_one_named_in_a_closed_place() {
         let d = disk();
@@ -1032,5 +1047,52 @@ mod tests {
         fs::hard_link(d.home.join("elsewhere/b.txt"), &mine).unwrap();
         assert!(opened(&p, &mine, Access::Read).unwrap().is_ok());
         assert!(opened(&p, &mine, Access::Write).is_err());
+    }
+
+    #[test]
+    fn looks_at_a_file_without_opening_it() {
+        let d = disk();
+        let p = places(&d);
+        let looked = p
+            .stat("x", &d.project.join("a.txt"), false)
+            .unwrap()
+            .unwrap();
+        assert!(looked.is_file);
+        assert_eq!(looked.len, 1);
+        assert!(looked.modified.is_some());
+        let folder = p.stat("x", &d.project, false).unwrap().unwrap();
+        assert!(!folder.is_file);
+        assert!(p
+            .stat("x", &d.project.join("gone"), false)
+            .unwrap()
+            .is_err());
+        assert!(p.stat("x", &d.home.join(".zshrc"), false).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn looks_at_a_file_only_its_owner_writes_and_goes_through_a_folder_it_may_only_search() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let d = disk();
+        let p = places(&d);
+        let only_written = d.project.join("w.txt");
+        fs::write(&only_written, "www").unwrap();
+        fs::set_permissions(&only_written, fs::Permissions::from_mode(0o200)).unwrap();
+        assert_eq!(p.stat("x", &only_written, false).unwrap().unwrap().len, 3);
+
+        let shut = d.project.join("shut");
+        fs::create_dir(&shut).unwrap();
+        fs::write(shut.join("in.txt"), "in").unwrap();
+        fs::set_permissions(&shut, fs::Permissions::from_mode(0o100)).unwrap();
+        let read = opened(&p, &shut.join("in.txt"), Access::Read).unwrap();
+        let looked = p.stat("x", &shut.join("in.txt"), false).unwrap();
+        fs::set_permissions(&shut, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(read.is_ok(), "{read:?}");
+        assert_eq!(looked.unwrap().len, 2);
+
+        let checked = resolve(&d.project.join("a.txt")).unwrap();
+        fs::remove_file(&checked).unwrap();
+        symlink(d.home.join("elsewhere/b.txt"), &checked).unwrap();
+        assert!(matches!(open::stat(&checked), Err(open::Failed::Link)));
     }
 }

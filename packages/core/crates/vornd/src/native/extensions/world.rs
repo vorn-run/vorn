@@ -3,7 +3,7 @@
 //! from. The gate has already checked every call against the manifest.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -216,6 +216,18 @@ async fn opened<T: Send + 'static>(
         places.open(extension, &path, access, runs).map(then)
     })
     .await?
+}
+
+/// `path` as git prints one: on Windows without the `\\?\` prefix and with `/`.
+fn file_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if cfg!(windows) {
+        path.strip_prefix(r"\\?\")
+            .unwrap_or(&path)
+            .replace('\\', "/")
+    } else {
+        path.into_owned()
+    }
 }
 
 /// Runs `check` off the runtime on the places `caller` may reach.
@@ -674,8 +686,10 @@ impl World for Wired {
                         .ok_or_else(|| needs(m, "the absolute folder to list"))?;
                     let (lister, named) = (Arc::clone(&native), dir.clone());
                     let list = move |o: std::io::Result<Opened>| {
-                        let entries = o.and_then(|o| o.entries()).unwrap_or_default();
-                        file::listing(&named, entries, &lister.env, &lister.ignored)
+                        let Ok(o) = o else { return Vec::new() };
+                        let entries = o.entries().unwrap_or_default();
+                        let real = file_path(o.real());
+                        file::listing(&named, &real, entries, &lister.env, &lister.ignored)
                     };
                     let entries = opened(&native, &caller, &dir, Access::Look, list).await?;
                     Ok(Value::Array(
@@ -683,12 +697,17 @@ impl World for Wired {
                     ))
                 }
                 "files.stat" => {
-                    let path =
-                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
-                    let stamp = |o: std::io::Result<Opened>| {
-                        o.ok().and_then(|o| file::stamp_of(o.metadata()))
-                    };
-                    let stamp = opened(&native, &caller, &path, Access::Look, stamp).await?;
+                    let path = PathBuf::from(
+                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?,
+                    );
+                    let looked = on_places(&native, &caller, move |places, extension, runs| {
+                        places.stat(extension, &path, runs)
+                    })
+                    .await??;
+                    let stamp = looked
+                        .ok()
+                        .filter(|l| l.is_file)
+                        .and_then(|l| file::stamp_of(l.len, l.modified?));
                     Ok(stamp.unwrap_or(Value::Null))
                 }
                 "shell.executables" => ask(&native, "shell:listExecutables", Value::Null).await,

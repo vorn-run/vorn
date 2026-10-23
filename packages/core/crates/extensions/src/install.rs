@@ -40,6 +40,8 @@ const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const TAIL_BYTES: usize = 2000;
 /// Left out of a bundle: history, dependencies and build output a build makes again.
 const NOT_PACKED: [&str; 3] = [".git", "node_modules", "target"];
+/// Starts the lock an editor keeps beside a file it has open, a link to nothing.
+const EDITOR_LOCK: &str = ".#";
 /// The most a pack may unpack to; Vorn's own are well under a megabyte.
 const ARCHIVE_MAX_BYTES: u64 = 64 << 20;
 /// The most files a pack may hold.
@@ -268,6 +270,9 @@ pub struct Installs {
     /// Held from an install's last check to its `current.json`, so two
     /// installs at once cannot both claim one agent.
     placing: Mutex<()>,
+    /// The linked folders the last [`Installs::recheck_linked`] found a
+    /// link in, by id: one is refused only once a second check finds it too.
+    linking: Mutex<HashMap<String, String>>,
 }
 
 impl std::fmt::Debug for Installs {
@@ -384,6 +389,7 @@ impl Installs {
             trust: Trust::default(),
             staged: Mutex::default(),
             placing: Mutex::default(),
+            linking: Mutex::default(),
         }
     }
 
@@ -908,9 +914,9 @@ impl Installs {
     }
 
     /// Checks every linked folder again as the link did, since one can gain
-    /// a link or special file after it was linked: one that did is marked
-    /// not loaded in its `current.json` until it holds none again. Answers
-    /// the ids whose mark changed. Blocks on the disk.
+    /// a link or special file after it was linked: one that still holds it
+    /// at the next check is marked not loaded in its `current.json` until it
+    /// holds none again. Answers the ids whose mark changed. Blocks on the disk.
     pub fn recheck_linked(&self) -> Vec<String> {
         let mut changed = Vec::new();
         for id in self.store.ids() {
@@ -920,7 +926,7 @@ impl Installs {
             else {
                 continue;
             };
-            let refused = match walk(&folder, "", &mut Vec::new()) {
+            let found = match walk(&folder, "", &mut Vec::new()) {
                 Ok(()) => None,
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => Some(e.to_string()),
                 // A folder that cannot be read now is not loaded anyway; its mark stays as it was.
@@ -935,6 +941,18 @@ impl Installs {
                 continue;
             }
             let was = current.get(REFUSED_KEY).and_then(Value::as_str);
+            let seen_before = {
+                let mut linking = lock(&self.linking);
+                match &found {
+                    Some(why) => linking.insert(id.clone(), why.clone()).is_some(),
+                    None => linking.remove(&id).is_some(),
+                }
+            };
+            // A link seen once may be gone by the next check, as a save's is.
+            if found.is_some() && was.is_none() && !seen_before {
+                continue;
+            }
+            let refused = found;
             if was == refused.as_deref() {
                 continue;
             }
@@ -1370,7 +1388,7 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> 
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        if NOT_PACKED.contains(&name.as_str()) {
+        if NOT_PACKED.contains(&name.as_str()) || name.starts_with(EDITOR_LOCK) {
             continue;
         }
         let rel = if prefix.is_empty() {
@@ -1665,8 +1683,24 @@ migrations = "migrations"
         installs.link(folder.path()).unwrap();
         assert!(installs.recheck_linked().is_empty());
 
+        let lock = folder.path().join("lib/.#main.rs");
+        std::os::unix::fs::symlink("me@host.1234:1700000000", &lock).unwrap();
         let planted = folder.path().join("lib/keys");
         std::os::unix::fs::symlink(outside.path(), &planted).unwrap();
+        assert!(installs.recheck_linked().is_empty(), "seen once");
+        assert!(installs.store().inspect("test.marker").is_ok());
+        fs::remove_file(&planted).unwrap();
+        assert!(
+            installs.recheck_linked().is_empty(),
+            "gone by the next check"
+        );
+        assert!(
+            installs.recheck_linked().is_empty(),
+            "an editor's lock is not packed"
+        );
+
+        std::os::unix::fs::symlink(outside.path(), &planted).unwrap();
+        assert!(installs.recheck_linked().is_empty());
         assert_eq!(installs.recheck_linked(), ["test.marker"]);
         let err = installs.store().inspect("test.marker").unwrap_err();
         assert!(err.contains("lib/keys is a link"), "{err}");

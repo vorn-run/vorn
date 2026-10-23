@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::fs::{File, Metadata};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
@@ -62,17 +62,20 @@ pub fn list_dir(dir: &str, env: &Arc<SafeEnv>, cache: &IgnoreCache) -> Vec<FileE
         let is_directory = entry.file_type().is_ok_and(|t| t.is_dir());
         (entry.file_name(), is_directory)
     });
-    listing(dir, entries, env, cache)
+    listing(dir, dir, entries, env, cache)
 }
 
-/// [`list_dir`] of entries already read: each name, and whether it is a directory.
+/// [`list_dir`] of entries already read: each name, and whether it is a
+/// directory. What git ignores is told at `real`, the folder resolved;
+/// paths are given under `shown`, the folder as the caller named it.
 pub fn listing(
-    dir: &str,
+    shown: &str,
+    real: &str,
     entries: impl IntoIterator<Item = (OsString, bool)>,
     env: &Arc<SafeEnv>,
     cache: &IgnoreCache,
 ) -> Vec<FileEntry> {
-    let ignored = git_ignored(dir, env, cache);
+    let ignored = git_ignored(real, env, cache);
     let mut out = Vec::new();
     for (name, is_directory) in entries {
         let name = name.to_string_lossy().into_owned();
@@ -82,13 +85,15 @@ pub fn listing(
         if name.starts_with('.') && name != ".github" {
             continue;
         }
-        let path = node_join(dir, &name);
-        if ignored.as_ref().is_some_and(|set| set.contains(&path)) {
+        if ignored
+            .as_ref()
+            .is_some_and(|set| set.contains(&node_join(real, &name)))
+        {
             continue;
         }
         out.push(FileEntry {
+            path: node_join(shown, &name),
             name,
-            path,
             is_directory,
         });
     }
@@ -189,15 +194,15 @@ pub fn read_text(file: &File, meta: &Metadata, max_bytes: u64) -> Option<String>
 /// A file's size and modification time in whole milliseconds; `None` for
 /// anything that is not a file this can stat.
 pub fn stamp(path: &str) -> Option<Value> {
-    stamp_of(&std::fs::metadata(path).ok()?)
-}
-
-/// [`stamp`] of what a file said it was.
-pub fn stamp_of(meta: &Metadata) -> Option<Value> {
+    let meta = std::fs::metadata(path).ok()?;
     if !meta.is_file() {
         return None;
     }
-    let modified = meta.modified().ok()?;
+    stamp_of(meta.len(), meta.modified().ok()?)
+}
+
+/// [`stamp`] of a file `size` bytes long, last changed at `modified`.
+pub fn stamp_of(size: u64, modified: SystemTime) -> Option<Value> {
     let ms = match modified.duration_since(UNIX_EPOCH) {
         Ok(d) => i64::try_from(d.as_millis()).ok()?,
         // Before 1970, floored as `Math.floor` floors a negative.
@@ -211,7 +216,7 @@ pub fn stamp_of(meta: &Metadata) -> Option<Value> {
             }
         }
     };
-    Some(json!({ "size": meta.len(), "mtimeMs": ms }))
+    Some(json!({ "size": size, "mtimeMs": ms }))
 }
 
 /// Writes `content` over the file, creating it; the error names the failed
@@ -633,6 +638,41 @@ mod tests {
         assert_eq!(
             write_content(m, "x"),
             json!({ "success": false, "error": format!("ENOENT: no such file or directory, open '{m}'") })
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lists_a_linked_folder_under_its_name_without_what_git_ignores() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = std::fs::canonicalize(dir.path()).unwrap().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(repo.join(".gitignore"), "out\n").unwrap();
+        std::fs::write(repo.join("kept.txt"), "").unwrap();
+        std::fs::create_dir(repo.join("out")).unwrap();
+        std::fs::write(repo.join("out/x"), "").unwrap();
+        let env = Arc::new(SafeEnv::new());
+        let init = vorn_git::Request {
+            bin: env.git_bin(),
+            args: vec!["init".into(), "-q".into()],
+            cwd: repo.to_str().unwrap().into(),
+            env: env.get(),
+            timeout: Duration::from_secs(10),
+            max_buffer: vorn_git::repo::DEFAULT_MAX_BUFFER,
+        };
+        vorn_git::run(&init).unwrap();
+        let named = dir.path().join("named");
+        std::os::unix::fs::symlink(&repo, &named).unwrap();
+        let (named, real) = (named.to_str().unwrap(), repo.to_str().unwrap());
+        let entries = [("kept.txt".into(), false), ("out".into(), true)];
+        let listed = listing(named, real, entries, &env, &IgnoreCache::default());
+        assert_eq!(
+            listed,
+            [FileEntry {
+                name: "kept.txt".into(),
+                path: format!("{named}/kept.txt"),
+                is_directory: false,
+            }]
         );
     }
 }
