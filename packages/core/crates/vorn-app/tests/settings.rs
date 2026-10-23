@@ -128,17 +128,30 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(before)
     });
     let tabs = SetAct::Default("layoutMode".into(), "\"tabs\"".into());
-    shot.click(&mut app, control("layout-mode", Act::Set(tabs)));
+    shot.click(&mut app, control("layout", Act::Set(tabs)));
     saved(&mut app, "the tabs layout", |c| {
         c.pointer("/defaults/layoutMode") == Some(&json!("tabs"))
     });
     let grid = SetAct::Default("layoutMode".into(), "\"grid\"".into());
-    shot.click(&mut app, control("layout-mode", Act::Set(grid)));
+    shot.click(&mut app, control("layout", Act::Set(grid)));
 
-    // The theme tiles and the style segment are kept by vornd and read back.
+    // The theme picker's tiles and the Look toggles are kept by vornd and
+    // read back; a light theme picked under a fixed dark scheme fixes light.
     use vorn_app::appearance as look;
     use vorn_app::screen::settings::theme_tile_id;
+    let dark = vorn_app::appearance::prefs(app.store.config.get("defaults")).scheme;
+    assert_eq!(
+        dark,
+        vorn_theme::Scheme::Dark,
+        "Vorn opens on a fixed dark scheme"
+    );
+    let picker = Act::Open(MenuKind::ThemePicker(vorn_theme::Appearance::Dark));
+    shot.click(&mut app, control("theme-chip", picker.clone()));
+    shot.save(&mut app, "set-theme-picker");
     shot.click(&mut app, theme_tile_id("nord"));
+    shot.click(&mut app, control("theme-chip", picker));
+    let light = SetAct::ThemeFilter(look::ThemeFilter::Light);
+    shot.click(&mut app, control("theme-filter", Act::Set(light)));
     shot.click(&mut app, theme_tile_id("solarized-light"));
     let tinted = SetAct::Default(look::CHROME.into(), "\"tinted\"".into());
     shot.click(&mut app, control(look::CHROME, Act::Set(tinted)));
@@ -146,6 +159,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         c.pointer("/defaults/darkTheme") == Some(&json!("nord"))
             && c.pointer("/defaults/lightTheme") == Some(&json!("solarized-light"))
             && c.pointer("/defaults/interfaceStyle") == Some(&json!("tinted"))
+            && c.pointer("/defaults/colorScheme") == Some(&json!("light"))
     });
     wait_for("the app's prefs after vornd's echo", || {
         app.pump();

@@ -58,6 +58,60 @@ fn saved(app: &App, id: &str) -> Option<Value> {
     task.is_object().then_some(task)
 }
 
+#[test]
+fn the_default_view_is_chosen_on_the_tasks_extension_page() {
+    use vorn_app::plugins::PlugAct;
+    use vorn_app::points::PointAct;
+    use vorn_app::settings::{Category, SetAct};
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let (mut app, mut shot) = tasks_view(&v);
+    assert_eq!(app.st.tasks.mode, Mode::List, "Tasks opens as a list");
+
+    // Settings › Extensions › Tasks, where the Default view row is.
+    app.st.settings.open = true;
+    shot.frame(&mut app);
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    let key = shot.until(&mut app, "Tasks listed", |app, _| {
+        let p = &app.st.plugins;
+        p.listings
+            .iter()
+            .find(|l| l.id == "vorn.tasks")
+            .map(|l| l.key.clone())
+    });
+    let select = Act::Plug(PlugAct::Select(Some(key)));
+    shot.click(&mut app, App::control("plug-installed-row", &select));
+    shot.frame(&mut app);
+    let board = Act::Point(PointAct::Preference {
+        id: "vorn.tasks".into(),
+        key: "default_view".into(),
+        value: "\"board\"".into(),
+    });
+    let row = App::control("ext-pref-vorn.tasks-default_view", &board);
+    assert!(
+        shot.ui.rect_of(row).is_some(),
+        "Default view on the Tasks page"
+    );
+    shot.click(&mut app, row);
+    assert_eq!(app.st.tasks.mode, Mode::Board, "the view follows at once");
+    shot.until(&mut app, "the preference kept", |app, _| {
+        let prefs = app.rpc().call("extension:installed", Value::Null).ok()?;
+        let tasks = prefs.as_array()?.iter().find(|e| e["id"] == "vorn.tasks")?;
+        let pref = tasks["preferences"]
+            .as_array()?
+            .iter()
+            .find(|p| p["id"] == "default_view")?;
+        (pref["value"] == "board").then_some(())
+    });
+}
+
 /// The Tasks view of a vornd with project `web`.
 fn tasks_view(v: &TestVornd) -> (App, Shot) {
     let mut app = connect(v);

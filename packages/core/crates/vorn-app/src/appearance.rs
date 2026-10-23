@@ -171,7 +171,7 @@ pub fn launch_file(data_dir: &Path) -> PathBuf {
     data_dir.join("desktop").join("materials")
 }
 
-/// The Materials choice the last launch kept in `file`; Solid when none.
+/// The Materials choice the last launch kept in `file`; Glass when none.
 pub fn launch_materials(file: &Path) -> Materials {
     crate::keep::read(file)
         .and_then(|s| Materials::from_key(s.trim()))

@@ -109,8 +109,8 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
                 .absolute(x, 0.0)
                 .size(knob, knob)
                 .rounded(knob / 2.0)
-                .bg(Rgba::white(1.0))
-                .border(1.0, Rgba::BLACK.alpha(0.12)),
+                .bg(c(look::WHITE))
+                .border(1.0, crate::ui::theme::shadow(0.12)),
         )
 }
 
@@ -161,9 +161,12 @@ const FONT_PRESETS: [(i64, f32, &str); 3] = [
 pub const THEME_SEARCH: Id = Id(0x7468_656d_6573_7263);
 
 pub(super) fn appearance(s: &Screen<'_>) -> El {
+    // On a terminal UI how it draws comes first, as it decides how all else reads.
+    let drawing = s.term_drawing.map(|d| card(vec![drawing_row(s, d)]));
     div()
         .col()
         .child(header("Appearance", "", None))
+        .children(drawing)
         .child(card(colour_rows(s)))
         .child(section("Look"))
         .child(card(look_rows(s)))
@@ -508,19 +511,15 @@ fn tile(
     }
 }
 
-/// The preview, the font, its size, and on a terminal UI how it draws.
+/// The preview, the font and its size.
 fn terminal_rows(s: &Screen<'_>) -> Vec<El> {
     let size = num(s, "fontSize").unwrap_or(13.0).round() as i64;
     let family = s.ui.text.term_family();
-    let mut rows = vec![
+    vec![
         terminal_preview(family, size),
         card_row(s, None, "Font", None, font_chip(s, family)),
         card_row(s, None, "Size", None, size_control(s, size)),
-    ];
-    if let Some(d) = s.term_drawing {
-        rows.push(drawing_row(s, d));
-    }
-    rows
+    ]
 }
 
 /// Two terminal lines in the theme's colours and the chosen face and size.
