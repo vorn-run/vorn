@@ -1184,9 +1184,10 @@ impl Ui {
         let Some(role) = role else {
             return;
         };
-        let id = match el.id {
-            Some(i) => NodeId(i.0),
-            None => {
+        let id = match (el.id, &el.content) {
+            (Some(i), _) => NodeId(i.0),
+            (None, Content::Custom(c)) => custom_node(*c),
+            (None, _) => {
                 self.anon += 1;
                 NodeId((1 << 63) | (self.anon << 1))
             }
@@ -2161,6 +2162,13 @@ fn to_cells(s: &mut taffy::Style, el: &El, in_row: bool, float: bool) {
         bottom: Lp::length(edge(2)),
         left: Lp::length(edge(3)),
     };
+}
+
+/// The accessibility node of a custom element with no id: from its custom
+/// id, so a terminal keeps its node when nodes before it come and go
+/// (unnamed nodes are numbered in tree order, with the low bit clear).
+fn custom_node(custom: u64) -> NodeId {
+    NodeId((1 << 63) | (custom << 1) | 1)
 }
 
 /// An SVG rendered to a `px`×`px` coverage mask.

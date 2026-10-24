@@ -901,3 +901,30 @@ fn a_terminal_shows_a_hand_over_controls_and_a_beam_over_fields() {
     r.ui.pointer_move(SIZE.0 - 2.0, SIZE.1 - 2.0);
     assert_eq!(r.ui.terminal_pointer(), vornui::Cursor::Default);
 }
+
+#[test]
+fn a_terminal_keeps_its_accessibility_node_when_labels_appear_before_it() {
+    let mut r = Rig::new();
+    r.ui.custom_a11y
+        .insert(7, (Role::Terminal, "Shell 1".into(), String::new()));
+    let terminal = |r: &Rig| {
+        let laid = r.laid.as_ref().expect("a frame");
+        let found = laid
+            .tree
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::Terminal);
+        found.map(|(id, _)| *id).expect("a terminal node")
+    };
+    r.frame(&|_| div().col().child(vornui::custom(7).w(100.0).h(40.0)));
+    let before = terminal(&r);
+    r.frame(&|_| {
+        div()
+            .col()
+            .child(vornui::text("Shell 1", 12.0, color::GRAY_300))
+            .child(vornui::custom(7).w(100.0).h(40.0))
+    });
+    assert_eq!(terminal(&r), before);
+    let labels = r.nodes(Role::Label).len();
+    assert_eq!(labels, 1);
+}
