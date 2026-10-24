@@ -229,6 +229,10 @@ pub enum MenuKind {
     ThemeInfo(String),
     /// Settings › Appearance's terminal font list.
     FontPicker,
+    /// Settings › About's Stable / Beta chip.
+    UpdateChannel,
+    /// Settings › About's terminals row, by the older session holder's instance.
+    Holder(String),
     /// A session's branch switcher.
     Branch(String),
     /// The editors a session's project opens in.

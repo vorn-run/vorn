@@ -175,7 +175,6 @@ impl Store {
                 "networkAccessEnabled",
                 "hasSeededDevServerWorkflow",
                 "hasSeededDefaultTaskWorkflow",
-                "updateAutoDownload",
                 "worktreeRetention",
                 "tuiDrawing",
                 "colorScheme",

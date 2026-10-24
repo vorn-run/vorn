@@ -835,6 +835,15 @@ impl App {
         }
     }
 
+    /// Restart Vorn, once vornd has stopped: this app reopens on the same
+    /// data directory and starts a vornd of its own build.
+    fn relaunch(&mut self) {
+        match crate::update::relaunch(self.data_dir.as_deref()) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => self.st.toast(format!("Could not restart Vorn: {e}."), true),
+        }
+    }
+
     /// Check now.
     fn check_updates(&self) {
         if let Some(updater) = &self.updater {
@@ -1584,6 +1593,8 @@ impl App {
                         | MenuKind::ThemeInfo(_)
                         | MenuKind::FontPicker
                         | MenuKind::AgentPicker
+                        | MenuKind::UpdateChannel
+                        | MenuKind::Holder(_)
                         | MenuKind::SetShell
                         | MenuKind::ExtChoice(..)
                 ) =>

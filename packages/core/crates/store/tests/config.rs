@@ -68,6 +68,7 @@ fn settings_that_moved_or_went_away_are_not_loaded() {
         "showHeadlessAgents",
         "headlessRetentionMinutes",
         "headlessStepTimeoutMinutes",
+        "updateAutoDownload",
     ];
     let saved: serde_json::Map<String, Value> = gone
         .iter()
@@ -104,12 +105,7 @@ fn a_false_the_user_chose_is_kept_rather_than_treated_as_unset() {
 
 #[test]
 fn keys_that_were_declared_but_never_listed_survive() {
-    for (key, value) in [
-        ("updateAutoDownload", json!(false)),
-        ("tuiDrawing", json!("text")),
-    ] {
-        round_trips(key, value);
-    }
+    round_trips("tuiDrawing", json!("text"));
 }
 
 #[test]

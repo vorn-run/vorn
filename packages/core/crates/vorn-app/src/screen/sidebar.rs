@@ -1552,7 +1552,7 @@ fn footer(s: &Screen<'_>) -> El {
         .child(button(Act::Welcome, "circle-help", "Welcome Guide", false));
     let row = if pending && dismissed {
         row.child(button(
-            Act::Set(SetAct::Open(crate::settings::Category::Updates)),
+            Act::Set(SetAct::Open(crate::settings::Category::About)),
             "settings",
             "Settings \u{2014} update ready",
             true,

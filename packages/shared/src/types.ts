@@ -1500,12 +1500,6 @@ export interface AppConfig {
     mainViewMode?: MainViewMode
     activeWorkspace?: string
     updateChannel?: 'stable' | 'beta'
-    /**
-     * Whether a found update downloads on its own. Install always waits for a
-     * restart either way; this only governs the transfer, which matters on a
-     * metered connection. Defaults to true — the behaviour before it existed.
-     */
-    updateAutoDownload?: boolean
     webAccessEnabled?: boolean
     mobileAccessEnabled?: boolean
     networkAccessEnabled?: boolean

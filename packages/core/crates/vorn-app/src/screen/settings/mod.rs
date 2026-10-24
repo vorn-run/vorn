@@ -7,7 +7,9 @@ mod pages;
 
 pub use agents::agent_field_id;
 pub use pages::theme_tile_id;
-pub(crate) use pages::{agent_picker, font_picker, shell_panel, theme_info, theme_picker};
+pub(crate) use pages::{
+    agent_picker, channel_items, font_picker, holder_items, shell_panel, theme_info, theme_picker,
+};
 pub use pages::{rotate_id, AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
 
 use super::{c, white, Screen};
@@ -32,7 +34,6 @@ fn nav_svg(cat: Category) -> String {
         Category::General => {
             r#"<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>"#
         }
-        Category::Updates => r#"<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/>"#,
         Category::Notifications => {
             r#"<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>"#
         }
@@ -203,7 +204,7 @@ fn sidebar(s: &Screen<'_>) -> El {
             ),
         );
         let mut items = div().col().gap(2.0);
-        for cat in cats.iter().filter(|c| c.shown()) {
+        for cat in cats.iter() {
             items = items.child(nav_item(s, *cat, c(look::GRAY_400)));
             for p in pages.iter().filter(|p| p.placed_after() == Some(*cat)) {
                 items = items.child(ext_item(s, p));
@@ -214,7 +215,7 @@ fn sidebar(s: &Screen<'_>) -> El {
     // Connections, the Connectors built-in's page, leads the extensions' pages.
     let mut pages: Vec<_> = pages
         .into_iter()
-        .filter(|p| p.placed_after().is_none_or(|c| !c.shown()))
+        .filter(|p| p.placed_after().is_none())
         .collect();
     pages.sort_by_key(|p| p.key() != CONNECTIONS_PAGE);
     let pages = pages.into_iter().map(|p| ext_item(s, p));
@@ -272,7 +273,6 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
     match cat {
         Category::Appearance => pages::appearance(s),
         Category::General => pages::general(s),
-        Category::Updates => pages::updates(s),
         Category::Notifications => pages::notifications(s),
         Category::Agents => agents::page(s),
         Category::Mcp => pages::mcp(s),

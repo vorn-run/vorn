@@ -47,6 +47,8 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::ThemePicker(_) => 430.0,
         MenuKind::ThemeInfo(_) => 268.0,
         MenuKind::FontPicker => 330.0,
+        MenuKind::UpdateChannel => 160.0,
+        MenuKind::Holder(_) => 180.0,
         _ => 200.0,
     }
 }
@@ -128,6 +130,8 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::TaskProject(f) => super::tasks::project_items(s, *f),
         MenuKind::TaskAgent(f) => super::tasks::agent_items(s, *f),
         MenuKind::ExtInstall => super::plugins::install_items(),
+        MenuKind::UpdateChannel => super::settings::channel_items(s),
+        MenuKind::Holder(id) => super::settings::holder_items(id),
         MenuKind::ExtChoice(ext, key) => super::plugins::choice_items(s, ext, key),
     }
 }

@@ -36,11 +36,13 @@ const MOVED: &[(&str, &str, &str)] = &[
     ("taskViewMode", "vorn.tasks", "default_view"),
 ];
 
-/// Settings nothing reads: Command Blocks is the Blocks extension's own switch.
+/// Settings nothing reads: Command Blocks is the Blocks extension's own
+/// switch, and updates always download.
 const GONE: &[&str] = &[
     "domBlockRendering",
     "keepSessionsRunning",
     "enableHoverPreview",
+    "updateAutoDownload",
 ];
 
 /// The moved settings among `stored`, by extension, as their preferences take them.

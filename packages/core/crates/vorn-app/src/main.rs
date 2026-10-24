@@ -7,7 +7,10 @@
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
 //!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
 //!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
-//!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|extension:ID]
+//!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|
+//!                       channel-menu|holder-menu|extension:ID]
+//!               [--update idle|checking|ready:VER|error:TEXT] [--holder BUILD:N]
+//!               [--outdated ID,ID] [--confirm-end on]
 //!               [--click X,Y]... [--type TEXT] [--hover X,Y]
 //!               [--reduced-transparency on] [--tui-drawing cells|pixels]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
@@ -36,6 +39,9 @@
 //! Then each `--click X,Y` presses there, `--type` types letters into the
 //! focused field, and `--hover X,Y` rests the pointer past the tooltip delay.
 //! `--reduced-transparency on` and `--tui-drawing` stand in for the system.
+//! On About, `--update`, `--holder` (an older session holder with N
+//! terminals), `--outdated` (installed packs shown as behind) and
+//! `--confirm-end` fake the states once vornd has answered.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -215,6 +221,22 @@ fn shot(args: &Args) -> Result<(), String> {
     if let Some(page) = args.get("settings") {
         app.shot_settings(page, &args.sets()?)?;
         app.frame(&mut ui, size);
+        app.frame(&mut ui, size);
+    }
+    if ["update", "holder", "outdated", "confirm-end"]
+        .iter()
+        .any(|k| args.get(k).is_some())
+    {
+        // vornd's answers land first, so they do not overwrite the fakes.
+        let until = Instant::now() + Duration::from_secs(10);
+        while (app.busy() || app.st.plugins.loads > 0) && Instant::now() < until {
+            app.frame(&mut ui, size);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        app.shot_about(args.get("update"), args.get("holder"), args.get("outdated"))?;
+        if args.get("confirm-end").is_some() {
+            app.st.settings.confirm_end = Some("shot".to_owned());
+        }
         app.frame(&mut ui, size);
     }
     if let Some(name) = args.get("open") {

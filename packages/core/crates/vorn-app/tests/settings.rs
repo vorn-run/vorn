@@ -216,26 +216,6 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     assert!(!app.st.settings.shell_editing);
     let _ = shell;
 
-    open(&mut shot, &mut app, Category::Updates);
-    shot.save(&mut app, "set-updates");
-    shot.click(
-        &mut app,
-        control(
-            "update-channel",
-            Act::Set(SetAct::Default("updateChannel".into(), "\"beta\"".into())),
-        ),
-    );
-    saved(&mut app, "the beta channel", |c| {
-        c.pointer("/defaults/updateChannel") == Some(&json!("beta"))
-    });
-    shot.click(
-        &mut app,
-        control(
-            "update-channel",
-            Act::Set(SetAct::Default("updateChannel".into(), "\"stable\"".into())),
-        ),
-    );
-
     open(&mut shot, &mut app, Category::Notifications);
     shot.save(&mut app, "set-notifications");
     shot.click(
@@ -441,13 +421,29 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     shot.save(&mut app, "set-keys");
 
     open(&mut shot, &mut app, Category::About);
-    shot.until(&mut app, "the core status", |a, _| {
-        a.st.settings.core_version.as_ref().map(|_| ())
-    });
     shot.until(&mut app, "the holders", |a, _| {
         a.st.settings.holders.as_ref().map(|_| ())
     });
     shot.save(&mut app, "set-about");
+    if !vorn_app::settings::IN_BROWSER {
+        shot.click(
+            &mut app,
+            control("update-channel", Act::Open(MenuKind::UpdateChannel)),
+        );
+        assert_eq!(
+            app.st.menu.as_ref().map(|m| m.kind.clone()),
+            Some(MenuKind::UpdateChannel)
+        );
+        let labels = app.menu_labels(&shot.ui);
+        let beta = labels.iter().position(|l| l == "Beta").expect("Beta");
+        shot.click(
+            &mut app,
+            vorn_app::ui::item_id(vorn_app::screen::menus::MENU, beta),
+        );
+        saved(&mut app, "the beta channel", |c| {
+            c.pointer("/defaults/updateChannel") == Some(&json!("beta"))
+        });
+    }
 
     shot.send(&mut app, key("Escape", 0, None));
     assert!(!app.st.settings.open, "Escape closes the page");

@@ -1,4 +1,4 @@
-//! The smaller panels: Appearance, General (with `ShellPicker`), Updates,
+//! The smaller panels: Appearance, General (with `ShellPicker`),
 //! Notifications, Skills & MCP, Keys and About.
 
 use serde_json::Value;
@@ -10,8 +10,7 @@ use crate::act::{Act, Acts};
 use crate::look;
 use crate::screen::{agent_icon, c, ico, white, Screen};
 use crate::settings::{
-    self, describe_field, describe_update, describe_usage, older_note, sigil, SetAct, Tone,
-    UpdateAction, UpdateStatus,
+    self, describe_field, describe_usage, sigil, SetAct, UpdateAction, UpdateStatus,
 };
 use crate::state::{now_ms, MenuKind};
 use crate::ui::{
@@ -39,19 +38,6 @@ fn default_act(key: &str, v: impl ToString) -> SetAct {
 
 fn seg_act(key: &str, v: impl ToString) -> Act {
     set(default_act(key, v))
-}
-
-/// A toggle row writing `defaults[key]`.
-fn switch_row(
-    s: &Screen<'_>,
-    key: &str,
-    on: bool,
-    title: &str,
-    description: &str,
-    note: Option<&str>,
-) -> El {
-    let t = toggle(s, key, on, default_act(key, !on), false, title);
-    row(title, description, note, t, false)
 }
 
 /// The Card Row Height slider's track.
@@ -110,9 +96,11 @@ mod glyph {
     pub const CHEVRON_UP: &str = r#"<path d="M18 15l-6-6-6 6"/>"#;
     pub const SEARCH: &str = r#"<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>"#;
     pub const TERMINAL: &str = r#"<path d="M4 17l6-6-6-6M12 19h8"/>"#;
+    pub const ARROW_UP_RIGHT: &str = r#"<path d="M7 17L17 7M7 7h10v10"/>"#;
+    pub const ELLIPSIS: &str = r#"<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>"#;
 }
 
-/// What each Appearance and General row, tile and chip says when hovered.
+/// What each Appearance, General and About row, tile and chip says when hovered.
 pub(crate) mod tip {
     #[cfg(target_os = "macos")]
     pub const SCHEME: &str =
@@ -170,6 +158,16 @@ pub(crate) mod tip {
     pub const MORE_AGENTS: &str = "Opens the extensions catalog, filtered to agents.";
     pub const SHELL: &str = "The shell a new terminal session runs.";
     pub const CHOOSE_PATH: &str = "Use a shell that isn't in the list.";
+    pub const BEHIND: &str = "Your running terminals still use the last version; restarting moves them over without ending them.";
+    pub const RESTART_VORN: &str =
+        "Restart Vorn so your terminals move to this version; they keep running.";
+    pub const CHECK: &str = "Look for a newer version of Vorn now.";
+    pub const CHANNEL: &str =
+        "Beta gets new versions first; Stable gets them once they have been tested.";
+    pub const RESTART_UPDATE: &str =
+        "Install the new version; Vorn reopens in a few seconds and your sessions keep running.";
+    pub const WHATS_NEW: &str = "Opens the release notes for this version.";
+    pub const UPDATE_EXTENSIONS: &str = "Update the listed extensions to their newest versions.";
     pub const DRAWING: &str =
         "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
 }
@@ -1314,50 +1312,39 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
         .child(tooltip(s.ui, choose, edit, tip::CHOOSE_PATH, None))
 }
 
-/// Where the `vorn` command is, with Install, or Reinstall and Remove.
-fn cli_row(s: &Screen<'_>) -> Option<El> {
-    let st = s.st.settings.cli.as_ref()?;
+/// The `vorn` command: Install, Reinstall while its folder is not on the
+/// PATH, or Remove, which also stops the app putting it back.
+fn cli_card(s: &Screen<'_>) -> Option<El> {
+    let st =
+        s.st.settings
+            .cli
+            .as_ref()
+            .filter(|c| c.available && !c.managed)?;
     let note =
         s.st.settings
             .cli_error
             .clone()
             .or_else(|| st.note.clone())
-            .unwrap_or_else(|| {
-                if st.installed && !st.on_path {
-                    format!("{} \u{2014} its folder is not on your PATH", st.path)
-                } else {
-                    st.path.clone()
+            .unwrap_or_else(|| match (st.installed, st.on_path) {
+                (true, true) => format!("Installed at {}. Run vorn --help in a terminal.", st.path),
+                (true, false) => format!("{} is not on your PATH.", st.path),
+                (false, _) => {
+                    "The vorn command starts sessions and reads them from a terminal.".to_owned()
                 }
             });
-    let description = if st.installed {
-        "Installed. Run `vorn --help` in a terminal."
-    } else {
-        "The vorn command starts sessions and reads them from a terminal."
+    let (label, act) = match (st.installed, st.on_path) {
+        (true, true) => ("Remove", SetAct::RemoveCli),
+        (true, false) => ("Reinstall", SetAct::InstallCli),
+        (false, _) => ("Install", SetAct::InstallCli),
     };
-    let enabled = st.available && !st.managed && !s.st.settings.cli_busy;
-    let control = if st.installed {
-        div()
-            .row()
-            .gap(6.0)
-            .shrink0()
-            .child(button(s, "cli", "Reinstall", SetAct::InstallCli, enabled))
-            .child(button(
-                s,
-                "cli-remove",
-                "Remove",
-                SetAct::RemoveCli,
-                enabled,
-            ))
-    } else {
-        button(s, "cli", "Install", SetAct::InstallCli, enabled)
-    };
-    Some(row(
-        "Command-Line Tool",
-        description,
+    let control = button(s, "cli", label, act, !s.st.settings.cli_busy);
+    Some(div().mt(24.0).child(card(vec![card_row(
+        s,
+        None,
+        "Command-line tool",
         Some(&note),
         control,
-        !st.available,
-    ))
+    )])))
 }
 
 pub(super) fn general(s: &Screen<'_>) -> El {
@@ -1665,202 +1652,6 @@ fn available_row(
             ),
         )
         .child(tooltip(s.ui, b, id, tip_text, None))
-}
-
-fn tone_dot(t: Tone) -> Rgba {
-    match t {
-        Tone::Blocked => c(look::BRONZO),
-        Tone::Broken => c(look::DANGER),
-        Tone::Live => c(look::INK),
-        Tone::Settled => look::INK.alpha(look::INK_FAINT),
-        Tone::Idle => look::INK.alpha(0.18),
-    }
-}
-
-pub(super) fn updates(s: &Screen<'_>) -> El {
-    let channel = defaults(s)
-        .and_then(|d| d.get("updateChannel"))
-        .and_then(Value::as_str)
-        .unwrap_or("stable")
-        .to_owned();
-    let status =
-        s.st.settings
-            .update
-            .clone()
-            .unwrap_or(UpdateStatus::Unsupported);
-    let view = describe_update(&status, &channel, now_ms());
-    let live: Vec<_> = s.store.sessions.iter().filter(|x| !x.ended()).collect();
-    let cost = (view.action == Some(UpdateAction::Restart))
-        .then(|| {
-            settings::update_cost(
-                live.len(),
-                live.iter().any(|x| x.status() == "running"),
-                !crate::update::ENDS_SESSIONS,
-            )
-        })
-        .flatten();
-    let mut info = div().col().grow().min_w0().child(
-        text(&view.label, 13.0, c(look::GRAY_200))
-            .line_height(19.5)
-            .silent(),
-    );
-    if let Some(cost) = cost {
-        info = info.child(
-            text(cost, 12.0, c(look::BRONZO))
-                .line_height(16.0)
-                .mt(2.0)
-                .silent(),
-        );
-    } else if let Some(d) = &view.detail {
-        info = info.child(
-            text(d, 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .mt(2.0)
-                .silent(),
-        );
-    }
-    if let Some(p) = view.percent {
-        info = info.child(
-            div().h(3.0).mt(8.0).rounded(2.0).bg(white(0.08)).child(
-                div()
-                    .h_full()
-                    .w_pct(p as f32 / 100.0)
-                    .rounded(2.0)
-                    .bg(white(0.3)),
-            ),
-        );
-    }
-    let mut card = div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .mb(20.0)
-        .px(16.0)
-        .py(12.0)
-        .rounded(8.0)
-        .border(1.0, white(0.08))
-        .bg(white(0.03))
-        .role(Role::Status, view.label.as_str())
-        .child(
-            div()
-                .size(5.0, 5.0)
-                .rounded(3.0)
-                .shrink0()
-                .bg(tone_dot(view.tone)),
-        )
-        .child(info);
-    if let Some(a) = view.action {
-        let (label, lead) = match a {
-            UpdateAction::Restart => ("Restart Now", true),
-            UpdateAction::Download => ("Download", false),
-            UpdateAction::Retry => ("Retry", false),
-        };
-        let id = s.acts.on("update-action", set(SetAct::UpdateNow));
-        let hot = s.ui.hover(id);
-        card = card.child(
-            div()
-                .id(id)
-                .on(Action::Click)
-                .px(12.0)
-                .py(4.0)
-                .rounded(6.0)
-                .border(1.0, white(0.08))
-                .bg(if lead {
-                    white(0.1).mix(white(0.14), hot)
-                } else {
-                    white(0.06).mix(white(0.1), hot)
-                })
-                .child(
-                    text(
-                        label,
-                        12.0,
-                        if lead {
-                            c(look::WHITE)
-                        } else {
-                            c(look::GRAY_300)
-                        },
-                    )
-                    .weight(500)
-                    .line_height(16.0)
-                    .silent(),
-                ),
-        );
-    }
-    let checking = matches!(status, UpdateStatus::Checking);
-    let can_check = !checking && status != UpdateStatus::Unsupported;
-    let check = button(
-        s,
-        "check-updates",
-        if checking {
-            "Checking\u{2026}"
-        } else {
-            "Check Now"
-        },
-        SetAct::CheckUpdates,
-        can_check,
-    );
-    let app = env!("CARGO_PKG_VERSION");
-    let mut rows = div().col().gap(4.0).child(row(
-        "Current version",
-        &format!("Vorn {app}"),
-        None,
-        check,
-        false,
-    ));
-    if let Some(server) = &s.st.server_version {
-        let (description, trailing) = settings::describe_server(server, app, true);
-        rows = rows.child(row(
-            "Terminal server",
-            &description,
-            None,
-            text(trailing, 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .silent(),
-            false,
-        ));
-    }
-    let channel_seg = segmented(
-        s,
-        "update-channel",
-        vec![
-            Seg {
-                label: "Stable",
-                icon: None,
-                act: seg_act("updateChannel", "\"stable\""),
-                on: channel == "stable",
-                disabled: false,
-            },
-            Seg {
-                label: "Beta",
-                icon: None,
-                act: seg_act("updateChannel", "\"beta\""),
-                on: channel == "beta",
-                disabled: false,
-            },
-        ],
-        12.0,
-    );
-    rows = rows
-        .child(row(
-            "Update channel",
-            "Beta receives early releases; stable receives tested releases only",
-            None,
-            channel_seg,
-            false,
-        ))
-        .child(switch_row(
-            s,
-            "updateAutoDownload",
-            flag(s, "updateAutoDownload", true),
-            "Download automatically",
-            "Installing still waits for you to restart",
-            None,
-        ));
-    div()
-        .col()
-        .child(header("Updates", "How Vorn keeps itself current", None))
-        .child(card)
-        .child(rows)
 }
 
 fn notif(s: &Screen<'_>) -> (bool, bool, bool, bool, bool, f64) {
@@ -2461,119 +2252,408 @@ pub(super) fn keys(s: &Screen<'_>) -> El {
 
 pub(super) fn about(s: &Screen<'_>) -> El {
     let st = &s.st.settings;
-    let mut logo = div().mb(12.0).h(24.0);
-    if let Some(id) = s.logo {
-        logo = logo.child(image(id, 24.0 * look::LOGO_ASPECT, 24.0).opacity(0.6));
+    let app = env!("CARGO_PKG_VERSION");
+    let status = st.update.clone().unwrap_or(UpdateStatus::Unsupported);
+    let live = s.store.sessions.iter().filter(|x| !x.ended()).count();
+    let head = settings::about_head(&status, app, now_ms(), live, !crate::update::ENDS_SESSIONS);
+    let ready = match &status {
+        UpdateStatus::Ready { version } => Some(version.as_str()),
+        _ => None,
+    };
+    let mut rows = vec![about_header(s, &head, &status)];
+    if let Some(b) = settings::behind(s.st.server_version.as_deref(), app, st.holders.as_ref()) {
+        rows.push(holder_row(s, &b));
     }
-    let mut col = div()
+    let notes_for = ready.unwrap_or(app);
+    let notes = s.acts.on(
+        "release-notes",
+        Act::OpenUrl(settings::release_notes(notes_for)),
+    );
+    let whats_new = card_row(
+        s,
+        None,
+        &format!("What's new in {notes_for}"),
+        Some(tip::WHATS_NEW),
+        glyph_icon(glyph::ARROW_UP_RIGHT, 14.0, c(look::GRAY_500)),
+    )
+    .id(notes)
+    .on(Action::Click)
+    .role(Role::Link, "What's new")
+    .ring(4.0);
+    rows.push(whats_new);
+    rows.push(extensions_row(s));
+    let mut links = div().row().wrap_children().gap(8.0).mt(16.0);
+    for (label, url) in [
+        ("Website", settings::WEBSITE),
+        ("Documentation", settings::DOCUMENTATION),
+        ("Send feedback", settings::FEEDBACK),
+        ("GitHub", settings::GITHUB),
+    ] {
+        let id = s
+            .acts
+            .on(&format!("link-{label}"), Act::OpenUrl(url.to_owned()));
+        links = links.child(link_pill(s, id, label));
+    }
+    let col = div()
         .col()
+        .child(header("About", "", None))
+        .child(card(rows))
+        .child(links)
         .child(
-            text("About", 20.0, c(look::WHITE))
+            text("\u{a9} 2026 Javier Canizalez", 11.0, c(look::GRAY_600))
+                .line_height(16.0)
+                .mt(16.0)
+                .pl(4.0)
+                .silent(),
+        );
+    col.child_if(cli_card(s))
+}
+
+/// The Vorn mark, the version or the update that is ready, the channel and
+/// the one action.
+fn about_header(s: &Screen<'_>, head: &settings::AboutHead, status: &UpdateStatus) -> El {
+    let mut mark = div().w(48.0).h(36.0).shrink0().center();
+    if let Some(id) = s.logo {
+        mark = mark.child(image(id, 22.0 * look::LOGO_ASPECT, 22.0));
+    }
+    let mut detail = div().row().items_center().gap(5.0).mt(2.0);
+    if head.current {
+        detail = detail.child(ico("circle-check", 12.0, 2.0, c(look::GREEN_400)));
+    }
+    detail = detail.child(
+        text(&head.detail, 12.0, c(look::GRAY_500))
+            .line_height(16.0)
+            .truncate()
+            .silent(),
+    );
+    let text_col = div()
+        .col()
+        .grow()
+        .min_w0()
+        .child(
+            text(&head.title, 17.0, c(look::WHITE))
                 .weight(600)
-                .line_height(28.0)
-                .mb(24.0)
-                .role(Role::Heading, "About"),
+                .line_height(22.0)
+                .role(Role::Status, head.title.as_str()),
         )
-        .child(logo)
+        .child(detail);
+    let mut right = div().row().items_center().gap(8.0).shrink0();
+    if !settings::IN_BROWSER {
+        right = right.child(channel_chip(s));
+        let checking = matches!(status, UpdateStatus::Checking);
+        let (label, act, tip, primary) = match head.action {
+            Some(UpdateAction::Restart) => (
+                "Restart to update",
+                SetAct::UpdateNow,
+                tip::RESTART_UPDATE,
+                true,
+            ),
+            Some(UpdateAction::Retry) => ("Try again", SetAct::CheckUpdates, tip::CHECK, false),
+            _ => (
+                if checking {
+                    "Checking\u{2026}"
+                } else {
+                    "Check now"
+                },
+                SetAct::CheckUpdates,
+                tip::CHECK,
+                false,
+            ),
+        };
+        let enabled = primary || (!checking && *status != UpdateStatus::Unsupported);
+        right = right.child(pill_button(
+            s,
+            "update-action",
+            label,
+            act,
+            tip,
+            primary,
+            enabled,
+        ));
+    }
+    div()
+        .row()
+        .items_center()
+        .gap(12.0)
+        .px(14.0)
+        .py(14.0)
+        .child(mark)
+        .child(text_col)
+        .child(right)
+}
+
+/// The Stable / Beta chip, opening the channel menu.
+fn channel_chip(s: &Screen<'_>) -> El {
+    let beta = update_channel(s) == "beta";
+    let name = if beta { "Beta" } else { "Stable" };
+    let kind = MenuKind::UpdateChannel;
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let id = s.acts.on("update-channel", Act::Open(kind));
+    let lit = s.ui.hover(id).max(if open { 1.0 } else { 0.0 });
+    let chip = div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .h(22.0)
+        .pl(8.0)
+        .pr(6.0)
+        .rounded(4.0)
+        .bg(white(0.06).mix(white(0.1), lit))
+        .role(Role::Button, name)
+        .ring(4.0)
+        .child(
+            text(name, 11.0, c(look::GRAY_300))
+                .line_height(14.0)
+                .silent(),
+        )
+        .child(glyph_icon(glyph::CHEVRON_DOWN, 10.0, c(look::GRAY_500)));
+    tooltip(s.ui, chip, id, tip::CHANNEL, None)
+}
+
+fn update_channel<'a>(s: &Screen<'a>) -> &'a str {
+    defaults(s)
+        .and_then(|d| d.get("updateChannel"))
+        .and_then(Value::as_str)
+        .unwrap_or("stable")
+}
+
+/// The channel menu's two picks.
+pub(crate) fn channel_items(s: &Screen<'_>) -> Vec<crate::screen::menus::Item> {
+    let beta = update_channel(s) == "beta";
+    vec![
+        crate::screen::menus::Item::pick("Stable", !beta, seg_act("updateChannel", "\"stable\"")),
+        crate::screen::menus::Item::pick("Beta", beta, seg_act("updateChannel", "\"beta\"")),
+    ]
+}
+
+/// The terminals row's menu: end the older holder's terminals, confirmed in the row.
+pub(crate) fn holder_items(instance: &str) -> Vec<crate::screen::menus::Item> {
+    let mut end = crate::screen::menus::Item::new(
+        "trash-2",
+        "End them\u{2026}",
+        set(SetAct::EndHolder(instance.to_owned())),
+    );
+    end.danger = true;
+    vec![end]
+}
+
+/// A neutral pill, or the surface's one filled button when `primary`.
+fn pill_button(
+    s: &Screen<'_>,
+    place: &str,
+    label: &str,
+    act: SetAct,
+    tip: &str,
+    primary: bool,
+    enabled: bool,
+) -> El {
+    let id = s.acts.on(place, set(act));
+    let hot = s.ui.hover(id);
+    let (bg, fg) = if primary {
+        (
+            c(look::WHITE).mix(c(look::GRAY_300), hot),
+            c(look::SURFACE_BASE),
+        )
+    } else {
+        (white(0.06).mix(white(0.1), hot), c(look::GRAY_200))
+    };
+    let mut b = div()
+        .id(id)
+        .row()
+        .items_center()
+        .h(28.0)
+        .px(12.0)
+        .rounded(4.0)
+        .shrink0()
+        .bg(bg)
+        .role(Role::Button, label)
+        .ring(4.0)
+        .disabled(!enabled)
+        .child(text(label, 12.0, fg).weight(500).line_height(16.0).silent());
+    b = if enabled {
+        b.on(Action::Click)
+    } else {
+        b.opacity(0.4)
+    };
+    tooltip(s.ui, b, id, tip, None)
+}
+
+/// Terminals still on an older build: Restart Vorn moves them over; the
+/// older holder's can be ended from the row's menu, confirmed in place.
+fn holder_row(s: &Screen<'_>, b: &settings::Behind) -> El {
+    let st = &s.st.settings;
+    let asking = b.holder.is_some() && st.confirm_end == b.holder;
+    let mut words = div()
+        .col()
+        .grow()
+        .min_w0()
+        .child(
+            text(&b.title, 13.0, c(look::GRAY_200))
+                .line_height(18.0)
+                .role(Role::Label, b.title.as_str()),
+        )
         .child(
             text(
-                format!("Vorn v{}", env!("CARGO_PKG_VERSION")),
-                14.0,
-                c(look::GRAY_300),
+                if asking {
+                    "End every terminal on that version? Their programs stop."
+                } else {
+                    b.detail.as_str()
+                },
+                12.0,
+                c(look::GRAY_500),
             )
-            .line_height(20.0)
+            .line_height(16.0)
+            .mt(2.0)
+            .wrapping()
             .silent(),
-        )
-        .child(
-            text("\u{a9} 2026 Javier Canizalez", 12.0, c(look::GRAY_600))
-                .line_height(16.0)
-                .mt(4.0)
-                .silent(),
         );
-    let mut status = div().col().mt(24.0);
-    if let Some(v) = &st.core_version {
-        status = status.child(
-            text(format!("Native core {v}"), 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .silent(),
-        );
-    }
-    let note_box = |t: String| {
-        div()
-            .mt(8.0)
-            .px(16.0)
-            .py(12.0)
-            .rounded(8.0)
-            .border(1.0, white(0.08))
-            .bg(white(0.03))
-            .child(
-                text(t, 12.0, c(look::GRAY_400))
-                    .line_height(16.0)
-                    .wrapping()
-                    .silent(),
-            )
-    };
-    if let Some(h) = &st.holders {
-        if let (Some(e), false) = (&h.error, h.current) {
-            status = status.child(note_box(format!("The session holder is not running: {e}.")));
-        }
-        for holder in h.older.iter().filter(|o| o.sessions != Some(0)) {
-            let asking = st.confirm_end.as_deref() == Some(holder.instance.as_str());
-            let label = if asking { "End them?" } else { "End them" };
-            let id = s.acts.on(
-                "end-holder",
-                set(SetAct::EndHolder(holder.instance.clone())),
-            );
-            let hot = s.ui.hover(id);
-            status = status.child(
-                div()
-                    .row()
-                    .items_center()
-                    .gap(12.0)
-                    .mt(8.0)
-                    .px(16.0)
-                    .py(12.0)
-                    .rounded(8.0)
-                    .border(1.0, white(0.08))
-                    .bg(white(0.03))
-                    .child(
-                        div().grow().min_w0().child(
-                            text(older_note(holder), 12.0, c(look::GRAY_400))
-                                .line_height(16.0)
-                                .wrapping()
-                                .silent(),
-                        ),
-                    )
-                    .child(
-                        div()
-                            .id(id)
-                            .on(Action::Click)
-                            .px(8.0)
-                            .py(4.0)
-                            .rounded(4.0)
-                            .border(1.0, white(0.12))
-                            .bg(white(0.0).mix(white(0.06), hot))
-                            .role(Role::Button, label)
-                            .child(
-                                text(label, 12.0, c(look::GRAY_300))
-                                    .line_height(16.0)
-                                    .silent(),
-                            ),
-                    ),
-            );
-        }
-    }
     if let Some(f) = &st.end_failure {
-        status = status.child(
+        words = words.child(
             text(f, 12.0, c(look::RED_400))
                 .line_height(16.0)
-                .mt(8.0)
+                .mt(4.0)
+                .wrapping()
                 .silent(),
         );
     }
-    col = col.child(status);
-    // The command-line tool has no place in General's two cards.
-    col.child_if(cli_row(s).map(|r| div().mt(24.0).child(r)))
+    let mut controls = div().row().items_center().gap(6.0).shrink0();
+    match (&b.holder, asking) {
+        (Some(h), true) => {
+            controls = controls
+                .child(pill_button(
+                    s,
+                    "keep-holder",
+                    "Cancel",
+                    SetAct::KeepHolder,
+                    tip::RESTART_VORN,
+                    false,
+                    true,
+                ))
+                .child(danger_button(s, h));
+        }
+        (holder, false) => {
+            if !settings::IN_BROWSER {
+                controls = controls.child(pill_button(
+                    s,
+                    "restart-vorn",
+                    "Restart Vorn",
+                    SetAct::RestartVorn,
+                    tip::RESTART_VORN,
+                    false,
+                    true,
+                ));
+            }
+            if let Some(h) = holder {
+                let id = s
+                    .acts
+                    .on("holder-more", Act::Open(MenuKind::Holder(h.clone())));
+                controls = controls.child(icon_button(s, id, glyph::ELLIPSIS, "More", "More"));
+            }
+        }
+        (None, true) => {}
+    }
+    let row = div()
+        .row()
+        .items_center()
+        .gap(12.0)
+        .px(14.0)
+        .py(12.0)
+        .child(
+            div()
+                .w(48.0)
+                .shrink0()
+                .center()
+                .child(ico("info", 16.0, 2.0, c(look::AMBER_400))),
+        )
+        .child(words)
+        .child(controls);
+    let row = match &b.holder {
+        Some(h) => s.acts.context(
+            row,
+            Id::new("holder-row").child(h.as_str()),
+            Act::Open(MenuKind::Holder(h.clone())),
+        ),
+        None => row,
+    };
+    let id = Id::new("holder-tip");
+    tooltip(s.ui, row, id, tip::BEHIND, None)
+}
+
+/// End them, confirmed: red text on a neutral pill.
+fn danger_button(s: &Screen<'_>, holder: &str) -> El {
+    let id = s
+        .acts
+        .on("end-holder", set(SetAct::EndHolder(holder.to_owned())));
+    let hot = s.ui.hover(id);
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .h(28.0)
+        .px(12.0)
+        .rounded(4.0)
+        .shrink0()
+        .bg(white(0.06).mix(white(0.1), hot))
+        .role(Role::Button, "End them")
+        .ring(4.0)
+        .child(
+            text("End them", 12.0, c(look::RED_400))
+                .weight(500)
+                .line_height(16.0)
+                .silent(),
+        )
+}
+
+/// Installed extension packs: all up to date, or the ones with an update and
+/// one button that updates them.
+fn extensions_row(s: &Screen<'_>) -> El {
+    let (installed, outdated) = crate::plugins::pack_updates(&s.st.plugins.listings);
+    let names: Vec<&str> = outdated.iter().map(|l| l.name.as_str()).collect();
+    let note = settings::extensions_note(installed, &names);
+    let mut control = div().row().items_center().gap(10.0).shrink0().child(
+        text(note, 12.0, c(look::GRAY_500))
+            .line_height(16.0)
+            .silent(),
+    );
+    if !outdated.is_empty() {
+        control = control.child(pill_button(
+            s,
+            "update-extensions",
+            &format!("Update {}", outdated.len()),
+            SetAct::UpdateExtensions,
+            tip::UPDATE_EXTENSIONS,
+            false,
+            true,
+        ));
+    }
+    card_row(s, None, "Extensions", None, control)
+}
+
+/// A link under the card: its name and an arrow, opening in the browser.
+fn link_pill(s: &Screen<'_>, id: Id, label: &str) -> El {
+    let hot = s.ui.hover(id);
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .h(26.0)
+        .px(10.0)
+        .rounded(4.0)
+        .bg(white(0.03).mix(white(0.07), hot))
+        .border(1.0, white(0.06))
+        .role(Role::Link, label)
+        .ring(4.0)
+        .child(
+            text(label, 12.0, c(look::GRAY_400).mix(c(look::GRAY_200), hot))
+                .line_height(16.0)
+                .silent(),
+        )
+        .child(glyph_icon(glyph::ARROW_UP_RIGHT, 11.0, c(look::GRAY_500)))
 }
 
 /// `ConnectorIcon`: a built-in connector's mark, else the external link.

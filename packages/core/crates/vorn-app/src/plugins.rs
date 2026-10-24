@@ -503,6 +503,29 @@ pub fn describe(state: &PackState) -> PackStatus {
     }
 }
 
+/// The installed packs, counted once each, and those with a newer release.
+pub fn pack_updates(listings: &[Listing]) -> (usize, Vec<&Listing>) {
+    let mut seen = std::collections::HashSet::new();
+    let installed: Vec<&Listing> = listings
+        .iter()
+        .filter(|l| l.pack.is_some() && seen.insert(l.id.as_str()))
+        .collect();
+    let outdated = installed
+        .iter()
+        .copied()
+        .filter(|l| {
+            matches!(
+                l.state(None),
+                PackState::Installed {
+                    available: Some(_),
+                    ..
+                }
+            )
+        })
+        .collect();
+    (installed.len(), outdated)
+}
+
 /// Semver precedence, prereleases included.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
     #[derive(PartialEq)]
@@ -2478,6 +2501,19 @@ mod tests {
         );
         assert_eq!(side.capabilities, ["triggers"]);
         assert_eq!(ls.iter().filter(|l| l.id == "http").count(), 1);
+    }
+
+    #[test]
+    fn pack_updates_count_each_pack_once_and_name_the_outdated() {
+        let packs = [
+            json!({"id": "ado", "name": "ADO", "version": "1.0.0"}),
+            json!({"id": "side", "name": "Side", "version": "0.1.0"}),
+        ];
+        let ls = build_listings(&builtins(), &catalog(), &[], &packs, &[]);
+        let (installed, outdated) = pack_updates(&ls);
+        assert_eq!(installed, 2);
+        let names: Vec<_> = outdated.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(names, ["ado"]);
     }
 
     #[test]

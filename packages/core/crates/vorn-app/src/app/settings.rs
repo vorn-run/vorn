@@ -10,7 +10,8 @@ use crate::act::Act;
 use crate::client::RpcError;
 use crate::screen::settings::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
 use crate::settings::{
-    self, split_args, AgentField, Category, ConnKey, KeyRowState, SetAct, Shell, CONNECTIONS_PAGE,
+    self, split_args, AgentField, Category, ConnKey, KeyRowState, SetAct, Shell, UpdateStatus,
+    CONNECTIONS_PAGE,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 
@@ -20,8 +21,9 @@ pub(super) enum SetCall {
     ConnKeys,
     Preflight(String),
     Rotated(String),
-    Core,
     Detected,
+    /// vornd stopping for Restart Vorn.
+    Restart,
 }
 
 impl App {
@@ -37,7 +39,67 @@ impl App {
         Ok(())
     }
 
-    /// `shot --open NAME`: an Appearance or General popover opened from its
+    /// `shot --update`, `--holder` and `--outdated`: About's states, faked
+    /// once vornd has answered. `update` is `idle`, `checking`, `ready:VER`
+    /// or `error:TEXT`; `holder` is `BUILD:SESSIONS`; `outdated` lists pack ids.
+    pub fn shot_about(
+        &mut self,
+        update: Option<&str>,
+        holder: Option<&str>,
+        outdated: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(u) = update {
+            self.st.settings.update = Some(match u.split_once(':') {
+                None if u == "idle" => UpdateStatus::Idle {
+                    last_checked: Some(crate::state::now_ms() - 120_000.0),
+                },
+                None if u == "checking" => UpdateStatus::Checking,
+                Some(("ready", v)) => UpdateStatus::Ready {
+                    version: v.to_owned(),
+                },
+                Some(("error", m)) => UpdateStatus::Error {
+                    message: m.to_owned(),
+                },
+                _ => {
+                    return Err(format!(
+                        "--update {u:?}: idle, checking, ready:VER or error:TEXT"
+                    ))
+                }
+            });
+        }
+        if let Some(h) = holder {
+            let (build, n) = h
+                .split_once(':')
+                .and_then(|(b, n)| Some((b, n.parse().ok()?)))
+                .ok_or(format!("--holder {h:?}: BUILD:SESSIONS"))?;
+            self.st.settings.holders = Some(settings::Holders {
+                current: true,
+                older: vec![settings::Holder {
+                    pid: 1,
+                    instance: "shot".to_owned(),
+                    build: build.to_owned(),
+                    sessions: Some(n),
+                    compatible: true,
+                }],
+                error: None,
+            });
+        }
+        for id in outdated.into_iter().flat_map(|o| o.split(',')) {
+            let mut found = false;
+            for l in self.st.plugins.listings.iter_mut().filter(|l| l.id == id) {
+                if let Some(p) = l.pack.as_mut() {
+                    p["version"] = Value::from("0.0.1");
+                    found = true;
+                }
+            }
+            if !found {
+                return Err(format!("--outdated {id}: not installed"));
+            }
+        }
+        Ok(())
+    }
+
+    /// `shot --open NAME`: an Appearance, General or About popover opened from its
     /// control, as a click on it would; `theme-picker` and `theme-info` use the first
     /// theme row. `extension:ID` selects that extension's page, and fails
     /// until vornd has listed it.
@@ -74,9 +136,11 @@ impl App {
             "font-picker" => ("font-chip", MenuKind::FontPicker),
             "agent-picker" => ("agent-chip", MenuKind::AgentPicker),
             "shell-picker" => ("shell-picker", MenuKind::SetShell),
+            "channel-menu" => ("update-channel", MenuKind::UpdateChannel),
+            "holder-menu" => ("holder-more", MenuKind::Holder("shot".to_owned())),
             _ => {
                 return Err(format!(
-                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker or extension:ID"
+                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu or extension:ID"
                 ))
             }
         };
@@ -138,11 +202,7 @@ impl App {
                     }
                 }
             }
-            SetCall::Core => {
-                if let Ok(v) = answer {
-                    st.core_version = v.get("version").and_then(Value::as_str).map(str::to_owned);
-                }
-            }
+            SetCall::Restart => self.relaunch(),
             SetCall::Detected => {
                 st.detecting = false;
                 if let Some((found, paths)) =
@@ -182,8 +242,13 @@ impl App {
                 );
             }
             Category::About => {
-                self.call(Call::Set(SetCall::Core), "core:status", Value::Null);
                 self.health = Some(health(self.port));
+                if !crate::settings::IN_BROWSER {
+                    self.st.settings.cli = Some(crate::cli_link::state());
+                }
+                if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+                    self.plug_load(true);
+                }
             }
             _ => {}
         }
@@ -475,6 +540,20 @@ impl App {
                 self.st.settings.end_failure =
                     outcome.err().map(|d| format!("Could not end them: {d}."));
                 self.health = Some(health(self.port));
+            }
+            SetAct::KeepHolder => self.st.settings.confirm_end = None,
+            SetAct::RestartVorn => {
+                self.call(Call::Set(SetCall::Restart), "server:shutdown", Value::Null)
+            }
+            SetAct::UpdateExtensions => {
+                let keys: Vec<String> = crate::plugins::pack_updates(&self.st.plugins.listings)
+                    .1
+                    .iter()
+                    .map(|l| l.key.clone())
+                    .collect();
+                for key in keys {
+                    self.plug_inspect(&key, true);
+                }
             }
         }
     }
