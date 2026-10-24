@@ -2273,13 +2273,13 @@ pub(super) fn about(s: &Screen<'_>) -> El {
         s,
         None,
         &format!("What's new in {notes_for}"),
-        Some(tip::WHATS_NEW),
+        None,
         glyph_icon(glyph::ARROW_UP_RIGHT, 14.0, c(look::GRAY_500)),
     )
-    .id(notes)
     .on(Action::Click)
     .role(Role::Link, "What's new")
     .ring(4.0);
+    let whats_new = crate::ui::tooltip(s.ui, whats_new, notes, tip::WHATS_NEW, None);
     rows.push(whats_new);
     rows.push(extensions_row(s));
     let mut links = div().row().wrap_children().gap(8.0).mt(16.0);
