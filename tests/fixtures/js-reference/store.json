@@ -25,10 +25,7 @@
         }
       },
       "defaults": {
-        "domBlockRendering": true,
         "fontSize": 13,
-        "keepSessionsRunning": true,
-        "minimalShellPrompt": true,
         "reopenSessions": true,
         "shell": "<default shell>",
         "startAtLogin": false,
@@ -78,10 +75,7 @@
         }
       },
       "defaults": {
-        "domBlockRendering": true,
         "fontSize": 15,
-        "keepSessionsRunning": true,
-        "minimalShellPrompt": true,
         "reopenSessions": true,
         "shell": "<default shell>",
         "startAtLogin": false,
@@ -1136,10 +1130,7 @@
         }
       },
       "defaults": {
-        "domBlockRendering": true,
         "fontSize": 15,
-        "keepSessionsRunning": true,
-        "minimalShellPrompt": true,
         "reopenSessions": true,
         "shell": "<default shell>",
         "startAtLogin": false,
@@ -1236,10 +1227,7 @@
         }
       },
       "defaults": {
-        "domBlockRendering": true,
         "fontSize": 15,
-        "keepSessionsRunning": true,
-        "minimalShellPrompt": true,
         "reopenSessions": true,
         "shell": "<default shell>",
         "startAtLogin": false,

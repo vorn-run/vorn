@@ -2507,13 +2507,14 @@ mod tests {
     fn pack_updates_count_each_pack_once_and_name_the_outdated() {
         let packs = [
             json!({"id": "ado", "name": "ADO", "version": "1.0.0"}),
+            json!({"id": "kusto", "name": "Kusto", "version": "0.2.0"}),
             json!({"id": "side", "name": "Side", "version": "0.1.0"}),
         ];
         let ls = build_listings(&builtins(), &catalog(), &[], &packs, &[]);
         let (installed, outdated) = pack_updates(&ls);
-        assert_eq!(installed, 2);
+        assert_eq!(installed, 3);
         let names: Vec<_> = outdated.iter().map(|l| l.id.as_str()).collect();
-        assert_eq!(names, ["ado"]);
+        assert_eq!(names, ["kusto"]);
     }
 
     #[test]
