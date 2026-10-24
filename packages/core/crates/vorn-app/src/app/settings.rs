@@ -236,7 +236,12 @@ impl App {
                     self.st.settings.cli = Some(crate::cli_link::state());
                 }
             }
-            Category::Notifications => crate::notify::refresh(),
+            Category::Notifications => {
+                crate::notify::refresh();
+                if self.st.plugins.packs.is_empty() && self.st.plugins.loads == 0 {
+                    self.plug_load(false);
+                }
+            }
             Category::Keys => {
                 self.call(
                     Call::Set(SetCall::ConnKeys),

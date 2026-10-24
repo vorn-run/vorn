@@ -38,23 +38,26 @@ fn declared(manifest: &Manifest) -> Vec<Preference> {
     let Some(c) = manifest.contributes.as_ref() else {
         return Vec::new();
     };
-    let switch = |id: &str, title: &str, default: bool| Preference {
+    let switch = |id: &str, title: &str, description: Option<String>, default: bool| Preference {
         base: Contribution {
             id: notice_key(id),
             title: title.to_owned(),
-            description: None,
+            description,
             when: None,
         },
         kind: PreferenceKind::Bool { default },
     };
     let mut out = c.preferences().to_vec();
-    out.extend(
-        c.notifications()
-            .iter()
-            .map(|n| switch(&n.base.id, &n.base.title, n.default)),
-    );
+    out.extend(c.notifications().iter().map(|n| {
+        switch(
+            &n.base.id,
+            &n.base.title,
+            n.base.description.clone(),
+            n.default,
+        )
+    }));
     if !c.notifications().is_empty() {
-        out.push(switch(ALL_NOTICES, "Notifications", true));
+        out.push(switch(ALL_NOTICES, "Notifications", None, true));
     }
     out
 }
@@ -296,6 +299,7 @@ command = ["x"]
 [[contributes.notifications]]
 id = "finished"
 title = "Notify when a run finishes"
+description = "A workflow run ended."
 [[contributes.notifications]]
 id = "approval"
 title = "Notify when a run needs approval"
@@ -311,6 +315,10 @@ default = false
             "Notify when a run finishes"
         );
         assert_eq!(row("notify:finished")["value"], true);
+        assert_eq!(
+            row("notify:finished")["description"],
+            "A workflow run ended."
+        );
         assert_eq!(row("notify:finished")["notifications"], "kind");
         assert_eq!(row("notify:approval")["value"], false);
         assert_eq!(row("notify:all")["notifications"], "all");

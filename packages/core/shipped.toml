@@ -75,5 +75,5 @@ sha256 = "a7d371c1cf3f52ecb6f51268b08ed2908228a902db52296110a47501d01c640d"
 [[extension]]
 id = "vorn.workflows"
 path = "workflows"
-version = "1.1.0"
-sha256 = "bc2a94cf558a3617334b48242dee60920a9f065c790f6b3d9942c5484a348e4a"
+version = "1.2.0"
+sha256 = "a5848b3f135873de6f1b1ea5cc1d905e7ec7a1a13c86abbda98a75c5db54f023"
