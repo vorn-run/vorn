@@ -214,6 +214,8 @@ pub struct Network {
     pub tokens: Option<Vec<DeviceToken>>,
     /// The Add a device sheet is open: `None` inside until vornd hands a code.
     pub adding: Option<Option<Code>>,
+    /// A `pairing:start` went out for the open sheet.
+    pub scan_sent: bool,
     pub asking: Option<PairingRequest>,
     /// The QR the sheet draws, and the link it encodes, made once per link.
     pub qr: Option<(String, String)>,
@@ -296,6 +298,7 @@ impl Network {
     /// Puts the sheet away.
     pub fn close_adding(&mut self) {
         self.adding = None;
+        self.scan_sent = false;
         self.asking = None;
         self.qr = None;
     }

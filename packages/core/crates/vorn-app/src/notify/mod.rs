@@ -156,7 +156,7 @@ impl Notifier {
                 vec![Notice {
                     title: title.to_owned(),
                     body: s(params, "body").unwrap_or("").to_owned(),
-                    key: Some(format!("ext:{ext}:{kind}:{title}")),
+                    key: Some(format!("ext:{ext}:{kind}")),
                     sound: prefs.sound(),
                 }]
             }
@@ -496,10 +496,7 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].title, "Vorn");
         assert_eq!(got[0].body, "Workflow \"Ship\" completed");
-        assert_eq!(
-            got[0].key.as_deref(),
-            Some("ext:vorn.workflows:finished:Vorn")
-        );
+        assert_eq!(got[0].key.as_deref(), Some("ext:vorn.workflows:finished"));
         let off = json!({ "defaults": { "notifications": { "enabled": false } } });
         assert!(n.heard("extension:notify", &p, &off, who, now).is_empty());
         let unnamed = json!({ "extensionId": "x", "kind": "k" });

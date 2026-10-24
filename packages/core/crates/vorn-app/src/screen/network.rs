@@ -316,7 +316,7 @@ fn device_row(s: &Screen<'_>, n: &Network, t: &DeviceToken, now: f64) -> El {
     tooltip(
         s.ui,
         row,
-        Id::new("net-device-tip").child(t.id.as_str()),
+        Id::new("net-device-row").child(t.id.as_str()),
         tip::DEVICE,
         None,
     )

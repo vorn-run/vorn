@@ -2304,15 +2304,17 @@ fn holder_row(s: &Screen<'_>, b: &settings::Behind) -> El {
         )
         .child(words)
         .child(controls);
-    let row = match &b.holder {
-        Some(h) => s.acts.context(
-            row,
-            Id::new("holder-row").child(h.as_str()),
-            Act::Open(MenuKind::Holder(h.clone())),
-        ),
-        None => row,
+    // The tooltip keeps the context menu's id, so right-click still finds it.
+    let (row, id) = match &b.holder {
+        Some(h) => {
+            let id = Id::new("holder-row").child(h.as_str());
+            let row = s
+                .acts
+                .context(row, id, Act::Open(MenuKind::Holder(h.clone())));
+            (row, id)
+        }
+        None => (row, Id::new("holder-tip")),
     };
-    let id = Id::new("holder-tip");
     tooltip(s.ui, row, id, tip::BEHIND, None)
 }
 

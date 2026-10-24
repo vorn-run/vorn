@@ -72,13 +72,13 @@ impl App {
             }
             NetAct::AddDevice => {
                 n.adding = Some(None);
+                n.scan_sent = false;
                 self.st.dialog = Some(Dialog::AddDevice);
-                if self.st.network.can_scan() {
-                    self.net_start_scan();
-                }
+                self.net_scan_when_ready();
             }
             NetAct::ShowAnother => {
                 n.adding = Some(None);
+                n.scan_sent = false;
                 self.net_start_scan();
             }
             NetAct::CloseAdding => {
@@ -183,6 +183,16 @@ impl App {
                 self.net_load_tokens();
             }
             NetCall::Ignored => {}
+        }
+        self.net_scan_when_ready();
+    }
+
+    /// Asks for a code once the open sheet can show one, even if the
+    /// addresses arrived after it opened.
+    fn net_scan_when_ready(&mut self) {
+        let n = &self.st.network;
+        if matches!(n.adding, Some(None)) && !n.scan_sent && n.can_scan() {
+            self.net_start_scan();
         }
     }
 
@@ -289,6 +299,7 @@ impl App {
 
     fn net_start_scan(&mut self) {
         self.st.network.error = None;
+        self.st.network.scan_sent = true;
         self.call(Call::Net(NetCall::Started), "pairing:start", Value::Null);
     }
 
