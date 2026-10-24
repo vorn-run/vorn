@@ -492,8 +492,8 @@ current, isGitRepo}`, under `git.read`.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
   changed), `workflow.signIn` (`{runId, workflowId, workflow, node, title,
-  message}`: a step waits for a sign-in) and `workflow.ended` (`{runId,
-  workflowId, workflow, outcome, steps}`, once per run, `outcome` one of
+message}`: a step waits for a sign-in) and `workflow.ended` (`{runId,
+workflowId, workflow, outcome, steps}`, once per run, `outcome` one of
   `completed`, `failed`, `rejected`).
 
 ### `notifications.send`: notices through the OS

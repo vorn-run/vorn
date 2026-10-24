@@ -177,6 +177,8 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
             .and_then(Value::as_bool)
             == Some(!reopen)
     });
+    // The picker lists ready agents only; CI machines have none on PATH.
+    app.st.installed = Some(app.store.agents.iter().map(|a| a.key.clone()).collect());
     let chip = control("agent-chip", Act::Open(MenuKind::AgentPicker));
     shot.click(&mut app, chip);
     assert_eq!(
@@ -274,6 +276,9 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     );
 
     open(&mut shot, &mut app, Category::Agents);
+    shot.until(&mut app, "the detection", |app, _| {
+        (!app.st.settings.detecting).then_some(())
+    });
     shot.save(&mut app, "set-agents");
     let first = app.st.installed.clone().unwrap_or_default();
     for k in &first {

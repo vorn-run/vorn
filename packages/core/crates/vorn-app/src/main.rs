@@ -8,9 +8,10 @@
 //!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
 //!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
 //!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|
-//!                       channel-menu|holder-menu|extension:ID]
+//!                       channel-menu|holder-menu|agent:KEY|agent-advanced:KEY|
+//!                       agent-remove:KEY|extension:ID]
 //!               [--update idle|checking|ready:VER|error:TEXT] [--holder BUILD:N]
-//!               [--outdated ID,ID] [--confirm-end on]
+//!               [--outdated ID,ID] [--confirm-end on] [--missing KEY,KEY]
 //!               [--click X,Y]... [--type TEXT] [--hover X,Y]
 //!               [--reduced-transparency on] [--tui-drawing cells|pixels]
 //!               [--notif-denied on]
@@ -36,14 +37,16 @@
 //! `--settings appearance` opens Settings on that page after writing each
 //! `--set colorScheme="dark"` to the defaults (vornd keeps them), and
 //! `--open` opens one of its popovers from its control, or with
-//! `extension:vorn.tasks` that extension's page under `--settings extensions`.
+//! `extension:vorn.tasks` that extension's page under `--settings extensions`,
+//! or with `agent:claude` that agent's page under `--settings agents`.
 //! Then each `--click X,Y` presses there, `--type` types letters into the
 //! focused field, and `--hover X,Y` rests the pointer past the tooltip delay.
 //! `--reduced-transparency on`, `--tui-drawing` and `--notif-denied on` (the
 //! system blocks Vorn's notifications) stand in for the system.
 //! On About, `--update`, `--holder` (an older session holder with N
 //! terminals), `--outdated` (installed packs shown as behind) and
-//! `--confirm-end` fake the states once vornd has answered.
+//! `--confirm-end` fake the states once vornd has answered; `--missing`
+//! shows those agents as not found.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -228,7 +231,7 @@ fn shot(args: &Args) -> Result<(), String> {
         app.frame(&mut ui, size);
         app.frame(&mut ui, size);
     }
-    if ["update", "holder", "outdated", "confirm-end"]
+    if ["update", "holder", "outdated", "confirm-end", "missing"]
         .iter()
         .any(|k| args.get(k).is_some())
     {
@@ -241,6 +244,10 @@ fn shot(args: &Args) -> Result<(), String> {
         app.shot_about(args.get("update"), args.get("holder"), args.get("outdated"))?;
         if args.get("confirm-end").is_some() {
             app.st.settings.confirm_end = Some("shot".to_owned());
+        }
+        let missing: Vec<&str> = args.get("missing").unwrap_or_default().split(',').collect();
+        if let Some(found) = app.st.installed.as_mut() {
+            found.retain(|k| !missing.contains(&k.as_str()));
         }
         app.frame(&mut ui, size);
     }

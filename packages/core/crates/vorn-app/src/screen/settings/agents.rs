@@ -371,7 +371,7 @@ fn detail(s: &Screen<'_>, a: &Agent) -> El {
     if let Some(tools) = tools_card(s, a) {
         col = col.child(section("Vorn tools")).child(tools);
     }
-    col.child(div().mt(16.0).child(card(more_rows(s, a))))
+    col.child(div().col().mt(16.0).child(card(more_rows(s, a))))
 }
 
 /// Not connected or Connected, Connect, and what Connect runs.
