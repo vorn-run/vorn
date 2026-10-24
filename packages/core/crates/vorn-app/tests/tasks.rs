@@ -79,26 +79,28 @@ fn the_default_view_is_chosen_on_the_tasks_extension_page() {
             &Act::Set(SetAct::Open(Category::Connectors)),
         ),
     );
-    let key = shot.until(&mut app, "Tasks listed", |app, _| {
+    // A listing still loading is redrawn when it lands, so wait for the row itself.
+    let tasks_row = shot.until(&mut app, "Tasks listed", |app, ui| {
         let p = &app.st.plugins;
-        p.listings
+        let key = p
+            .listings
             .iter()
-            .find(|l| l.id == "vorn.tasks")
-            .map(|l| l.key.clone())
+            .find(|l| l.id == "vorn.tasks")?
+            .key
+            .clone();
+        let row = App::control("plug-installed-row", &Act::Plug(PlugAct::Select(Some(key))));
+        (p.loads == 0 && ui.rect_of(row).is_some()).then_some(row)
     });
-    let select = Act::Plug(PlugAct::Select(Some(key)));
-    shot.click(&mut app, App::control("plug-installed-row", &select));
-    shot.frame(&mut app);
+    shot.click(&mut app, tasks_row);
     let board = Act::Point(PointAct::Preference {
         id: "vorn.tasks".into(),
         key: "default_view".into(),
         value: "\"board\"".into(),
     });
     let row = App::control("ext-pref-vorn.tasks-default_view", &board);
-    assert!(
-        shot.ui.rect_of(row).is_some(),
-        "Default view on the Tasks page"
-    );
+    shot.until(&mut app, "Default view on the Tasks page", |_, ui| {
+        ui.rect_of(row).map(|_| ())
+    });
     shot.click(&mut app, row);
     assert_eq!(app.st.tasks.mode, Mode::Board, "the view follows at once");
     shot.until(&mut app, "the preference kept", |app, _| {
