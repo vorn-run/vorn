@@ -55,24 +55,6 @@ fn switch_row(
     row(title, description, note, t, false)
 }
 
-/// The font size's `w-7 h-7` steppers.
-fn stepper(s: &Screen<'_>, glyph: &str, delta: i32) -> El {
-    let id = s.acts.on("font-size", set(SetAct::FontSize(delta)));
-    div()
-        .id(id)
-        .on(Action::Click)
-        .size(28.0, 28.0)
-        .center()
-        .rounded(6.0)
-        .bg(white(0.06).mix(white(0.1), s.ui.hover(id)))
-        .role(Role::Button, if delta < 0 { "Smaller" } else { "Larger" })
-        .child(
-            text(glyph, 14.0, c(look::GRAY_300))
-                .line_height(20.0)
-                .silent(),
-        )
-}
-
 /// The Card Row Height slider's track.
 pub const ROW_SLIDER: Id = Id(0x726f_7768_6569_6768);
 /// The notification volume slider's track.
@@ -128,6 +110,47 @@ mod glyph {
     pub const CHEVRON_DOWN: &str = r#"<path d="M6 9l6 6 6-6"/>"#;
     pub const CHEVRON_UP: &str = r#"<path d="M18 15l-6-6-6 6"/>"#;
     pub const SEARCH: &str = r#"<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>"#;
+}
+
+/// What each Appearance row, tile and chip says when hovered.
+pub(crate) mod tip {
+    #[cfg(target_os = "macos")]
+    pub const SCHEME: &str =
+        "Which theme Vorn uses. System follows your Mac's light or dark setting.";
+    #[cfg(not(target_os = "macos"))]
+    pub const SCHEME: &str =
+        "Which theme Vorn uses. System follows your computer's light or dark setting.";
+    pub const THEME: &str = "The colours of Vorn's surfaces, text and terminals.";
+    #[cfg(target_os = "macos")]
+    pub const LIGHT_THEME: &str = "The theme used while your Mac is in light mode.";
+    #[cfg(not(target_os = "macos"))]
+    pub const LIGHT_THEME: &str = "The theme used while your computer is in light mode.";
+    #[cfg(target_os = "macos")]
+    pub const DARK_THEME: &str = "The theme used while your Mac is in dark mode.";
+    #[cfg(not(target_os = "macos"))]
+    pub const DARK_THEME: &str = "The theme used while your computer is in dark mode.";
+    pub const THEME_INFO: &str = "Shows the theme's terminal colours and who made it.";
+    pub const MORE_THEMES: &str = "Opens the extensions catalog, filtered to themes.";
+    pub const SURFACES: &str = "How Vorn draws its sidebar, toolbar and panels.";
+    pub const SOLID: &str = "Opaque surfaces everywhere.";
+    pub const GLASS: &str =
+        "The sidebar and toolbar show the system's translucent material; buttons sit on glass.";
+    pub const TINTED_GLASS: &str = "As Glass, tinted with the theme's colours.";
+    pub const NO_GLASS: &str = "Off while Reduce transparency is on in the system settings.";
+    pub const CHROME: &str =
+        "Paint Vorn's sidebar and panels in the theme's colours instead of Vorn's own.";
+    pub const CONTRAST: &str =
+        "Lighten or darken text that would be hard to read, keeping its colour.";
+    pub const FONT: &str = "The font every terminal uses.";
+    pub const SIZE: &str = "The text size in terminals.";
+    pub const LIGATURES: &str = "This font joins symbols like != and -> into one shape.";
+    pub const LAYOUT: &str = "How sessions are arranged in the window.";
+    pub const GRID: &str = "Sessions side by side in a grid.";
+    pub const TABS: &str = "One session at a time, switched with tabs.";
+    pub const LIST: &str = "A list of sessions beside the open one.";
+    pub const CARD_HEIGHT: &str = "How tall each session card is in the grid.";
+    pub const DRAWING: &str =
+        "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
 }
 
 fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
@@ -225,7 +248,7 @@ fn colour_rows(s: &Screen<'_>) -> Vec<El> {
         ],
         10.0,
     );
-    let mut rows = vec![card_row(s, None, "Appearance", None, scheme)];
+    let mut rows = vec![card_row(s, None, "Appearance", Some(tip::SCHEME), scheme)];
     for r in a::theme_rows(prefs.scheme) {
         let mark = (prefs.scheme == Scheme::System).then(|| {
             let body = match r.look {
@@ -234,13 +257,24 @@ fn colour_rows(s: &Screen<'_>) -> Vec<El> {
             };
             glyph_icon(body, 14.0, c(look::GRAY_500))
         });
-        rows.push(card_row(s, mark, r.label, None, theme_control(s, r.look)));
+        let tip = match (prefs.scheme, r.look) {
+            (Scheme::System, Look::Light) => tip::LIGHT_THEME,
+            (Scheme::System, Look::Dark) => tip::DARK_THEME,
+            _ => tip::THEME,
+        };
+        rows.push(card_row(
+            s,
+            mark,
+            r.label,
+            Some(tip),
+            theme_control(s, r.look, tip),
+        ));
     }
     rows
 }
 
 /// The theme chip that opens the picker, and the (i) beside it.
-fn theme_control(s: &Screen<'_>, side: Look) -> El {
+fn theme_control(s: &Screen<'_>, side: Look, tip: &str) -> El {
     let t = chosen_theme(s, side);
     let kind = MenuKind::ThemePicker(side);
     let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
@@ -254,13 +288,11 @@ fn theme_control(s: &Screen<'_>, side: Look) -> El {
                 .silent(),
         )
         .child(chevron(open));
-    let info = icon_button(
-        s,
-        s.acts
-            .on("theme-info", Act::Open(MenuKind::ThemeInfo(t.id.clone()))),
-        glyph::INFO,
-        "Theme details",
-    );
+    let chip = tooltip(s.ui, chip, id, tip, None);
+    let info_id = s
+        .acts
+        .on("theme-info", Act::Open(MenuKind::ThemeInfo(t.id.clone())));
+    let info = icon_button(s, info_id, glyph::INFO, "Theme details", tip::THEME_INFO);
     div().row().items_center().gap(6.0).child(chip).child(info)
 }
 
@@ -313,7 +345,7 @@ fn theme_swatch(t: &Theme, size: f32) -> El {
 }
 
 /// A neutral 26 px icon button: gray, white on a faint wash when hovered.
-fn icon_button(s: &Screen<'_>, id: Id, body: &str, label: &str) -> El {
+fn icon_button(s: &Screen<'_>, id: Id, body: &str, label: &str, tip: &str) -> El {
     let hot = s.ui.hover(id);
     let b = div()
         .id(id)
@@ -330,7 +362,7 @@ fn icon_button(s: &Screen<'_>, id: Id, body: &str, label: &str) -> El {
             14.0,
             c(look::GRAY_400).mix(c(look::WHITE), hot),
         ));
-    tooltip(s.ui, b, id, label, None)
+    tooltip(s.ui, b, id, tip, None)
 }
 
 /// Surfaces, theme colours on them, and readable contrast.
@@ -353,9 +385,9 @@ fn look_rows(s: &Screen<'_>) -> Vec<El> {
             reduced,
         ));
     let surfaces_tip = if cfg!(windows) {
-        "Solid surfaces, the system's glass under the sidebar and menus, or that glass tinted by the theme. The sidebar changes at the next launch."
+        "How Vorn draws its sidebar, toolbar and panels. The sidebar changes at the next launch."
     } else {
-        "Solid surfaces, the system's glass under the sidebar and menus, or that glass tinted by the theme."
+        tip::SURFACES
     };
     let tinted = prefs.chrome == Chrome::Tinted;
     let chrome = toggle(
@@ -380,14 +412,14 @@ fn look_rows(s: &Screen<'_>) -> Vec<El> {
             s,
             Some(glyph_icon(glyph::PALETTE, 14.0, c(look::GRAY_500))),
             "Theme colours on surfaces",
-            Some("Draw the sidebar, panels and cards in the theme's own colours instead of neutral grays."),
+            Some(tip::CHROME),
             chrome,
         ),
         card_row(
             s,
             Some(glyph_icon(glyph::CONTRAST, 14.0, c(look::GRAY_500))),
             "Readable contrast",
-            Some("Lift text that reads below 4.5:1 against its background, keeping its hue."),
+            Some(tip::CONTRAST),
             contrast,
         ),
     ]
@@ -449,11 +481,19 @@ fn surface_tile(
                 .child(line(38.0, 0.35))
                 .child(div().size(20.0, 6.0).rounded(2.0).bg(c(look::BRONZO))),
         );
-    let tip = disabled
-        .then_some("Reduce transparency is on in the system settings, so surfaces stay solid.");
+    let says = match m {
+        Materials::Solid => tip::SOLID,
+        Materials::Native => tip::GLASS,
+        Materials::Themed => tip::TINTED_GLASS,
+    };
+    let says = if disabled {
+        format!("{says} {}", tip::NO_GLASS)
+    } else {
+        says.to_owned()
+    };
     let act = set(surface_act(m));
     let on = m == chosen && !disabled;
-    tile(s, "surface", act, pic, label, on, disabled, tip)
+    tile(s, "surface", act, pic, label, on, disabled, &says)
 }
 
 /// A picture choice: the picture ringed in the accent when chosen, and its
@@ -467,7 +507,7 @@ fn tile(
     label: &str,
     on: bool,
     disabled: bool,
-    tip: Option<&str>,
+    tip: &str,
 ) -> El {
     let id = Acts::id(place, &act);
     if !disabled {
@@ -505,10 +545,7 @@ fn tile(
     } else {
         el.on(Action::Click).ring(4.0)
     };
-    match tip {
-        Some(t) => tooltip(s.ui, el, id, t, None),
-        None => el,
-    }
+    tooltip(s.ui, el, id, tip, None)
 }
 
 /// The preview, the font and its size.
@@ -517,8 +554,8 @@ fn terminal_rows(s: &Screen<'_>) -> Vec<El> {
     let family = s.ui.text.term_family();
     vec![
         terminal_preview(family, size),
-        card_row(s, None, "Font", None, font_chip(s, family)),
-        card_row(s, None, "Size", None, size_control(s, size)),
+        card_row(s, None, "Font", Some(tip::FONT), font_chip(s, family)),
+        card_row(s, None, "Size", Some(tip::SIZE), size_control(s, size)),
     ]
 }
 
@@ -568,17 +605,18 @@ fn font_chip(s: &Screen<'_>, family: &str) -> El {
             .as_ref()
             .is_some_and(|m| m.kind == MenuKind::FontPicker);
     let id = s.acts.on("font-chip", Act::Open(MenuKind::FontPicker));
-    chip(s, id, family, open)
+    let chip = chip(s, id, family, open)
         .child(
             text(family, 13.0, c(look::GRAY_200))
                 .family(family)
                 .line_height(18.0)
                 .silent(),
         )
-        .child(chevron(open))
+        .child(chevron(open));
+    tooltip(s.ui, chip, id, tip::FONT, None)
 }
 
-/// Three Aa steps, then the exact size with a step down and up.
+/// Three Aa steps, then the exact size.
 fn size_control(s: &Screen<'_>, size: i64) -> El {
     let mut steps = div()
         .row()
@@ -615,19 +653,11 @@ fn size_control(s: &Screen<'_>, size: i64) -> El {
                 ),
         );
     }
-    let exact = div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .child(stepper(s, "\u{2212}", -1))
-        .child(
-            div().w(44.0).row().justify_center().child(
-                text(format!("{size} px"), 12.0, c(look::GRAY_300))
-                    .line_height(16.0)
-                    .silent(),
-            ),
-        )
-        .child(stepper(s, "+", 1));
+    let exact = div().w(44.0).row().justify_end().child(
+        text(format!("{size} px"), 12.0, c(look::GRAY_300))
+            .line_height(16.0)
+            .silent(),
+    );
     div()
         .row()
         .items_center()
@@ -668,8 +698,8 @@ fn session_rows(s: &Screen<'_>) -> Vec<El> {
             ),
         );
     vec![
-        card_row(s, None, "Layout", None, tiles).py(12.0),
-        card_row(s, None, "Card height", None, height),
+        card_row(s, None, "Layout", Some(tip::LAYOUT), tiles).py(12.0),
+        card_row(s, None, "Card height", Some(tip::CARD_HEIGHT), height),
     ]
 }
 
@@ -717,8 +747,13 @@ fn layout_tile(s: &Screen<'_>, key: &str, label: &str, chosen: &str) -> El {
             )
             .child(block(66.0, 58.0, 0.12)),
     };
+    let says = match key {
+        "grid" => tip::GRID,
+        "tabs" => tip::TABS,
+        _ => tip::LIST,
+    };
     let act = seg_act("layoutMode", format!("\"{key}\""));
-    tile(s, "layout", act, pic, label, chosen == key, false, None)
+    tile(s, "layout", act, pic, label, chosen == key, false, says)
 }
 
 /// Where a theme comes from, as the (i) popover's footer says it.
@@ -845,6 +880,16 @@ pub(crate) fn theme_picker(s: &Screen<'_>, side: Look) -> El {
     }
     let more_id = s.acts.on("more-themes", set(SetAct::MoreThemes));
     let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
+    let more = div()
+        .id(more_id)
+        .on(Action::Click)
+        .role(Role::Link, "Get more themes")
+        .ring(2.0)
+        .child(
+            text("Get more themes\u{2026}", 12.0, more_ink)
+                .line_height(16.0)
+                .silent(),
+        );
     let footer = div()
         .row()
         .items_center()
@@ -852,18 +897,7 @@ pub(crate) fn theme_picker(s: &Screen<'_>, side: Look) -> El {
         .px(12.0)
         .py(8.0)
         .border_top(1.0, white(0.06))
-        .child(
-            div()
-                .id(more_id)
-                .on(Action::Click)
-                .role(Role::Link, "Get more themes")
-                .ring(2.0)
-                .child(
-                    text("Get more themes\u{2026}", 12.0, more_ink)
-                        .line_height(16.0)
-                        .silent(),
-                ),
-        )
+        .child(tooltip(s.ui, more, more_id, tip::MORE_THEMES, None))
         .child(
             text("Hover to preview", 11.0, c(look::GRAY_500))
                 .line_height(14.0)
@@ -940,15 +974,23 @@ fn picker_tile(s: &Screen<'_>, t: &Theme, on: bool) -> El {
         )
 }
 
+/// The shortest the font list gets before it opens above the row instead.
+const FONT_PICKER_MIN_H: f32 = 160.0;
+
 /// The font chip's popover: each installed monospace family in its own
 /// face, with a sample line and whether it joins ligatures.
 pub(crate) fn font_picker(s: &Screen<'_>) -> El {
     const SAMPLE: &str = "fn main() -> Result<()> {} != 0";
     let current = s.ui.text.term_family();
+    // Fit the room below the Font row so the list never flips over the chip.
+    let below =
+        s.st.menu
+            .as_ref()
+            .map_or(f32::MAX, |m| s.size.1 - m.at.1 - 8.0);
     let mut col = div()
         .id(Id::new("font-list"))
         .col()
-        .max_h(360.0)
+        .max_h(crate::screen::menus::FONT_PICKER_H.min(below.max(FONT_PICKER_MIN_H)) - 10.0)
         .scroll_y()
         .py(4.0)
         .role(Role::ListBox, "Fonts");
@@ -974,13 +1016,18 @@ pub(crate) fn font_picker(s: &Screen<'_>) -> El {
                 .silent(),
         );
         if f.ligatures {
-            top = top.child(
-                div().px(6.0).rounded(3.0).border(1.0, white(0.12)).child(
+            let tag_id = Id::new("ligatures").child(f.name.as_str());
+            let tag = div()
+                .px(6.0)
+                .rounded(3.0)
+                .border(1.0, white(0.12))
+                .role(Role::Label, "Ligatures")
+                .child(
                     text("Ligatures", 10.0, c(look::GRAY_400))
                         .line_height(14.0)
                         .silent(),
-                ),
-            );
+                );
+            top = top.child(tooltip(s.ui, tag, tag_id, tip::LIGATURES, None));
         }
         col = col.child(
             div()
@@ -1034,12 +1081,13 @@ fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {
         ],
         12.0,
     );
-    let note = match (d.supported, d.pixels) {
-        (false, _) => "Pixels look like the desktop app where the terminal shows images; Text works in any terminal. This terminal does not show images.",
-        (true, true) => "Pixels look like the desktop app where the terminal shows images; Text works in any terminal. Drawing pixels now.",
-        (true, false) => "Pixels look like the desktop app where the terminal shows images; Text works in any terminal. Drawing text now.",
+    let now = match (d.supported, d.pixels) {
+        (false, _) => "This terminal does not show images.",
+        (true, true) => "Drawing pixels now.",
+        (true, false) => "Drawing text now.",
     };
-    card_row(s, None, "Drawing", Some(note), choice)
+    let note = format!("{} {now}", tip::DRAWING);
+    card_row(s, None, "Drawing", Some(&note), choice)
 }
 
 /// The family's sigil in a 24 px frame.

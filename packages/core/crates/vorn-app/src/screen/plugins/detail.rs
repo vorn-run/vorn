@@ -103,7 +103,10 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
         .filter_map(|p| preference(s, id, p))
         .collect();
     if !rows.is_empty() {
-        col = col.child(section("Settings", rows));
+        col = col.child(section(
+            "Settings",
+            vec![crate::screen::settings::card(rows)],
+        ));
     }
     let n = places(page.contributes);
     let groups = place_groups(page.contributes);
@@ -624,7 +627,7 @@ pub(super) fn origin_label(origin: &str) -> &str {
     host.split('/').next().unwrap_or(host)
 }
 
-/// One preference: its title and description beside a switch, or a segmented choice.
+/// One preference: a card row with its title beside a switch or a segmented choice.
 fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
     let key = sv(p, "id")?;
     let title = sv(p, "title").unwrap_or(key);
@@ -663,22 +666,11 @@ fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
         }
         _ => return None,
     };
-    let mut words = div().col().grow().min_w0().child(
-        text(title, 12.5, k::GRAY_300)
-            .line_height(18.75)
-            .role(Role::Label, title),
-    );
-    if let Some(d) = sv(p, "description").filter(|d| !d.is_empty()) {
-        words = words.child(quiet(d).mt(2.0));
-    }
-    Some(
-        div()
-            .row()
-            .items_center()
-            .gap(12.0)
-            .child(words)
-            .child(control),
-    )
+    // As on Settings' own pages: the description is the row's tooltip, not a line under it.
+    let tip = sv(p, "description").filter(|d| !d.is_empty());
+    Some(crate::screen::settings::card_row(
+        s, None, title, tip, control,
+    ))
 }
 
 fn section(label: &str, children: Vec<El>) -> El {

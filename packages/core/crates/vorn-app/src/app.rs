@@ -1600,6 +1600,17 @@ impl App {
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };
         at.0 = at.0.min(self.size.0 - w - 8.0).max(8.0);
+        if kind == MenuKind::FontPicker {
+            // Scroll the page up so the list opens below the Font row rather than over it.
+            let content = crate::screen::settings::CONTENT;
+            let short = at.1 + menus::FONT_PICKER_H + 8.0 - self.size.1;
+            let room = ui.scroll_max(content) - ui.scroll_offset(content);
+            let by = short.min(room).max(0.0);
+            if by > 0.0 {
+                ui.set_scroll_offset(content, ui.scroll_offset(content) + by);
+                at.1 -= by;
+            }
+        }
         match &kind {
             MenuKind::Grid => {
                 let paths: Vec<String> = self

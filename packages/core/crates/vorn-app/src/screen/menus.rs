@@ -50,6 +50,9 @@ pub fn width(kind: &MenuKind) -> f32 {
     }
 }
 
+/// The font picker's height: its list and the popover's edge.
+pub const FONT_PICKER_H: f32 = 370.0;
+
 /// A panel of `items` in the open menu's group, its submenu in [`SUB`].
 pub fn panel(
     ui: &Ui,

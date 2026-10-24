@@ -424,7 +424,8 @@ pub(in crate::screen) fn card(rows: Vec<El>) -> El {
 }
 
 /// One row of a [`card`]: an optional icon and the label at the left,
-/// `control` at the right; `tip` explains the row when its label is hovered.
+/// `control` at the right; `tip` explains the row while it is hovered, unless
+/// a part of the control has a tooltip of its own.
 pub(in crate::screen) fn card_row(
     s: &Screen<'_>,
     mark: Option<El>,
@@ -435,14 +436,7 @@ pub(in crate::screen) fn card_row(
     let name = text(label, 13.0, c(look::GRAY_200))
         .line_height(18.0)
         .role(Role::Label, label);
-    let name = match tip {
-        Some(t) => {
-            let id = Id::new("row-tip").child(label);
-            crate::ui::tooltip(s.ui, name, id, t, None)
-        }
-        None => name,
-    };
-    div()
+    let row = div()
         .row()
         .items_center()
         .justify_between()
@@ -459,7 +453,16 @@ pub(in crate::screen) fn card_row(
                 .child_if(mark)
                 .child(name),
         )
-        .child(control)
+        .child(control);
+    match tip {
+        Some(t) => crate::ui::tooltip(s.ui, row, row_tip_id(label), t, None),
+        None => row,
+    }
+}
+
+/// The id a [`card_row`] labelled `label` shows its tooltip under.
+pub fn row_tip_id(label: &str) -> Id {
+    Id::new("row-tip").child(label)
 }
 
 /// The one switch, [`widgets::toggle`](crate::ui::widgets::toggle).

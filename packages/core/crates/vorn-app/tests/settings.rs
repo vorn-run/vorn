@@ -107,25 +107,15 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     shot.save(&mut app, "set-appearance");
 
     // Appearance: the font size steps and the layout segment write defaults.
-    let before = app
-        .store
-        .config
-        .pointer("/defaults/fontSize")
-        .and_then(Value::as_i64)
-        .unwrap_or(13);
-    shot.click(
-        &mut app,
-        control("font-size", Act::Set(SetAct::FontSize(1))),
-    );
+    let large = SetAct::Default("fontSize".into(), "16".into());
+    shot.click(&mut app, control("font-preset", Act::Set(large)));
     saved(&mut app, "the larger font", |c| {
-        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(before + 1)
+        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(16)
     });
-    shot.click(
-        &mut app,
-        control("font-size", Act::Set(SetAct::FontSize(-1))),
-    );
+    let medium = SetAct::Default("fontSize".into(), "13".into());
+    shot.click(&mut app, control("font-preset", Act::Set(medium)));
     saved(&mut app, "the font back", |c| {
-        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(before)
+        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(13)
     });
     let tabs = SetAct::Default("layoutMode".into(), "\"tabs\"".into());
     shot.click(&mut app, control("layout", Act::Set(tabs)));

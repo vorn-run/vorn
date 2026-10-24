@@ -117,8 +117,6 @@ pub enum SetAct {
     Default(String, String),
     /// `defaults.notifications[key] = value`.
     Notify(String, bool),
-    /// The terminal font size, one step down or up.
-    FontSize(i32),
     /// A theme from the picker, by id: its side's key, and the scheme when
     /// a fixed one is of the other side.
     PickTheme(String),

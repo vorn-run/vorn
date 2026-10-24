@@ -612,13 +612,31 @@ impl TextSystem {
             return list.clone();
         }
         let db = self.fonts.db();
-        let mut names: Vec<String> = db
+        let flagged: HashSet<&str> = db
             .faces()
             .filter(|f| f.monospaced)
-            .filter(|f| has_outlines(db, f.id))
-            .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
+            .filter_map(|f| f.families.first().map(|(n, _)| n.as_str()))
             // A leading dot names a face the system keeps for itself.
             .filter(|n| !n.starts_with('.'))
+            .collect();
+        // A family is listed when every outline face under its name draws
+        // fixed-width glyphs: the flag alone lets in a family whose
+        // regular face is proportional beside a monospaced one.
+        let mut fixed: HashMap<&str, bool> = HashMap::new();
+        for f in db.faces() {
+            let Some((name, _)) = f.families.first() else {
+                continue;
+            };
+            if !flagged.contains(name.as_str()) || !has_outlines(db, f.id) {
+                continue;
+            }
+            let ok = fixed_advances(db, f.id);
+            *fixed.entry(name.as_str()).or_insert(true) &= ok;
+        }
+        let mut names: Vec<String> = fixed
+            .into_iter()
+            .filter(|&(_, ok)| ok)
+            .map(|(n, _)| n.to_owned())
             .collect();
         if !names.iter().any(|n| n == self.mono_family) {
             names.push(self.mono_family.to_owned());
@@ -915,6 +933,33 @@ fn has_outlines(db: &cosmic_text::fontdb::Database, id: cosmic_text::fontdb::ID)
     .unwrap_or(false)
 }
 
+/// Whether a face draws narrow, wide and punctuation glyphs at one advance.
+fn fixed_advances(db: &cosmic_text::fontdb::Database, id: cosmic_text::fontdb::ID) -> bool {
+    use cosmic_text::skrifa::{
+        instance::{LocationRef, Size},
+        FontRef, MetadataProvider,
+    };
+    db.with_face_data(id, |data, index| {
+        let Ok(font) = FontRef::from_index(data, index) else {
+            return false;
+        };
+        let (map, metrics) = (
+            font.charmap(),
+            font.glyph_metrics(Size::unscaled(), LocationRef::default()),
+        );
+        let mut widths = "iIlmMW0. ".chars().map(|ch| {
+            map.map(ch)
+                .and_then(|g| metrics.advance_width(g))
+                .filter(|w| *w > 0.0)
+        });
+        let Some(Some(first)) = widths.next() else {
+            return false;
+        };
+        widths.all(|w| w.is_some_and(|w| (w - first).abs() < 0.5))
+    })
+    .unwrap_or(false)
+}
+
 fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba, gamma: TextGamma) {
     let ra = &p.raster;
     scene.glyph(
@@ -975,6 +1020,31 @@ mod tests {
             TextSystem::attrs_in(t.term_family(), 400, false).family,
             Family::Name(other.name.as_str())
         );
+    }
+
+    #[test]
+    fn only_families_with_fixed_width_glyphs_are_listed() {
+        let mono = crate::theme::font::MONO;
+        let mut t = TextSystem::new(1.0, crate::theme::font::UI, mono, 12.0);
+        let list = t.monospace_families();
+        let db = t.fonts.db();
+        let faces = |name: &str| -> Vec<_> {
+            db.faces()
+                .filter(|f| f.families.first().is_some_and(|(n, _)| n == name))
+                .filter(|f| has_outlines(db, f.id))
+                .map(|f| f.id)
+                .collect()
+        };
+        for f in list.iter().filter(|f| f.name != mono) {
+            assert!(
+                faces(&f.name).iter().all(|&id| fixed_advances(db, id)),
+                "{}",
+                f.name
+            );
+        }
+        if let Some(&ui) = faces(crate::theme::font::UI).first() {
+            assert!(!fixed_advances(db, ui));
+        }
     }
 
     #[test]

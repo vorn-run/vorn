@@ -306,16 +306,6 @@ impl App {
                 n[key.as_str()] = json!(on);
                 d["notifications"] = n;
             }),
-            SetAct::FontSize(delta) => {
-                let cur = self
-                    .store
-                    .config
-                    .pointer("/defaults/fontSize")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(13);
-                let next = (cur + i64::from(delta)).clamp(8, 24);
-                self.write_defaults(|d| d["fontSize"] = json!(next));
-            }
             SetAct::PickTheme(id) => {
                 let installed = self.st.settings.appearance.installed();
                 let Some(look) = crate::appearance::find(installed, &id).map(|t| t.appearance)

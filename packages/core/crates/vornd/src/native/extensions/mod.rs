@@ -423,7 +423,6 @@ impl Extensions {
         let store = self.router.store();
         let mut packs: Vec<_> = (store.ids().iter())
             .filter_map(|id| store.inspect_unmeasured(id).ok())
-            .filter(|pack| pack.is_extension())
             .collect();
         // In the order they were installed: a top-bar button keeps its place.
         packs.sort_by_key(|p| p.installed_at.as_u64().unwrap_or(u64::MAX));
