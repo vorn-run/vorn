@@ -2339,7 +2339,10 @@ fn about_header(s: &Screen<'_>, head: &settings::AboutHead, status: &UpdateStatu
         .child(detail);
     let mut right = div().row().items_center().gap(8.0).shrink0();
     if !settings::IN_BROWSER {
-        right = right.child(channel_chip(s));
+        // A ready update is one button; the channel waits until it is installed.
+        if head.action != Some(UpdateAction::Restart) {
+            right = right.child(channel_chip(s));
+        }
         let checking = matches!(status, UpdateStatus::Checking);
         let (label, act, tip, primary) = match head.action {
             Some(UpdateAction::Restart) => (
