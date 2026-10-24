@@ -480,7 +480,7 @@ const SHOW_BYTES: &str = r#"python3 -c "import os,sys,tty;tty.setraw(0);sys.stdo
 
 #[test]
 #[cfg(unix)]
-fn images_reach_an_agent_cli_as_ctrl_v_and_drops_as_quoted_paths() {
+fn images_reach_an_agent_cli_as_ctrl_v_and_drops_as_escaped_paths() {
     use vorn_app::ui::{Dropped, MemoryClipboard};
     let Some(v) = TestVornd::start() else {
         return;
@@ -538,7 +538,7 @@ fn images_reach_an_agent_cli_as_ctrl_v_and_drops_as_quoted_paths() {
         shows("got ^[[200~hi there^[[201~.".into(), 1),
     );
 
-    // Dropped files: their quoted paths, space separated, bracketed.
+    // Dropped files: their escaped paths, space separated, bracketed.
     let r = app.term_box(&id).expect("the terminal is painted");
     let k = shot.ui.scale();
     let mid = ((r.x + r.w / 2.0) / k, (r.y + r.h / 2.0) / k);
@@ -548,7 +548,7 @@ fn images_reach_an_agent_cli_as_ctrl_v_and_drops_as_quoted_paths() {
         &mut app,
         "the dropped paths",
         shows(
-            "got ^[[200~/tmp/a.png '/tmp/my shot.png' ^[[201~.".into(),
+            r"got ^[[200~/tmp/a.png /tmp/my\ shot.png ^[[201~.".into(),
             1,
         ),
     );

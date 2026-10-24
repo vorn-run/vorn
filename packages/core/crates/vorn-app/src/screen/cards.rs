@@ -622,12 +622,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
 
 /// The shell's blocks when it shows them.
 pub fn split<'a>(s: &Screen<'a>, session: &Session) -> Option<&'a Shell> {
-    blocks::split(
-        &s.store.config,
-        &s.st.points,
-        session,
-        s.st.shells.get(&session.info.id),
-    )
+    blocks::split(&s.st.points, session, s.st.shells.get(&session.info.id))
 }
 
 /// The terminal's split: the finished commands, the running one, then the
@@ -1689,6 +1684,89 @@ pub(super) fn tabs(s: &Screen<'_>) -> El {
         .child(strip)
         .child_if(chrome::banner(s))
         .child(content)
+}
+
+/// The list layout: the sessions one per row beside the selected one.
+pub(super) fn list(s: &Screen<'_>) -> El {
+    let shown = s.st.visible(s.store);
+    if shown.is_empty() {
+        return no_match();
+    }
+    let active =
+        s.st.selected
+            .as_deref()
+            .and_then(|id| {
+                shown
+                    .iter()
+                    .copied()
+                    .find(|&i| s.store.sessions[i].info.id == id)
+            })
+            .unwrap_or(shown[0]);
+    let mut rows = div()
+        .id(Id::new("session-list"))
+        .col()
+        .gap(2.0)
+        .p(4.0)
+        .w(240.0)
+        .shrink0()
+        .h_full()
+        .scroll_y()
+        .border_right(1.0, white(0.06))
+        .role(Role::TabList, "Sessions");
+    for &i in &shown {
+        rows = rows.child(list_row(s, &s.store.sessions[i], i == active));
+    }
+    div()
+        .row()
+        .grow()
+        .min_h(0.0)
+        .child(rows)
+        .child(div().col().grow().min_w0().child(body(
+            s,
+            active,
+            &s.store.sessions[active],
+            false,
+            1.0,
+        )))
+}
+
+/// One session in the list layout: its status and title.
+fn list_row(s: &Screen<'_>, session: &Session, active: bool) -> El {
+    let sid = session.info.id.as_str();
+    let id = Acts::id("list-row", &Act::Select(sid.to_owned()));
+    let hot = s.ui.hover(id);
+    let fg = if active {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_400).mix(c(look::GRAY_200), hot)
+    };
+    let bg = if active {
+        white(0.08)
+    } else {
+        white(0.0).mix(white(0.04), hot)
+    };
+    let el = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .h(32.0)
+        .px(8.0)
+        .rounded(4.0)
+        .bg(bg)
+        .role(Role::Tab, session.title())
+        .selected(active)
+        .child(status_icon(s, session, 16.0, 1.0))
+        .child(
+            div().grow().min_w0().child(
+                text(session.title(), 13.0, fg)
+                    .line_height(18.0)
+                    .truncate()
+                    .silent(),
+            ),
+        );
+    let el = s.acts.click(el, "list-row", Act::Select(sid.to_owned()));
+    s.acts
+        .context(el, id, Act::Open(MenuKind::Card(sid.to_owned())))
 }
 
 #[cfg(test)]

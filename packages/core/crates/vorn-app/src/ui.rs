@@ -15,8 +15,8 @@ pub use vornui::winit::window::Window as NativeWindow;
 pub use vornui::{backend, cells, icons, menu, palette, theme, widgets};
 pub use vornui::{
     custom, decode_png, div, icon, image, rasterize_svg_rgba, shape, text, Action, Clipboard,
-    Cursor, Dropped, El, Event, Id, Input, Laid, MemoryClipboard, Offscreen, Place, Rect,
-    RenderMode, Rgba, Sense, Ui, UiConfig, WheelPhase, WindowRequest, WHEEL_LINE,
+    Cursor, Dropped, El, Event, Id, Input, Laid, MemoryClipboard, MonoFamily, Offscreen, Place,
+    Rect, RenderMode, Rgba, Sense, Ui, UiConfig, WheelPhase, WindowRequest, WHEEL_LINE,
 };
 pub use vornui::{use_bundled_fonts, TextStyle};
 pub use vornui::{TextEdit, MOVE_SLOP};

@@ -117,6 +117,8 @@ pub struct Connectors {
     http: Http,
     /// The connection the Connections page is adding, while it adds one.
     pub(crate) draft: Mutex<Option<crate::page::Draft>>,
+    /// The Connections page's keys: the one being replaced and those that failed a test.
+    pub(crate) keys: Mutex<crate::page::Keys>,
 }
 
 impl std::fmt::Debug for Connectors {
@@ -294,6 +296,7 @@ impl Connectors {
             checkout_auth: Mutex::default(),
             http: Http,
             draft: Mutex::default(),
+            keys: Mutex::default(),
         })
     }
 

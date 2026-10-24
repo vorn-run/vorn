@@ -128,15 +128,18 @@ fn header(s: &Screen<'_>) -> El {
         })
         .pr(12.0)
         .child(title)
-        .child(tool(
+        .child(super::chrome::group(
             s,
-            "sidebar",
-            Act::ToggleSidebar,
-            "panel-left",
-            2.0,
-            "Toggle sidebar",
-            Some(&format!("{m}B", m = mod_label())),
-            false,
+            [tool(
+                s,
+                "sidebar",
+                Act::ToggleSidebar,
+                "panel-left",
+                2.0,
+                "Toggle sidebar",
+                Some(&format!("{m}B", m = mod_label())),
+                false,
+            )],
         ));
     let bar = draggable(s, div().col().shrink0().child(bar));
     let mut row = div()
@@ -146,43 +149,19 @@ fn header(s: &Screen<'_>) -> El {
         .px(12.0)
         .py(8.0)
         .role(Role::TabList, "View mode");
-    for b in super::chrome::top_buttons(s) {
-        let (on, name, label, keys) = (b.on, b.icon.as_str(), b.label.as_str(), b.keys);
-        let id = s.acts.on("sidebar-mode", b.act);
-        let hot = s.ui.hover(id);
-        let fg = if on {
-            c(look::WHITE)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
-        };
-        let mut b = div()
-            .id(id)
-            .on(Action::Click)
-            .row()
-            .items_center()
-            .gap(6.0)
-            .px(10.0)
-            .py(6.0)
-            .rounded(8.0)
-            .bg(if on {
-                white(0.10)
-            } else {
-                white(0.0).mix(white(0.04), hot)
-            })
-            .role(Role::Tab, label)
-            .selected(on)
-            .child(ico(name, 14.0, 2.0, fg));
-        if on {
-            b = b.child(text(label, 12.0, fg).weight(500).line_height(18.0).silent());
-        }
-        row = row.child(tooltip(s.ui, b, id, label, keys.as_deref()));
-    }
+    let glass = super::chrome::glass(s);
+    let tabs = view_tabs(s, "sidebar-mode", true);
+    row = if glass {
+        row.child(super::chrome::group(s, tabs))
+    } else {
+        tabs.into_iter().fold(row, El::child)
+    };
     // `border-b` under the whole header, the view pills included.
     div()
         .col()
         .shrink0()
         .child(bar)
-        .child(row)
+        .child_if(super::chrome::views(s).then_some(row))
         .child(div().h(1.0).w_full().bg(white(0.06)))
 }
 
@@ -274,7 +253,7 @@ fn session_line(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
     use crate::components::sidebar::{session_row, Detail, SessionRow, SessionRowIds, StepRow};
     use crate::components::Status;
     let sid = session.info.id.as_str();
-    let tabs = s.st.layout == crate::state::LayoutMode::Tabs;
+    let tabs = s.st.layout != crate::state::LayoutMode::Grid;
     let act = if tabs {
         Act::Select(sid.to_owned())
     } else {
@@ -1573,7 +1552,7 @@ fn footer(s: &Screen<'_>) -> El {
         .child(button(Act::Welcome, "circle-help", "Welcome Guide", false));
     let row = if pending && dismissed {
         row.child(button(
-            Act::Set(SetAct::Open(crate::settings::Category::Updates)),
+            Act::Set(SetAct::Open(crate::settings::Category::About)),
             "settings",
             "Settings \u{2014} update ready",
             true,
@@ -1731,6 +1710,60 @@ pub(super) fn sidebar(s: &Screen<'_>) -> El {
 
 /// The handle on the sidebar's right edge that resizes it.
 pub const SIDEBAR_HANDLE: Id = Id(0x7369_6465_6261_7268);
+
+/// The view tabs: icon buttons, the chosen one labelled; on glass over the
+/// system's material the system draws their icons and label.
+pub(super) fn view_tabs(s: &Screen<'_>, place: &str, labels: bool) -> Vec<El> {
+    let glass = super::chrome::glass(s);
+    let mut tabs = Vec::new();
+    for b in super::chrome::top_buttons(s) {
+        let (on, name, label, keys) = (b.on, b.icon.as_str(), b.label.as_str(), b.keys);
+        let id = s.acts.on(place, b.act);
+        let hot = s.ui.hover(id);
+        let fg = if on {
+            c(look::WHITE)
+        } else {
+            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
+        };
+        let mut b = div()
+            .id(id)
+            .on(Action::Click)
+            .row()
+            .items_center()
+            .gap(6.0)
+            .px(10.0)
+            .py(if glass { 4.0 } else { 6.0 })
+            .rounded(if glass { 13.0 } else { 8.0 })
+            .bg(if glass {
+                white(0.0)
+            } else if on {
+                white(0.10)
+            } else {
+                white(0.0).mix(white(0.04), hot)
+            })
+            .role(Role::Tab, label)
+            .selected(on);
+        let svg = glass.then(|| look::icon(name, 2.0)).flatten();
+        b = match &svg {
+            Some(svg) => b.child(div().size(14.0, 14.0).native_icon(svg, 14.0, fg)),
+            None => b.child(ico(name, 14.0, 2.0, fg)),
+        };
+        if on && labels {
+            // Over glass the system draws the label; the app keeps its room.
+            let ink = if svg.is_some() { white(0.0) } else { fg };
+            let mut t = text(label, 12.0, ink)
+                .weight(500)
+                .line_height(18.0)
+                .silent();
+            if svg.is_some() {
+                t = t.native_label(label, 12.0, fg);
+            }
+            b = b.child(t);
+        }
+        tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
+    }
+    tabs
+}
 
 #[cfg(test)]
 mod tests {

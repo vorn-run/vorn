@@ -164,7 +164,7 @@ and when the place shows.
 A settings page is listed under Extensions in the Settings sidebar, and in
 the palette as its title and "Settings". It may name the app's own page it
 follows with `after` (`appearance`, `general`, `updates`, `notifications`,
-`agents`, `mcp`, `keys` or `network`), as SSH & Hosts
+`agents`, `mcp` or `network`), as SSH & Hosts
 follows `agents`, so it keeps that place and its palette entry, its bare
 title.
 
@@ -250,6 +250,9 @@ A few more shapes for a settings form:
   `true` to open or `false` to close. Open, its children show under the row
   rather than beside its title.
 - Text with the `label` style is a form field's small, uppercase caption.
+- Any node's `tip` (`.tip(line)`) shows when the pointer rests on it: a
+  button, a box, a line of text, an item in an entry's menu. The terminal
+  and the platform's own controls do not draw it.
 
 A `web` part is a native web view the client places and seats, with the
 address bar, back and forward, and an artifact's review controls over it.
@@ -491,7 +494,28 @@ current, isGitRepo}`, under `git.read`.
   may run commands.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
-  changed).
+  changed), `workflow.signIn` (`{runId, workflowId, workflow, node, title,
+message}`: a step waits for a sign-in) and `workflow.ended` (`{runId,
+workflowId, workflow, outcome, steps}`, once per run, `outcome` one of
+  `completed`, `failed`, `rejected`).
+
+### `notifications.send`: notices through the OS
+
+An extension declares each kind of notice it sends:
+
+```toml
+[[contributes.notifications]]
+id = "finished"
+title = "Notify when a run finishes"
+default = true
+```
+
+Each kind shows as a switch on the extension's page, and Settings ›
+Notifications has one switch per extension for all of them. A call
+`notifications.send` (`{kind, title, body?, open?}`, under the permission
+`notifications.send`) reaches the OS only while Notifications, the
+extension's switch and the kind's switch are all on; otherwise it fails
+with `off`, and a kind it did not declare fails with `denied`.
 
 ### `web.call`: the Browser's web views
 

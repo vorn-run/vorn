@@ -305,6 +305,14 @@ pub const GROUP_NAME: Id = Id(0x6772_6f75_7000_0001);
 /// The workspace switcher's name field.
 pub const WS_NAME: Id = Id(0x7773_6e61_6d00_0001);
 
+/// The terminal font family Settings stores, empty for the bundled face.
+fn term_family(config: &Value) -> &str {
+    config
+        .pointer("/defaults/terminalFontFamily")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+}
+
 /// Sets `defaults.activeWorkspace`, making `defaults` when there is none.
 fn set_active_workspace(config: &mut Value, id: String) {
     if !config.get("defaults").is_some_and(Value::is_object) {
@@ -450,6 +458,8 @@ pub struct App {
     cli_launch: Option<std::sync::mpsc::Receiver<Option<crate::cli_link::Notice>>>,
     /// The administrator prompt that adds the command's folder to PATH, while it is up.
     cli_prompt: Option<std::sync::mpsc::Receiver<Result<bool, String>>>,
+    /// Terminals Vorn started to install or connect an agent, by session.
+    agent_jobs: HashMap<String, crate::settings::AgentJob>,
 }
 
 /// Everything connecting to vornd waits on (the RPC socket, the models, the
@@ -528,7 +538,7 @@ impl App {
         let st = State {
             sidebar: true,
             layout: LayoutMode::from_config(&store.config),
-            tasks: crate::tasks::Tasks::new(&store.config),
+            tasks: crate::tasks::Tasks::new(),
             settings: crate::settings::Settings::new(),
             // A first run, or one before this guide, opens the welcome guide.
             dialog: (!crate::onboarding::seen(&store.config)).then_some(Dialog::Welcome),
@@ -596,6 +606,7 @@ impl App {
             updater: None,
             cli_launch: None,
             cli_prompt: None,
+            agent_jobs: HashMap::new(),
         };
         app.st.grids =
             crate::flex::grids_from_json(app.store.config.pointer("/defaults/gridLayout"));
@@ -665,7 +676,7 @@ impl App {
     }
 
     /// Polls `headless:list` every 5 s, drops exited sessions past
-    /// `headlessRetentionMinutes` every 30 s, and folds the pills once
+    /// Workflows' `headlessRetentionMinutes` every 30 s, and folds the pills once
     /// their popover closes.
     fn headless_tick(&mut self, ui: &mut Ui, now: web_time::Instant) {
         if now >= self.headless_polled + crate::headless::POLL {
@@ -674,12 +685,11 @@ impl App {
         }
         if now >= self.headless_pruned + crate::headless::PRUNE {
             self.headless_pruned = now;
-            let minutes = self
-                .store
-                .config
-                .pointer("/defaults/headlessRetentionMinutes")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0);
+            let minutes = crate::workflows::minutes(&crate::workflows::preference(
+                &self.st,
+                "headlessRetentionMinutes",
+            ))
+            .unwrap_or(1.0);
             self.st.headless.prune(minutes * 60_000.0, now_ms());
         }
         ui.wake_at(self.headless_polled + crate::headless::POLL);
@@ -828,6 +838,15 @@ impl App {
         }
     }
 
+    /// Restart Vorn, once vornd has stopped: this app reopens on the same
+    /// data directory and starts a vornd of its own build.
+    fn relaunch(&mut self) {
+        match crate::update::relaunch(self.data_dir.as_deref()) {
+            Ok(()) => std::process::exit(0),
+            Err(e) => self.st.toast(format!("Could not restart Vorn: {e}."), true),
+        }
+    }
+
     /// Check now.
     fn check_updates(&self) {
         if let Some(updater) = &self.updater {
@@ -932,6 +951,7 @@ impl App {
                     self.plug_notified(&method, &params);
                     self.net_notified(&method, &params);
                     self.ext_notified(&method, &params);
+                    self.agent_notified(&method, &params);
                     if method == "layout:opened" {
                         self.layout_opened(&params);
                     }
@@ -1477,13 +1497,7 @@ impl App {
     fn jump_to_command(&mut self, ui: &mut Ui, up: bool) {
         let Some(id) = self.current() else { return };
         let as_blocks = self.store.session(&id).is_some_and(|s| {
-            crate::log::split(
-                &self.store.config,
-                &self.st.points,
-                s,
-                self.st.shells.get(&id),
-            )
-            .is_some()
+            crate::log::split(&self.st.points, s, self.st.shells.get(&id)).is_some()
         });
         if as_blocks {
             return;
@@ -1579,6 +1593,17 @@ impl App {
                         | MenuKind::ViewOptions
                         | MenuKind::TaskOptions
                         | MenuKind::ExtInstall
+                        | MenuKind::ThemePicker(_)
+                        | MenuKind::ThemeInfo(_)
+                        | MenuKind::FontPicker
+                        | MenuKind::AgentPicker
+                        | MenuKind::UpdateChannel
+                        | MenuKind::NotifSound
+                        | MenuKind::NotifSources
+                        | MenuKind::Holder(_)
+                        | MenuKind::Device(_)
+                        | MenuKind::SetShell
+                        | MenuKind::ExtChoice(..)
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
@@ -1589,6 +1614,17 @@ impl App {
             (None, None) => (self.size.0 - w - 12.0, look::TOP_BAR_H),
         };
         at.0 = at.0.min(self.size.0 - w - 8.0).max(8.0);
+        if kind == MenuKind::FontPicker {
+            // Scroll the page up so the list opens below the Font row rather than over it.
+            let content = crate::screen::settings::CONTENT;
+            let short = at.1 + menus::FONT_PICKER_H + 8.0 - self.size.1;
+            let room = ui.scroll_max(content) - ui.scroll_offset(content);
+            let by = short.min(room).max(0.0);
+            if by > 0.0 {
+                ui.set_scroll_offset(content, ui.scroll_offset(content) + by);
+                at.1 -= by;
+            }
+        }
         match &kind {
             MenuKind::Grid => {
                 let paths: Vec<String> = self
@@ -1616,6 +1652,22 @@ impl App {
                 ui.set_edit_text(MODEL_ID, "");
                 self.list_models(false);
             }
+            MenuKind::ThemePicker(look) => {
+                self.st.settings.theme_filter = Some(crate::appearance::ThemeFilter::of(*look));
+                ui.set_edit_text(crate::screen::settings::THEME_SEARCH, "");
+            }
+            MenuKind::AgentPicker => {
+                ui.set_edit_text(crate::screen::settings::AGENT_SEARCH, "");
+                // Its Available section lists the catalog's agents.
+                if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+                    self.run_plug(ui, crate::plugins::PlugAct::Refresh);
+                }
+            }
+            MenuKind::FontPicker => {
+                if self.st.settings.fonts.is_none() {
+                    self.st.settings.fonts = Some(ui.text.monospace_families());
+                }
+            }
             MenuKind::LaunchWorktree => {
                 if let Some((_, path)) = self.composer_project() {
                     self.call(
@@ -1641,6 +1693,22 @@ impl App {
             .is_some_and(|m| m.kind == MenuKind::LaunchModel)
         {
             ui.set_focus(Some(MODEL_ID));
+        }
+        if self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| matches!(m.kind, MenuKind::ThemePicker(_)))
+        {
+            ui.set_focus(Some(crate::screen::settings::THEME_SEARCH));
+        }
+        if self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::AgentPicker)
+        {
+            ui.set_focus(Some(crate::screen::settings::AGENT_SEARCH));
         }
     }
 
@@ -2702,6 +2770,8 @@ impl App {
                                         | Act::AskDeleteWorkspace(_)
                                         | Act::DeleteWorkspace(_)
                                 )
+                            || matches!(m.kind, MenuKind::ThemePicker(_))
+                                && matches!(act, Act::Set(crate::settings::SetAct::ThemeFilter(_)))
                             || matches!(m.kind, MenuKind::SidebarOptions)
                                 && matches!(
                                     act,
@@ -3355,9 +3425,12 @@ impl App {
         }
         self.was_composing = composing;
         let now = web_time::Instant::now();
-        for notice in std::mem::take(&mut self.notices) {
-            if self.notifier.admit(&notice, ui.window_focused(), now) {
-                self.notice_sink.show(notice);
+        if !self.notices.is_empty() {
+            let show = crate::notify::Prefs::of(&self.store.config).show;
+            for notice in std::mem::take(&mut self.notices) {
+                if self.notifier.admit(&notice, ui.window_focused(), show, now) {
+                    self.notice_sink.show(notice);
+                }
             }
         }
         self.seen_tick(ui);
@@ -3377,7 +3450,8 @@ impl App {
         if let Some(at) = self.session_tick(now) {
             ui.wake_at(at);
         }
-        self.settings_tick(now);
+        self.settings_tick();
+        self.agent_tick(ui, now);
         let focus = ui.focus();
         if focus != self.last_focus {
             if let Some(old) = self.last_focus {
@@ -3394,6 +3468,7 @@ impl App {
             .and_then(Value::as_f64)
             .map_or(look::TERM_FONT, |f| look::TERM_FONT * f as f32 / 13.0);
         ui.text.set_term_size(font);
+        ui.text.set_term_family(term_family(&self.store.config));
         self.size = size;
         self.agents.load(
             ui,
@@ -3590,13 +3665,8 @@ impl App {
                 continue;
             };
             let sid = session.info.id.as_str();
-            let split = crate::log::split(
-                &self.store.config,
-                &self.st.points,
-                session,
-                self.st.shells.get(sid),
-            )
-            .is_some();
+            let split =
+                crate::log::split(&self.st.points, session, self.st.shells.get(sid)).is_some();
             if !split {
                 if let Some(g) = &self.grid {
                     if !session.ended() {
@@ -3716,6 +3786,26 @@ fn list(answer: Result<Value, RpcError>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stored_font_family_reaches_the_terminal_text() {
+        let mono = crate::ui::theme::font::MONO;
+        let mut text =
+            vornui::TextSystem::new(1.0, crate::ui::theme::font::UI, mono, look::TERM_FONT);
+        text.set_term_family(term_family(&json!({})));
+        assert_eq!(text.term_family(), mono);
+        let Some(other) = text
+            .monospace_families()
+            .iter()
+            .find(|f| f.name != mono)
+            .map(|f| f.name.clone())
+        else {
+            return;
+        };
+        let config = json!({ "defaults": { "terminalFontFamily": other } });
+        text.set_term_family(term_family(&config));
+        assert_eq!(text.term_family(), other);
+    }
 
     #[test]
     fn shortcuts_match_the_renderer() {

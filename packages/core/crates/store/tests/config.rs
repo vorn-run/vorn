@@ -48,13 +48,9 @@ fn round_trips(key: &str, value: Value) {
 #[test]
 fn defaults_survive_a_save_and_load() {
     for (key, value) in [
-        ("domBlockRendering", json!(true)),
-        ("domBlockRendering", json!(false)),
-        ("minimalShellPrompt", json!(true)),
-        ("minimalShellPrompt", json!(false)),
         ("reopenSessions", json!(true)),
-        ("keepSessionsRunning", json!(true)),
-        ("keepSessionsRunning", json!(false)),
+        ("reopenSessions", json!(false)),
+        ("startAtLogin", json!(true)),
         ("widgetEnabled", json!(false)),
     ] {
         round_trips(key, value);
@@ -62,13 +58,50 @@ fn defaults_survive_a_save_and_load() {
 }
 
 #[test]
-fn terminal_settings_default_on_when_the_user_has_not_chosen() {
+fn settings_that_moved_or_went_away_are_not_loaded() {
     let mut store = memory();
-    save_config(&mut store, config_with(json!({})), &[]);
+    let gone = [
+        "domBlockRendering",
+        "minimalShellPrompt",
+        "keepSessionsRunning",
+        "enableHoverPreview",
+        "showHeadlessAgents",
+        "headlessRetentionMinutes",
+        "headlessStepTimeoutMinutes",
+        "updateAutoDownload",
+    ];
+    let saved: serde_json::Map<String, Value> = gone
+        .iter()
+        .map(|k| ((*k).to_owned(), json!(true)))
+        .collect();
+    save_config(&mut store, config_with(Value::Object(saved)), &[]);
     let defaults = defaults_of(&mut store);
-    assert_eq!(defaults["domBlockRendering"], true);
-    assert_eq!(defaults["minimalShellPrompt"], true);
-    assert_eq!(defaults["keepSessionsRunning"], true);
+    for key in gone {
+        assert!(defaults.get(key).is_none(), "{key} still loads");
+    }
+    store.drop_defaults(&gone).unwrap();
+    assert!(store
+        .stored_defaults()
+        .unwrap()
+        .keys()
+        .all(|k| !gone.contains(&k.as_str())));
+}
+
+#[test]
+fn put_default_rewrites_one_stored_row() {
+    let mut store = memory();
+    save_config(
+        &mut store,
+        config_with(json!({ "notifications": { "enabled": true, "soundVolume": 0.5 } })),
+        &[],
+    );
+    store
+        .put_default("notifications", &json!({ "enabled": true }))
+        .unwrap();
+    assert_eq!(
+        store.stored_defaults().unwrap().get("notifications"),
+        Some(&json!({ "enabled": true }))
+    );
 }
 
 #[test]
@@ -77,28 +110,19 @@ fn a_false_the_user_chose_is_kept_rather_than_treated_as_unset() {
     save_config(
         &mut store,
         config_with(json!({
-            "domBlockRendering": false,
-            "minimalShellPrompt": false,
-            "keepSessionsRunning": false
+            "reopenSessions": false,
+            "startAtLogin": false
         })),
         &[],
     );
     let defaults = defaults_of(&mut store);
-    assert_eq!(defaults["domBlockRendering"], false);
-    assert_eq!(defaults["minimalShellPrompt"], false);
-    assert_eq!(defaults["keepSessionsRunning"], false);
+    assert_eq!(defaults["reopenSessions"], false);
+    assert_eq!(defaults["startAtLogin"], false);
 }
 
 #[test]
 fn keys_that_were_declared_but_never_listed_survive() {
-    for (key, value) in [
-        ("updateAutoDownload", json!(false)),
-        ("headlessStepTimeoutMinutes", json!(45)),
-        ("enableHoverPreview", json!(false)),
-        ("tuiDrawing", json!("text")),
-    ] {
-        round_trips(key, value);
-    }
+    round_trips("tuiDrawing", json!("text"));
 }
 
 #[test]
@@ -110,6 +134,7 @@ fn appearance_choices_survive_a_save() {
         ("interfaceStyle", json!("tinted")),
         ("contrastCorrection", json!(true)),
         ("materials", json!("solid")),
+        ("terminalFontFamily", json!("Menlo")),
     ] {
         round_trips(key, value);
     }
@@ -137,16 +162,16 @@ fn keys_survive_a_client_a_whole_release_behind() {
         &mut store,
         config_with(json!({
             "serverPort": 61601,
-            "showHeadlessAgents": true,
-            "headlessRetentionMinutes": 30
+            "updateChannel": "beta",
+            "layoutMode": "tabs"
         })),
         &[],
     );
     save_config(&mut store, config_with(json!({})), &[]);
     let defaults = defaults_of(&mut store);
     assert_eq!(defaults["serverPort"], 61601);
-    assert_eq!(defaults["showHeadlessAgents"], true);
-    assert_eq!(defaults["headlessRetentionMinutes"], 30);
+    assert_eq!(defaults["updateChannel"], "beta");
+    assert_eq!(defaults["layoutMode"], "tabs");
 }
 
 #[test]

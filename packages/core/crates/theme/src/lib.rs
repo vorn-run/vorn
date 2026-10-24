@@ -61,6 +61,9 @@ pub struct Theme {
     /// The extension's id; the settings name a theme by it.
     pub id: String,
     pub name: String,
+    /// Who publishes the extension, and its version; empty when not known.
+    pub publisher: String,
+    pub version: String,
     pub appearance: Appearance,
     pub terminal: Terminal,
     ui: [Rgba8; Token::COUNT],
@@ -133,6 +136,8 @@ impl Theme {
         Ok(Theme {
             id: id.to_owned(),
             name: name.to_owned(),
+            publisher: String::new(),
+            version: String::new(),
             appearance,
             ui: derive::tokens(appearance, &terminal, &given),
             terminal,
@@ -284,7 +289,10 @@ pub fn from_manifest(text: &str) -> Result<Option<Theme>, ThemeError> {
             .and_then(toml::Value::as_str)
             .unwrap_or_default()
     };
-    Theme::from_section(text_of("id"), text_of("name"), section).map(Some)
+    let mut theme = Theme::from_section(text_of("id"), text_of("name"), section)?;
+    text_of("publisher").clone_into(&mut theme.publisher);
+    text_of("version").clone_into(&mut theme.version);
+    Ok(Some(theme))
 }
 
 #[cfg(test)]
@@ -318,6 +326,7 @@ ansi = ["#000000", "#cc3333", "#33cc33", "#cccc33", "#3333cc", "#cc33cc", "#33cc
             (theme.id.as_str(), theme.name.as_str()),
             ("acme-dusk", "Acme Dusk")
         );
+        assert_eq!(theme.version, "1.0.0");
         assert_eq!(theme.get(Token::SurfaceBase), Rgba8::rgb(0x111111));
         assert_eq!(theme.get(Token::Ink), Rgba8::rgb(0xdddddd));
         assert_eq!(theme.get(Token::Danger), Rgba8::rgb(0xcc3333));

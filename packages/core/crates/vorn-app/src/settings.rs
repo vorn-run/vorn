@@ -13,16 +13,14 @@ pub enum Category {
     #[default]
     Appearance,
     General,
-    Updates,
     Notifications,
+    /// The agents on this machine and their setup, Vorn's tools included.
     Agents,
-    Mcp,
     /// The Extensions manager (its route keeps the old `connectors`).
     Connectors,
     /// Settings › Connections: opens the Connectors built-in's own page,
     /// [`CONNECTIONS_PAGE`].
     Connections,
-    Keys,
     Network,
     About,
 }
@@ -33,13 +31,10 @@ impl Category {
         Some(match id {
             "appearance" => Category::Appearance,
             "general" => Category::General,
-            "updates" => Category::Updates,
             "notifications" => Category::Notifications,
             "agents" => Category::Agents,
-            "mcp" => Category::Mcp,
             "connectors" | "extensions" | "plugins" => Category::Connectors,
             "connections" => Category::Connections,
-            "keys" => Category::Keys,
             "network" => Category::Network,
             "about" => Category::About,
             _ => return None,
@@ -50,13 +45,10 @@ impl Category {
         match self {
             Category::Appearance => "Appearance",
             Category::General => "General",
-            Category::Updates => "Updates",
             Category::Notifications => "Notifications",
-            Category::Agents => "Coding Agents",
-            Category::Mcp => "Skills & MCP",
+            Category::Agents => "Agents",
             Category::Connectors => "Extensions",
             Category::Connections => "Connections",
-            Category::Keys => "Keys",
             Category::Network => "Remote Access",
             Category::About => "About",
         }
@@ -67,13 +59,6 @@ impl Category {
 /// (sign-in, updates, the command line tool, the widget) belong to the desktop app.
 pub const IN_BROWSER: bool = cfg!(target_arch = "wasm32");
 
-impl Category {
-    /// Whether the category has anything to set from here.
-    pub fn shown(self) -> bool {
-        !(IN_BROWSER && self == Category::Updates)
-    }
-}
-
 /// The sidebar's sections, as `SIDEBAR_SECTIONS` lists them; the
 /// EXTENSIONS group follows them, with [`EXTENSIONS`] first.
 pub const SECTIONS: [(&str, &[Category]); 2] = [
@@ -82,19 +67,10 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
         &[
             Category::Appearance,
             Category::General,
-            Category::Updates,
             Category::Notifications,
         ],
     ),
-    (
-        "CONNECTIONS",
-        &[
-            Category::Agents,
-            Category::Mcp,
-            Category::Keys,
-            Category::Network,
-        ],
-    ),
+    ("CONNECTIONS", &[Category::Agents, Category::Network]),
 ];
 
 /// The EXTENSIONS group's own pages, before each extension's settings.
@@ -115,11 +91,18 @@ pub enum SetAct {
     Close,
     /// `defaults[key] = value`, the value as JSON text.
     Default(String, String),
-    /// `defaults.notifications[key] = value`.
-    Notify(String, bool),
-    /// The terminal font size, one step down or up.
-    FontSize(i32),
-    TestSound,
+    /// `defaults.notifications[key] = value`, the value as JSON text.
+    Notify(String, String),
+    /// A theme from the picker, by id: its side's key, and the scheme when
+    /// a fixed one is of the other side.
+    PickTheme(String),
+    /// A theme picker chip, on or off.
+    ThemeFilter(crate::appearance::ThemeFilter),
+    /// The catalog's extensions matching a query, with one listing's page
+    /// open when given: Get more themes…, Get more agents… and Install.
+    Browse(String, Option<String>),
+    /// Opens the system's notification settings for Vorn.
+    OpenNotifSettings,
     ShellMenu,
     PickShell(String),
     EditShell,
@@ -134,22 +117,32 @@ pub enum SetAct {
     UpdateNow,
     /// The sidebar's update notice put away; the gear keeps a dot.
     DismissUpdate,
-    // Coding agents.
+    // Agents.
     Redetect,
+    /// An agent's detail shown in place of the list, or the list again.
+    OpenAgent(Option<String>),
     ResetAgent(String),
+    /// The detail's Advanced rows, shown or hidden.
     ExpandAgent(String),
-    CopyInstall(String),
+    /// Runs the agent's installer in a terminal card.
+    InstallAgent(String),
+    /// Runs the agent's Vorn tools setup for it.
+    ConnectAgent(String),
+    /// Removes the agent's adapter; the first press asks in the row.
+    RemoveAgent(String),
+    /// The Remove row's Cancel.
+    KeepAgent,
     /// Typing in an agent's command, arguments or headless arguments.
     AgentText(String, AgentField),
-    // Skills and MCP.
-    Copy(String),
-    // Keys.
-    TestKey(String),
-    Rotate(String, String),
-    SaveRotate(String, String),
-    CancelRotate(String),
     // About.
+    /// End the older holder's terminals; the first press asks in the row.
     EndHolder(String),
+    /// The terminals row's Cancel: End them stops asking.
+    KeepHolder,
+    /// Stop vornd and reopen the app, so the terminals move to this version.
+    RestartVorn,
+    /// Install each pack that has a newer release.
+    UpdateExtensions,
 }
 
 /// Which of an agent's command fields a text act edits.
@@ -362,116 +355,6 @@ pub fn update_cost(sessions: usize, turn_running: bool, survive: bool) -> Option
     Some(format!("{subject} {fate}.{turn}"))
 }
 
-/// What the Terminal server row says for a server whose build is known.
-pub fn describe_server(server: &str, app: &str, adopted: bool) -> (String, &'static str) {
-    if server == app {
-        let how = if adopted {
-            "running since before this window opened"
-        } else {
-            "started by this window"
-        };
-        return (format!("Vorn {server}, {how}"), "Current");
-    }
-    let behind = if server == "unknown" {
-        "A server started outside Vorn is holding your terminals".to_owned()
-    } else {
-        format!("Vorn {server} is still holding your terminals; this app is {app}")
-    };
-    (
-        format!("{behind}. Moving it needs a restart of Vorn on this machine."),
-        "Restart to move",
-    )
-}
-
-/// One of `connection:listKeys`'s entries.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConnKey {
-    pub connection: String,
-    pub name: String,
-    pub connector: String,
-    pub fields: Vec<KeyFieldInfo>,
-    pub usage: u64,
-}
-
-/// One field of a [`ConnKey`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyFieldInfo {
-    pub key: String,
-    pub label: String,
-    pub readable: bool,
-    pub hint: Option<String>,
-    pub env: Option<Vec<String>>,
-}
-
-impl ConnKey {
-    pub fn from_value(v: &Value) -> Option<ConnKey> {
-        let s = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
-        Some(ConnKey {
-            connection: s(v, "connectionId")?,
-            name: s(v, "name").unwrap_or_default(),
-            connector: s(v, "connectorId").unwrap_or_default(),
-            fields: v
-                .get("fields")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|f| {
-                    Some(KeyFieldInfo {
-                        key: s(f, "key")?,
-                        label: s(f, "label").unwrap_or_default(),
-                        readable: f.get("readable").and_then(Value::as_bool).unwrap_or(true),
-                        hint: s(f, "hint"),
-                        env: f.get("envNames").and_then(Value::as_array).map(|a| {
-                            a.iter()
-                                .filter_map(|e| e.as_str().map(str::to_owned))
-                                .collect()
-                        }),
-                    })
-                })
-                .collect(),
-            usage: v.get("usageCount").and_then(Value::as_u64).unwrap_or(0),
-        })
-    }
-}
-
-/// What a key's stored value can be said to be.
-pub fn describe_field(f: &KeyFieldInfo) -> String {
-    if !f.readable {
-        return "Locked \u{2014} this machine cannot read it".to_owned();
-    }
-    if let Some(env) = &f.env {
-        return if env.is_empty() {
-            "No variables set".to_owned()
-        } else {
-            env.join(" \u{b7} ")
-        };
-    }
-    f.hint
-        .clone()
-        .filter(|h| !h.is_empty())
-        .unwrap_or_else(|| "Set".to_owned())
-}
-
-/// How many steps use something, in words.
-pub fn describe_usage(n: u64) -> String {
-    match n {
-        0 => "unused".to_owned(),
-        1 => "used by 1 step".to_owned(),
-        n => format!("used by {n} steps"),
-    }
-}
-
-/// A key's test result and its rotation in progress.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct KeyRowState {
-    pub testing: bool,
-    /// The preflight's answer: none, ok, or failed, and its message.
-    pub result: Option<(Option<bool>, Option<String>)>,
-    pub rotating: Option<String>,
-    pub saving: bool,
-    pub error: Option<String>,
-}
-
 /// A session holder vornd reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Holder {
@@ -526,30 +409,156 @@ impl Holders {
     }
 }
 
-fn plural(n: i64, one: &str, many: &str) -> String {
-    format!("{n} {}", if n == 1 { one } else { many })
+/// The links under About's card.
+pub const WEBSITE: &str = "https://vorn.run";
+pub const DOCUMENTATION: &str = "https://github.com/vorn-run/vorn/tree/main/docs";
+pub const FEEDBACK: &str = "https://github.com/vorn-run/vorn/issues/new";
+pub const GITHUB: &str = "https://github.com/vorn-run/vorn";
+
+/// The release notes of `version`, on its release page.
+pub fn release_notes(version: &str) -> String {
+    format!("{}/tag/v{version}", crate::update::RELEASES)
 }
 
-/// What an older session holder means for its sessions.
-pub fn older_note(h: &Holder) -> String {
-    let held = match h.sessions {
-        None => "Sessions started before Vorn was updated".to_owned(),
-        Some(n) => format!(
-            "{} started before Vorn was updated",
-            plural(n, "session", "sessions")
-        ),
+/// About's header row: the version or the update that is ready, a detail
+/// line, and the one action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AboutHead {
+    pub title: String,
+    pub detail: String,
+    /// Up to date: the detail leads with a check.
+    pub current: bool,
+    pub action: Option<UpdateAction>,
+}
+
+/// What About's header row says for the updater's `status`, with `sessions`
+/// live and this app at `app`.
+pub fn about_head(
+    status: &UpdateStatus,
+    app: &str,
+    now: f64,
+    sessions: usize,
+    survive: bool,
+) -> AboutHead {
+    let head = |detail: String, current, action| AboutHead {
+        title: format!("Vorn {app}"),
+        detail,
+        current,
+        action,
     };
-    let verb = if h.sessions == Some(1) { "is" } else { "are" };
-    if h.compatible {
-        format!(
-            "{held} {verb} still on the older session holder ({}). It exits after the last one ends.",
-            h.build
-        )
-    } else {
-        format!(
-            "{held} {verb} on a session holder ({}) this version cannot talk to. They keep running until you end them.",
-            h.build
-        )
+    match status {
+        UpdateStatus::Idle { last_checked: at } => head(
+            match last_checked(*at, now) {
+                Some(when) => format!("Up to date \u{b7} {when}"),
+                None => "Up to date".to_owned(),
+            },
+            true,
+            None,
+        ),
+        UpdateStatus::Checking => head("Checking for updates\u{2026}".to_owned(), false, None),
+        UpdateStatus::Available { version } => head(format!("Downloading {version}"), false, None),
+        UpdateStatus::Downloading { version, percent } => head(
+            format!("Downloading {version} \u{b7} {percent}%"),
+            false,
+            None,
+        ),
+        UpdateStatus::Ready { version } => {
+            let keep = match (sessions, survive) {
+                (0, _) => String::new(),
+                (1, true) => " \u{b7} your session keeps running".to_owned(),
+                (n, true) => format!(" \u{b7} your {n} sessions keep running"),
+                (1, false) => " \u{b7} your session ends".to_owned(),
+                (n, false) => format!(" \u{b7} your {n} sessions end"),
+            };
+            AboutHead {
+                title: format!("{version} is ready"),
+                detail: format!("You have {app}{keep}"),
+                current: false,
+                action: Some(UpdateAction::Restart),
+            }
+        }
+        UpdateStatus::Manual { version } => AboutHead {
+            title: format!("{version} is available"),
+            detail: "Install the new package from the releases page".to_owned(),
+            current: false,
+            action: None,
+        },
+        UpdateStatus::Error { message } => head(
+            format!("Could not check for updates: {message}"),
+            false,
+            Some(UpdateAction::Retry),
+        ),
+        UpdateStatus::Unsupported => head(
+            "Updates are off in development builds".to_owned(),
+            false,
+            None,
+        ),
+    }
+}
+
+/// Terminals that still run on an older build, as About's row says it: the
+/// older session holder's (which can be ended), else vornd's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Behind {
+    pub title: String,
+    pub detail: String,
+    /// The older holder's instance, for End them.
+    pub holder: Option<String>,
+}
+
+/// Whether About shows the terminals row, for vornd at `server`, this app at
+/// `app`, and the session holders vornd reports.
+pub fn behind(server: Option<&str>, app: &str, holders: Option<&Holders>) -> Option<Behind> {
+    const MOVE: &str = "They keep running and move over when Vorn restarts";
+    if let Some(h) = holders {
+        if let Some(old) = h.older.iter().find(|o| o.sessions != Some(0)) {
+            let build = if old.build.is_empty() {
+                "an older version"
+            } else {
+                old.build.as_str()
+            };
+            return Some(Behind {
+                title: format!("Your terminals still run on {build}"),
+                detail: if old.compatible {
+                    MOVE.to_owned()
+                } else {
+                    "This version cannot reach them; they keep running until you end them"
+                        .to_owned()
+                },
+                holder: Some(old.instance.clone()),
+            });
+        }
+        if let (Some(e), false) = (&h.error, h.current) {
+            return Some(Behind {
+                title: "The session holder is not running".to_owned(),
+                detail: e.clone(),
+                holder: None,
+            });
+        }
+    }
+    match server {
+        Some(s) if s != app => Some(Behind {
+            title: if s == "unknown" {
+                "Your terminals run on a server started outside Vorn".to_owned()
+            } else {
+                format!("Your terminals still run on {s}")
+            },
+            detail: MOVE.to_owned(),
+            holder: None,
+        }),
+        _ => None,
+    }
+}
+
+/// What About's Extensions row says: each installed pack up to date, or the
+/// ones with a newer release.
+pub fn extensions_note(installed: usize, outdated: &[&str]) -> String {
+    match (outdated, installed) {
+        ([], 0) => "None installed".to_owned(),
+        ([], 1) => "Up to date".to_owned(),
+        ([], n) => format!("All {n} up to date"),
+        (names, _) if names.len() <= 3 => names.join(", "),
+        (names, _) => format!("{} and {} more", names[..2].join(", "), names.len() - 2),
     }
 }
 
@@ -584,14 +593,14 @@ pub struct Settings {
     /// The sidebar's ready-update notice was dismissed (`updateBannerDismissed`).
     pub update_dismissed: bool,
     pub detecting: bool,
+    /// The agents whose Advanced rows are shown.
     pub agents_open: HashSet<String>,
-    /// The agent whose install command was copied, and until when.
-    pub copied: Option<(String, web_time::Instant)>,
+    /// The agent whose detail is open on the Agents page.
+    pub agent: Option<String>,
+    /// The agent whose Remove asks first.
+    pub confirm_remove: Option<String>,
     /// Typed arguments not yet committed, by (agent, field).
     pub args: HashMap<(String, AgentField), String>,
-    pub keys: Option<Vec<ConnKey>>,
-    pub key_rows: HashMap<String, KeyRowState>,
-    pub core_version: Option<String>,
     pub holders: Option<Holders>,
     pub end_failure: Option<String>,
     /// The holder whose End them asks first.
@@ -602,6 +611,10 @@ pub struct Settings {
     pub appearance: crate::appearance::Appearance,
     /// The theme tile under the pointer, drawn until the pointer leaves it.
     pub theme_preview: Option<String>,
+    /// The theme picker's chip on, if any.
+    pub theme_filter: Option<crate::appearance::ThemeFilter>,
+    /// The installed monospace families, read when the font list first opens.
+    pub fonts: Option<std::rc::Rc<[crate::ui::MonoFamily]>>,
 }
 
 impl Settings {
@@ -685,45 +698,76 @@ pub fn split_args(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
 }
 
-/// Why the server will not shut down on its own, if it
-/// will not.
-pub fn server_stays_up(config: &Value) -> Option<String> {
-    let polling = config
-        .get("workflows")
-        .and_then(Value::as_array)
+/// Whether the agent's command is on this machine; until detection first
+/// answers, every agent counts, so the list does not flash "Needs setup".
+pub fn is_ready(installed: Option<&[String]>, key: &str) -> bool {
+    installed.is_none_or(|l| l.iter().any(|k| k == key))
+}
+
+/// The agents whose command was found, then the ones that need setup, each
+/// in the order Vorn lists them.
+pub fn partition_agents<'a>(
+    agents: impl IntoIterator<Item = &'a Agent>,
+    installed: Option<&[String]>,
+) -> (Vec<&'a Agent>, Vec<&'a Agent>) {
+    agents
         .into_iter()
-        .flatten()
-        .any(|w| {
-            w.get("enabled").and_then(Value::as_bool) == Some(true)
-                && w.get("nodes")
-                    .and_then(Value::as_array)
-                    .and_then(|n| {
-                        n.iter()
-                            .find(|n| n.get("type").and_then(Value::as_str) == Some("trigger"))
-                    })
-                    .and_then(|t| t.pointer("/config/triggerType"))
-                    .and_then(Value::as_str)
-                    == Some("connectorPoll")
-        });
-    let network = config
-        .pointer("/defaults/networkAccessEnabled")
+        .partition(|a| is_ready(installed, &a.key))
+}
+
+/// `defaults[AGENT_TOOLS][agent]`: Vorn ran Connect for the agent and it worked.
+pub const AGENT_TOOLS: &str = "agentTools";
+
+/// Whether the agent can use Vorn's tools, as far as Vorn knows.
+pub fn tools_connected(config: &Value, agent: &str) -> bool {
+    config
+        .get("defaults")
+        .and_then(|d| d.get(AGENT_TOOLS))
+        .and_then(|t| t.get(agent))
         .and_then(Value::as_bool)
-        == Some(true);
-    let reasons: Vec<&str> = [
-        network.then_some(
-            "Network Access is on, so it stays up to be reached from your other devices",
-        ),
-        polling.then_some("a connector is polling on a schedule, which it services itself"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    (!reasons.is_empty()).then(|| {
-        format!(
-            "{}. This server will not shut down on its own.",
-            reasons.join(", and ")
-        )
-    })
+        .unwrap_or(false)
+}
+
+/// What a setup typed into a shell runs: the commands in order, then `exit`,
+/// so the shell's exit code says whether every one of them worked.
+pub fn setup_line(commands: &[String]) -> String {
+    format!("{} && exit\r", commands.join(" && "))
+}
+
+/// How long an agent's session stays quiet before Vorn types into it.
+pub const QUIET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// The longest Vorn waits for that quiet before typing anyway.
+pub const QUIET_CAP: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A terminal Vorn started to set an agent up, by its session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentJob {
+    /// The installer; detection runs again when its shell exits.
+    Install(String),
+    /// Setup commands in a shell; connected when the shell exits cleanly.
+    Connect(String),
+    /// Setup commands typed into a session of the agent, one at a time, each
+    /// once the session has gone quiet after `since`.
+    ConnectInAgent {
+        agent: String,
+        pending: std::collections::VecDeque<String>,
+        since: web_time::Instant,
+    },
+}
+
+/// When the next setup command can be typed: once output that came after
+/// `since` has been quiet for [`QUIET`], and by [`QUIET_CAP`] after `since`
+/// even if the session never printed.
+pub fn type_due(
+    last_output: Option<web_time::Instant>,
+    since: web_time::Instant,
+) -> web_time::Instant {
+    let cap = since + QUIET_CAP;
+    match last_output {
+        Some(o) if o >= since => (o + QUIET).min(cap),
+        _ => cap,
+    }
 }
 
 #[cfg(test)]
@@ -812,38 +856,136 @@ mod tests {
     }
 
     #[test]
-    fn keys_and_holders_say_what_they_hold() {
-        let f = KeyFieldInfo {
-            key: "k".into(),
-            label: "K".into(),
-            readable: true,
-            hint: None,
-            env: Some(vec![]),
-        };
-        assert_eq!(describe_field(&f), "No variables set");
-        assert_eq!(describe_usage(2), "used by 2 steps");
+    fn holders_say_what_they_hold() {
         let h = Holders::from_health(&json!({ "sessiond": { "current": { "pid": 1, "instance": "a" },
             "older": [{ "pid": 2, "instance": "b", "build": "0.7", "sessions": 1, "compatible": true }] } }))
         .expect("holders");
         assert!(h.current);
+        assert_eq!(h.older[0].build, "0.7");
+    }
+
+    #[test]
+    fn about_says_the_version_or_the_update_that_is_ready() {
+        let idle = about_head(
+            &UpdateStatus::Idle { last_checked: None },
+            "0.8.0",
+            0.0,
+            2,
+            true,
+        );
+        assert_eq!(idle.title, "Vorn 0.8.0");
+        assert_eq!(idle.detail, "Up to date");
+        assert!(idle.current);
+        assert_eq!(idle.action, None);
+        let ready = UpdateStatus::Ready {
+            version: "0.8.1".into(),
+        };
+        let r = about_head(&ready, "0.8.0", 0.0, 4, true);
+        assert_eq!(r.title, "0.8.1 is ready");
         assert_eq!(
-            older_note(&h.older[0]),
-            "1 session started before Vorn was updated is still on the older session holder (0.7). It exits after the last one ends."
+            r.detail,
+            "You have 0.8.0 \u{b7} your 4 sessions keep running"
+        );
+        assert_eq!(r.action, Some(UpdateAction::Restart));
+        assert_eq!(
+            about_head(&ready, "0.8.0", 0.0, 1, false).detail,
+            "You have 0.8.0 \u{b7} your session ends"
+        );
+        let failed = UpdateStatus::Error {
+            message: "offline".into(),
+        };
+        assert_eq!(
+            about_head(&failed, "0.8.0", 0.0, 0, true).action,
+            Some(UpdateAction::Retry)
+        );
+        assert_eq!(
+            release_notes("0.8.1"),
+            "https://github.com/vorn-run/vorn/releases/tag/v0.8.1"
         );
     }
 
     #[test]
-    fn the_server_says_why_it_stays_up() {
-        assert_eq!(server_stays_up(&json!({ "defaults": {} })), None);
-        let c = json!({ "defaults": { "networkAccessEnabled": true }, "workflows": [
-            { "enabled": true, "nodes": [{ "type": "trigger", "config": { "triggerType": "connectorPoll" } }] }] });
+    fn the_terminals_row_shows_only_while_terminals_are_behind() {
+        assert_eq!(behind(Some("0.8"), "0.8", None), None);
+        let old = |sessions| Holders {
+            current: true,
+            older: vec![Holder {
+                pid: 2,
+                instance: "b".into(),
+                build: "0.7".into(),
+                sessions,
+                compatible: true,
+            }],
+            error: None,
+        };
+        let b = behind(Some("0.8"), "0.8", Some(&old(Some(3)))).expect("behind");
+        assert_eq!(b.title, "Your terminals still run on 0.7");
+        assert_eq!(b.holder.as_deref(), Some("b"));
+        assert_eq!(behind(Some("0.8"), "0.8", Some(&old(Some(0)))), None);
+        let server = behind(Some("0.7"), "0.8", None).expect("vornd behind");
+        assert_eq!(server.title, "Your terminals still run on 0.7");
+        assert_eq!(server.holder, None);
+    }
+
+    #[test]
+    fn the_extensions_row_names_what_has_an_update() {
+        assert_eq!(extensions_note(12, &[]), "All 12 up to date");
+        assert_eq!(extensions_note(0, &[]), "None installed");
+        assert_eq!(extensions_note(5, &["Tasks", "Git"]), "Tasks, Git");
         assert_eq!(
-            server_stays_up(&c).as_deref(),
-            Some("Network Access is on, so it stays up to be reached from your other devices, and a connector is polling on a schedule, which it services itself. This server will not shut down on its own.")
+            extensions_note(9, &["A", "B", "C", "D", "E"]),
+            "A, B and 3 more"
         );
+    }
+
+    #[test]
+    fn ready_agents_come_first_and_the_rest_need_setup() {
+        let agents = crate::agents::testing::agents();
+        let keys = |l: Vec<&Agent>| l.iter().map(|a| a.key.clone()).collect::<Vec<_>>();
+        let found = vec!["gamma".to_owned(), "acme".to_owned()];
+        let (ready, setup) = partition_agents(&agents, Some(&found));
+        assert_eq!(keys(ready), ["acme", "gamma"]);
+        assert_eq!(keys(setup), ["beta"]);
+        let (ready, setup) = partition_agents(&agents, None);
+        assert_eq!(ready.len(), 3, "every agent counts until detection answers");
+        assert!(setup.is_empty());
+        assert!(partition_agents(&agents, Some(&[])).0.is_empty());
+    }
+
+    #[test]
+    fn vorn_tools_are_connected_only_where_connect_worked() {
+        let config = json!({ "defaults": { AGENT_TOOLS: { "acme": true, "beta": false } } });
+        assert!(tools_connected(&config, "acme"));
+        assert!(!tools_connected(&config, "beta"));
+        assert!(!tools_connected(&config, "gamma"));
+        assert!(!tools_connected(&json!({}), "acme"));
+    }
+
+    #[test]
+    fn a_shell_setup_exits_only_when_every_command_worked() {
+        let cmds = ["a add vorn".to_owned(), "a install vorn".to_owned()];
+        assert_eq!(setup_line(&cmds), "a add vorn && a install vorn && exit\r");
+        assert_eq!(setup_line(&cmds[..1]), "a add vorn && exit\r");
+    }
+
+    #[test]
+    fn types_into_an_agent_once_it_has_gone_quiet() {
+        use std::time::Duration;
+        let since = web_time::Instant::now();
+        let ms = Duration::from_millis;
+        // Nothing printed yet: wait up to the cap.
+        assert_eq!(type_due(None, since), since + QUIET_CAP);
+        // Output from before the last command typed does not count.
+        let before = since.checked_sub(ms(10)).unwrap_or(since);
+        if before < since {
+            assert_eq!(type_due(Some(before), since), since + QUIET_CAP);
+        }
+        // Output after it: due once quiet.
         assert_eq!(
-            describe_server("0.8", "0.8", false).0,
-            "Vorn 0.8, started by this window"
+            type_due(Some(since + ms(400)), since),
+            since + ms(400) + QUIET
         );
+        // A session that keeps printing still gets typed into at the cap.
+        assert_eq!(type_due(Some(since + ms(19_900)), since), since + QUIET_CAP);
     }
 }

@@ -712,3 +712,26 @@ fn a_per_session_tree_draws_one_sessions_child() {
     let text = cells(one, &Rec::default());
     assert!(!text.contains("2 done"), "{text}");
 }
+
+#[test]
+fn a_tip_makes_its_node_a_tooltip_owner_on_pixels_only() {
+    let hovers = |b: &Rec| b.any(|e| matches!(e, Ev::Hover { node } if node == "key:a"));
+    let tipped = row([icon("key-round"), text("Token saved")])
+        .id("key:a")
+        .tip("Where this key is kept.");
+    let bind = Rec::default();
+    pixels(&tipped, &bind);
+    assert!(hovers(&bind), "a tipped box binds a hover under its id");
+    let bind = Rec::default();
+    pixels(&row([text("Token saved")]).id("key:a"), &bind);
+    assert!(!hovers(&bind), "no tip, no hover");
+    let bind = Rec::default();
+    cells(&tipped, &bind);
+    assert!(!hovers(&bind), "a terminal cannot hover");
+    let bind = Rec::default();
+    pixels(&button("test:a", "Test").tip("Checks the key."), &bind);
+    assert!(
+        !bind.any(|e| matches!(e, Ev::Hover { .. })),
+        "a button's tip uses the button's own id"
+    );
+}

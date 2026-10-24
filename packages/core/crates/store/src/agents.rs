@@ -26,8 +26,6 @@ pub struct AgentSettings {
     pub env_passthrough: Vec<String>,
     /// `defaults.shell`, the shell sessions run in; `None` for the default.
     pub shell: Option<String>,
-    /// `defaults.minimalShellPrompt`: a shell's own prompt is left out.
-    pub minimal_shell_prompt: bool,
 }
 
 impl AgentSettings {
@@ -66,13 +64,10 @@ impl AgentSettings {
             Some(Value::String(s)) => Some(s),
             _ => None,
         };
-        let minimal_shell_prompt =
-            default_value(&conn, "minimalShellPrompt")? == Some(Value::Bool(true));
         Ok(Some(AgentSettings {
             commands,
             env_passthrough,
             shell,
-            minimal_shell_prompt,
         }))
     }
 }
@@ -112,17 +107,11 @@ mod tests {
         .unwrap();
         let read = AgentSettings::read(&db).unwrap().unwrap();
         assert_eq!(read.env_passthrough, ["ANTHROPIC_API_KEY"]);
-        assert_eq!((read.shell, read.minimal_shell_prompt), (None, false));
-        conn.execute_batch(
-            r#"INSERT INTO defaults VALUES ('shell', '"/bin/sh"');
-               INSERT INTO defaults VALUES ('minimalShellPrompt', 'true');"#,
-        )
-        .unwrap();
+        assert_eq!(read.shell, None);
+        conn.execute_batch(r#"INSERT INTO defaults VALUES ('shell', '"/bin/sh"');"#)
+            .unwrap();
         let read = AgentSettings::read(&db).unwrap().unwrap();
-        assert_eq!(
-            (read.shell.as_deref(), read.minimal_shell_prompt),
-            (Some("/bin/sh"), true)
-        );
+        assert_eq!(read.shell.as_deref(), Some("/bin/sh"));
         assert_eq!(
             read.commands["gamma"],
             serde_json::json!({ "command": "gem", "args": ["--x"], "headlessArgs": ["-p"] })

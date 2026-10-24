@@ -376,6 +376,54 @@ fn a_neighbour_tooltip_shows_at_once_while_one_was_just_up() {
 }
 
 #[test]
+fn an_open_menu_hides_page_tooltips_but_not_its_own() {
+    let (page, menu, inside) = (Id::new("page"), Id::new("menu"), Id::new("inside"));
+    let build = |ui: &Ui| {
+        let popover = div().child(widgets::icon_button(
+            ui,
+            inside,
+            widgets::icons::X,
+            14.0,
+            "In",
+        ));
+        div()
+            .row()
+            .pt(60.0)
+            .pl(200.0)
+            .gap(40.0)
+            .child(widgets::icon_button(
+                ui,
+                page,
+                widgets::icons::X,
+                14.0,
+                "Page",
+            ))
+            .child(
+                div()
+                    .size(10.0, 10.0)
+                    .overlay(popover, vornui::Place::Below, 4.0),
+            )
+    };
+    let mut r = Rig::new();
+    r.frame(&build);
+    r.ui.open_menu(menu, page);
+    r.frame(&build);
+    for id in [page, inside] {
+        let (x, y) = r.center(id);
+        r.ui.pointer_move(x, y);
+        r.frame(&build);
+        r.wait(vornui::TOOLTIP_DELAY.as_millis() as u64);
+        r.frame(&build);
+    }
+    assert!(r.ui.tooltip_shown(inside));
+    let (x, y) = r.center(page);
+    r.ui.pointer_move(x, y);
+    r.frame(&build);
+    r.wait(vornui::TOOLTIP_DELAY.as_millis() as u64);
+    assert!(!r.ui.tooltip_shown(page));
+}
+
+#[test]
 fn hover_transitions_over_150ms() {
     let b = Id::new("b");
     let build = |ui: &Ui| widgets::button(ui, b, "Run");
@@ -900,4 +948,31 @@ fn a_terminal_shows_a_hand_over_controls_and_a_beam_over_fields() {
     assert_eq!(r.ui.terminal_pointer(), vornui::Cursor::Text);
     r.ui.pointer_move(SIZE.0 - 2.0, SIZE.1 - 2.0);
     assert_eq!(r.ui.terminal_pointer(), vornui::Cursor::Default);
+}
+
+#[test]
+fn a_terminal_keeps_its_accessibility_node_when_labels_appear_before_it() {
+    let mut r = Rig::new();
+    r.ui.custom_a11y
+        .insert(7, (Role::Terminal, "Shell 1".into(), String::new()));
+    let terminal = |r: &Rig| {
+        let laid = r.laid.as_ref().expect("a frame");
+        let found = laid
+            .tree
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::Terminal);
+        found.map(|(id, _)| *id).expect("a terminal node")
+    };
+    r.frame(&|_| div().col().child(vornui::custom(7).w(100.0).h(40.0)));
+    let before = terminal(&r);
+    r.frame(&|_| {
+        div()
+            .col()
+            .child(vornui::text("Shell 1", 12.0, color::GRAY_300))
+            .child(vornui::custom(7).w(100.0).h(40.0))
+    });
+    assert_eq!(terminal(&r), before);
+    let labels = r.nodes(Role::Label).len();
+    assert_eq!(labels, 1);
 }

@@ -454,6 +454,12 @@ impl Node {
         self
     }
 
+    /// The line shown when the pointer rests on it.
+    pub fn tip(mut self, t: impl Into<String>) -> Node {
+        self.props.tip = Some(t.into());
+        self
+    }
+
     pub fn style(mut self, s: TextStyle) -> Node {
         if let Kind::Text { style, .. } = &mut self.kind {
             *style = s;

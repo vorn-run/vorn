@@ -31,12 +31,13 @@ pub enum Chrome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Materials {
     /// Opaque surfaces everywhere.
-    #[default]
     Solid,
-    /// The system's translucent sidebar, and menus, popovers and the palette
-    /// over a blur of what is behind them.
+    /// The system's translucent sidebar under a wash of the theme's panel,
+    /// and menus, popovers and the palette over a blur of what is behind them;
+    /// the default, so a new install opens on the system's glass.
+    #[default]
     Native,
-    /// As native, the translucency tinted with the theme's surfaces.
+    /// As native, the translucency tinted more strongly with the theme's surfaces.
     Themed,
 }
 
@@ -163,7 +164,7 @@ mod tests {
     fn defaults_draw_today_s_look() {
         let r = Prefs::default().resolve(false, false, &[], None);
         assert_eq!(&r.theme, find_bundled(VORN_DARK).unwrap());
-        assert_eq!(r.materials, Materials::Solid);
+        assert_eq!(r.materials, Materials::Native);
     }
 
     #[test]

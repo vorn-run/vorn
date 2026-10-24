@@ -109,6 +109,12 @@ pub struct Ui {
     /// The scene layers the last layout's overlays (menus, popovers,
     /// tooltips) drew into; empty when none was open.
     pub(crate) overlays: std::ops::Range<usize>,
+    /// Boxes this frame wants the system's glass under: device pixels and radius.
+    pub(crate) glass: Vec<(Rect, f32)>,
+    /// Icons the system draws in that glass: device-pixel box, SVG, colour.
+    pub(crate) glass_icons: Vec<(Rect, std::rc::Rc<str>, Rgba)>,
+    /// Labels the system draws in that glass: device-pixel box, text, size, colour.
+    pub(crate) glass_labels: Vec<(Rect, std::rc::Rc<str>, f32, Rgba)>,
 }
 
 enum Measure<'a> {
@@ -242,6 +248,9 @@ impl Ui {
             cells: None,
             native: None,
             overlays: 0..0,
+            glass: Vec::new(),
+            glass_icons: Vec::new(),
+            glass_labels: Vec::new(),
         }
     }
 
@@ -415,6 +424,9 @@ impl Ui {
         self.wake.set(None);
         self.scene.clear();
         self.overlays = 0..0;
+        self.glass.clear();
+        self.glass_icons.clear();
+        self.glass_labels.clear();
         self.clear = clear;
         // Pictures the last frame did not draw give their entry back.
         self.pictures.retain(|_, p| std::mem::take(&mut p.used));
@@ -784,6 +796,42 @@ impl Ui {
         if cells {
             self.record_box(cx, el, rl, ring);
         }
+        // A surface drawn over glass hides it: the glass views sit above
+        // everything the app draws.
+        let covers = el.backdrop_blur.is_some() || el.bg.is_some_and(|c| c.0[3] >= 0.5);
+        if covers && !el.native_glass && !cells && !self.glass.is_empty() {
+            // Only the part left showing covers: a card scrolled under the
+            // top bar is clipped away there. A badge or dot on a button is
+            // smaller than its glass and leaves it.
+            let seen = bx.intersect(&cx.clip.scaled(k));
+            let hit = |r: &Rect| {
+                seen.w >= r.w
+                    && seen.h >= r.h
+                    && r.x < seen.x + seen.w
+                    && seen.x < r.x + r.w
+                    && r.y < seen.y + seen.h
+                    && seen.y < r.y + r.h
+            };
+            self.glass.retain(|(r, _)| !hit(r));
+            self.glass_icons.retain(|(r, ..)| !hit(r));
+            self.glass_labels.retain(|(r, ..)| !hit(r));
+        }
+        if el.native_glass && !cells {
+            self.glass.push((bx, radius * k));
+        }
+        if let Some((svg, size, color)) = el.native_icon.as_ref().filter(|_| !cells) {
+            let s = size * k;
+            let at = Rect {
+                x: bx.x + (bx.w - s) / 2.0,
+                y: bx.y + (bx.h - s) / 2.0,
+                w: s,
+                h: s,
+            };
+            self.glass_icons.push((at, svg.clone(), *color));
+        }
+        if let Some((t, size, color)) = el.native_label.as_ref().filter(|_| !cells) {
+            self.glass_labels.push((bx, t.clone(), size * k, *color));
+        }
         if let Some(sigma) = el.backdrop_blur.filter(|_| !cells) {
             self.scene.backdrop_blur(bx, sigma * k, radius * k);
         }
@@ -1136,9 +1184,10 @@ impl Ui {
         let Some(role) = role else {
             return;
         };
-        let id = match el.id {
-            Some(i) => NodeId(i.0),
-            None => {
+        let id = match (el.id, &el.content) {
+            (Some(i), _) => NodeId(i.0),
+            (None, Content::Custom(c)) => custom_node(*c),
+            (None, _) => {
                 self.anon += 1;
                 NodeId((1 << 63) | (self.anon << 1))
             }
@@ -2113,6 +2162,13 @@ fn to_cells(s: &mut taffy::Style, el: &El, in_row: bool, float: bool) {
         bottom: Lp::length(edge(2)),
         left: Lp::length(edge(3)),
     };
+}
+
+/// The accessibility node of a custom element with no id: from its custom
+/// id, so a terminal keeps its node when nodes before it come and go
+/// (unnamed nodes are numbered in tree order, with the low bit clear).
+fn custom_node(custom: u64) -> NodeId {
+    NodeId((1 << 63) | (custom << 1) | 1)
 }
 
 /// An SVG rendered to a `px`×`px` coverage mask.

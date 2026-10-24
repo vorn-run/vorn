@@ -13,6 +13,8 @@ pub struct Rgba(pub [f32; 4]);
 impl Rgba {
     pub const TRANSPARENT: Rgba = Rgba([0.0; 4]);
     pub const BLACK: Rgba = Rgba([0.0, 0.0, 0.0, 1.0]);
+    /// White on every theme, for a switch's or slider's knob.
+    pub const WHITE: Rgba = Rgba([1.0; 4]);
 
     /// `0xRRGGBB`, opaque.
     pub const fn hex(c: u32) -> Rgba {

@@ -10,6 +10,7 @@ mod sheet;
 
 use serde_json::Value;
 
+pub(in crate::screen) use detail::choice_items;
 pub(in crate::screen) use sheet::dialog;
 
 use super::settings::header;
@@ -147,7 +148,12 @@ fn chip(hot: f32) -> El {
 }
 
 /// A listing's glyph: its own paths, else the built-in mark for its id.
-pub(super) fn glyph(l: Option<&Listing>, connector: &str, size: f32, color: impl Into<Rgba>) -> El {
+pub(in crate::screen) fn glyph(
+    l: Option<&Listing>,
+    connector: &str,
+    size: f32,
+    color: impl Into<Rgba>,
+) -> El {
     let color = color.into();
     let own = l.and_then(|l| {
         l.catalog

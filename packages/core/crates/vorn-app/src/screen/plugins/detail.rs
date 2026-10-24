@@ -12,7 +12,9 @@ use crate::plugins::{
 };
 use crate::points::PointAct;
 use crate::runs::s as sv;
+use crate::screen::menus::Item;
 use crate::screen::{ico, white, Screen};
+use crate::state::MenuKind;
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Role};
 
@@ -48,9 +50,20 @@ struct Page<'a> {
     declared: Vec<String>,
     hosts: Vec<String>,
     service: Option<&'a Value>,
-    switch: Option<El>,
+    /// The extension's own on/off, drawn as the first row of its settings.
+    switch: Option<Switch<'a>>,
     /// The extension's id and the preferences it declares, each with its value.
     preferences: (&'a str, Option<&'a Value>),
+}
+
+/// An extension's switch: whether it is on, what flipping it does, and the
+/// tooltip saying what it does.
+struct Switch<'a> {
+    mark: El,
+    on: bool,
+    act: Act,
+    busy: bool,
+    tip: Option<&'a str>,
 }
 
 fn strings(v: Option<&Value>) -> Vec<String> {
@@ -84,8 +97,7 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
             .items_start()
             .gap(12.0)
             .child(well(40.0, 6.0, white(0.05), page.mark))
-            .child(who)
-            .child_if(page.switch.map(|e| e.mt(4.0))),
+            .child(who),
     );
     if let Some(desc) = page.description.filter(|d| !d.is_empty()) {
         col = col.child(
@@ -96,14 +108,27 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
         );
     }
     let (id, prefs) = page.preferences;
-    let rows: Vec<El> = prefs
-        .and_then(Value::as_array)
+    let switch = page.switch.map(|w| {
+        let place = format!("ext-switch-{id}");
+        let toggle = crate::screen::settings::toggle(s, &place, w.on, w.act, w.busy, page.name);
+        crate::screen::settings::card_row(s, Some(w.mark), page.name, w.tip, toggle.shrink0())
+    });
+    let rows: Vec<El> = switch
         .into_iter()
-        .flatten()
-        .filter_map(|p| preference(s, id, p))
+        .chain(
+            prefs
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|p| !shown_elsewhere(p))
+                .filter_map(|p| preference(s, id, p)),
+        )
         .collect();
     if !rows.is_empty() {
-        col = col.child(section("Settings", rows));
+        col = col.child(section(
+            "Settings",
+            vec![crate::screen::settings::card(rows)],
+        ));
     }
     let n = places(page.contributes);
     let groups = place_groups(page.contributes);
@@ -165,13 +190,10 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
         sub.push_str(&format!(" \u{b7} v{v}"));
     }
     sub.push_str(" \u{b7} built in");
-    let switch = s.acts.on(
-        "ext-builtin-detail",
-        Act::Point(PointAct::Builtin {
-            id: id.to_owned(),
-            on: !on,
-        }),
-    );
+    let act = Act::Point(PointAct::Builtin {
+        id: id.to_owned(),
+        on: !on,
+    });
     let busy = s.st.points.switching.is_some();
     let col = extension_page(
         s,
@@ -184,7 +206,13 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
             declared: strings(b.pointer("/declares/uses")),
             hosts: strings(b.pointer("/declares/network")),
             service: b.get("service"),
-            switch: Some(crate::ui::widgets::toggle(s.ui, switch, name, on, busy).shrink0()),
+            switch: Some(Switch {
+                mark: ico("puzzle", 15.0, 1.75, k::GRAY_400),
+                on,
+                act,
+                busy,
+                tip: sv(b, "description"),
+            }),
             preferences: (id, b.get("preferences")),
         },
     );
@@ -391,6 +419,23 @@ fn extension(s: &Screen<'_>, l: &Listing) -> El {
         }
     }
     let manifest = pack.or(l.catalog.as_ref());
+    let linked = pack.is_some_and(|p| p.get("linked") == Some(&Value::Bool(true)));
+    // Off uninstalls and on installs, as a built-in's switch turns it off and on.
+    let switch = match pack {
+        Some(_) if !linked => Some(PlugAct::Remove(l.id.clone())),
+        None if l.installable() => Some(PlugAct::Install(l.key.clone())),
+        _ => None,
+    }
+    .map(|plug| Switch {
+        mark: glyph(Some(l), &l.id, 15.0, k::GRAY_400),
+        on: pack.is_some(),
+        act: act(plug),
+        busy: s.st.plugins.busy(&l.id) || describe(&state).busy,
+        tip: manifest
+            .and_then(|m| sv(m, "description"))
+            .or(l.description.as_deref())
+            .filter(|d| !d.is_empty()),
+    });
     let col = extension_page(
         s,
         Page {
@@ -402,7 +447,7 @@ fn extension(s: &Screen<'_>, l: &Listing) -> El {
             declared: l.permissions.clone(),
             hosts: strings(manifest.and_then(|m| m.pointer("/declares/network"))),
             service: manifest.and_then(|m| m.get("service")),
-            switch: None,
+            switch,
             preferences: (&l.id, pack.and_then(|p| p.get("preferences"))),
         },
     );
@@ -624,7 +669,52 @@ pub(super) fn origin_label(origin: &str) -> &str {
     host.split('/').next().unwrap_or(host)
 }
 
-/// One preference: its title and description beside a switch, or a segmented choice.
+/// The most options a choice shows side by side; more open from a chip.
+const MAX_SEGMENTS: usize = 3;
+
+/// A choice preference's options: (id, title).
+fn options(p: &Value) -> impl Iterator<Item = (&str, &str)> {
+    p.get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|o| Some((sv(o, "id")?, sv(o, "title").unwrap_or_default())))
+}
+
+/// The menu of extension `ext`'s choice preference `key`.
+pub(in crate::screen) fn choice_items(s: &Screen<'_>, ext: &str, key: &str) -> Vec<Item> {
+    let lists = [&s.st.points.builtins, &s.st.plugins.packs];
+    let Some(p) = lists
+        .iter()
+        .flat_map(|l| l.iter())
+        .filter(|e| sv(e, "id") == Some(ext))
+        .filter_map(|e| e.get("preferences").and_then(Value::as_array))
+        .flatten()
+        .find(|p| sv(p, "id") == Some(key))
+    else {
+        return Vec::new();
+    };
+    let chosen = p.get("value").and_then(Value::as_str);
+    options(p)
+        .map(|(id, label)| {
+            let act = Act::Point(PointAct::Preference {
+                id: ext.to_owned(),
+                key: key.to_owned(),
+                value: Value::from(id).to_string(),
+            });
+            Item::pick(label, chosen == Some(id), act)
+        })
+        .collect()
+}
+
+/// Whether `p` is the switch for all of an extension's notifications, which
+/// Settings › Notifications shows instead of its page.
+fn shown_elsewhere(p: &Value) -> bool {
+    sv(p, "notifications") == Some("all")
+}
+
+/// One preference: a card row with its title beside a switch, a segmented
+/// choice, or a chip that opens a long one.
 fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
     let key = sv(p, "id")?;
     let title = sv(p, "title").unwrap_or(key);
@@ -643,42 +733,55 @@ fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
             let id = s.acts.on(&place, act(Value::Bool(!on)));
             crate::ui::widgets::toggle(s.ui, id, title, on, false).shrink0()
         }
+        Some("choice") if options(p).count() > MAX_SEGMENTS => {
+            let kind = MenuKind::ExtChoice(ext.to_owned(), key.to_owned());
+            let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+            let chosen = value.and_then(Value::as_str);
+            let label = options(p)
+                .find(|(id, _)| Some(*id) == chosen)
+                .map_or("", |(_, l)| l);
+            let id = s.acts.on(&place, Act::Open(kind));
+            let lit = s.ui.hover(id).max(if open { 1.0 } else { 0.0 });
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(8.0)
+                .h(28.0)
+                .pl(10.0)
+                .pr(8.0)
+                .shrink0()
+                .rounded(4.0)
+                .bg(white(0.04).mix(white(0.08), lit))
+                .border(1.0, white(0.08))
+                .role(Role::ComboBox, title)
+                .expanded(open)
+                .ring(R)
+                .child(text(label, 13.0, k::GRAY_200).line_height(18.0).silent())
+                .child(ico("chevron-down", 12.0, 2.0, k::GRAY_500))
+        }
         Some("choice") => {
             let chosen = value.and_then(Value::as_str);
-            let opts = p
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|o| Some((sv(o, "id")?, sv(o, "title").unwrap_or_default())))
+            let opts = options(p)
                 .map(|(id, label)| crate::screen::settings::Seg {
                     label,
                     icon: None,
                     act: act(Value::from(id)),
                     on: chosen == Some(id),
                     disabled: false,
+                    tip: None,
                 })
                 .collect();
             crate::screen::settings::segmented(s, &place, opts, 10.0)
         }
         _ => return None,
     };
-    let mut words = div().col().grow().min_w0().child(
-        text(title, 12.5, k::GRAY_300)
-            .line_height(18.75)
-            .role(Role::Label, title),
-    );
-    if let Some(d) = sv(p, "description").filter(|d| !d.is_empty()) {
-        words = words.child(quiet(d).mt(2.0));
-    }
-    Some(
-        div()
-            .row()
-            .items_center()
-            .gap(12.0)
-            .child(words)
-            .child(control),
-    )
+    // As on Settings' own pages: the description is the row's tooltip, not a line under it.
+    let tip = sv(p, "description").filter(|d| !d.is_empty());
+    Some(crate::screen::settings::card_row(
+        s, None, title, tip, control,
+    ))
 }
 
 fn section(label: &str, children: Vec<El>) -> El {
@@ -754,4 +857,19 @@ fn fact(term: &str, value: &str, mono: bool) -> El {
                 .shrink0(),
         )
         .child(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn only_the_switch_for_all_notifications_leaves_the_page() {
+        let all = json!({ "id": "notify:all", "notifications": "all" });
+        let kind = json!({ "id": "notify:finished", "notifications": "kind" });
+        let plain = json!({ "id": "top_bar" });
+        assert!(super::shown_elsewhere(&all));
+        assert!(!super::shown_elsewhere(&kind));
+        assert!(!super::shown_elsewhere(&plain));
+    }
 }

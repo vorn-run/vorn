@@ -415,7 +415,7 @@ fn the_landing_answers_a_gate_and_the_prompt_asks_for_inputs() {
 }
 
 #[test]
-fn a_finished_run_is_recorded_as_a_notice_and_never_reaches_the_os() {
+fn a_finished_run_notifies_through_the_workflows_extension_and_never_reaches_the_os() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -439,7 +439,8 @@ fn a_finished_run_is_recorded_as_a_notice_and_never_reaches_the_os() {
             "edges": [{ "id": "e", "source": "t", "target": "s" }]
         }),
     );
-    // Unfocused, as a test window is, so nothing holds a notice back.
+    // Workflows sends it through notifications.send; unfocused, as a test
+    // window is, nothing holds it back.
     shot.ui.set_window_focused(false);
     app.rpc()
         .call("workflow:run", json!({ "workflowId": "wf-tell" }))

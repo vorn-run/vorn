@@ -418,6 +418,21 @@ struct RawContributes {
     workflows: Vec<RawWorkflow>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     preferences: Vec<RawPreference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notifications: Vec<RawNotification>,
+}
+
+/// `[[contributes.notifications]]`: a kind of notice the extension sends.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawNotification {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default: Option<bool>,
 }
 
 /// `[[contributes.preferences]]`: a setting the extension reads.
@@ -1604,12 +1619,14 @@ impl RawContributes {
             }
         }
         let preferences = self.preferences_json(at)?;
+        let notifications = self.notifications_json(at)?;
         for (key, list) in [
             ("panes", panes),
             ("footers", footers),
             ("linkHandlers", links),
             ("layouts", layouts),
             ("preferences", preferences),
+            ("notifications", notifications),
         ]
         .into_iter()
         .chain(flows)
@@ -1623,6 +1640,45 @@ impl RawContributes {
         }
         self.check_settings(at, &out)?;
         Ok(Value::Object(out))
+    }
+
+    fn notifications_json(&self, at: &At<'_>) -> Result<Vec<Value>, FileError> {
+        let mut list = Vec::new();
+        for (i, n) in self.notifications.iter().enumerate() {
+            let field = format!("contributes.notifications[{i}]");
+            let mut m = contribution_json(
+                &n.id,
+                n.title.as_ref(),
+                n.description.as_ref(),
+                None,
+                at,
+                &field,
+            )?;
+            if !super::is_contribution_id(&n.id) || n.id == super::ALL_NOTICES {
+                return Err(at(
+                    &format!("{field}.id"),
+                    format!(
+                        "needs an id of letters, digits, - and _, starting with a letter, other than `{}`",
+                        super::ALL_NOTICES
+                    ),
+                ));
+            }
+            if self.notifications[..i].iter().any(|q| q.id == n.id) {
+                return Err(at(
+                    &format!("{field}.id"),
+                    format!("`{}` names another notification too", n.id),
+                ));
+            }
+            if n.title.is_none() {
+                return Err(at(
+                    &format!("{field}.title"),
+                    "is the switch's label, such as \"Notify when a run finishes\"".into(),
+                ));
+            }
+            m.insert("default".into(), json!(n.default.unwrap_or(true)));
+            list.push(Value::Object(m));
+        }
+        Ok(list)
     }
 
     fn preferences_json(&self, at: &At<'_>) -> Result<Vec<Value>, FileError> {
@@ -1945,6 +2001,16 @@ impl From<&Manifest> for Raw {
                         when: l.base.when.as_ref().map(when),
                         pattern: l.pattern.clone(),
                         example: l.example.clone(),
+                    })
+                    .collect(),
+                notifications: c
+                    .notifications()
+                    .iter()
+                    .map(|n| RawNotification {
+                        id: n.base.id.clone(),
+                        title: Some(n.base.title.clone()),
+                        description: n.base.description.clone(),
+                        default: Some(n.default),
                     })
                     .collect(),
                 ..RawContributes::default()

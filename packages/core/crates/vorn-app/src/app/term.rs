@@ -1,8 +1,8 @@
 //! The terminal's selection and clipboard: a drag or double-click selects,
 //! the copy key copies it, the paste keys paste, and a paste vornd flags
 //! asks first. A clipboard holding only an image sends Ctrl-V, which agent
-//! CLIs answer by reading the image themselves; dropped files paste their
-//! quoted paths, and a dropped image is saved first.
+//! CLIs answer by reading the image themselves; copied and dropped files
+//! paste their escaped paths, and a dropped image is saved first.
 
 use std::path::Path;
 
@@ -81,23 +81,38 @@ pub(super) enum TermImage {
     Path(String),
 }
 
-/// Characters a shell reads as themselves in a word.
-fn plain(c: char, windows: bool) -> bool {
-    c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c) || windows && c == '\\'
+/// Characters a Windows shell reads as themselves in a path.
+fn plain(c: char) -> bool {
+    c.is_ascii_alphanumeric() || "_@%+=:,./-\\".contains(c)
 }
 
-/// `path` as one shell word: as it is when nothing in it is special, else
-/// single-quoted (double-quoted for a Windows path).
+/// Characters escaped with a backslash in a typed path: a shell's
+/// specials, which an agent CLI's path splitter also reads back.
+const SPECIAL: &str = "\\ ()[]{}<>\"'`!#$&;|*?\t";
+
+/// `path` as one shell word: each special character backslash-escaped
+/// (a Windows path, which has backslashes of its own, double-quoted).
 pub fn shell_quoted(path: &str) -> String {
     let b = path.as_bytes();
     let windows = path.starts_with("\\\\")
         || b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\';
-    if !path.is_empty() && path.chars().all(|c| plain(c, windows)) {
-        path.to_owned()
+    if path.is_empty() {
+        "''".to_owned()
     } else if windows {
-        format!("\"{path}\"")
+        if path.chars().all(plain) {
+            path.to_owned()
+        } else {
+            format!("\"{path}\"")
+        }
     } else {
-        format!("'{}'", path.replace('\'', "'\\''"))
+        let mut out = String::with_capacity(path.len() + 4);
+        for c in path.chars() {
+            if SPECIAL.contains(c) {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out
     }
 }
 
@@ -108,6 +123,27 @@ pub fn quoted_paths<P: AsRef<Path>>(paths: &[P]) -> String {
         .iter()
         .map(|p| shell_quoted(&p.as_ref().to_string_lossy()) + " ")
         .collect()
+}
+
+/// What the paste key sends a terminal.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Paste {
+    /// Text, as a bracketed paste: copied files' quoted paths, else the clipboard's text.
+    Text(String),
+    /// Ctrl+V, for an agent CLI to read the clipboard's image itself.
+    ImageKey,
+}
+
+/// The paste for a clipboard holding `files`, `text` and maybe an image;
+/// none when it holds nothing a terminal takes.
+pub fn paste_of<P: AsRef<Path>>(files: &[P], text: Option<String>, image: bool) -> Option<Paste> {
+    if !files.is_empty() {
+        return Some(Paste::Text(quoted_paths(files)));
+    }
+    match text.filter(|t| !t.is_empty()) {
+        Some(t) => Some(Paste::Text(t)),
+        None => image.then_some(Paste::ImageKey),
+    }
 }
 
 /// Writes `bytes` to a new file in `dir`, named for the time and with
@@ -214,20 +250,24 @@ impl App {
     }
 
     /// The clipboard into `session`: bracketed, and asked about first when
-    /// vornd says the program would run it line by line. An image with no
-    /// text is Ctrl-V, for the program to read from the clipboard itself.
+    /// vornd says the program would run it line by line. Copied files paste
+    /// their paths; an image with no text is Ctrl-V, for the program to read
+    /// from the clipboard itself.
     pub(super) fn paste_clipboard(&mut self, ui: &mut Ui, session: &str) {
         self.st.sel = None;
         let Some(g) = self.grid.clone() else {
             return;
         };
         let clip = ui.clipboard();
-        match clip.get().filter(|t| !t.is_empty()) {
-            Some(text) => {
+        let files = clip.files();
+        let text = if files.is_empty() { clip.get() } else { None };
+        let image = text.as_ref().is_none_or(|t| t.is_empty()) && clip.has_image();
+        match paste_of(&files, text, image) {
+            Some(Paste::Text(text)) => {
                 self.return_to_live(session);
                 g.paste_clipboard(session, &text);
             }
-            None if clip.has_image() => {
+            Some(Paste::ImageKey) => {
                 self.return_to_live(session);
                 g.key(session, "KeyV", mods::CTRL, None);
             }
@@ -524,25 +564,46 @@ mod tests {
     }
 
     #[test]
-    fn paths_are_quoted_as_a_shell_reads_them_back() {
+    fn paths_are_escaped_as_a_shell_reads_them_back() {
         assert_eq!(shell_quoted("/tmp/shot.png"), "/tmp/shot.png");
-        assert_eq!(shell_quoted("/a/My Shot.png"), "'/a/My Shot.png'");
-        assert_eq!(shell_quoted("/a/it's.png"), "'/a/it'\\''s.png'");
-        assert_eq!(shell_quoted("/a/$HOME;rm"), "'/a/$HOME;rm'");
-        assert_eq!(shell_quoted("/a/caf\u{e9}.png"), "'/a/caf\u{e9}.png'");
+        assert_eq!(shell_quoted("/a/My Shot.png"), r"/a/My\ Shot.png");
+        assert_eq!(shell_quoted("/a/it's.png"), r"/a/it\'s.png");
+        assert_eq!(shell_quoted("/a/$HOME;rm"), r"/a/\$HOME\;rm");
+        assert_eq!(shell_quoted("/a/caf\u{e9}.png"), "/a/caf\u{e9}.png");
+        assert_eq!(shell_quoted("/a/(1) [x].png"), r"/a/\(1\)\ \[x\].png");
         assert_eq!(shell_quoted(""), "''");
         assert_eq!(shell_quoted(r"C:\Users\me\a.png"), r"C:\Users\me\a.png");
         assert_eq!(shell_quoted(r"C:\My Pics\a.png"), r#""C:\My Pics\a.png""#);
-        assert_eq!(shell_quoted(r"/a\b"), r"'/a\b'");
+        assert_eq!(shell_quoted(r"/a\b"), r"/a\\b");
     }
 
     #[test]
     fn dropped_paths_are_space_separated_with_a_trailing_space() {
         assert_eq!(
             quoted_paths(&["/a/one.png", "/b/two words.txt"]),
-            "/a/one.png '/b/two words.txt' "
+            r"/a/one.png /b/two\ words.txt "
         );
         assert_eq!(quoted_paths::<&str>(&[]), "");
+    }
+
+    #[test]
+    fn the_paste_key_sends_files_then_text_then_an_image_key() {
+        let none: [&str; 0] = [];
+        let text = |t: &str| Some(t.to_owned());
+        assert_eq!(
+            paste_of(&none, text("hi"), true),
+            Some(Paste::Text("hi".into())),
+            "text wins over an image"
+        );
+        assert_eq!(paste_of(&none, None, true), Some(Paste::ImageKey));
+        assert_eq!(paste_of(&none, text(""), true), Some(Paste::ImageKey));
+        assert_eq!(paste_of(&none, None, false), None);
+        assert_eq!(paste_of(&none, text(""), false), None, "nothing to paste");
+        assert_eq!(
+            paste_of(&["/a/my shot.png"], text("my shot.png"), true),
+            Some(Paste::Text(r"/a/my\ shot.png ".into())),
+            "copied files paste their paths, not their names or icons"
+        );
     }
 
     #[test]

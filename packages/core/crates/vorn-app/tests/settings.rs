@@ -107,38 +107,41 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     shot.save(&mut app, "set-appearance");
 
     // Appearance: the font size steps and the layout segment write defaults.
-    let before = app
-        .store
-        .config
-        .pointer("/defaults/fontSize")
-        .and_then(Value::as_i64)
-        .unwrap_or(13);
-    shot.click(
-        &mut app,
-        control("font-size", Act::Set(SetAct::FontSize(1))),
-    );
+    let large = SetAct::Default("fontSize".into(), "16".into());
+    shot.click(&mut app, control("font-preset", Act::Set(large)));
     saved(&mut app, "the larger font", |c| {
-        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(before + 1)
+        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(16)
     });
-    shot.click(
-        &mut app,
-        control("font-size", Act::Set(SetAct::FontSize(-1))),
-    );
+    let medium = SetAct::Default("fontSize".into(), "13".into());
+    shot.click(&mut app, control("font-preset", Act::Set(medium)));
     saved(&mut app, "the font back", |c| {
-        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(before)
+        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(13)
     });
     let tabs = SetAct::Default("layoutMode".into(), "\"tabs\"".into());
-    shot.click(&mut app, control("layout-mode", Act::Set(tabs)));
+    shot.click(&mut app, control("layout", Act::Set(tabs)));
     saved(&mut app, "the tabs layout", |c| {
         c.pointer("/defaults/layoutMode") == Some(&json!("tabs"))
     });
     let grid = SetAct::Default("layoutMode".into(), "\"grid\"".into());
-    shot.click(&mut app, control("layout-mode", Act::Set(grid)));
+    shot.click(&mut app, control("layout", Act::Set(grid)));
 
-    // The theme tiles and the style segment are kept by vornd and read back.
+    // The theme picker's tiles and the Look toggles are kept by vornd and
+    // read back; a light theme picked under a fixed dark scheme fixes light.
     use vorn_app::appearance as look;
     use vorn_app::screen::settings::theme_tile_id;
+    let dark = vorn_app::appearance::prefs(app.store.config.get("defaults")).scheme;
+    assert_eq!(
+        dark,
+        vorn_theme::Scheme::Dark,
+        "Vorn opens on a fixed dark scheme"
+    );
+    let picker = Act::Open(MenuKind::ThemePicker(vorn_theme::Appearance::Dark));
+    shot.click(&mut app, control("theme-chip", picker.clone()));
+    shot.save(&mut app, "set-theme-picker");
     shot.click(&mut app, theme_tile_id("nord"));
+    shot.click(&mut app, control("theme-chip", picker));
+    let light = SetAct::ThemeFilter(look::ThemeFilter::Light);
+    shot.click(&mut app, control("theme-filter", Act::Set(light)));
     shot.click(&mut app, theme_tile_id("solarized-light"));
     let tinted = SetAct::Default(look::CHROME.into(), "\"tinted\"".into());
     shot.click(&mut app, control(look::CHROME, Act::Set(tinted)));
@@ -146,6 +149,7 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         c.pointer("/defaults/darkTheme") == Some(&json!("nord"))
             && c.pointer("/defaults/lightTheme") == Some(&json!("solarized-light"))
             && c.pointer("/defaults/interfaceStyle") == Some(&json!("tinted"))
+            && c.pointer("/defaults/colorScheme") == Some(&json!("light"))
     });
     wait_for("the app's prefs after vornd's echo", || {
         app.pump();
@@ -154,46 +158,43 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
             .then_some(())
     });
 
-    // General: a switch, a select from its menu, and the shell's typed path.
+    // General: a switch, the agent picker, and the shell's typed path.
     open(&mut shot, &mut app, Category::General);
     shot.until(&mut app, "the shells", |a, _| {
         a.st.settings.shells.as_ref().map(|_| ())
     });
     shot.save(&mut app, "set-general");
-    let hover = app
+    let reopen = app
         .store
         .config
-        .pointer("/defaults/enableHoverPreview")
+        .pointer("/defaults/reopenSessions")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let act = SetAct::Default("enableHoverPreview".into(), (!hover).to_string());
-    shot.click(&mut app, control("enableHoverPreview", Act::Set(act)));
-    saved(&mut app, "the hover preview switch", |c| {
-        c.pointer("/defaults/enableHoverPreview")
+        .unwrap_or(true);
+    let act = SetAct::Default("reopenSessions".into(), (!reopen).to_string());
+    shot.click(&mut app, control("reopenSessions", Act::Set(act)));
+    saved(&mut app, "the reopen switch", |c| {
+        c.pointer("/defaults/reopenSessions")
             .and_then(Value::as_bool)
-            == Some(!hover)
+            == Some(!reopen)
     });
-    let sel = control(
-        "select",
-        Act::Open(MenuKind::SetSelect("headlessStepTimeoutMinutes".into())),
-    );
-    shot.reveal(&mut app, CONTENT, sel);
-    shot.click(&mut app, sel);
-    let labels = app.menu_labels(&shot.ui);
+    // The picker lists ready agents only; CI machines have none on PATH.
+    app.st.installed = Some(app.store.agents.iter().map(|a| a.key.clone()).collect());
+    let chip = control("agent-chip", Act::Open(MenuKind::AgentPicker));
+    shot.click(&mut app, chip);
     assert_eq!(
-        labels.last().map(String::as_str),
-        Some("No limit"),
-        "{labels:?}"
+        app.st.menu.as_ref().map(|m| m.kind.clone()),
+        Some(MenuKind::AgentPicker)
     );
-    let i = labels.iter().position(|l| l == "2 hours").expect("2 hours");
-    shot.click(
-        &mut app,
-        vorn_app::ui::item_id(vorn_app::screen::menus::MENU, i),
-    );
-    saved(&mut app, "the step timeout", |c| {
-        c.pointer("/defaults/headlessStepTimeoutMinutes")
-            .and_then(Value::as_i64)
-            == Some(120)
+    shot.save(&mut app, "set-agent-picker");
+    let other = (&app.store.agents)
+        .into_iter()
+        .map(|a| a.key.clone())
+        .nth(1)
+        .expect("a second agent");
+    let pick = SetAct::Default("defaultAgent".into(), format!("\"{other}\""));
+    shot.click(&mut app, control("agent-option", Act::Set(pick)));
+    saved(&mut app, "the default agent", |c| {
+        c.pointer("/defaults/defaultAgent") == Some(&json!(other))
     });
     let picker = control("shell-picker", Act::Open(MenuKind::SetShell));
     shot.reveal(&mut app, CONTENT, picker);
@@ -217,50 +218,27 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     assert!(!app.st.settings.shell_editing);
     let _ = shell;
 
-    open(&mut shot, &mut app, Category::Updates);
-    shot.save(&mut app, "set-updates");
-    shot.click(
-        &mut app,
-        control(
-            "update-channel",
-            Act::Set(SetAct::Default("updateChannel".into(), "\"beta\"".into())),
-        ),
-    );
-    saved(&mut app, "the beta channel", |c| {
-        c.pointer("/defaults/updateChannel") == Some(&json!("beta"))
-    });
-    shot.click(
-        &mut app,
-        control(
-            "update-channel",
-            Act::Set(SetAct::Default("updateChannel".into(), "\"stable\"".into())),
-        ),
-    );
-
     open(&mut shot, &mut app, Category::Notifications);
     shot.save(&mut app, "set-notifications");
-    shot.click(
-        &mut app,
-        control("enabled", Act::Set(SetAct::Notify("enabled".into(), true))),
-    );
-    saved(&mut app, "notifications on", |c| {
-        c.pointer("/defaults/notifications/enabled") == Some(&json!(true))
+    let notify =
+        |place, key: &str, v: &str| control(place, Act::Set(SetAct::Notify(key.into(), v.into())));
+    // Notifications are on until switched off, and each control writes one key.
+    shot.click(&mut app, notify("notif-enabled", "enabled", "false"));
+    saved(&mut app, "notifications off", |c| {
+        c.pointer("/defaults/notifications/enabled") == Some(&json!(false))
     });
-    shot.click(
-        &mut app,
-        control("onBell", Act::Set(SetAct::Notify("onBell".into(), false))),
-    );
+    shot.click(&mut app, notify("notif-enabled", "enabled", "true"));
+    shot.click(&mut app, notify("notif-bell", "onBell", "false"));
     saved(&mut app, "the bell off", |c| {
         c.pointer("/defaults/notifications/onBell") == Some(&json!(false))
+            && c.pointer("/defaults/notifications/enabled") == Some(&json!(true))
     });
-    shot.click(
-        &mut app,
-        control("onBell", Act::Set(SetAct::Notify("onBell".into(), true))),
-    );
-    shot.click(
-        &mut app,
-        control("enabled", Act::Set(SetAct::Notify("enabled".into(), false))),
-    );
+    shot.click(&mut app, notify("notif-show", "show", "\"always\""));
+    saved(&mut app, "shown always", |c| {
+        c.pointer("/defaults/notifications/show") == Some(&json!("always"))
+            && c.pointer("/defaults/notifications/onBell") == Some(&json!(false))
+    });
+    shot.click(&mut app, notify("notif-bell", "onBell", "true"));
 
     // Worktrees is the cleanup extension's page.
     let page = "vorn.worktrees/settings/worktrees";
@@ -298,6 +276,9 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     );
 
     open(&mut shot, &mut app, Category::Agents);
+    shot.until(&mut app, "the detection", |app, _| {
+        (!app.st.settings.detecting).then_some(())
+    });
     shot.save(&mut app, "set-agents");
     let first = app.st.installed.clone().unwrap_or_default();
     for k in &first {
@@ -324,6 +305,18 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         .find(|a| first.contains(&a.key))
         .cloned()
     {
+        // A row opens the agent's page; its arguments wait under Advanced.
+        let open = Act::Set(SetAct::OpenAgent(Some(agent.key.clone())));
+        shot.click(&mut app, control(&format!("agent-row:{}", agent.key), open));
+        assert_eq!(app.st.settings.agent.as_deref(), Some(agent.key.as_str()));
+        shot.save(&mut app, "set-agent");
+        shot.click(
+            &mut app,
+            control(
+                "agent-advanced",
+                Act::Set(SetAct::ExpandAgent(agent.key.clone())),
+            ),
+        );
         let id = vorn_app::screen::settings::agent_field_id(&agent.key, AgentField::Args);
         shot.click(&mut app, id);
         shot.type_text(&mut app, "--verbose");
@@ -349,12 +342,12 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         "settings-nav",
         Act::Set(SetAct::Open(Category::Agents)),
     ));
-    let mcp = y(control(
+    let remote = y(control(
         "settings-nav",
-        Act::Set(SetAct::Open(Category::Mcp)),
+        Act::Set(SetAct::Open(Category::Network)),
     ));
     let ssh = y(nav);
-    assert!(agents < ssh && ssh < mcp, "{agents} < {ssh} < {mcp}");
+    assert!(agents < ssh && ssh < remote, "{agents} < {ssh} < {remote}");
     shot.click(&mut app, nav);
     shot.until(&mut app, "the hosts", |a, _| {
         entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "Build box")
@@ -426,29 +419,30 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         c["remoteHosts"].as_array().map_or(0, Vec::len) == 2
     });
 
-    open(&mut shot, &mut app, Category::Mcp);
-    shot.save(&mut app, "set-mcp");
-    let cmd = "/plugin install vorn".to_owned();
-    shot.click(
-        &mut app,
-        control("mcp-copy", Act::Set(SetAct::Copy(cmd.clone()))),
-    );
-    assert_eq!(shot.ui.clipboard().get(), Some(cmd));
-
-    open(&mut shot, &mut app, Category::Keys);
-    shot.until(&mut app, "the keys", |a, _| {
-        a.st.settings.keys.as_ref().map(|_| ())
-    });
-    shot.save(&mut app, "set-keys");
-
     open(&mut shot, &mut app, Category::About);
-    shot.until(&mut app, "the core status", |a, _| {
-        a.st.settings.core_version.as_ref().map(|_| ())
-    });
     shot.until(&mut app, "the holders", |a, _| {
         a.st.settings.holders.as_ref().map(|_| ())
     });
     shot.save(&mut app, "set-about");
+    if !vorn_app::settings::IN_BROWSER {
+        shot.click(
+            &mut app,
+            control("update-channel", Act::Open(MenuKind::UpdateChannel)),
+        );
+        assert_eq!(
+            app.st.menu.as_ref().map(|m| m.kind.clone()),
+            Some(MenuKind::UpdateChannel)
+        );
+        let labels = app.menu_labels(&shot.ui);
+        let beta = labels.iter().position(|l| l == "Beta").expect("Beta");
+        shot.click(
+            &mut app,
+            vorn_app::ui::item_id(vorn_app::screen::menus::MENU, beta),
+        );
+        saved(&mut app, "the beta channel", |c| {
+            c.pointer("/defaults/updateChannel") == Some(&json!("beta"))
+        });
+    }
 
     shot.send(&mut app, key("Escape", 0, None));
     assert!(!app.st.settings.open, "Escape closes the page");

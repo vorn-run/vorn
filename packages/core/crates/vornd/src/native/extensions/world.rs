@@ -25,6 +25,9 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long `video.call`'s `boot` waits for a simulator to start: a cold
 /// boot takes tens of seconds, and the router gives the whole call 60.
 const VIDEO_BOOT: Duration = Duration::from_secs(55);
+/// The longest title and body an extension's notice keeps, in characters.
+const NOTICE_TITLE: usize = 120;
+const NOTICE_BODY: usize = 400;
 
 /// vornd's world: its session records, git, the network, the vault and the extensions' tables.
 pub struct Wired {
@@ -948,6 +951,35 @@ impl World for Wired {
                     )
                     .await
                     .map_err(|e| ExtError::new("failed", e))
+                }
+                // Clients show it under the person's focus rule, sound and cooldown.
+                "notifications.send" => {
+                    let host = native.extensions().ok_or_else(stopping)?;
+                    let manifest = host
+                        .manifest_of(&caller.extension)
+                        .map_err(|e| ExtError::new("failed", e))?;
+                    let kind = text(&args, "kind").ok_or_else(|| needs(m, "the kind of notice"))?;
+                    let title = text(&args, "title").ok_or_else(|| needs(m, "its title"))?;
+                    let config = ask(&native, "config:load", Value::Null).await?;
+                    let main = config
+                        .pointer("/defaults/notifications/enabled")
+                        .and_then(Value::as_bool)
+                        != Some(false);
+                    let settings = host.router().preferences(&manifest);
+                    gate::admit_notice(&manifest, &kind, &settings, main)?;
+                    let clip = |t: String, n: usize| t.chars().take(n).collect::<String>();
+                    native.broadcast(
+                        "extension:notify",
+                        json!({
+                            "extensionId": caller.extension,
+                            "extension": manifest.name,
+                            "kind": kind,
+                            "title": clip(title, NOTICE_TITLE),
+                            "body": clip(text(&args, "body").unwrap_or_default(), NOTICE_BODY),
+                            "open": args.get("open").cloned().unwrap_or(Value::Null),
+                        }),
+                    );
+                    Ok(Value::Null)
                 }
                 "remote.hosts" => {
                     let config = ask(&native, "config:load", Value::Null).await?;

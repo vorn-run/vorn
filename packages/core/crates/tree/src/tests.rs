@@ -4,7 +4,9 @@ use serde_json::json;
 
 fn page() -> Node {
     col([
-        toolbar([button("scan", "Scan").icon("refresh-cw")]),
+        toolbar([button("scan", "Scan")
+            .icon("refresh-cw")
+            .tip("Looks for worktrees again.")]),
         card([
             stat("3", "worktrees"),
             stat("1.2 GB", "build output").tone(Tone::Accent).end(),
@@ -50,6 +52,9 @@ fn a_tree_travels_as_json_and_back() {
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["tokens"], 1);
     assert_eq!(v["tree"]["children"][0]["kind"], "toolbar");
+    let scan = &v["tree"]["children"][0]["children"][0];
+    assert_eq!(scan["props"]["tip"], "Looks for worktrees again.");
+    assert!(v["tree"]["children"][1]["props"].get("tip").is_none());
     assert_eq!(read(&v).unwrap(), r);
 }
 

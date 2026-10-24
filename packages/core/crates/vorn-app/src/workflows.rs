@@ -13,6 +13,16 @@ use crate::runs::{self, s};
 /// gates it says are waiting are drawn here.
 pub const ID: &str = "vorn.workflows";
 
+/// Workflows' preference `key`, as the extension holds it.
+pub fn preference(st: &crate::state::State, key: &str) -> Value {
+    crate::points::preference(&[&st.points.builtins, &st.plugins.packs], ID, key)
+}
+
+/// A duration choice's minutes: its option ids are `m<minutes>`.
+pub fn minutes(choice: &Value) -> Option<f64> {
+    choice.as_str()?.strip_prefix('m')?.parse().ok()
+}
+
 /// The landing's two tabs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum Tab {

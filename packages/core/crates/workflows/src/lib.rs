@@ -25,6 +25,14 @@ use vorn_workflow::{Host, Step};
 /// The id the Workflows extension goes by.
 pub const ID: &str = "vorn.workflows";
 
+/// Workflows' preference for how long a step may run, a duration choice.
+pub const STEP_TIME_LIMIT: &str = "headlessStepTimeoutMinutes";
+
+/// The minutes a duration choice's `m<minutes>` id names.
+pub fn minutes(id: &str) -> Option<f64> {
+    id.strip_prefix('m')?.parse::<u32>().ok().map(f64::from)
+}
+
 /// The id Tasks goes by, whose `createTaskFromItem` step's doc is kept here.
 pub const TASKS_ID: &str = "vorn.tasks";
 

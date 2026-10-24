@@ -632,9 +632,10 @@ impl Ui {
     }
 
     /// Whether `id`'s tooltip should show: the pointer has rested on it for
-    /// [`TOOLTIP_DELAY`] and no menu is open.
+    /// [`TOOLTIP_DELAY`] and no menu is open, unless `id` sits in an overlay
+    /// (an entry of the open menu).
     pub fn tooltip_shown(&self, id: Id) -> bool {
-        self.st.menu.is_none()
+        (self.st.menu.is_none() || self.st.hit(id).is_some_and(|h| h.layer > 0))
             && self.st.pressed.is_none()
             && self
                 .st

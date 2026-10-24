@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use web_time::Instant;
 
-use serde_json::Value;
 use vorn_tree::Command;
 
 use crate::grid::Lines;
@@ -76,7 +75,6 @@ pub struct Shell {
 /// Whether `session` shows its finished commands as blocks over a live
 /// region: an integrated shell with Shell blocks on, outside a full-screen program.
 pub fn split<'a>(
-    config: &Value,
     points: &crate::points::Points,
     session: &crate::client::Session,
     shell: Option<&'a Shell>,
@@ -84,13 +82,7 @@ pub fn split<'a>(
     if !crate::prompt::blocks_on(points) {
         return None;
     }
-    let on = config
-        .pointer("/defaults/domBlockRendering")
-        .and_then(Value::as_bool)
-        .unwrap_or(true);
-    shell.filter(|sh| {
-        on && session.is_shell() && !session.ended() && sh.integrated() && !sh.lines.alt
-    })
+    shell.filter(|sh| session.is_shell() && !session.ended() && sh.integrated() && !sh.lines.alt)
 }
 
 impl Shell {

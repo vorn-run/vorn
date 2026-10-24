@@ -160,23 +160,10 @@ impl Store {
             let strings = keys.iter().filter(|k| k.is_string()).cloned().collect();
             out.insert("envPassthrough".into(), Value::Array(strings));
         }
-        out.insert(
-            "domBlockRendering".into(),
-            or("domBlockRendering", Value::Bool(true)),
-        );
-        out.insert(
-            "minimalShellPrompt".into(),
-            or("minimalShellPrompt", Value::Bool(true)),
-        );
-        out.insert(
-            "keepSessionsRunning".into(),
-            or("keepSessionsRunning", Value::Bool(true)),
-        );
         set_if_present(
             &mut out,
             &[
                 "widgetEnabled",
-                "taskViewMode",
                 "activeWorkspace",
                 "mainViewMode",
                 "layoutMode",
@@ -186,13 +173,8 @@ impl Store {
                 "mobileAccessEnabled",
                 "serverPort",
                 "networkAccessEnabled",
-                "showHeadlessAgents",
-                "headlessRetentionMinutes",
                 "hasSeededDevServerWorkflow",
                 "hasSeededDefaultTaskWorkflow",
-                "updateAutoDownload",
-                "headlessStepTimeoutMinutes",
-                "enableHoverPreview",
                 "worktreeRetention",
                 "tuiDrawing",
                 "colorScheme",
@@ -201,9 +183,30 @@ impl Store {
                 "interfaceStyle",
                 "contrastCorrection",
                 "materials",
+                "terminalFontFamily",
+                "agentTools",
             ],
         );
         Ok(out)
+    }
+
+    /// Deletes the `defaults` rows `keys` names: settings Vorn no longer keeps there.
+    pub fn drop_defaults(&self, keys: &[&str]) -> Result<()> {
+        for key in keys {
+            self.conn()
+                .execute("DELETE FROM defaults WHERE key = ?", [key])?;
+        }
+        Ok(())
+    }
+
+    /// Writes one `defaults` row as it is, for a one-time rewrite of a stored setting.
+    pub fn put_default(&self, key: &str, value: &Value) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO defaults (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value.to_string().as_str()],
+        )?;
+        Ok(())
     }
 
     /// Writes a whole `AppConfig` snapshot in one transaction.
@@ -426,16 +429,13 @@ pub const VIEWER_SETTING_KEYS: &[&str] = &[
     "mainViewMode",
     "layoutMode",
     "gridLayout",
-    "taskViewMode",
     "minimizedPlacement",
     "activeWorkspace",
     "fontSize",
+    "terminalFontFamily",
     "rowHeight",
     "theme",
     "notifications",
-    "domBlockRendering",
-    "enableHoverPreview",
-    "showHeadlessAgents",
     "reopenSessions",
     "hasSeenOnboarding",
 ];
@@ -676,10 +676,7 @@ mod tests {
                 "fontSize": 13,
                 "theme": "dark",
                 "reopenSessions": true,
-                "startAtLogin": false,
-                "domBlockRendering": true,
-                "minimalShellPrompt": true,
-                "keepSessionsRunning": true
+                "startAtLogin": false
             })
         );
         assert_eq!(

@@ -26,7 +26,7 @@ pub fn width(kind: &MenuKind) -> f32 {
     match kind {
         MenuKind::Grid | MenuKind::Card(_) => 220.0,
         MenuKind::Terminal(_) => 180.0,
-        MenuKind::ViewOptions => 200.0,
+        MenuKind::ViewOptions => 228.0,
         MenuKind::Project(_) => 140.0,
         MenuKind::Group(_) | MenuKind::SessionGroups(_) => 176.0,
         MenuKind::GroupIcon(_) => 248.0,
@@ -40,12 +40,24 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::TaskProject(_) => 180.0,
         MenuKind::SetShell => 288.0,
         MenuKind::ExtInstall => 240.0,
-        MenuKind::SetSelect(_) => 128.0,
+        MenuKind::AgentPicker => 320.0,
+        MenuKind::ExtChoice(..) => 180.0,
         MenuKind::OpenIn(_) => 180.0,
         MenuKind::Branch(_) => 220.0,
+        MenuKind::ThemePicker(_) => 430.0,
+        MenuKind::ThemeInfo(_) => 268.0,
+        MenuKind::FontPicker => 330.0,
+        MenuKind::UpdateChannel => 160.0,
+        MenuKind::NotifSound => 180.0,
+        MenuKind::NotifSources => 290.0,
+        MenuKind::Holder(_) => 180.0,
+        MenuKind::Device(_) => 180.0,
         _ => 200.0,
     }
 }
+
+/// The font picker's height: its list and the popover's edge.
+pub const FONT_PICKER_H: f32 = 370.0;
 
 /// A panel of `items` in the open menu's group, its submenu in [`SUB`].
 pub fn panel(
@@ -102,8 +114,14 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
         MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
-        MenuKind::SetSelect(key) => super::settings::select_items(s, key),
-        MenuKind::Branch(_) | MenuKind::OpenIn(_) | MenuKind::LaunchModel => Vec::new(),
+        MenuKind::Branch(_)
+        | MenuKind::OpenIn(_)
+        | MenuKind::LaunchModel
+        | MenuKind::ThemePicker(_)
+        | MenuKind::ThemeInfo(_)
+        | MenuKind::FontPicker
+        | MenuKind::AgentPicker
+        | MenuKind::NotifSources => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)
@@ -116,6 +134,11 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::TaskProject(f) => super::tasks::project_items(s, *f),
         MenuKind::TaskAgent(f) => super::tasks::agent_items(s, *f),
         MenuKind::ExtInstall => super::plugins::install_items(),
+        MenuKind::UpdateChannel => super::settings::channel_items(s),
+        MenuKind::NotifSound => super::settings::sound_items(s),
+        MenuKind::Holder(id) => super::settings::holder_items(id),
+        MenuKind::Device(id) => super::network::device_items(id),
+        MenuKind::ExtChoice(ext, key) => super::plugins::choice_items(s, ext, key),
     }
 }
 
@@ -432,7 +455,8 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
                 .px(12.0)
                 .py(4.0)
                 .child(seg(LayoutMode::Grid, "Grid", "grid-4"))
-                .child(seg(LayoutMode::Tabs, "Tabs", "tab-window")),
+                .child(seg(LayoutMode::Tabs, "Tabs", "tab-window"))
+                .child(seg(LayoutMode::List, "List", "list")),
         ),
         ..Item::default()
     });

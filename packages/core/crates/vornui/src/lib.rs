@@ -68,7 +68,7 @@ pub use motion::{Animate, Transform, Transition};
 pub use pace::Pacer;
 pub use render::{Offscreen, RenderMode, OFFSCREEN_FORMAT};
 pub use scene::{Blur, Rect, Rgba, Scene, Shadow, TextGamma};
-pub use text::{use_bundled_fonts, TextStyle, TextSystem};
+pub use text::{intern_family, use_bundled_fonts, MonoFamily, TextStyle, TextSystem};
 pub use ui::{
     decode_png, rasterize_svg, rasterize_svg_rgba, write_png, CustomA11y, Laid, Ui, UiConfig,
     ROOT_NODE,

@@ -11,6 +11,7 @@
 
 pub mod builtin;
 pub mod hosted;
+pub mod moved;
 pub mod routes;
 pub mod world;
 
@@ -423,7 +424,6 @@ impl Extensions {
         let store = self.router.store();
         let mut packs: Vec<_> = (store.ids().iter())
             .filter_map(|id| store.inspect_unmeasured(id).ok())
-            .filter(|pack| pack.is_extension())
             .collect();
         // In the order they were installed: a top-bar button keeps its place.
         packs.sort_by_key(|p| p.installed_at.as_u64().unwrap_or(u64::MAX));
@@ -909,7 +909,10 @@ impl Extensions {
     }
 
     /// The manifest of built-in or installed extension `id`.
-    fn manifest_of(&self, id: &str) -> Result<Arc<vorn_extensions::manifest::Manifest>, String> {
+    pub(crate) fn manifest_of(
+        &self,
+        id: &str,
+    ) -> Result<Arc<vorn_extensions::manifest::Manifest>, String> {
         if let Some(m) = self.builtins.manifest(id) {
             return Ok(m);
         }

@@ -360,6 +360,13 @@ impl Daemon {
             ancestors,
             home,
         );
+        let (n, router) = (Arc::clone(native), Arc::clone(extensions.router()));
+        let moving = tokio::task::spawn_blocking(move || {
+            crate::native::extensions::moved::migrate(&n, &router);
+        });
+        if let Err(err) = moving.await {
+            warn!(%err, "could not move the settings that moved to extensions");
+        }
         if let Err(err) = routes::start_pages(&extensions).await {
             warn!(%err, "pane pages have no origin; panes will not open");
         }

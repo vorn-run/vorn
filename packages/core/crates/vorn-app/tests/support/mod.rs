@@ -550,14 +550,34 @@ impl Shot {
         self.frame(app);
     }
 
+    /// Clicks `id` as `click` does, and says whether it was there to click.
+    pub fn try_click(&mut self, app: &mut App, id: Id) -> bool {
+        self.frame(app);
+        if self.ui.rect_of(id).is_none()
+            || (app.st.settings.open
+                && app.st.menu.is_none()
+                && !self.try_reveal(app, vorn_app::screen::settings::CONTENT, id))
+        {
+            return false;
+        }
+        let clicked = app.click(&mut self.ui, id);
+        self.frame(app);
+        clicked
+    }
+
     /// Scrolls the scroll view `view` until `id` is inside the window.
     #[track_caller]
     pub fn reveal(&mut self, app: &mut App, view: Id, id: Id) {
+        assert!(self.try_reveal(app, view, id), "{id:?} is laid out");
+    }
+
+    /// `reveal`, false when `id` leaves the layout on the way.
+    fn try_reveal(&mut self, app: &mut App, view: Id, id: Id) -> bool {
         let mut probe = 0.0;
         for _ in 0..40 {
             self.frame(app);
             let Some(r) = self.ui.rect_of(id) else {
-                panic!("{id:?} is laid out");
+                return false;
             };
             let off = self.ui.scroll_offset(view);
             // Clipped away entirely: walk the view from the top until it shows.
@@ -573,9 +593,10 @@ impl Shot {
                 self.ui
                     .set_scroll_offset(view, (off + r.y - 120.0).max(0.0));
             } else {
-                return;
+                return true;
             }
         }
+        true
     }
 
     /// Rests the pointer on `id`, for what shows on hover.

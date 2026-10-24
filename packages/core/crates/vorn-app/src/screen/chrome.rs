@@ -41,17 +41,52 @@ pub(super) fn tool(
     let b = div()
         .id(id)
         .on(Action::Click)
-        .p(4.0)
-        .rounded(6.0)
         .bg(bg)
-        .role(Role::Button, label)
-        .child(ico(name, 16.0, stroke, fg));
+        .role(Role::Button, label);
+    let b = match glass(s).then(|| look::icon(name, stroke)).flatten() {
+        Some(svg) => b.size(28.0, 28.0).rounded(14.0).native_icon(&svg, 16.0, fg),
+        None => b.p(4.0).rounded(6.0).child(ico(name, 16.0, stroke, fg)),
+    };
     tooltip(s.ui, b, id, label, shortcut)
 }
 
 /// A thin vertical rule between toolbar groups.
 pub(super) fn divider() -> El {
     div().w(1.0).h(16.0).bg(white(0.06)).mx(2.0).shrink0()
+}
+
+/// A label in a toolbar control: drawn by the system inside glass, so it
+/// takes the glass's vibrancy, else by the app.
+pub(super) fn label(s: &Screen<'_>, t: &str, size: f32, line: f32, fg: Rgba) -> El {
+    if glass(s) {
+        return text(t, size, white(0.0))
+            .weight(500)
+            .line_height(line)
+            .native_label(t, size, fg)
+            .silent();
+    }
+    text(t, size, fg).line_height(line).silent()
+}
+
+/// Whether toolbar buttons sit on glass: over the system's material.
+pub(super) fn glass(s: &Screen<'_>) -> bool {
+    s.ui.see_through() && crate::ui::palette::materials() != vorn_theme::Materials::Solid
+}
+
+/// Toolbar buttons that belong together: one glass capsule over the
+/// system's material, a plain row otherwise.
+pub(super) fn group(s: &Screen<'_>, buttons: impl IntoIterator<Item = El>) -> El {
+    let row = div().row().items_center();
+    let row = buttons.into_iter().fold(row, El::child);
+    if !glass(s) {
+        return row.gap(4.0);
+    }
+    row.gap(2.0)
+        .h(32.0)
+        .px(3.0)
+        .rounded(16.0)
+        .native_glass()
+        .shrink0()
 }
 
 fn menu_open(s: &Screen<'_>, kind: &MenuKind) -> bool {
@@ -76,7 +111,7 @@ pub(super) fn top_buttons(s: &Screen<'_>) -> Vec<TopButton> {
     let sessions = TopButton {
         act: Act::View(MainView::Sessions),
         view: MainView::Sessions,
-        icon: "monitor".to_owned(),
+        icon: "square-terminal".to_owned(),
         label: "Sessions".to_owned(),
         keys: Some(format!("{m}S", m = mod_label())),
         on: s.st.view == MainView::Sessions,
@@ -143,22 +178,32 @@ fn pills(s: &Screen<'_>) -> El {
 /// SidebarToggle, a divider and the view pills: what the toolbar starts
 /// with while the sidebar is closed.
 pub(super) fn nav_cluster(s: &Screen<'_>) -> El {
-    div()
-        .row()
-        .items_center()
-        .gap(4.0)
-        .child(tool(
-            s,
-            "toolbar",
-            Act::ToggleSidebar,
-            "panel-left",
-            2.0,
-            "Toggle sidebar",
-            Some(&format!("{m}B", m = mod_label())),
-            false,
-        ))
-        .child(divider())
-        .child(pills(s))
+    let toggle = tool(
+        s,
+        "toolbar",
+        Act::ToggleSidebar,
+        "panel-left",
+        2.0,
+        "Toggle sidebar",
+        Some(&format!("{m}B", m = mod_label())),
+        false,
+    );
+    let row = div().row().items_center();
+    if glass(s) {
+        return row.gap(8.0).ml(6.0).child(group(s, [toggle])).child_if(
+            views(s).then(|| group(s, super::sidebar::view_tabs(s, "toolbar-mode", false))),
+        );
+    }
+    let row = row.gap(4.0).child(toggle);
+    if !views(s) {
+        return row;
+    }
+    row.child(divider()).child(pills(s))
+}
+
+/// Whether there is more than Sessions to switch to.
+pub(super) fn views(s: &Screen<'_>) -> bool {
+    top_buttons(s).len() > 1
 }
 
 /// The dock's popover, as the one menu open: a press outside closes it.
@@ -782,18 +827,18 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
     }
     let mut right = div().row().items_center().gap(4.0);
     if s.st.view == MainView::Tasks {
+        let add = tool(
+            s,
+            "toolbar",
+            Act::Task(crate::tasks::TaskAct::New("todo".into())),
+            "plus",
+            2.0,
+            "Add task",
+            None,
+            false,
+        );
         return right
-            .child(task_options(s))
-            .child(tool(
-                s,
-                "toolbar",
-                Act::Task(crate::tasks::TaskAct::New("todo".into())),
-                "plus",
-                2.0,
-                "Add task",
-                None,
-                false,
-            ))
+            .child(group(s, [task_options(s), add]))
             .child_if(window_controls(s));
     }
     if s.st.view == MainView::Sessions {
@@ -817,9 +862,13 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
                     .absolute_right(2.0, 2.0),
             );
         }
-        right = right.child(opts).child(divider());
+        right = if glass(s) {
+            right.gap(8.0).child(group(s, [opts]))
+        } else {
+            right.child(opts).child(divider())
+        };
     }
-    right = right.child(tool(
+    let recent = tool(
         s,
         "toolbar",
         Act::Open(MenuKind::Recent),
@@ -828,9 +877,9 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
         "Recent sessions",
         None,
         menu_open(s, &MenuKind::Recent),
-    ));
-    if plus {
-        right = right.child(tool(
+    );
+    let new = plus.then(|| {
+        tool(
             s,
             "toolbar",
             Act::Open(MenuKind::Grid),
@@ -839,9 +888,11 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
             "New session",
             None,
             menu_open(s, &MenuKind::Grid),
-        ));
-    }
-    right.child_if(window_controls(s))
+        )
+    });
+    right
+        .child(group(s, std::iter::once(recent).chain(new)))
+        .child_if(window_controls(s))
 }
 
 /// TaskToolbar's trigger: ink-secondary, white with a dot while a filter is on.
@@ -861,14 +912,21 @@ fn task_options(s: &Screen<'_>) -> El {
             white(0.0).mix(white(0.06), hot),
         )
     };
-    let mut b = div()
+    let b = div()
         .id(id)
         .on(Action::Click)
-        .p(4.0)
-        .rounded(6.0)
         .bg(bg)
-        .role(Role::Button, "View options")
-        .child(ico("sliders-horizontal", 16.0, 1.5, fg));
+        .role(Role::Button, "View options");
+    let mut b = match glass(s)
+        .then(|| look::icon("sliders-horizontal", 1.5))
+        .flatten()
+    {
+        Some(svg) => b.size(28.0, 28.0).rounded(14.0).native_icon(&svg, 16.0, fg),
+        None => b
+            .p(4.0)
+            .rounded(6.0)
+            .child(ico("sliders-horizontal", 16.0, 1.5, fg)),
+    };
     if changed && !open {
         b = b.child(
             div()
@@ -937,7 +995,11 @@ pub(super) fn top_bar(s: &Screen<'_>) -> El {
         div()
             .col()
             .shrink0()
-            .bg(c(look::SURFACE_BASE))
+            .bg(if s.ui.see_through() {
+                crate::ui::theme::shadow(0.0)
+            } else {
+                c(look::SURFACE_BASE)
+            })
             .child(bar)
             .child(div().h(1.0).w_full().bg(white(0.06))),
     )

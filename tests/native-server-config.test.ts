@@ -52,14 +52,14 @@ describe.runIf(runnable)('the configuration in vornd', () => {
 
     const next: AppConfig = {
       ...before,
-      defaults: { ...before.defaults, shell: '/bin/sh', minimalShellPrompt: false },
+      defaults: { ...before.defaults, shell: '/bin/sh', reopenSessions: false },
       projects: [...before.projects, project('cfg-a')]
     }
     expect(await viaVornd.call('config:save', next)).not.toHaveProperty('error')
 
     const loaded = await direct.result<AppConfig>('config:load')
     expect(loaded.defaults.shell).toBe('/bin/sh')
-    expect(loaded.defaults.minimalShellPrompt).toBe(false)
+    expect(loaded.defaults.reopenSessions).toBe(false)
     expect(loaded.projects.map((p) => p.name)).toContain('cfg-a')
     expect(loaded.revision).toBeGreaterThan(before.revision ?? 0)
 

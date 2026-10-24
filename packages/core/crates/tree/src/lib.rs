@@ -429,6 +429,9 @@ pub struct Props {
     /// Its accessible name, for a box assistive technology should announce.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// What it shows when the pointer rests on it: what it is or does, in a line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 impl Props {
