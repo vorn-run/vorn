@@ -196,9 +196,37 @@ impl App {
                     });
                     let r = n.reachable.get_or_insert_with(Default::default);
                     r.remote = true;
-                    r.urls.insert(0, format!("https://100.101.102.103:{}/app/", r.port));
+                    let url = format!("https://100.101.102.103:{}/app/", r.port);
+                    if !r.urls.contains(&url) {
+                        r.urls.insert(0, url);
+                    }
+                    if r.fingerprint.is_none() {
+                        r.fingerprint = Some("9F3A1C7E52B04D8812AF6E3390C1D7B4".to_owned());
+                    }
+                    // Only this frame's copy: the temp vornd never opens a listener.
+                    let config = &mut self.store.config;
+                    if !config.get("defaults").is_some_and(Value::is_object) {
+                        config["defaults"] = serde_json::json!({});
+                    }
+                    config["defaults"]["networkAccessEnabled"] = Value::Bool(true);
                 }
                 "advanced" => self.st.network.advanced = true,
+                "devices" => {
+                    let now = crate::state::now_ms();
+                    let device = |id: &str, name: &str, ago_ms: f64| crate::network::DeviceToken {
+                        id: id.to_owned(),
+                        name: name.to_owned(),
+                        last_seen_at: Some(crate::tasks::iso(now - ago_ms)),
+                        revoked_at: None,
+                        last_address: None,
+                    };
+                    let tokens = self.st.network.tokens.get_or_insert_with(Vec::new);
+                    if tokens.iter().any(|t| t.id == "shot-phone") {
+                        continue;
+                    }
+                    tokens.push(device("shot-phone", "Javier's iPhone", 7_200_000.0));
+                    tokens.push(device("shot-mac", "Studio Mac mini", 90_000_000.0));
+                }
                 "add-device" => self.run_net(ui, NetAct::AddDevice),
                 "pair-request" => {
                     self.run_net(ui, NetAct::AddDevice);
@@ -215,13 +243,18 @@ impl App {
                         continue;
                     }
                     let kind = MenuKind::Device(id);
+                    let more = crate::act::Acts::id("net-device", &Act::Open(kind.clone()));
+                    // The menu hangs from its button, so wait for a frame that lays it out.
+                    if ui.rect_of(more).is_none() {
+                        return Err(format!("--open net-{state}: the device row is not drawn"));
+                    }
                     let src = super::Src {
-                        id: Some(crate::act::Acts::id("net-device", &Act::Open(kind.clone()))),
+                        id: Some(more),
                         at: None,
                     };
                     self.open_menu(ui, kind, src);
                 }
-                other => return Err(format!("--open net-{other}: tailnet, advanced, add-device, pair-request, device-menu or confirm-remove")),
+                other => return Err(format!("--open net-{other}: tailnet, advanced, devices, add-device, pair-request, device-menu or confirm-remove")),
             }
         }
         Ok(())

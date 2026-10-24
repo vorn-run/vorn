@@ -39,7 +39,7 @@
 //! `--open` opens one of its popovers from its control, or with
 //! `extension:vorn.tasks` that extension's page under `--settings extensions`,
 //! or with `agent:claude` that agent's page under `--settings agents`;
-//! `net-tailnet+add-device` (also `advanced`, `pair-request`, `device-menu`,
+//! `net-tailnet+add-device` (also `advanced`, `devices`, `pair-request`, `device-menu`,
 //! `confirm-remove`) sets Remote Access states under `--settings network`.
 //! Then each `--click X,Y` presses there, `--type` types letters into the
 //! focused field, and `--hover X,Y` rests the pointer past the tooltip delay.

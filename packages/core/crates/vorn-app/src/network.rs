@@ -130,16 +130,33 @@ impl DeviceToken {
             .last_seen_at
             .as_deref()
             .filter(|s| !s.is_empty())
-            .map(|at| match crate::runs::relative(at, now_ms) {
-                r if r == "Just now" => "just now".to_owned(),
-                r => r,
-            });
+            .map(|at| ago(at, now_ms));
         match (self.kind(), when) {
             (DeviceKind::Phone, Some(w)) => format!("Last seen {w}"),
             (DeviceKind::Phone, None) => "Never connected".to_owned(),
             (DeviceKind::Computer, Some(w)) => format!("Another Vorn · last seen {w}"),
             (DeviceKind::Computer, None) => "Another Vorn · never connected".to_owned(),
         }
+    }
+}
+
+/// How long ago `iso` was, in words: "just now", "2 hours ago", "yesterday".
+fn ago(iso: &str, now_ms: f64) -> String {
+    let Some(t) = crate::tasks::ms(iso) else {
+        return "a while ago".to_owned();
+    };
+    let mins = ((now_ms - t) / 60_000.0).floor().max(0.0) as u64;
+    let n = |n: u64, unit: &str| {
+        let s = if n == 1 { "" } else { "s" };
+        format!("{n} {unit}{s} ago")
+    };
+    match mins {
+        0 => "just now".to_owned(),
+        1..=59 => n(mins, "minute"),
+        60..=1439 => n(mins / 60, "hour"),
+        1440..=2879 => "yesterday".to_owned(),
+        2880..=43_199 => n(mins / 1440, "day"),
+        _ => format!("on {}", crate::tasks::short_date(iso)),
     }
 }
 
@@ -490,14 +507,16 @@ mod tests {
             ..phone
         };
         assert_eq!(phone.seen(t + 1000.0), "Last seen just now");
-        assert_eq!(phone.seen(t + 7_200_000.0), "Last seen 2h ago");
+        assert_eq!(phone.seen(t + 7_200_000.0), "Last seen 2 hours ago");
+        assert_eq!(phone.seen(t + 60_000.0), "Last seen 1 minute ago");
+        assert_eq!(phone.seen(t + 3.0 * 86_400_000.0), "Last seen 3 days ago");
         let mac = DeviceToken {
             name: "Studio Mac mini".into(),
             ..phone
         };
         assert_eq!(
             mac.seen(t + 86_400_000.0),
-            "Another Vorn · last seen 1d ago"
+            "Another Vorn · last seen yesterday"
         );
     }
 
