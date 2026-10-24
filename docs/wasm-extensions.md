@@ -250,6 +250,9 @@ A few more shapes for a settings form:
   `true` to open or `false` to close. Open, its children show under the row
   rather than beside its title.
 - Text with the `label` style is a form field's small, uppercase caption.
+- Any node's `tip` (`.tip(line)`) shows when the pointer rests on it: a
+  button, a box, a line of text, an item in an entry's menu. The terminal
+  and the platform's own controls do not draw it.
 
 A `web` part is a native web view the client places and seats, with the
 address bar, back and forward, and an artifact's review controls over it.

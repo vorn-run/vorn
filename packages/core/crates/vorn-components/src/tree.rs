@@ -219,7 +219,10 @@ impl Cx<'_> {
 
     fn node(&self, n: &Node) -> El {
         let el = match &n.kind {
-            Kind::Box => return self.boxed(&n.props, n.children.iter().map(|k| self.node(k))),
+            Kind::Box => {
+                let b = self.boxed(&n.props, n.children.iter().map(|k| self.node(k)));
+                return self.tipped(n, None, b);
+            }
             Kind::Text {
                 text: t,
                 style,
@@ -279,8 +282,9 @@ impl Cx<'_> {
                 let id = n.id.as_deref().unwrap_or_default();
                 let name = n.props.label.as_deref().unwrap_or(label);
                 let ev = press(id, confirm.as_deref(), pick.as_deref());
-                self.button(ev, label, name, icon.as_deref(), *style, confirm.as_deref())
-                    .1
+                let (bid, b) =
+                    self.button(ev, label, name, icon.as_deref(), *style, confirm.as_deref());
+                return sized(self.tipped(n, Some(bid), b), &n.props);
             }
             Kind::Field {
                 value,
@@ -484,7 +488,24 @@ impl Cx<'_> {
                 .video(key(n), v)
                 .unwrap_or_else(|| div().sem(Sem::Hidden)),
         };
-        sized(el, &n.props)
+        sized(self.tipped(n, None, el), &n.props)
+    }
+
+    /// `el` with node `n`'s tip on hover; `id` is the control's own when it has one.
+    fn tipped(&self, n: &Node, id: Option<Id>, el: El) -> El {
+        let Some(tip) = n
+            .props
+            .tip
+            .as_deref()
+            .filter(|_| !self.ui.is_native() && !self.ui.is_cells())
+        else {
+            return el;
+        };
+        let id = id.unwrap_or_else(|| {
+            let node = n.id.clone().unwrap_or_else(|| format!("tip:{tip}"));
+            self.bind.on(Ev::Hover { node })
+        });
+        widgets::tooltip(self.ui, el, id, tip, None)
     }
 
     /// A plain box laid out by its props.
@@ -1599,6 +1620,13 @@ impl Cx<'_> {
                 asking = Some((q.as_str(), shown, *style, ids));
             }
             let item = self.menu_item(id, shown, *style, icon.as_deref());
+            let item = match b.props.tip.as_deref() {
+                // Beside, so the tip never covers the items above or below.
+                Some(t) if !self.ui.is_native() => {
+                    widgets::tooltip_at(self.ui, item, id, t, None, Place::Beside)
+                }
+                _ => item,
+            };
             entries.push(self.sem(item, || Sem::Button {
                 style: sem_style(*style),
                 confirm: confirm.clone(),
