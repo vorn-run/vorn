@@ -503,7 +503,7 @@ fn resume_shell(native: &Native, id: &str, previous: &TerminalSession) -> Answer
     let setup = native.shells.setup(
         &native.env,
         settings.shell.as_deref(),
-        settings.minimal_shell_prompt,
+        crate::native::extensions::moved::minimal_prompt(native),
     );
     let (shell, setup) = match setup {
         Ok(ready) => ready,
@@ -1519,7 +1519,7 @@ fn shell_create(native: &Native, ask: &ShellAsk<'_>) -> Answer {
     let (shell, setup) = match native.shells.setup(
         &native.env,
         settings.shell.as_deref(),
-        settings.minimal_shell_prompt,
+        crate::native::extensions::moved::minimal_prompt(native),
     ) {
         Ok(ready) => ready,
         Err(e) => return Answer::Error(e.to_string()),

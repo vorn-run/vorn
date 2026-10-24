@@ -122,8 +122,9 @@ pub enum SetAct {
     PickTheme(String),
     /// A theme picker chip, on or off.
     ThemeFilter(crate::appearance::ThemeFilter),
-    /// The theme picker's Get more themes…: the catalog's themes.
-    MoreThemes,
+    /// The catalog's extensions matching a query, with one listing's page
+    /// open when given: Get more themes…, Get more agents… and Install.
+    Browse(String, Option<String>),
     TestSound,
     ShellMenu,
     PickShell(String),
@@ -694,47 +695,6 @@ pub fn split_args(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
 }
 
-/// Why the server will not shut down on its own, if it
-/// will not.
-pub fn server_stays_up(config: &Value) -> Option<String> {
-    let polling = config
-        .get("workflows")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .any(|w| {
-            w.get("enabled").and_then(Value::as_bool) == Some(true)
-                && w.get("nodes")
-                    .and_then(Value::as_array)
-                    .and_then(|n| {
-                        n.iter()
-                            .find(|n| n.get("type").and_then(Value::as_str) == Some("trigger"))
-                    })
-                    .and_then(|t| t.pointer("/config/triggerType"))
-                    .and_then(Value::as_str)
-                    == Some("connectorPoll")
-        });
-    let network = config
-        .pointer("/defaults/networkAccessEnabled")
-        .and_then(Value::as_bool)
-        == Some(true);
-    let reasons: Vec<&str> = [
-        network.then_some(
-            "Network Access is on, so it stays up to be reached from your other devices",
-        ),
-        polling.then_some("a connector is polling on a schedule, which it services itself"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    (!reasons.is_empty()).then(|| {
-        format!(
-            "{}. This server will not shut down on its own.",
-            reasons.join(", and ")
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -842,14 +802,7 @@ mod tests {
     }
 
     #[test]
-    fn the_server_says_why_it_stays_up() {
-        assert_eq!(server_stays_up(&json!({ "defaults": {} })), None);
-        let c = json!({ "defaults": { "networkAccessEnabled": true }, "workflows": [
-            { "enabled": true, "nodes": [{ "type": "trigger", "config": { "triggerType": "connectorPoll" } }] }] });
-        assert_eq!(
-            server_stays_up(&c).as_deref(),
-            Some("Network Access is on, so it stays up to be reached from your other devices, and a connector is polling on a schedule, which it services itself. This server will not shut down on its own.")
-        );
+    fn the_server_says_who_started_it() {
         assert_eq!(
             describe_server("0.8", "0.8", false).0,
             "Vorn 0.8, started by this window"

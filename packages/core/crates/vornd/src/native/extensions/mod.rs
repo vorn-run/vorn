@@ -11,6 +11,7 @@
 
 pub mod builtin;
 pub mod hosted;
+pub mod moved;
 pub mod routes;
 pub mod world;
 

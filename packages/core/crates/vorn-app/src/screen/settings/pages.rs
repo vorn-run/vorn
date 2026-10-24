@@ -8,7 +8,6 @@ use vorn_theme::{Appearance as Look, Chrome, Materials, Scheme, Theme};
 use super::{button, card, card_row, header, row, section, segmented, set, svg, toggle, Seg};
 use crate::act::{Act, Acts};
 use crate::look;
-use crate::screen::menus::Item;
 use crate::screen::{agent_icon, c, ico, white, Screen};
 use crate::settings::{
     self, describe_field, describe_update, describe_usage, older_note, sigil, SetAct, Tone,
@@ -110,9 +109,10 @@ mod glyph {
     pub const CHEVRON_DOWN: &str = r#"<path d="M6 9l6 6 6-6"/>"#;
     pub const CHEVRON_UP: &str = r#"<path d="M18 15l-6-6-6 6"/>"#;
     pub const SEARCH: &str = r#"<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>"#;
+    pub const TERMINAL: &str = r#"<path d="M4 17l6-6-6-6M12 19h8"/>"#;
 }
 
-/// What each Appearance row, tile and chip says when hovered.
+/// What each Appearance and General row, tile and chip says when hovered.
 pub(crate) mod tip {
     #[cfg(target_os = "macos")]
     pub const SCHEME: &str =
@@ -149,6 +149,27 @@ pub(crate) mod tip {
     pub const TABS: &str = "One session at a time, switched with tabs.";
     pub const LIST: &str = "A list of sessions beside the open one.";
     pub const CARD_HEIGHT: &str = "How tall each session card is in the grid.";
+    #[cfg(target_os = "macos")]
+    pub const LOGIN: &str = "Start Vorn when you sign in to your Mac.";
+    #[cfg(not(target_os = "macos"))]
+    pub const LOGIN: &str = "Start Vorn when you sign in to your computer.";
+    pub const REOPEN: &str = "Bring back the sessions that were open when Vorn quit.";
+    pub const AGENT: &str = "The agent a new session starts with.";
+    #[cfg(target_os = "macos")]
+    pub const INSTALLED: &str = "Agents on this Mac.";
+    #[cfg(not(target_os = "macos"))]
+    pub const INSTALLED: &str = "Agents on this computer.";
+    pub const AVAILABLE: &str = "Agents you can add.";
+    #[cfg(target_os = "macos")]
+    pub const SET_UP: &str =
+        "This agent's adapter is installed but its command isn't on this Mac yet.";
+    #[cfg(not(target_os = "macos"))]
+    pub const SET_UP: &str =
+        "This agent's adapter is installed but its command isn't on this computer yet.";
+    pub const INSTALL: &str = "Adds this agent from the catalog.";
+    pub const MORE_AGENTS: &str = "Opens the extensions catalog, filtered to agents.";
+    pub const SHELL: &str = "The shell a new terminal session runs.";
+    pub const CHOOSE_PATH: &str = "Use a shell that isn't in the list.";
     pub const DRAWING: &str =
         "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
 }
@@ -878,7 +899,9 @@ pub(crate) fn theme_picker(s: &Screen<'_>, side: Look) -> El {
     for t in list {
         grid = grid.child(picker_tile(s, t, t.id == chosen));
     }
-    let more_id = s.acts.on("more-themes", set(SetAct::MoreThemes));
+    let more_id = s
+        .acts
+        .on("more-themes", set(SetAct::Browse("theme".into(), None)));
     let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
     let more = div()
         .id(more_id)
@@ -1119,10 +1142,10 @@ fn shell_picker(s: &Screen<'_>) -> El {
         return div()
             .row()
             .items_center()
-            .w(288.0)
+            .w(240.0)
             .shrink0()
             .px(8.0)
-            .py(6.0)
+            .h(28.0)
             .rounded(4.0)
             .bg(white(0.04))
             .border(1.0, if focus { white(0.25) } else { white(0.12) })
@@ -1166,42 +1189,17 @@ fn shell_picker(s: &Screen<'_>) -> El {
     let id = s
         .acts
         .on("shell-picker", crate::act::Act::Open(MenuKind::SetShell));
-    let hot = if open { 1.0 } else { s.ui.hover(id) };
-    div()
-        .id(id)
-        .on(Action::Click)
-        .row()
-        .items_center()
-        .gap(8.0)
-        .w(288.0)
-        .shrink0()
-        .px(8.0)
-        .py(6.0)
-        .rounded(4.0)
-        .border(1.0, white(0.12).mix(white(0.25), hot))
-        .role(Role::ComboBox, "Default Shell")
-        .expanded(open)
-        .child(shell_glyph(current.map(|c| c.family.as_str())))
+    let chip = chip(s, id, "Shell", open)
+        .child(glyph_icon(glyph::TERMINAL, 14.0, c(look::GRAY_500)))
         .child(
-            div()
-                .col()
-                .grow()
-                .min_w0()
-                .child(
-                    text(name, 13.0, c(look::GRAY_200))
-                        .line_height(19.5)
-                        .truncate()
-                        .silent(),
-                )
-                .child(
-                    text(value, 11.0, c(look::GRAY_600))
-                        .mono()
-                        .line_height(16.5)
-                        .truncate()
-                        .silent(),
-                ),
+            text(name, 13.0, c(look::GRAY_200))
+                .line_height(18.0)
+                .silent(),
         )
-        .child(ico("chevron-down", 12.0, 2.0, c(look::GRAY_500)))
+        .child(chevron(open))
+        .role(Role::ComboBox, "Shell")
+        .expanded(open);
+    tooltip(s.ui, chip, id, tip::SHELL, None)
 }
 
 /// The shell picker's listbox.
@@ -1227,7 +1225,7 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
     match &s.st.settings.shells {
         None => col = col.child(note("Looking for shells\u{2026}")),
         Some(list) if list.is_empty() => {
-            col = col.child(note("No shells detected. Enter a path instead."));
+            col = col.child(note("No shells detected. Choose a path instead."));
         }
         Some(list) => {
             for sh in list {
@@ -1296,165 +1294,24 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
         }
     }
     let edit = s.acts.on("shell-option", set(SetAct::EditShell));
-    col.child(div().mt(4.0).mb(4.0).h(1.0).w_full().bg(white(0.06)))
-        .child(
-            div()
-                .id(edit)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(8.0)
-                .px(12.0)
-                .py(8.0)
-                .bg(white(0.0).mix(white(0.06), s.ui.hover(edit)))
-                .role(Role::Button, "Enter a path\u{2026}")
-                .child(ico("pen-line", 13.0, 2.0, c(look::GRAY_500)))
-                .child(
-                    text("Enter a path\u{2026}", 12.0, c(look::GRAY_400))
-                        .line_height(16.0)
-                        .silent(),
-                ),
-        )
-}
-
-/// The agent picker's `flex bg-white/[0.04] rounded-lg p-0.5` buttons.
-fn agent_choice(s: &Screen<'_>) -> El {
-    let current = defaults(s)
-        .and_then(|d| d.get("defaultAgent"))
-        .and_then(Value::as_str)
-        .unwrap_or(s.store.agents.default_key());
-    let mut row = div()
-        .row()
-        .shrink0()
-        .gap(2.0)
-        .p(2.0)
-        .rounded(8.0)
-        .bg(white(0.04));
-    for a in &s.store.agents {
-        let installed = s.st.installed.as_ref().is_none_or(|l| l.contains(&a.key));
-        let id = s.acts.on(
-            "default-agent",
-            set(default_act("defaultAgent", format!("\"{}\"", a.key))),
-        );
-        let hot = s.ui.hover(id);
-        let on = current == a.key;
-        let fg = if !installed {
-            c(look::GRAY_600)
-        } else if on {
-            c(look::WHITE)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
-        };
-        let short = a.name.split(' ').next().unwrap_or(&a.name);
-        let mut b = div()
-            .id(id)
-            .row()
-            .items_center()
-            .gap(6.0)
-            .px(10.0)
-            .py(4.0)
-            .rounded(6.0)
-            .role(Role::RadioButton, a.name.as_str())
-            .selected(on)
-            .child(agent_icon(s, &a.key, 14.0))
-            .child(text(short, 12.0, fg).line_height(16.0).silent());
-        if on && installed {
-            b = b.bg(white(0.1));
-        }
-        b = if installed {
-            b.on(Action::Click)
-        } else {
-            b.opacity(0.3)
-        };
-        let tip = if installed {
-            a.name.clone()
-        } else {
-            format!("{} is not installed", a.name)
-        };
-        row = row.child(crate::ui::tooltip(s.ui, b, id, &tip, None));
-    }
-    row
-}
-
-/// A native `<select>`: the value and the system's chevron.
-fn select(s: &Screen<'_>, key: &str, label: &str) -> El {
-    let id = s.acts.on(
-        "select",
-        crate::act::Act::Open(MenuKind::SetSelect(key.to_owned())),
-    );
-    let open =
-        s.st.menu
-            .as_ref()
-            .is_some_and(|m| m.kind == MenuKind::SetSelect(key.to_owned()));
-    div()
-        .id(id)
+    let choose = div()
+        .id(edit)
         .on(Action::Click)
         .row()
         .items_center()
-        .w(128.0)
-        .shrink0()
+        .gap(8.0)
         .px(12.0)
-        .py(6.0)
-        .rounded(6.0)
-        .bg(white(0.04))
-        .border(1.0, if open { white(0.15) } else { white(0.08) })
-        .role(Role::ComboBox, key)
+        .py(8.0)
+        .bg(white(0.0).mix(white(0.06), s.ui.hover(edit)))
+        .role(Role::Button, "Choose path\u{2026}")
+        .child(ico("pen-line", 13.0, 2.0, c(look::GRAY_500)))
         .child(
-            div().grow().min_w0().child(
-                text(label, 14.0, c(look::GRAY_200))
-                    .line_height(20.0)
-                    .silent(),
-            ),
-        )
-        .child(ico("chevron-down", 12.0, 2.0, c(look::GRAY_400)))
-}
-
-/// A select's options: (stored value, label).
-fn options(key: &str) -> &'static [(i64, &'static str)] {
-    match key {
-        "headlessRetentionMinutes" => &[
-            (1, "1 minute"),
-            (5, "5 minutes"),
-            (15, "15 minutes"),
-            (30, "30 minutes"),
-            (60, "1 hour"),
-        ],
-        _ => &[
-            (15, "15 minutes"),
-            (30, "30 minutes"),
-            (60, "1 hour"),
-            (120, "2 hours"),
-            (360, "6 hours"),
-            (0, "No limit"),
-        ],
-    }
-}
-
-fn select_value(s: &Screen<'_>, key: &str) -> i64 {
-    let fallback = if key == "headlessRetentionMinutes" {
-        1.0
-    } else {
-        60.0
-    };
-    num(s, key).unwrap_or(fallback) as i64
-}
-
-/// The open select's entries.
-pub(crate) fn select_items(s: &Screen<'_>, key: &str) -> Vec<Item> {
-    let v = select_value(s, key);
-    options(key)
-        .iter()
-        .map(|(n, l)| Item::pick(*l, *n == v, set(default_act(key, n))))
-        .collect()
-}
-
-fn select_row(s: &Screen<'_>, key: &str, title: &str, description: &str) -> El {
-    let v = select_value(s, key);
-    let label = options(key)
-        .iter()
-        .find(|(n, _)| *n == v)
-        .map_or_else(|| v.to_string(), |(_, l)| (*l).to_owned());
-    row(title, description, None, select(s, key, &label), false)
+            text("Choose path\u{2026}", 12.0, c(look::GRAY_400))
+                .line_height(16.0)
+                .silent(),
+        );
+    col.child(div().mt(4.0).mb(4.0).h(1.0).w_full().bg(white(0.06)))
+        .child(tooltip(s.ui, choose, edit, tip::CHOOSE_PATH, None))
 }
 
 /// Where the `vorn` command is, with Install, or Reinstall and Remove.
@@ -1505,104 +1362,300 @@ fn cli_row(s: &Screen<'_>) -> Option<El> {
 
 pub(super) fn general(s: &Screen<'_>) -> El {
     let reopen = flag(s, "reopenSessions", true);
-    let headless = flag(s, "showHeadlessAgents", true);
-    let stays = settings::server_stays_up(&s.store.config);
-    let mut rows = div()
-        .col()
-        .gap(4.0)
-        .child(row(
-            "Default Coding Agent",
-            "Pre-selected agent when creating new sessions",
-            None,
-            agent_choice(s),
-            false,
-        ))
-        .child(row(
-            "Default Shell",
-            "Shell used for terminal sessions. Shells differ in how much they can report about each command.",
-            None,
-            shell_picker(s),
-            false,
-        ))
-        .child_if((!settings::IN_BROWSER).then(|| switch_row(
+    let login = (!settings::IN_BROWSER).then(|| {
+        let on = flag(s, "startAtLogin", false);
+        let t = toggle(
             s,
             "startAtLogin",
-            flag(s, "startAtLogin", false),
-            "Start Vorn When I Sign In",
-            "Vorn opens with the machine, so a restart puts you back where you were.",
-            reopen.then_some("With Reopen Sessions on, your agents start again at sign-in rather than when you next open Vorn."),
-        )))
-        .child(switch_row(
-            s,
-            "reopenSessions",
-            reopen,
-            "Reopen Sessions on Startup",
-            "Bring back the panes you had open. Agents still running are reconnected to, keeping the turn they were in; ones whose process was stopped are started again where they left off, and shells reopen in the directory they were in.",
-            None,
-        ))
-        .child(switch_row(
-            s,
-            "keepSessionsRunning",
-            flag(s, "keepSessionsRunning", true),
-            "Keep Sessions Running When Vorn Closes",
-            "Agents keep working while Vorn is shut. Reopening reconnects to them instead of restarting them. A background server stays running until every session ends, then shuts down on its own.",
-            stays.as_deref(),
-        ))
-        .child(switch_row(
-            s,
-            "domBlockRendering",
-            flag(s, "domBlockRendering", true),
-            "Command Blocks",
-            "Draw finished commands as blocks with their own padding, boundary and copy button, instead of leaving them in the terminal grid",
-            None,
-        ))
-        .child(switch_row(
-            s,
-            "minimalShellPrompt",
-            flag(s, "minimalShellPrompt", true),
-            "Minimal Shell Prompt",
-            "Replace your shell prompt in terminal sessions so each command reads as a heading. Turn off to keep your own prompt exactly as your shell renders it",
-            None,
-        ))
-        .child(switch_row(
-            s,
-            "enableHoverPreview",
-            flag(s, "enableHoverPreview", false),
-            "Hover Preview",
-            "Preview sessions by hovering over them in the sidebar",
-            None,
-        ));
-    rows = rows.child_if(cli_row(s));
-    rows = rows.child(switch_row(
+            on,
+            set(default_act("startAtLogin", !on)),
+            false,
+            "Open at login",
+        );
+        card_row(s, None, "Open at login", Some(tip::LOGIN), t)
+    });
+    let t = toggle(
         s,
-        "showHeadlessAgents",
-        headless,
-        "Show Headless Agents",
-        "Display background agent sessions above the session grid",
-        None,
-    ));
-    if headless {
-        rows = rows.child(select_row(
-            s,
-            "headlessRetentionMinutes",
-            "Completed Agent Retention",
-            "How long to show completed headless agents before auto-hiding",
-        ));
-    }
-    rows = rows.child(select_row(
-        s,
-        "headlessStepTimeoutMinutes",
-        "Workflow Step Timeout",
-        "How long a headless workflow step may run before its agent is killed and the step fails. Individual steps can override this.",
-    ));
+        "reopenSessions",
+        reopen,
+        set(default_act("reopenSessions", !reopen)),
+        false,
+        "Reopen sessions",
+    );
+    let startup: Vec<El> = login
+        .into_iter()
+        .chain([card_row(s, None, "Reopen sessions", Some(tip::REOPEN), t)])
+        .collect();
     div()
         .col()
-        .child(header(
-            "General",
-            "Application preferences and defaults",
-            None,
-        ))
-        .child(rows)
+        .child(header("General", "", None))
+        .child(section("Startup"))
+        .child(card(startup))
+        .child(section("New sessions"))
+        .child(card(vec![
+            card_row(s, None, "Agent", Some(tip::AGENT), agent_chip(s)),
+            card_row(s, None, "Shell", Some(tip::SHELL), shell_picker(s)),
+        ]))
+}
+
+/// The agent new sessions start with: the stored one, else the first.
+fn default_agent<'a>(s: &Screen<'a>) -> &'a str {
+    defaults(s)
+        .and_then(|d| d.get("defaultAgent"))
+        .and_then(Value::as_str)
+        .unwrap_or(s.store.agents.default_key())
+}
+
+/// The Agent row's chip: the default agent's mark and full name.
+fn agent_chip(s: &Screen<'_>) -> El {
+    let key = default_agent(s);
+    let name = s.store.agents.get(key).map_or(key, |a| a.name.as_str());
+    let open =
+        s.st.menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::AgentPicker);
+    let id = s.acts.on("agent-chip", Act::Open(MenuKind::AgentPicker));
+    let chip = chip(s, id, name, open)
+        .pl(6.0)
+        .child(agent_icon(s, key, 18.0))
+        .child(
+            text(name, 13.0, c(look::GRAY_200))
+                .line_height(18.0)
+                .silent(),
+        )
+        .child(chevron(open));
+    tooltip(s.ui, chip, id, tip::AGENT, None)
+}
+
+/// The field the agent picker searches in.
+pub const AGENT_SEARCH: Id = Id(0x6167_656e_7473_7263);
+
+/// The agent picker: search, the agents on this machine, the ones that can
+/// be added, and more from the catalog.
+pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
+    use crate::plugins::{Kind, Source};
+    let query = s.ui.edit_text(AGENT_SEARCH).trim().to_lowercase();
+    let hit = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
+    let chosen = default_agent(s);
+    let on_machine = |key: &str| {
+        s.st.installed
+            .as_ref()
+            .is_none_or(|l| l.iter().any(|k| k == key))
+    };
+    let heading = |label: &str, tip_text: &str| {
+        let id = Id::new("agent-section").child(label);
+        let t = text(label.to_uppercase(), 11.0, c(look::GRAY_500))
+            .tracking(0.06)
+            .line_height(14.0)
+            .id(id)
+            .sense(Sense::HOVER)
+            .role(Role::Heading, label);
+        div()
+            .px(10.0)
+            .pt(8.0)
+            .pb(4.0)
+            .child(tooltip(s.ui, t, id, tip_text, None))
+    };
+    let mut installed = Vec::new();
+    let mut available = Vec::new();
+    for a in &s.store.agents {
+        if !hit(&a.name) {
+            continue;
+        }
+        if on_machine(&a.key) {
+            let id = s.acts.on(
+                "agent-option",
+                set(default_act("defaultAgent", format!("\"{}\"", a.key))),
+            );
+            let on = a.key == chosen;
+            let lit = s.ui.hover(id).max(if on { 1.0 } else { 0.0 });
+            let mut r = div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(10.0)
+                .px(10.0)
+                .py(6.0)
+                .rounded(4.0)
+                .bg(white(0.0).mix(white(0.08), lit))
+                .role(Role::ListBoxOption, a.name.as_str())
+                .selected(on)
+                .child(agent_icon(s, &a.key, 20.0))
+                .child(
+                    div().grow().min_w0().child(
+                        text(&a.name, 13.0, c(look::GRAY_200))
+                            .line_height(18.0)
+                            .truncate()
+                            .silent(),
+                    ),
+                );
+            if on {
+                r = r.child(
+                    text("Default", 11.0, c(look::GRAY_500))
+                        .line_height(14.0)
+                        .silent(),
+                );
+            }
+            installed.push(r);
+        } else {
+            available.push(available_row(
+                s,
+                &a.key,
+                Some(&a.key),
+                &a.name,
+                "Set up",
+                tip::SET_UP,
+                set(SetAct::Open(settings::Category::Agents)),
+            ));
+        }
+    }
+    for l in &s.st.plugins.listings {
+        let agent = l.kind == Kind::Extension
+            && l.source == Source::Catalog
+            && l.id.starts_with(AGENT_EXTENSIONS);
+        if agent && hit(&l.name) {
+            let act = set(SetAct::Browse("agent".into(), Some(l.key.clone())));
+            available.push(available_row(
+                s,
+                &l.key,
+                None,
+                &l.name,
+                "Install",
+                tip::INSTALL,
+                act,
+            ));
+        }
+    }
+    let mut list = div().col().p(6.0).role(Role::ListBox, "Agents");
+    if installed.is_empty() && available.is_empty() {
+        list = list.child(
+            text("No agents match", 12.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .px(10.0)
+                .py(16.0),
+        );
+    }
+    if !installed.is_empty() {
+        list = list
+            .child(heading("Installed", tip::INSTALLED))
+            .children(installed);
+    }
+    if !available.is_empty() {
+        list = list
+            .child(heading("Available", tip::AVAILABLE))
+            .children(available);
+    }
+    let focus = if s.ui.focused(AGENT_SEARCH) { 1.0 } else { 0.0 };
+    let style = TextStyle {
+        line_height: 16.0,
+        ..TextStyle::ui(12.0)
+    };
+    let search = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .pl(10.0)
+        .pr(8.0)
+        .py(6.0)
+        .rounded(4.0)
+        .bg(white(0.05))
+        .border(1.0, white(0.1).mix(white(0.2), focus))
+        .frames(AGENT_SEARCH)
+        .child(glyph_icon(glyph::SEARCH, 12.0, c(look::GRAY_500)))
+        .child(
+            field(
+                AGENT_SEARCH,
+                "Search agents",
+                "Search agents",
+                style,
+                look::GRAY_200,
+            )
+            .grow()
+            .min_w0(),
+        );
+    let more_id = s
+        .acts
+        .on("more-agents", set(SetAct::Browse("agent".into(), None)));
+    let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
+    let more = div()
+        .id(more_id)
+        .on(Action::Click)
+        .role(Role::Link, "Get more agents")
+        .ring(2.0)
+        .child(
+            text("Get more agents\u{2026}", 12.0, more_ink)
+                .line_height(16.0)
+                .silent(),
+        );
+    crate::ui::widgets::popover("Agents")
+        .w(320.0)
+        .child(div().p(10.0).border_bottom(1.0, white(0.06)).child(search))
+        .child(
+            div()
+                .id(Id::new("agent-list"))
+                .max_h(320.0)
+                .scroll_y()
+                .child(list),
+        )
+        .child(
+            div()
+                .px(12.0)
+                .py(8.0)
+                .border_top(1.0, white(0.06))
+                .child(tooltip(s.ui, more, more_id, tip::MORE_AGENTS, None)),
+        )
+}
+
+/// The catalog's agent adapters are extensions under this id.
+const AGENT_EXTENSIONS: &str = "vorn.agents.";
+
+/// An agent that can be added: its mark (a known one's, else a blank),
+/// faded name, and the button that adds it.
+fn available_row(
+    s: &Screen<'_>,
+    place: &str,
+    agent: Option<&str>,
+    name: &str,
+    label: &str,
+    tip_text: &str,
+    act: Act,
+) -> El {
+    let id = s.acts.on(&format!("agent-add:{place}"), act);
+    let mark = agent.map_or_else(
+        || div().size(20.0, 20.0).rounded(4.0).bg(white(0.08)),
+        |k| agent_icon(s, k, 20.0),
+    );
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .px(10.0)
+        .py(3.0)
+        .rounded(4.0)
+        .bg(white(0.06).mix(white(0.12), s.ui.hover(id)))
+        .role(Role::Button, format!("{label} {name}"))
+        .ring(4.0)
+        .child(
+            text(label, 11.0, c(look::GRAY_200))
+                .line_height(14.0)
+                .silent(),
+        );
+    div()
+        .row()
+        .items_center()
+        .gap(10.0)
+        .px(10.0)
+        .py(6.0)
+        .child(div().opacity(0.6).child(mark))
+        .child(
+            div().grow().min_w0().child(
+                text(name, 13.0, c(look::GRAY_400))
+                    .line_height(18.0)
+                    .truncate()
+                    .silent(),
+            ),
+        )
+        .child(tooltip(s.ui, b, id, tip_text, None))
 }
 
 fn tone_dot(t: Tone) -> Rgba {
@@ -2510,7 +2563,8 @@ pub(super) fn about(s: &Screen<'_>) -> El {
         );
     }
     col = col.child(status);
-    col
+    // The command-line tool has no place in General's two cards.
+    col.child_if(cli_row(s).map(|r| div().mt(24.0).child(r)))
 }
 
 /// `ConnectorIcon`: a built-in connector's mark, else the external link.

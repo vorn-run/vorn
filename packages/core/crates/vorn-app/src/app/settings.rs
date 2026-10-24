@@ -37,8 +37,8 @@ impl App {
         Ok(())
     }
 
-    /// `shot --open NAME`: an Appearance popover opened from its control, as
-    /// a click on it would; `theme-picker` and `theme-info` use the first
+    /// `shot --open NAME`: an Appearance or General popover opened from its
+    /// control, as a click on it would; `theme-picker` and `theme-info` use the first
     /// theme row. `extension:ID` selects that extension's page, and fails
     /// until vornd has listed it.
     pub fn shot_open(&mut self, ui: &mut Ui, name: &str) -> Result<(), String> {
@@ -72,9 +72,11 @@ impl App {
                 ("theme-info", MenuKind::ThemeInfo(id))
             }
             "font-picker" => ("font-chip", MenuKind::FontPicker),
+            "agent-picker" => ("agent-chip", MenuKind::AgentPicker),
+            "shell-picker" => ("shell-picker", MenuKind::SetShell),
             _ => {
                 return Err(format!(
-                    "--open {name:?}: theme-picker, theme-info, font-picker or extension:ID"
+                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker or extension:ID"
                 ))
             }
         };
@@ -325,14 +327,14 @@ impl App {
                 let on = &mut self.st.settings.theme_filter;
                 *on = (*on != Some(f)).then_some(f);
             }
-            SetAct::MoreThemes => {
+            SetAct::Browse(query, listing) => {
                 self.open_settings(Category::Connectors);
                 ui.set_focus(None);
                 let p = &mut self.st.plugins;
                 p.tab = crate::plugins::Tab::Browse;
                 p.kind = Some(crate::plugins::Kind::Extension);
-                "theme".clone_into(&mut p.query);
-                p.selected = None;
+                p.query = query;
+                p.selected = listing;
                 p.adding = None;
             }
             SetAct::TestSound => crate::system::bell(),

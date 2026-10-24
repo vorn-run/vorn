@@ -10,6 +10,7 @@ mod sheet;
 
 use serde_json::Value;
 
+pub(in crate::screen) use detail::choice_items;
 pub(in crate::screen) use sheet::dialog;
 
 use super::settings::header;

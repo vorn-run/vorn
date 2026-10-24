@@ -158,46 +158,41 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
             .then_some(())
     });
 
-    // General: a switch, a select from its menu, and the shell's typed path.
+    // General: a switch, the agent picker, and the shell's typed path.
     open(&mut shot, &mut app, Category::General);
     shot.until(&mut app, "the shells", |a, _| {
         a.st.settings.shells.as_ref().map(|_| ())
     });
     shot.save(&mut app, "set-general");
-    let hover = app
+    let reopen = app
         .store
         .config
-        .pointer("/defaults/enableHoverPreview")
+        .pointer("/defaults/reopenSessions")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let act = SetAct::Default("enableHoverPreview".into(), (!hover).to_string());
-    shot.click(&mut app, control("enableHoverPreview", Act::Set(act)));
-    saved(&mut app, "the hover preview switch", |c| {
-        c.pointer("/defaults/enableHoverPreview")
+        .unwrap_or(true);
+    let act = SetAct::Default("reopenSessions".into(), (!reopen).to_string());
+    shot.click(&mut app, control("reopenSessions", Act::Set(act)));
+    saved(&mut app, "the reopen switch", |c| {
+        c.pointer("/defaults/reopenSessions")
             .and_then(Value::as_bool)
-            == Some(!hover)
+            == Some(!reopen)
     });
-    let sel = control(
-        "select",
-        Act::Open(MenuKind::SetSelect("headlessStepTimeoutMinutes".into())),
-    );
-    shot.reveal(&mut app, CONTENT, sel);
-    shot.click(&mut app, sel);
-    let labels = app.menu_labels(&shot.ui);
+    let chip = control("agent-chip", Act::Open(MenuKind::AgentPicker));
+    shot.click(&mut app, chip);
     assert_eq!(
-        labels.last().map(String::as_str),
-        Some("No limit"),
-        "{labels:?}"
+        app.st.menu.as_ref().map(|m| m.kind.clone()),
+        Some(MenuKind::AgentPicker)
     );
-    let i = labels.iter().position(|l| l == "2 hours").expect("2 hours");
-    shot.click(
-        &mut app,
-        vorn_app::ui::item_id(vorn_app::screen::menus::MENU, i),
-    );
-    saved(&mut app, "the step timeout", |c| {
-        c.pointer("/defaults/headlessStepTimeoutMinutes")
-            .and_then(Value::as_i64)
-            == Some(120)
+    shot.save(&mut app, "set-agent-picker");
+    let other = (&app.store.agents)
+        .into_iter()
+        .map(|a| a.key.clone())
+        .nth(1)
+        .expect("a second agent");
+    let pick = SetAct::Default("defaultAgent".into(), format!("\"{other}\""));
+    shot.click(&mut app, control("agent-option", Act::Set(pick)));
+    saved(&mut app, "the default agent", |c| {
+        c.pointer("/defaults/defaultAgent") == Some(&json!(other))
     });
     let picker = control("shell-picker", Act::Open(MenuKind::SetShell));
     shot.reveal(&mut app, CONTENT, picker);

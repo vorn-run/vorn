@@ -160,18 +160,6 @@ impl Store {
             let strings = keys.iter().filter(|k| k.is_string()).cloned().collect();
             out.insert("envPassthrough".into(), Value::Array(strings));
         }
-        out.insert(
-            "domBlockRendering".into(),
-            or("domBlockRendering", Value::Bool(true)),
-        );
-        out.insert(
-            "minimalShellPrompt".into(),
-            or("minimalShellPrompt", Value::Bool(true)),
-        );
-        out.insert(
-            "keepSessionsRunning".into(),
-            or("keepSessionsRunning", Value::Bool(true)),
-        );
         set_if_present(
             &mut out,
             &[
@@ -185,13 +173,9 @@ impl Store {
                 "mobileAccessEnabled",
                 "serverPort",
                 "networkAccessEnabled",
-                "showHeadlessAgents",
-                "headlessRetentionMinutes",
                 "hasSeededDevServerWorkflow",
                 "hasSeededDefaultTaskWorkflow",
                 "updateAutoDownload",
-                "headlessStepTimeoutMinutes",
-                "enableHoverPreview",
                 "worktreeRetention",
                 "tuiDrawing",
                 "colorScheme",
@@ -204,6 +188,15 @@ impl Store {
             ],
         );
         Ok(out)
+    }
+
+    /// Deletes the `defaults` rows `keys` names: settings Vorn no longer keeps there.
+    pub fn drop_defaults(&self, keys: &[&str]) -> Result<()> {
+        for key in keys {
+            self.conn()
+                .execute("DELETE FROM defaults WHERE key = ?", [key])?;
+        }
+        Ok(())
     }
 
     /// Writes a whole `AppConfig` snapshot in one transaction.
@@ -433,9 +426,6 @@ pub const VIEWER_SETTING_KEYS: &[&str] = &[
     "rowHeight",
     "theme",
     "notifications",
-    "domBlockRendering",
-    "enableHoverPreview",
-    "showHeadlessAgents",
     "reopenSessions",
     "hasSeenOnboarding",
 ];
@@ -676,10 +666,7 @@ mod tests {
                 "fontSize": 13,
                 "theme": "dark",
                 "reopenSessions": true,
-                "startAtLogin": false,
-                "domBlockRendering": true,
-                "minimalShellPrompt": true,
-                "keepSessionsRunning": true
+                "startAtLogin": false
             })
         );
         assert_eq!(

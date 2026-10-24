@@ -219,8 +219,10 @@ pub enum MenuKind {
     WfIcon,
     /// The settings shell picker's list.
     SetShell,
-    /// A settings `<select>`, by the default it writes.
-    SetSelect(String),
+    /// Settings › General's agent picker.
+    AgentPicker,
+    /// An extension page's choice of many options: extension id, preference id.
+    ExtChoice(String, String),
     /// Settings › Appearance's theme picker, for a theme row of that scheme.
     ThemePicker(vorn_theme::Appearance),
     /// A theme's terminal palette, publisher and version, by theme id.

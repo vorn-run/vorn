@@ -40,7 +40,8 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::TaskProject(_) => 180.0,
         MenuKind::SetShell => 288.0,
         MenuKind::ExtInstall => 240.0,
-        MenuKind::SetSelect(_) => 128.0,
+        MenuKind::AgentPicker => 320.0,
+        MenuKind::ExtChoice(..) => 180.0,
         MenuKind::OpenIn(_) => 180.0,
         MenuKind::Branch(_) => 220.0,
         MenuKind::ThemePicker(_) => 430.0,
@@ -108,13 +109,13 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
         MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
-        MenuKind::SetSelect(key) => super::settings::select_items(s, key),
         MenuKind::Branch(_)
         | MenuKind::OpenIn(_)
         | MenuKind::LaunchModel
         | MenuKind::ThemePicker(_)
         | MenuKind::ThemeInfo(_)
-        | MenuKind::FontPicker => Vec::new(),
+        | MenuKind::FontPicker
+        | MenuKind::AgentPicker => Vec::new(),
         MenuKind::RunStatus
         | MenuKind::WorkflowFilter
         | MenuKind::WorkflowItem(_)
@@ -127,6 +128,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::TaskProject(f) => super::tasks::project_items(s, *f),
         MenuKind::TaskAgent(f) => super::tasks::agent_items(s, *f),
         MenuKind::ExtInstall => super::plugins::install_items(),
+        MenuKind::ExtChoice(ext, key) => super::plugins::choice_items(s, ext, key),
     }
 }
 

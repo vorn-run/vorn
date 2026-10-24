@@ -120,25 +120,24 @@ fn jumps_between_commands_by_their_prompts() {
         return;
     };
     let mut app = connect(&v);
-    // Blocks off: the terminal shows its own history, which the jump scrolls.
-    add_project(
-        &mut app,
-        &v,
-        "demo",
-        json!({ "shell": shell, "domBlockRendering": false }),
+    // Shell blocks off: the terminal shows its own history, which the jump scrolls.
+    let off = app.rpc().call(
+        "extension:remove",
+        json!({ "id": vorn_app::prompt::BLOCKS }),
     );
+    assert!(off.is_ok(), "{off:?}");
+    add_project(&mut app, &v, "demo", json!({ "shell": shell }));
     let mut shot = Shot::new();
     shot.send(&mut app, key("Backquote", mods::CTRL, Some("`")));
     let id = wait_for("the shell's card", || {
         app.pump();
         app.st.selected.clone()
     });
+    shot.until(&mut app, "Shell blocks off", |app, _| {
+        (!vorn_app::prompt::blocks_on(&app.st.points)).then_some(())
+    });
     shot.until(&mut app, "the shell's first prompt", |app, _| {
-        app.st
-            .shells
-            .get(&id)
-            .is_some_and(|sh| sh.integrated())
-            .then_some(())
+        (!app.grid()?.lines(&id)?.prompts.is_empty()).then_some(())
     });
     // The card sizes the terminal once it is painted; a resize later pulls
     // history onto the screen and moves every line the jump counts from.

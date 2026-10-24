@@ -112,6 +112,21 @@ impl Preferences {
         Ok(json!({ "id": key, "value": value }))
     }
 
+    /// Keeps each of `values` for `extension` that the person has not set:
+    /// what was chosen here wins over what is moved in.
+    pub fn adopt(&mut self, extension: &str, values: Map<String, Value>) {
+        let kept = self.values.entry(extension.to_owned()).or_default();
+        let before = kept.len();
+        for (key, value) in values {
+            kept.entry(key).or_insert(value);
+        }
+        if kept.is_empty() {
+            self.values.remove(extension);
+        } else if kept.len() != before {
+            self.save();
+        }
+    }
+
     /// Forgets what the person chose for `extension`, as it is removed.
     pub fn forget(&mut self, extension: &str) {
         if self.values.remove(extension).is_some() {
@@ -208,5 +223,24 @@ options = [{ id = "new", title = "Newest" }, { id = "old", title = "Oldest" }]
             .or_default()
             .insert("sort".into(), json!("gone"));
         assert_eq!(p.resolved(&manifest())["sort"], "new");
+    }
+
+    #[test]
+    fn adopting_moved_values_keeps_what_the_person_already_chose() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("p.json");
+        let m = manifest();
+        let mut p = Preferences::load(Some(file.clone()));
+        p.set(&m, "sort", json!("new")).unwrap();
+        let mut moved = Map::new();
+        moved.insert("pane".into(), json!(false));
+        moved.insert("sort".into(), json!("old"));
+        p.adopt("notes", moved);
+        assert_eq!(
+            Value::Object(Preferences::load(Some(file)).resolved(&m)),
+            json!({ "pane": false, "sort": "new" })
+        );
+        p.adopt("other", Map::new());
+        assert!(!p.values.contains_key("other"));
     }
 }

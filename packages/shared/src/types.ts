@@ -1040,7 +1040,7 @@ export interface LaunchAgentConfig {
    * How long a headless step may run before the engine gives up on it, in
    * milliseconds. On expiry the agent is killed, the node is marked `error`,
    * and the run finishes — so one agent that never exits can't hold its run
-   * open forever. Unset falls back to `defaults.headlessStepTimeoutMinutes`.
+   * open forever. Unset falls back to the Workflows extension's Step time limit.
    */
   timeoutMs?: number
 }
@@ -1518,14 +1518,6 @@ export interface AppConfig {
      * takes another and remembers that one instead.
      */
     serverPort?: number
-    showHeadlessAgents?: boolean
-    headlessRetentionMinutes?: number
-    /**
-     * Ceiling on a headless workflow step, in minutes, for steps that don't set
-     * their own timeout. Guards against an agent that starts but never exits —
-     * without it the step waits forever and its run never closes. 0 disables it.
-     */
-    headlessStepTimeoutMinutes?: number
     /**
      * Environment variable names to forward to agent sessions and workflow
      * script nodes even though they match a sensitive prefix. Opt-in and
@@ -1540,39 +1532,6 @@ export interface AppConfig {
      * knowing on POSIX where the two really are different variables.
      */
     envPassthrough?: string[]
-    enableHoverPreview?: boolean
-    /**
-     * Shell sessions only. Replaces the shell's own prompt with a single
-     * glyph, so each command reads as a heading above its output instead of
-     * repeating your username, host and path on every line. Defaults to on;
-     * turn it off to keep your own prompt exactly as your shell renders it.
-     */
-    minimalShellPrompt?: boolean
-    /**
-     * Draw finished commands as real elements instead of leaving them in the
-     * terminal grid. The live command stays in the terminal; everything
-     * already finished becomes a container that can have padding, a boundary
-     * and its own copy button without anything being printed into the shell.
-     */
-    domBlockRendering?: boolean
-    /**
-     * Whether the server keeps running after the last window closes.
-     *
-     * The agents are the point. A PTY belongs to the server process, so while
-     * the server was a child of the app, quitting killed every session and
-     * reopening could only relaunch them from their transcripts — losing the
-     * process, the turn in flight, and any prompt waiting for an answer.
-     * With this on, quitting closes a window and nothing else; the next launch
-     * reconnects to the sessions that were already running.
-     *
-     * The background server shuts itself down once nothing is left running,
-     * so this does not leave a process behind for ever.
-     *
-     * Defaults to on. Turning it off restores the old behaviour exactly, and
-     * "Stop Sessions and Server" in the File menu does it once without changing
-     * the setting.
-     */
-    keepSessionsRunning?: boolean
     /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on

@@ -7,7 +7,7 @@
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
 //!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
 //!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
-//!               [--open theme-picker|theme-info|font-picker|extension:ID]
+//!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|extension:ID]
 //!               [--click X,Y]... [--type TEXT] [--hover X,Y]
 //!               [--reduced-transparency on] [--tui-drawing cells|pixels]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]

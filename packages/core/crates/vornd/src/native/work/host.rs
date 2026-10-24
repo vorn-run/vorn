@@ -144,15 +144,22 @@ pub fn without_definition(run: &WorkflowExecution) -> Value {
 
 impl Host for VorndHost {
     /// What the engine reads of the configuration: projects, tasks,
-    /// workflows and the stored defaults. A store beside the server has none
-    /// of the app's fallbacks, so `loadConfig` is not read whole.
+    /// workflows, the stored defaults and Workflows' Step time limit. A store
+    /// beside the server has none of the app's fallbacks, so `loadConfig` is
+    /// not read whole.
     async fn config(&self) -> Option<Value> {
+        let limit = self.native.upgrade().and_then(|n| {
+            n.extensions()?
+                .router()
+                .preference(vorn_workflows::ID, vorn_workflows::STEP_TIME_LIMIT)
+        });
         self.db
-            .run(|store| {
+            .run(move |store| {
                 let config = json!({
                     "projects": store.call("dbListProjects", json!([])).ok()?,
                     "workflows": store.call("dbListWorkflows", json!([])).ok()?,
                     "defaults": store.stored_defaults().ok()?,
+                    "preferences": { vorn_workflows::STEP_TIME_LIMIT: limit },
                 });
                 Some(vorn_work::js_numbers(config))
             })

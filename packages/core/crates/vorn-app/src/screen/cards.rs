@@ -622,12 +622,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
 
 /// The shell's blocks when it shows them.
 pub fn split<'a>(s: &Screen<'a>, session: &Session) -> Option<&'a Shell> {
-    blocks::split(
-        &s.store.config,
-        &s.st.points,
-        session,
-        s.st.shells.get(&session.info.id),
-    )
+    blocks::split(&s.st.points, session, s.st.shells.get(&session.info.id))
 }
 
 /// The terminal's split: the finished commands, the running one, then the

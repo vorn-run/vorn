@@ -693,15 +693,16 @@ impl Agent {
         ))
     }
 
-    /// The step's own ceiling, else the configured default; 0 disables it.
+    /// The step's own ceiling, else Workflows' Step time limit; 0 disables it.
     fn step_timeout_ms(&self, config: &Value, cfg: &Value) -> u64 {
         if let Some(ms) = config.get("timeoutMs").and_then(Value::as_f64) {
             return ms.max(0.0) as u64;
         }
         let minutes = cfg
-            .get("defaults")
-            .and_then(|d| d.get("headlessStepTimeoutMinutes"))
-            .and_then(Value::as_f64)
+            .get("preferences")
+            .and_then(|p| p.get(crate::STEP_TIME_LIMIT))
+            .and_then(Value::as_str)
+            .and_then(crate::minutes)
             .unwrap_or(DEFAULT_STEP_TIMEOUT_MINUTES);
         if minutes > 0.0 {
             (minutes * 60_000.0) as u64
@@ -723,5 +724,24 @@ async fn take_task<H: Host>(cx: &StepCx<'_, H>, task: &str, session: &str, agent
 async fn reopen_task<H: Host>(cx: &StepCx<'_, H>, task: &str) {
     if let Err(err) = cx.host().api("task.handBack", json!({ "id": task })).await {
         warn!(%task, %err, "a step could not hand its task back");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_step_runs_for_its_own_limit_else_the_workflows_preference() {
+        let cfg = |limit: &str| json!({ "preferences": { crate::STEP_TIME_LIMIT: limit } });
+        let none = json!({});
+        assert_eq!(
+            Agent.step_timeout_ms(&none, &Value::Null),
+            (DEFAULT_STEP_TIMEOUT_MINUTES * 60_000.0) as u64
+        );
+        assert_eq!(Agent.step_timeout_ms(&none, &cfg("m15")), 15 * 60_000);
+        assert_eq!(Agent.step_timeout_ms(&none, &cfg("m0")), 0);
+        let own = json!({ "timeoutMs": 5_000 });
+        assert_eq!(Agent.step_timeout_ms(&own, &cfg("m15")), 5_000);
     }
 }

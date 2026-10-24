@@ -7,8 +7,8 @@ mod pages;
 
 pub use agents::agent_field_id;
 pub use pages::theme_tile_id;
-pub(crate) use pages::{font_picker, select_items, shell_panel, theme_info, theme_picker};
-pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
+pub(crate) use pages::{agent_picker, font_picker, shell_panel, theme_info, theme_picker};
+pub use pages::{rotate_id, AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
 
 use super::{c, white, Screen};
 use crate::act::Act;

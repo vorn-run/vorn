@@ -213,6 +213,7 @@ impl Screen<'_> {
                 crate::state::MenuKind::GroupIcon(g) => sidebar::group_icon_picker(self, g),
                 crate::state::MenuKind::Workspace => sidebar::workspace_panel(self),
                 crate::state::MenuKind::SetShell => settings::shell_panel(self),
+                crate::state::MenuKind::AgentPicker => settings::agent_picker(self),
                 crate::state::MenuKind::ThemePicker(look) => settings::theme_picker(self, *look),
                 crate::state::MenuKind::ThemeInfo(ref id) => settings::theme_info(self, id),
                 crate::state::MenuKind::FontPicker => settings::font_picker(self),

@@ -673,7 +673,7 @@ impl App {
     }
 
     /// Polls `headless:list` every 5 s, drops exited sessions past
-    /// `headlessRetentionMinutes` every 30 s, and folds the pills once
+    /// Workflows' `headlessRetentionMinutes` every 30 s, and folds the pills once
     /// their popover closes.
     fn headless_tick(&mut self, ui: &mut Ui, now: web_time::Instant) {
         if now >= self.headless_polled + crate::headless::POLL {
@@ -682,12 +682,11 @@ impl App {
         }
         if now >= self.headless_pruned + crate::headless::PRUNE {
             self.headless_pruned = now;
-            let minutes = self
-                .store
-                .config
-                .pointer("/defaults/headlessRetentionMinutes")
-                .and_then(Value::as_f64)
-                .unwrap_or(1.0);
+            let minutes = crate::workflows::minutes(&crate::workflows::preference(
+                &self.st,
+                "headlessRetentionMinutes",
+            ))
+            .unwrap_or(1.0);
             self.st.headless.prune(minutes * 60_000.0, now_ms());
         }
         ui.wake_at(self.headless_polled + crate::headless::POLL);
@@ -1485,13 +1484,7 @@ impl App {
     fn jump_to_command(&mut self, ui: &mut Ui, up: bool) {
         let Some(id) = self.current() else { return };
         let as_blocks = self.store.session(&id).is_some_and(|s| {
-            crate::log::split(
-                &self.store.config,
-                &self.st.points,
-                s,
-                self.st.shells.get(&id),
-            )
-            .is_some()
+            crate::log::split(&self.st.points, s, self.st.shells.get(&id)).is_some()
         });
         if as_blocks {
             return;
@@ -1590,6 +1583,9 @@ impl App {
                         | MenuKind::ThemePicker(_)
                         | MenuKind::ThemeInfo(_)
                         | MenuKind::FontPicker
+                        | MenuKind::AgentPicker
+                        | MenuKind::SetShell
+                        | MenuKind::ExtChoice(..)
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
@@ -1642,6 +1638,13 @@ impl App {
                 self.st.settings.theme_filter = Some(crate::appearance::ThemeFilter::of(*look));
                 ui.set_edit_text(crate::screen::settings::THEME_SEARCH, "");
             }
+            MenuKind::AgentPicker => {
+                ui.set_edit_text(crate::screen::settings::AGENT_SEARCH, "");
+                // Its Available section lists the catalog's agents.
+                if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+                    self.run_plug(ui, crate::plugins::PlugAct::Refresh);
+                }
+            }
             MenuKind::FontPicker => {
                 if self.st.settings.fonts.is_none() {
                     self.st.settings.fonts = Some(ui.text.monospace_families());
@@ -1680,6 +1683,14 @@ impl App {
             .is_some_and(|m| matches!(m.kind, MenuKind::ThemePicker(_)))
         {
             ui.set_focus(Some(crate::screen::settings::THEME_SEARCH));
+        }
+        if self
+            .st
+            .menu
+            .as_ref()
+            .is_some_and(|m| m.kind == MenuKind::AgentPicker)
+        {
+            ui.set_focus(Some(crate::screen::settings::AGENT_SEARCH));
         }
     }
 
@@ -3632,13 +3643,8 @@ impl App {
                 continue;
             };
             let sid = session.info.id.as_str();
-            let split = crate::log::split(
-                &self.store.config,
-                &self.st.points,
-                session,
-                self.st.shells.get(sid),
-            )
-            .is_some();
+            let split =
+                crate::log::split(&self.st.points, session, self.st.shells.get(sid)).is_some();
             if !split {
                 if let Some(g) = &self.grid {
                     if !session.ended() {

@@ -12,7 +12,9 @@ use crate::plugins::{
 };
 use crate::points::PointAct;
 use crate::runs::s as sv;
+use crate::screen::menus::Item;
 use crate::screen::{ico, white, Screen};
+use crate::state::MenuKind;
 use crate::ui::theme::color as k;
 use crate::ui::{div, text, Action, El, Role};
 
@@ -176,6 +178,7 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
         }),
     );
     let busy = s.st.points.switching.is_some();
+    let toggle = crate::ui::widgets::toggle(s.ui, switch, name, on, busy).shrink0();
     let col = extension_page(
         s,
         Page {
@@ -187,7 +190,10 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
             declared: strings(b.pointer("/declares/uses")),
             hosts: strings(b.pointer("/declares/network")),
             service: b.get("service"),
-            switch: Some(crate::ui::widgets::toggle(s.ui, switch, name, on, busy).shrink0()),
+            switch: Some(match sv(b, "description") {
+                Some(d) => crate::ui::tooltip(s.ui, toggle, switch, d, None),
+                None => toggle,
+            }),
             preferences: (id, b.get("preferences")),
         },
     );
@@ -627,7 +633,46 @@ pub(super) fn origin_label(origin: &str) -> &str {
     host.split('/').next().unwrap_or(host)
 }
 
-/// One preference: a card row with its title beside a switch or a segmented choice.
+/// The most options a choice shows side by side; more open from a chip.
+const MAX_SEGMENTS: usize = 3;
+
+/// A choice preference's options: (id, title).
+fn options(p: &Value) -> impl Iterator<Item = (&str, &str)> {
+    p.get("options")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|o| Some((sv(o, "id")?, sv(o, "title").unwrap_or_default())))
+}
+
+/// The menu of extension `ext`'s choice preference `key`.
+pub(in crate::screen) fn choice_items(s: &Screen<'_>, ext: &str, key: &str) -> Vec<Item> {
+    let lists = [&s.st.points.builtins, &s.st.plugins.packs];
+    let Some(p) = lists
+        .iter()
+        .flat_map(|l| l.iter())
+        .filter(|e| sv(e, "id") == Some(ext))
+        .filter_map(|e| e.get("preferences").and_then(Value::as_array))
+        .flatten()
+        .find(|p| sv(p, "id") == Some(key))
+    else {
+        return Vec::new();
+    };
+    let chosen = p.get("value").and_then(Value::as_str);
+    options(p)
+        .map(|(id, label)| {
+            let act = Act::Point(PointAct::Preference {
+                id: ext.to_owned(),
+                key: key.to_owned(),
+                value: Value::from(id).to_string(),
+            });
+            Item::pick(label, chosen == Some(id), act)
+        })
+        .collect()
+}
+
+/// One preference: a card row with its title beside a switch, a segmented
+/// choice, or a chip that opens a long one.
 fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
     let key = sv(p, "id")?;
     let title = sv(p, "title").unwrap_or(key);
@@ -646,14 +691,37 @@ fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
             let id = s.acts.on(&place, act(Value::Bool(!on)));
             crate::ui::widgets::toggle(s.ui, id, title, on, false).shrink0()
         }
+        Some("choice") if options(p).count() > MAX_SEGMENTS => {
+            let kind = MenuKind::ExtChoice(ext.to_owned(), key.to_owned());
+            let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+            let chosen = value.and_then(Value::as_str);
+            let label = options(p)
+                .find(|(id, _)| Some(*id) == chosen)
+                .map_or("", |(_, l)| l);
+            let id = s.acts.on(&place, Act::Open(kind));
+            let lit = s.ui.hover(id).max(if open { 1.0 } else { 0.0 });
+            div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(8.0)
+                .h(28.0)
+                .pl(10.0)
+                .pr(8.0)
+                .shrink0()
+                .rounded(4.0)
+                .bg(white(0.04).mix(white(0.08), lit))
+                .border(1.0, white(0.08))
+                .role(Role::ComboBox, title)
+                .expanded(open)
+                .ring(R)
+                .child(text(label, 13.0, k::GRAY_200).line_height(18.0).silent())
+                .child(ico("chevron-down", 12.0, 2.0, k::GRAY_500))
+        }
         Some("choice") => {
             let chosen = value.and_then(Value::as_str);
-            let opts = p
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|o| Some((sv(o, "id")?, sv(o, "title").unwrap_or_default())))
+            let opts = options(p)
                 .map(|(id, label)| crate::screen::settings::Seg {
                     label,
                     icon: None,
