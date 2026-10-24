@@ -50,9 +50,20 @@ struct Page<'a> {
     declared: Vec<String>,
     hosts: Vec<String>,
     service: Option<&'a Value>,
-    switch: Option<El>,
+    /// The extension's own on/off, drawn as the first row of its settings.
+    switch: Option<Switch<'a>>,
     /// The extension's id and the preferences it declares, each with its value.
     preferences: (&'a str, Option<&'a Value>),
+}
+
+/// An extension's switch: whether it is on, what flipping it does, and the
+/// tooltip saying what it does.
+struct Switch<'a> {
+    mark: El,
+    on: bool,
+    act: Act,
+    busy: bool,
+    tip: Option<&'a str>,
 }
 
 fn strings(v: Option<&Value>) -> Vec<String> {
@@ -86,8 +97,7 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
             .items_start()
             .gap(12.0)
             .child(well(40.0, 6.0, white(0.05), page.mark))
-            .child(who)
-            .child_if(page.switch.map(|e| e.mt(4.0))),
+            .child(who),
     );
     if let Some(desc) = page.description.filter(|d| !d.is_empty()) {
         col = col.child(
@@ -98,11 +108,20 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
         );
     }
     let (id, prefs) = page.preferences;
-    let rows: Vec<El> = prefs
-        .and_then(Value::as_array)
+    let switch = page.switch.map(|w| {
+        let place = format!("ext-switch-{id}");
+        let toggle = crate::screen::settings::toggle(s, &place, w.on, w.act, w.busy, page.name);
+        crate::screen::settings::card_row(s, Some(w.mark), page.name, w.tip, toggle.shrink0())
+    });
+    let rows: Vec<El> = switch
         .into_iter()
-        .flatten()
-        .filter_map(|p| preference(s, id, p))
+        .chain(
+            prefs
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|p| preference(s, id, p)),
+        )
         .collect();
     if !rows.is_empty() {
         col = col.child(section(
@@ -170,15 +189,11 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
         sub.push_str(&format!(" \u{b7} v{v}"));
     }
     sub.push_str(" \u{b7} built in");
-    let switch = s.acts.on(
-        "ext-builtin-detail",
-        Act::Point(PointAct::Builtin {
-            id: id.to_owned(),
-            on: !on,
-        }),
-    );
+    let act = Act::Point(PointAct::Builtin {
+        id: id.to_owned(),
+        on: !on,
+    });
     let busy = s.st.points.switching.is_some();
-    let toggle = crate::ui::widgets::toggle(s.ui, switch, name, on, busy).shrink0();
     let col = extension_page(
         s,
         Page {
@@ -190,9 +205,12 @@ pub(super) fn builtin(s: &Screen<'_>, b: &Value) -> El {
             declared: strings(b.pointer("/declares/uses")),
             hosts: strings(b.pointer("/declares/network")),
             service: b.get("service"),
-            switch: Some(match sv(b, "description") {
-                Some(d) => crate::ui::tooltip(s.ui, toggle, switch, d, None),
-                None => toggle,
+            switch: Some(Switch {
+                mark: ico("puzzle", 15.0, 1.75, k::GRAY_400),
+                on,
+                act,
+                busy,
+                tip: sv(b, "description"),
             }),
             preferences: (id, b.get("preferences")),
         },
@@ -400,6 +418,23 @@ fn extension(s: &Screen<'_>, l: &Listing) -> El {
         }
     }
     let manifest = pack.or(l.catalog.as_ref());
+    let linked = pack.is_some_and(|p| p.get("linked") == Some(&Value::Bool(true)));
+    // Off uninstalls and on installs, as a built-in's switch turns it off and on.
+    let switch = match pack {
+        Some(_) if !linked => Some(PlugAct::Remove(l.id.clone())),
+        None if l.installable() => Some(PlugAct::Install(l.key.clone())),
+        _ => None,
+    }
+    .map(|plug| Switch {
+        mark: glyph(Some(l), &l.id, 15.0, k::GRAY_400),
+        on: pack.is_some(),
+        act: act(plug),
+        busy: s.st.plugins.busy(&l.id) || describe(&state).busy,
+        tip: manifest
+            .and_then(|m| sv(m, "description"))
+            .or(l.description.as_deref())
+            .filter(|d| !d.is_empty()),
+    });
     let col = extension_page(
         s,
         Page {
@@ -411,7 +446,7 @@ fn extension(s: &Screen<'_>, l: &Listing) -> El {
             declared: l.permissions.clone(),
             hosts: strings(manifest.and_then(|m| m.pointer("/declares/network"))),
             service: manifest.and_then(|m| m.get("service")),
-            switch: None,
+            switch,
             preferences: (&l.id, pack.and_then(|p| p.get("preferences"))),
         },
     );

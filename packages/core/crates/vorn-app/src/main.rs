@@ -250,6 +250,8 @@ fn shot(args: &Args) -> Result<(), String> {
     }
     if let Some(at) = args.get("hover") {
         let (x, y) = point(at)?;
+        // An open popover finishes growing in before the pointer lands on it.
+        std::thread::sleep(Duration::from_millis(300));
         app.frame(&mut ui, size);
         ui.pointer_move(x, y);
         app.events(&mut ui);

@@ -1513,7 +1513,9 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
     for l in &s.st.plugins.listings {
         let agent = l.kind == Kind::Extension
             && l.source == Source::Catalog
-            && l.id.starts_with(AGENT_EXTENSIONS);
+            && l.id
+                .strip_prefix(AGENT_EXTENSIONS)
+                .is_some_and(|k| s.store.agents.iter().all(|a| a.key != k));
         if agent && hit(&l.name) {
             let act = set(SetAct::Browse("agent".into(), Some(l.key.clone())));
             available.push(available_row(
@@ -1590,10 +1592,17 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
         );
     crate::ui::widgets::popover("Agents")
         .w(320.0)
-        .child(div().p(10.0).border_bottom(1.0, white(0.06)).child(search))
+        .child(
+            div()
+                .col()
+                .p(10.0)
+                .border_bottom(1.0, white(0.06))
+                .child(search),
+        )
         .child(
             div()
                 .id(Id::new("agent-list"))
+                .col()
                 .max_h(320.0)
                 .scroll_y()
                 .child(list),
