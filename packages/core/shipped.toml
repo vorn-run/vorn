@@ -3,7 +3,7 @@
 # and sha256; vornd's build embeds `<id>-<version>.vorn.tgz` from
 # $VORN_SHIPPED_DIR (else packages/core/shipped/), and scripts/shipped.mjs
 # fetches the packs vorn-run/extensions' CI built at `rev`.
-rev = "935b1f6cdba15f1211391dd5771faa2bb9fca034"
+rev = "b2f4a42afc40778afc3a9c5e8fba018a92110743"
 
 [[extension]]
 id = "vorn.worktrees"
@@ -76,4 +76,4 @@ sha256 = "a7d371c1cf3f52ecb6f51268b08ed2908228a902db52296110a47501d01c640d"
 id = "vorn.workflows"
 path = "workflows"
 version = "1.2.0"
-sha256 = "a5848b3f135873de6f1b1ea5cc1d905e7ec7a1a13c86abbda98a75c5db54f023"
+sha256 = "bfafbdb7056e52ebe13d30020b5c88dfd0a5199eacbc77359edfa1c2fb41d21b"
