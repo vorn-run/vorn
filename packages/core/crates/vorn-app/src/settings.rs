@@ -21,7 +21,6 @@ pub enum Category {
     /// Settings › Connections: opens the Connectors built-in's own page,
     /// [`CONNECTIONS_PAGE`].
     Connections,
-    Keys,
     Network,
     About,
 }
@@ -36,7 +35,6 @@ impl Category {
             "agents" => Category::Agents,
             "connectors" | "extensions" | "plugins" => Category::Connectors,
             "connections" => Category::Connections,
-            "keys" => Category::Keys,
             "network" => Category::Network,
             "about" => Category::About,
             _ => return None,
@@ -51,7 +49,6 @@ impl Category {
             Category::Agents => "Agents",
             Category::Connectors => "Extensions",
             Category::Connections => "Connections",
-            Category::Keys => "Keys",
             Category::Network => "Remote Access",
             Category::About => "About",
         }
@@ -73,10 +70,7 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
             Category::Notifications,
         ],
     ),
-    (
-        "CONNECTIONS",
-        &[Category::Agents, Category::Keys, Category::Network],
-    ),
+    ("CONNECTIONS", &[Category::Agents, Category::Network]),
 ];
 
 /// The EXTENSIONS group's own pages, before each extension's settings.
@@ -140,11 +134,6 @@ pub enum SetAct {
     KeepAgent,
     /// Typing in an agent's command, arguments or headless arguments.
     AgentText(String, AgentField),
-    // Keys.
-    TestKey(String),
-    Rotate(String, String),
-    SaveRotate(String, String),
-    CancelRotate(String),
     // About.
     /// End the older holder's terminals; the first press asks in the row.
     EndHolder(String),
@@ -364,95 +353,6 @@ pub fn update_cost(sessions: usize, turn_running: bool, survive: bool) -> Option
         (true, false) => " The turn in flight is cut short.",
     };
     Some(format!("{subject} {fate}.{turn}"))
-}
-
-/// One of `connection:listKeys`'s entries.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ConnKey {
-    pub connection: String,
-    pub name: String,
-    pub connector: String,
-    pub fields: Vec<KeyFieldInfo>,
-    pub usage: u64,
-}
-
-/// One field of a [`ConnKey`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeyFieldInfo {
-    pub key: String,
-    pub label: String,
-    pub readable: bool,
-    pub hint: Option<String>,
-    pub env: Option<Vec<String>>,
-}
-
-impl ConnKey {
-    pub fn from_value(v: &Value) -> Option<ConnKey> {
-        let s = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
-        Some(ConnKey {
-            connection: s(v, "connectionId")?,
-            name: s(v, "name").unwrap_or_default(),
-            connector: s(v, "connectorId").unwrap_or_default(),
-            fields: v
-                .get("fields")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|f| {
-                    Some(KeyFieldInfo {
-                        key: s(f, "key")?,
-                        label: s(f, "label").unwrap_or_default(),
-                        readable: f.get("readable").and_then(Value::as_bool).unwrap_or(true),
-                        hint: s(f, "hint"),
-                        env: f.get("envNames").and_then(Value::as_array).map(|a| {
-                            a.iter()
-                                .filter_map(|e| e.as_str().map(str::to_owned))
-                                .collect()
-                        }),
-                    })
-                })
-                .collect(),
-            usage: v.get("usageCount").and_then(Value::as_u64).unwrap_or(0),
-        })
-    }
-}
-
-/// What a key's stored value can be said to be.
-pub fn describe_field(f: &KeyFieldInfo) -> String {
-    if !f.readable {
-        return "Locked \u{2014} this machine cannot read it".to_owned();
-    }
-    if let Some(env) = &f.env {
-        return if env.is_empty() {
-            "No variables set".to_owned()
-        } else {
-            env.join(" \u{b7} ")
-        };
-    }
-    f.hint
-        .clone()
-        .filter(|h| !h.is_empty())
-        .unwrap_or_else(|| "Set".to_owned())
-}
-
-/// How many steps use something, in words.
-pub fn describe_usage(n: u64) -> String {
-    match n {
-        0 => "unused".to_owned(),
-        1 => "used by 1 step".to_owned(),
-        n => format!("used by {n} steps"),
-    }
-}
-
-/// A key's test result and its rotation in progress.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct KeyRowState {
-    pub testing: bool,
-    /// The preflight's answer: none, ok, or failed, and its message.
-    pub result: Option<(Option<bool>, Option<String>)>,
-    pub rotating: Option<String>,
-    pub saving: bool,
-    pub error: Option<String>,
 }
 
 /// A session holder vornd reports.
@@ -701,8 +601,6 @@ pub struct Settings {
     pub confirm_remove: Option<String>,
     /// Typed arguments not yet committed, by (agent, field).
     pub args: HashMap<(String, AgentField), String>,
-    pub keys: Option<Vec<ConnKey>>,
-    pub key_rows: HashMap<String, KeyRowState>,
     pub holders: Option<Holders>,
     pub end_failure: Option<String>,
     /// The holder whose End them asks first.
@@ -958,16 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn keys_and_holders_say_what_they_hold() {
-        let f = KeyFieldInfo {
-            key: "k".into(),
-            label: "K".into(),
-            readable: true,
-            hint: None,
-            env: Some(vec![]),
-        };
-        assert_eq!(describe_field(&f), "No variables set");
-        assert_eq!(describe_usage(2), "used by 2 steps");
+    fn holders_say_what_they_hold() {
         let h = Holders::from_health(&json!({ "sessiond": { "current": { "pid": 1, "instance": "a" },
             "older": [{ "pid": 2, "instance": "b", "build": "0.7", "sessions": 1, "compatible": true }] } }))
         .expect("holders");

@@ -342,12 +342,12 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         "settings-nav",
         Act::Set(SetAct::Open(Category::Agents)),
     ));
-    let keys = y(control(
+    let remote = y(control(
         "settings-nav",
-        Act::Set(SetAct::Open(Category::Keys)),
+        Act::Set(SetAct::Open(Category::Network)),
     ));
     let ssh = y(nav);
-    assert!(agents < ssh && ssh < keys, "{agents} < {ssh} < {keys}");
+    assert!(agents < ssh && ssh < remote, "{agents} < {ssh} < {remote}");
     shot.click(&mut app, nav);
     shot.until(&mut app, "the hosts", |a, _| {
         entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "Build box")
@@ -418,12 +418,6 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     saved(&mut app, "a second host", |c| {
         c["remoteHosts"].as_array().map_or(0, Vec::len) == 2
     });
-
-    open(&mut shot, &mut app, Category::Keys);
-    shot.until(&mut app, "the keys", |a, _| {
-        a.st.settings.keys.as_ref().map(|_| ())
-    });
-    shot.save(&mut app, "set-keys");
 
     open(&mut shot, &mut app, Category::About);
     shot.until(&mut app, "the holders", |a, _| {

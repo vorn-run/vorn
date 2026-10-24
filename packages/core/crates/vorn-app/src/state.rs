@@ -237,6 +237,8 @@ pub enum MenuKind {
     NotifSources,
     /// Settings › About's terminals row, by the older session holder's instance.
     Holder(String),
+    /// Settings › Remote Access's device menu, by the device's token id.
+    Device(String),
     /// A session's branch switcher.
     Branch(String),
     /// The editors a session's project opens in.
@@ -304,6 +306,8 @@ pub enum Dialog {
     SignIn,
     /// What a workflow from a project's file runs, before it is turned on.
     TurnOn(String),
+    /// Settings › Remote Access's Add a device sheet.
+    AddDevice,
 }
 
 /// A toast in the bottom right.

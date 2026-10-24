@@ -1,176 +1,212 @@
-//! The Remote Access page: share this machine, with its addresses and devices,
-//! or use another one.
+//! The Remote Access page: sharing this machine, how others reach it, the
+//! devices paired with it, and the Add a device sheet.
 
 use web_time::Instant;
 
-use super::settings::{header, row, toggle};
+use super::settings::{
+    card, card_row, glyph, glyph_icon, header, icon_button, row_tip_id, section, toggle,
+};
 use super::{c, ico, white, Screen};
 use crate::act::Act;
-use crate::look::{self, Color};
+use crate::look;
 use crate::network::{
-    address_host, address_kind, devices_label, format_remaining, grouped, others_label, pair_link,
-    Adding, AddressKind, Mode, NetAct, Network, DEVICE_NAME, HOST_TOKEN, HOST_URL,
-    TAILSCALE_DOWNLOAD,
+    format_remaining, grouped, share_line, shown_code, AddressKind, DeviceKind, DeviceToken,
+    NetAct, Network, DEVICE_NAME,
 };
+use crate::state::MenuKind;
 use crate::ui::theme::color::AMBER_500;
-use crate::ui::{div, field, text, Action, El, Id, Role, TextStyle};
+use crate::ui::{div, field, shape, text, tooltip, Action, El, Id, Rgba, Role, TextStyle};
+
+#[cfg(target_os = "macos")]
+const SHARE: &str = "Share this Mac";
+#[cfg(not(target_os = "macos"))]
+const SHARE: &str = "Share this computer";
+
+/// What each row, tile and button says while it is hovered.
+mod tip {
+    #[cfg(target_os = "macos")]
+    pub const SHARE: &str = "Lets your phone and other computers reach the sessions on this Mac.";
+    #[cfg(not(target_os = "macos"))]
+    pub const SHARE: &str =
+        "Lets your phone and other computers reach the sessions on this computer.";
+    pub const TAILSCALE: &str =
+        "Encrypted. Works wherever your devices are signed in to Tailscale.";
+    pub const LAN: &str = "Not encrypted. Works only on the same home or office network.";
+    pub const ADD: &str = "Pair a phone: scan the QR code with the Vorn app, or type the code.";
+    pub const DEVICE: &str = "Last time this device connected.";
+    pub const MORE: &str = "More";
+    pub const REMOVE: &str = "Signs this device out now. It must pair again to reconnect.";
+    #[cfg(target_os = "macos")]
+    pub const BROWSER: &str =
+        "Address to open Vorn from a browser on a device that can reach this Mac.";
+    #[cfg(not(target_os = "macos"))]
+    pub const BROWSER: &str =
+        "Address to open Vorn from a browser on a device that can reach this computer.";
+    pub const ADVANCED: &str =
+        "Certificate fingerprint, server address and tokens for setups by hand.";
+    pub const FINGERPRINT: &str =
+        "The certificate the address presents. Compare it when you pair by hand.";
+    pub const ADDRESSES: &str = "Every address Vorn answers on, for typing into another device.";
+    pub const TOKEN: &str =
+        "Makes a token another computer uses to connect by hand. It is shown once.";
+    pub const COPY: &str = "Copy";
+}
 
 pub(super) fn page(s: &Screen<'_>) -> El {
     let n = &s.st.network;
-    let mut el = div().col().child(header(
-        "Remote Access",
-        "Reach this Vorn from your phone or another computer",
-        None,
-    ));
-    if n.loading && n.status.is_none() {
-        el = el.child(
-            div()
-                .row()
-                .items_center()
-                .justify_center()
-                .gap(12.0)
-                .py(32.0)
-                .child(ico("refresh-cw", 20.0, 2.0, c(look::GRAY_500)))
-                .child(
-                    text("Checking network status...", 14.0, c(look::GRAY_500))
-                        .line_height(20.0)
-                        .silent(),
-                ),
-        );
-    }
-    el = el.child(segmented(s, n.viewing));
-    match n.viewing {
-        Mode::Local => el.child(share(s, n)),
-        Mode::Host => el.child(another(s, n)),
-    }
+    let on = sharing(s);
+    div()
+        .col()
+        .child(header("Remote Access", "", None))
+        .child(share_card(s, n, on))
+        .child(section("Devices"))
+        .child(devices(s, n))
+        .child(reach_card(s, n, on).mt(24.0))
+        .child_if(n.error.as_deref().map(|e| {
+            text(e, 12.0, c(look::DANGER))
+                .line_height(16.0)
+                .mt(12.0)
+                .wrapping()
+        }))
+}
+
+fn sharing(s: &Screen<'_>) -> bool {
+    s.store
+        .config
+        .pointer("/defaults/networkAccessEnabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn net(place: &str, s: &Screen<'_>, act: NetAct) -> Id {
     s.acts.on(place, Act::Net(act))
 }
 
-/// "This machine" / "Another machine".
-fn segmented(s: &Screen<'_>, viewing: Mode) -> El {
-    let option = |mode: Mode, label: &str| {
-        let id = net("net-view", s, NetAct::View(mode));
-        let on = viewing == mode;
-        let fg = if on {
-            c(look::WHITE)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), s.ui.hover(id))
-        };
-        div()
-            .id(id)
-            .on(Action::Click)
-            .ring(6.0)
-            .px(12.0)
-            .py(4.0)
-            .rounded(6.0)
-            .bg(if on { white(0.1) } else { white(0.0) })
-            .role(Role::RadioButton, label)
-            .selected(on)
-            .child(text(label, 12.0, fg).line_height(16.0).silent())
+/// The switch, its state in a line, and how others reach this machine.
+fn share_card(s: &Screen<'_>, n: &Network, on: bool) -> El {
+    let ink = if on {
+        c(look::GREEN_400)
+    } else {
+        c(look::GRAY_500)
     };
-    div()
-        .row()
-        .mb(20.0)
-        .p(2.0)
-        .gap(2.0)
-        .rounded(8.0)
-        .bg(white(0.04))
-        .role(Role::RadioGroup, "Remote Access")
-        .child(option(Mode::Local, "This machine"))
-        .child(option(Mode::Host, "Another machine"))
-}
-
-/// `ShareThisMachine`.
-fn share(s: &Screen<'_>, n: &Network) -> El {
-    let enabled = s
-        .store
-        .config
-        .pointer("/defaults/networkAccessEnabled")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
     let switch = toggle(
         s,
         "net-share",
-        enabled,
-        Act::Net(NetAct::Share(!enabled)),
+        on,
+        Act::Net(NetAct::Share(!on)),
         false,
-        "Share this machine",
-    )
-    .ring(12.0);
-    let mut el = div().col().child_if(this_computer(s, n)).child(row(
-        "Share this machine",
-        "Let other devices open Vorn in a browser",
-        None,
-        switch,
-        false,
-    ));
+        SHARE,
+    );
+    let top = div()
+        .row()
+        .items_center()
+        .justify_between()
+        .gap(16.0)
+        .child(
+            div()
+                .col()
+                .min_w0()
+                .child(
+                    text(SHARE, 14.0, c(look::GRAY_200))
+                        .weight(500)
+                        .line_height(20.0)
+                        .role(Role::Label, SHARE),
+                )
+                .child(
+                    text(share_line(on, n.active().len()), 12.0, ink)
+                        .line_height(16.0)
+                        .mt(2.0)
+                        .silent(),
+                ),
+        )
+        .child(switch);
+    let mut body = div()
+        .col()
+        .gap(12.0)
+        .p(14.0)
+        .child(tooltip(s.ui, top, row_tip_id(SHARE), tip::SHARE, None))
+        .child(
+            div()
+                .row()
+                .gap(8.0)
+                .role(Role::RadioGroup, "How others reach it")
+                .child(route_tile(s, n, AddressKind::Tailnet))
+                .child(route_tile(s, n, AddressKind::Lan)),
+        );
     if n.confirming {
-        el = el.child(confirm(s));
+        body = body.child(confirm(s));
     }
-    if enabled {
-        el = el.child_if(addresses(s, n)).child(devices(s, n));
-    }
-    el
+    card(vec![body])
 }
 
-/// The web client on this computer: its address, to copy or open. Not in the
-/// web client itself, which is that page already.
-fn this_computer(s: &Screen<'_>, n: &Network) -> Option<El> {
-    if cfg!(target_arch = "wasm32") {
-        return None;
-    }
-    let open = s.acts.on("net-open-web", Act::OpenWebClient);
-    let hot = s.ui.hover(open);
-    let open_btn = div()
-        .id(open)
+/// One way in: its mark, its name and the trade-off in a line; the one the
+/// code and the browser address use is ringed.
+fn route_tile(s: &Screen<'_>, n: &Network, kind: AddressKind) -> El {
+    let installed = n.status.as_ref().is_some_and(|t| t.installed);
+    let (icon, title, line, tip) = match kind {
+        AddressKind::Tailnet => (
+            "lock",
+            "Tailscale",
+            match (n.tailnet(), installed) {
+                (true, _) => "Encrypted · anywhere your devices are signed in",
+                (false, true) => "Not running · start Tailscale to use it",
+                (false, false) => "Not installed · get Tailscale",
+            },
+            tip::TAILSCALE,
+        ),
+        AddressKind::Lan => (
+            "wifi",
+            "This network",
+            "Not encrypted · home or office only",
+            tip::LAN,
+        ),
+    };
+    let id = net("net-route", s, NetAct::Route(kind));
+    let hot = s.ui.hover(id);
+    let on = n.route() == kind;
+    // The ring's extra pixel comes out of the padding, so nothing moves.
+    let (edge, width, pad) = if on {
+        (c(look::BRONZO), 2.0, 11.0)
+    } else {
+        (white(0.1).mix(white(0.18), hot), 1.0, 12.0)
+    };
+    let mark = if kind == AddressKind::Tailnet && n.tailnet() {
+        c(look::GREEN_400)
+    } else {
+        c(look::GRAY_400)
+    };
+    let el = div()
         .on(Action::Click)
-        .ring(6.0)
-        .ml(8.0)
-        .shrink0()
-        .px(8.0)
-        .py(4.0)
-        .rounded(6.0)
-        .bg(white(0.06).mix(white(0.1), hot))
-        .role(Role::Button, "Open in browser")
+        .ring(4.0)
+        .flex(1.0)
+        .col()
+        .gap(4.0)
+        .p(pad)
+        .rounded(4.0)
+        .border(width, edge)
+        .bg(white(0.0).mix(white(0.03), hot))
+        .role(Role::RadioButton, title)
+        .selected(on)
         .child(
-            text("Open", 12.0, c(look::GRAY_400).mix(c(look::WHITE), hot))
+            div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .child(ico(icon, 14.0, 2.0, mark))
+                .child(
+                    text(title, 13.0, c(look::GRAY_200))
+                        .weight(500)
+                        .line_height(18.0)
+                        .silent(),
+                ),
+        )
+        .child(
+            text(line, 11.0, c(look::GRAY_500))
                 .line_height(16.0)
-                .silent(),
-        );
-    Some(
-        card()
-            .mb(16.0)
-            .child(caption("On this computer").mb(6.0))
-            .child(
-                div()
-                    .row()
-                    .items_center()
-                    .child(
-                        div().row().grow().min_w0().child(
-                            text(s.web_url, 14.0, c(look::GRAY_200))
-                                .mono()
-                                .line_height(20.0)
-                                .truncate(),
-                        ),
-                    )
-                    .child(copy_button(s, n, s.web_url))
-                    .child(open_btn),
-            )
-            .child(
-                text(
-                    "The port changes each time the server starts. In a terminal, vorn web opens it.",
-                    12.0,
-                    c(look::GRAY_600),
-                )
-                .line_height(16.0)
-                .mt(8.0)
                 .wrapping()
                 .silent(),
-            ),
-    )
+        );
+    tooltip(s.ui, el, id, tip, None)
 }
 
 /// What the wide bind costs, before it happens without a tailnet.
@@ -183,261 +219,318 @@ fn confirm(s: &Screen<'_>) -> El {
     };
     div()
         .col()
-        .mt(12.0)
-        .p(16.0)
-        .rounded(8.0)
+        .p(12.0)
+        .rounded(4.0)
         .border(1.0, AMBER_500.alpha(0.2))
         .bg(AMBER_500.alpha(0.04))
         .child(
-            text("Enable without Tailscale?", 14.0, c(look::AMBER_400))
+            text("Share without Tailscale?", 13.0, c(look::AMBER_400))
                 .weight(500)
-                .line_height(20.0)
+                .line_height(18.0)
                 .mb(4.0),
         )
         .child(para(
-            "Vorn will accept connections from anything on this network, over plain HTTP. A device \
-             token is still required, but it travels unencrypted, so anyone who can read this \
-             network's traffic can take it. A token runs commands on this machine.",
+            "Anything on this network can reach Vorn over plain HTTP. A device's token still \
+             gates it, but it travels unencrypted, and a token runs commands here. Fine on a \
+             home or office network you trust; not on public wifi.",
         ))
-        .child(
-            para("Fine on a home or office network you trust. Not on shared or public wifi.")
-                .mt(6.0),
-        )
         .child(
             div()
                 .row()
                 .gap(8.0)
-                .mt(12.0)
-                .child(outline(s, "net-share", "Enable anyway", NetAct::EnableAnyway))
+                .mt(10.0)
+                .child(outline(
+                    s,
+                    "net-share",
+                    "Share anyway",
+                    NetAct::EnableAnyway,
+                ))
                 .child(ghost(s, "net-share", "Cancel", NetAct::CancelShare)),
         )
 }
 
-/// The first address, its kind, and the others on demand.
-fn addresses(s: &Screen<'_>, n: &Network) -> Option<El> {
-    let reachable = n.reachable.as_ref()?;
-    let (primary, rest) = reachable.urls.split_first()?;
-    let on_tailnet = n.status.as_ref().is_some_and(|t| t.running);
-    let installed = n.status.as_ref().is_some_and(|t| t.installed);
-    let faint = |t: &str| text(t, 12.0, c(look::GRAY_600)).line_height(16.0).silent();
-    let mut note = div().row().items_center().mt(8.0);
-    if on_tailnet {
-        note = note.child(faint("Encrypted via Tailscale"));
-    } else {
-        note = note.child(faint("This network only, unencrypted"));
-        if !installed {
-            let open = s
-                .acts
-                .on("net-tailscale", Act::OpenUrl(TAILSCALE_DOWNLOAD.to_owned()));
-            note = note
-                .child(faint(" · "))
-                .child(inline_link(s, open, "Add Tailscale"));
-        }
-    }
-    if !rest.is_empty() {
-        let id = net("net-others", s, NetAct::ToggleAddresses);
-        note = note.child(faint(" · ")).child(inline_link(
-            s,
-            id,
-            &others_label(rest.len(), n.show_all),
-        ));
-    }
-    let mut card = card().child(caption("Open in a browser").mb(6.0)).child(
-        div()
-            .row()
-            .items_center()
-            .child(
-                text(primary.as_str(), 14.0, c(look::GREEN_400))
-                    .mono()
-                    .line_height(20.0)
-                    .truncate(),
-            )
-            .child(copy_button(s, n, primary)),
-    );
-    card = card.child(note);
-    if n.show_all && !rest.is_empty() {
-        let list = rest.iter().map(|url| {
-            div()
-                .row()
-                .items_center()
-                .py(4.0)
-                .child(
-                    div().row().grow().min_w0().child(
-                        text(url.as_str(), 12.0, c(look::GRAY_400))
-                            .mono()
-                            .line_height(16.0)
-                            .truncate(),
-                    ),
-                )
-                .child(copy_button(s, n, url))
-        });
-        card = card.child(
-            div()
-                .col()
-                .mt(12.0)
-                .pt(12.0)
-                .border_top(1.0, white(0.06))
-                .children(list)
-                .child(
-                    text(
-                        "Use whichever address the other device shares a network with.",
-                        10.0,
-                        c(look::GRAY_600),
-                    )
-                    .line_height(14.0)
-                    .mt(6.0)
-                    .wrapping()
-                    .silent(),
-                ),
-        );
-    }
-    Some(card)
+/// Phones and computers paired with this machine, then the way to add one.
+fn devices(s: &Screen<'_>, n: &Network) -> El {
+    let now = crate::state::now_ms();
+    let mut rows: Vec<El> = n
+        .active()
+        .into_iter()
+        .map(|t| device_row(s, n, t, now))
+        .collect();
+    rows.push(add_row(s));
+    card(rows)
 }
 
-/// The devices allowed in, and the only place to add one.
-fn devices(s: &Screen<'_>, n: &Network) -> El {
-    let active = n.active();
-    let mut head = div()
+fn device_row(s: &Screen<'_>, n: &Network, t: &DeviceToken, now: f64) -> El {
+    let asking = n.confirm_revoke.as_deref() == Some(t.id.as_str());
+    let icon = match t.kind() {
+        DeviceKind::Phone => "smartphone",
+        DeviceKind::Computer => "monitor",
+    };
+    let line = if asking {
+        "Remove it? It must pair again to reconnect.".to_owned()
+    } else {
+        t.seen(now)
+    };
+    let menu = Act::Open(MenuKind::Device(t.id.clone()));
+    let controls = if asking {
+        div()
+            .row()
+            .gap(6.0)
+            .shrink0()
+            .child(ghost(s, "net-revoke", "Cancel", NetAct::CancelRevoke))
+            .child(remove(s, &t.id))
+    } else {
+        let id = s.acts.on("net-device", menu.clone());
+        icon_button(s, id, glyph::ELLIPSIS, "More", tip::MORE)
+    };
+    let row = div()
+        .row()
+        .items_center()
+        .gap(12.0)
+        .min_h(52.0)
+        .px(14.0)
+        .py(8.0)
+        .child(ico(icon, 18.0, 1.75, c(look::GRAY_400)))
+        .child(
+            div()
+                .col()
+                .grow()
+                .min_w0()
+                .child(
+                    text(t.name.as_str(), 14.0, c(look::GRAY_200))
+                        .line_height(20.0)
+                        .truncate()
+                        .role(Role::Label, t.name.as_str()),
+                )
+                .child(
+                    text(line, 11.0, c(look::GRAY_500))
+                        .line_height(16.0)
+                        .silent(),
+                ),
+        )
+        .child(controls);
+    let row = s
+        .acts
+        .context(row, Id::new("net-device-row").child(t.id.as_str()), menu);
+    tooltip(
+        s.ui,
+        row,
+        Id::new("net-device-tip").child(t.id.as_str()),
+        tip::DEVICE,
+        None,
+    )
+}
+
+/// The device menu: Remove, which asks on the row first.
+pub(crate) fn device_items(id: &str) -> Vec<crate::screen::menus::Item> {
+    let mut remove = crate::screen::menus::Item::new(
+        "trash-2",
+        "Remove\u{2026}",
+        Act::Net(NetAct::AskRevoke(id.to_owned())),
+    );
+    remove.danger = true;
+    vec![remove]
+}
+
+/// "Add a device", the last row of the list.
+fn add_row(s: &Screen<'_>) -> El {
+    let id = net("net-add", s, NetAct::AddDevice);
+    let hot = s.ui.hover(id);
+    let row = div()
+        .on(Action::Click)
+        .ring(4.0)
         .row()
         .items_center()
         .justify_between()
-        .child(caption(&devices_label(active.len())));
-    if n.adding.is_none() && n.minted.is_none() {
-        head = head.child(
-            link(
-                s,
-                "net-add",
-                "Add device",
-                NetAct::AddDevice,
-                look::GRAY_400,
-            )
-            .mr(-8.0),
-        );
-    }
-    let mut el = card().child(head);
-    if let Some(m) = &n.minted {
-        el = el.child(minted(s, n, &m.name, &m.plaintext));
-    }
-    if let Some(asking) = &n.asking {
-        el = el.child(asking_panel(s, &asking.device_name, &asking.address));
-    } else {
-        match &n.adding {
-            Some(Adding::Scan(code)) => {
-                let left = code.remaining(now_ms());
-                if left == 0 {
-                    el = el.child(expired(s));
-                } else if let Some(url) = n.pair_url() {
-                    el = el.child(scan(s, n, url, &code.code, left));
-                }
-            }
-            Some(Adding::Token) => el = el.child(token_form(s)),
-            None => {}
-        }
-    }
-    if let Some(error) = &n.error {
-        el = el.child(
-            text(error.as_str(), 12.0, c(look::DANGER))
-                .line_height(16.0)
-                .mt(8.0)
-                .wrapping(),
-        );
-    }
-    if n.tokens.is_some() && active.is_empty() && n.adding.is_none() && n.minted.is_none() {
-        el = el.child(
-            text(
-                "No devices yet. Add one, then open the address above on it.",
-                12.0,
-                c(look::GRAY_600),
-            )
-            .line_height(16.0)
-            .mt(8.0)
-            .wrapping()
-            .silent(),
-        );
-    }
-    if !active.is_empty() {
-        let rows = active.iter().enumerate().map(|(i, t)| {
-            let right = if n.confirm_revoke.as_deref() == Some(t.id.as_str()) {
-                div()
-                    .row()
-                    .gap(6.0)
-                    .shrink0()
-                    .child(revoke(s, &t.id))
-                    .child(link(
-                        s,
-                        "net-revoke",
-                        "Cancel",
-                        NetAct::CancelRevoke,
-                        look::GRAY_500,
-                    ))
-            } else {
-                link(
-                    s,
-                    "net-remove",
-                    "Remove",
-                    NetAct::AskRevoke(t.id.clone()),
-                    look::GRAY_500,
-                )
-            };
-            let mut r = div()
+        .gap(12.0)
+        .min_h(48.0)
+        .px(14.0)
+        .py(8.0)
+        .bg(white(0.0).mix(white(0.03), hot))
+        .role(Role::Button, "Add a device")
+        .child(
+            div()
                 .row()
                 .items_center()
                 .gap(12.0)
-                .py(8.0)
+                .child(div().w(18.0).center().child(ico(
+                    "plus",
+                    16.0,
+                    2.0,
+                    c(look::GRAY_400).mix(c(look::WHITE), hot),
+                )))
                 .child(
-                    div()
-                        .col()
-                        .grow()
-                        .min_w0()
-                        .child(
-                            text(t.name.as_str(), 14.0, c(look::GRAY_200))
-                                .line_height(20.0)
-                                .truncate(),
-                        )
-                        .child(
-                            text(t.seen(), 10.0, c(look::GRAY_600))
-                                .line_height(14.0)
-                                .silent(),
-                        ),
+                    text("Add a device", 14.0, c(look::GRAY_200))
+                        .line_height(20.0)
+                        .silent(),
+                ),
+        )
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(4.0)
+                .child(
+                    text("Phone", 12.0, c(look::GRAY_500))
+                        .line_height(16.0)
+                        .silent(),
                 )
-                .child(right);
-            if i > 0 {
-                r = r.border_top(1.0, white(0.04));
-            }
-            r
-        });
-        el = el.child(div().col().mt(4.0).children(rows));
+                .child(glyph_icon(glyph::CHEVRON_RIGHT, 12.0, c(look::GRAY_500))),
+        );
+    tooltip(s.ui, row, id, tip::ADD, None)
+}
+
+/// Where a browser opens Vorn, and what is under Advanced.
+fn reach_card(s: &Screen<'_>, n: &Network, on: bool) -> El {
+    let url = if on {
+        n.pair_url().unwrap_or(s.web_url)
+    } else {
+        s.web_url
+    };
+    let address = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .min_w0()
+        .child(
+            text(url, 11.0, c(look::GRAY_400))
+                .mono()
+                .line_height(16.0)
+                .truncate(),
+        )
+        .child(copy_pill(s, n, url));
+    let mut rows = vec![card_row(
+        s,
+        None,
+        "Open in a browser",
+        Some(tip::BROWSER),
+        address,
+    )];
+    let id = net("net-advanced", s, NetAct::ToggleAdvanced);
+    let hot = s.ui.hover(id);
+    let chevron = if n.advanced {
+        glyph::CHEVRON_DOWN
+    } else {
+        glyph::CHEVRON_RIGHT
+    };
+    let advanced = div()
+        .on(Action::Click)
+        .ring(4.0)
+        .row()
+        .items_center()
+        .justify_between()
+        .gap(16.0)
+        .min_h(48.0)
+        .px(14.0)
+        .py(8.0)
+        .bg(white(0.0).mix(white(0.03), hot))
+        .role(Role::Button, "Advanced")
+        .expanded(n.advanced)
+        .child(
+            text("Advanced", 13.0, c(look::GRAY_200))
+                .line_height(18.0)
+                .silent(),
+        )
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(4.0)
+                .child(
+                    text("Fingerprint, tokens", 12.0, c(look::GRAY_500))
+                        .line_height(16.0)
+                        .silent(),
+                )
+                .child(glyph_icon(chevron, 12.0, c(look::GRAY_500))),
+        );
+    rows.push(tooltip(s.ui, advanced, id, tip::ADVANCED, None));
+    if n.advanced {
+        rows.push(advanced_panel(s, n));
     }
-    el
+    card(rows)
+}
+
+/// The fingerprint, every address, and a token for another computer.
+fn advanced_panel(s: &Screen<'_>, n: &Network) -> El {
+    let sub = |label: &str, tip: &str, body: El| {
+        let el = div()
+            .col()
+            .gap(4.0)
+            .child(
+                text(label, 12.0, c(look::GRAY_500))
+                    .line_height(16.0)
+                    .role(Role::Label, label),
+            )
+            .child(body);
+        tooltip(s.ui, el, Id::new("net-adv-tip").child(label), tip, None)
+    };
+    let mono = |t: &str| {
+        div().row().items_center().gap(8.0).min_w0().child(
+            text(t, 11.0, c(look::GRAY_300))
+                .mono()
+                .line_height(16.0)
+                .truncate(),
+        )
+    };
+    let mut col = div().col().gap(16.0).px(14.0).py(12.0);
+    if let Some(fp) = n.fingerprint() {
+        col = col.child(sub(
+            "Certificate fingerprint",
+            tip::FINGERPRINT,
+            mono(&grouped(fp)).child(copy_pill(s, n, fp)),
+        ));
+    }
+    let mut urls: Vec<&str> = n
+        .reachable
+        .iter()
+        .flat_map(|r| r.urls.iter().map(String::as_str))
+        .collect();
+    if !urls.contains(&s.web_url) {
+        urls.push(s.web_url);
+    }
+    let list = div()
+        .col()
+        .gap(6.0)
+        .children(urls.iter().map(|u| mono(u).child(copy_pill(s, n, u))));
+    col = col.child(sub("Server address", tip::ADDRESSES, list));
+    let token = if let Some(m) = &n.minted {
+        minted(s, n, &m.name, &m.plaintext)
+    } else if n.naming {
+        div()
+            .row()
+            .items_center()
+            .gap(8.0)
+            .child(input(s, DEVICE_NAME, "Computer name", "Studio Mac mini").grow())
+            .child(outline(s, "net-token", "Create token", NetAct::CreateToken))
+            .child(ghost(s, "net-token", "Cancel", NetAct::CancelToken))
+    } else {
+        div().row().child(outline(
+            s,
+            "net-name-token",
+            "Create token for another computer",
+            NetAct::NameToken,
+        ))
+    };
+    col.child(sub("Tokens", tip::TOKEN, token))
 }
 
 /// The one moment a token's plaintext is readable.
 fn minted(s: &Screen<'_>, n: &Network, name: &str, plaintext: &str) -> El {
     div()
         .col()
-        .mt(12.0)
+        .gap(8.0)
         .p(12.0)
-        .rounded(8.0)
-        .border(1.0, c(look::BRONZO).alpha(0.3))
-        .bg(c(look::SURFACE_RAISED))
+        .rounded(4.0)
+        .border(1.0, white(0.08))
+        .bg(white(0.03))
         .child(
             text(
-                format!("Token for \u{201c}{name}\u{201d}"),
-                14.0,
-                c(look::GRAY_200),
-            )
-            .weight(500)
-            .line_height(20.0),
-        )
-        .child(
-            text(
-                "Copy it now. Only its hash is stored, so this is the only time it can be shown.",
+                format!("Token for \u{201c}{name}\u{201d}. Copy it now; it is not shown again."),
                 12.0,
-                c(look::GRAY_500),
+                c(look::GRAY_300),
             )
             .line_height(16.0)
-            .mt(4.0)
-            .mb(10.0)
             .wrapping()
             .silent(),
         )
@@ -445,11 +538,7 @@ fn minted(s: &Screen<'_>, n: &Network, name: &str, plaintext: &str) -> El {
             div()
                 .row()
                 .items_center()
-                .px(12.0)
-                .py(8.0)
-                .rounded(6.0)
-                .bg(c(look::SURFACE_BASE))
-                .border(1.0, white(0.06))
+                .gap(8.0)
                 .child(
                     div().row().grow().min_w0().child(
                         text(plaintext, 12.0, c(look::INK))
@@ -458,365 +547,151 @@ fn minted(s: &Screen<'_>, n: &Network, name: &str, plaintext: &str) -> El {
                             .truncate(),
                     ),
                 )
-                .child(copy_button(s, n, plaintext)),
-        )
-        .children(n.fingerprint().map(fingerprint))
-        .child(
-            div()
-                .row()
-                .mt(10.0)
-                .child(link(s, "net-minted", "Done", NetAct::DoneMinted, look::GRAY_500).ml(-8.0)),
+                .child(copy_pill(s, n, plaintext))
+                .child(ghost(s, "net-minted", "Done", NetAct::DoneMinted)),
         )
 }
 
-/// A phone that redeemed the code, waiting on a person.
-fn asking_panel(s: &Screen<'_>, device: &str, address: &str) -> El {
-    let pair = |k: &str, v: &str| {
-        div()
-            .row()
-            .justify_between()
-            .gap(12.0)
-            .child(text(k, 12.0, c(look::GRAY_500)).line_height(16.0).silent())
-            .child(
-                text(v, 12.0, c(look::GRAY_300))
-                    .mono()
-                    .line_height(16.0)
-                    .truncate(),
-            )
-    };
-    div()
-        .col()
-        .mt(12.0)
-        .p(12.0)
-        .rounded(8.0)
-        .border(1.0, c(look::BRONZO).alpha(0.4))
-        .bg(c(look::SURFACE_RAISED))
-        .child(
-            div()
-                .row()
-                .items_center()
-                .gap(8.0)
-                .child(
-                    div()
-                        .size(6.0, 6.0)
-                        .rounded(3.0)
-                        .shrink0()
-                        .bg(c(look::BRONZO)),
-                )
-                .child(
-                    text("A phone is asking to pair", 14.0, c(look::GRAY_200))
-                        .weight(500)
-                        .line_height(20.0),
-                ),
-        )
-        .child(
-            div()
-                .col()
-                .gap(4.0)
-                .mt(8.0)
-                .child(pair("Device", device))
-                .child(pair("Address", address)),
-        )
-        .child(
-            text(
-                "This lets it run terminals on this machine. Only approve a phone you are holding.",
-                11.0,
-                c(look::GRAY_500),
-            )
+/// The Add a device sheet: a QR code and the code to type, then the phone
+/// that used it, to approve or deny.
+pub(super) fn sheet(s: &Screen<'_>) -> El {
+    let n = &s.st.network;
+    let faint = |t: &str, size: f32| {
+        text(t, size, c(look::GRAY_500))
             .line_height(16.0)
-            .mt(8.0)
             .wrapping()
-            .silent(),
-        )
-        .child(
-            div()
-                .row()
-                .gap(8.0)
-                .mt(10.0)
-                .child(outline(s, "net-decide", "Approve", NetAct::Decide(true)))
-                .child(ghost(s, "net-decide", "Deny", NetAct::Decide(false))),
-        )
-}
-
-/// The code to type, the link it stands for, and which address it carries.
-fn scan(s: &Screen<'_>, n: &Network, pair_url: &str, code: &str, left: u64) -> El {
-    let urls = n.reachable.as_ref().map_or(&[][..], |r| &r.urls[..]);
-    let link_text = pair_link(pair_url, code, n.fingerprint());
+            .silent()
+    };
     let mut col = div()
         .col()
-        .min_w0()
-        .mt(12.0)
+        .items_center()
+        .gap(12.0)
+        .w(320.0)
+        .p(20.0)
+        .rounded(12.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_OVERLAY))
+        .role(Role::Dialog, "Add a device")
         .child(
-            text("Open this link in the Vorn app.", 14.0, c(look::GRAY_200))
+            text("Add a device", 15.0, c(look::WHITE))
+                .weight(600)
                 .line_height(20.0)
-                .silent(),
-        )
-        .child(
-            text(
-                "Then approve the phone here. It will ask by name.",
-                12.0,
-                c(look::GRAY_500),
-            )
-            .line_height(16.0)
-            .mt(4.0)
-            .silent(),
-        )
-        .child(
-            div()
-                .row()
-                .items_center()
-                .mt(8.0)
-                .child(
-                    div().row().grow().min_w0().child(
-                        text(link_text.as_str(), 12.0, c(look::GRAY_400))
-                            .mono()
-                            .line_height(16.0)
-                            .truncate(),
-                    ),
-                )
-                .child(copy_button(s, n, &link_text)),
+                .role(Role::Heading, "Add a device"),
         );
-    if urls.len() > 1 {
-        let chips = urls.iter().map(|url| {
-            let id = net("net-url", s, NetAct::ChooseUrl(url.clone()));
-            let chosen = url == pair_url;
-            let (border, bg, fg) = if chosen {
-                (white(0.2), white(0.08), c(look::GRAY_200))
-            } else {
-                let hot = s.ui.hover(id);
-                (
-                    white(0.06),
-                    white(0.0).mix(white(0.06), hot),
-                    c(look::GRAY_500).mix(c(look::WHITE), hot),
-                )
-            };
-            div()
-                .id(id)
-                .on(Action::Click)
-                .ring(6.0)
-                .px(8.0)
-                .py(4.0)
-                .rounded(6.0)
-                .border(1.0, border)
-                .bg(bg)
-                .role(Role::RadioButton, url.as_str())
-                .selected(chosen)
-                .child(
-                    text(address_host(url), 11.0, fg)
-                        .mono()
-                        .line_height(16.0)
-                        .silent(),
-                )
-        });
-        let kind = match address_kind(pair_url) {
-            AddressKind::Tailnet => "The phone must be on your tailnet.",
-            AddressKind::Lan => "The phone must be able to reach this address.",
+    let code = n.adding.as_ref().and_then(Option::as_ref);
+    let left = code.map_or(0, |c| c.remaining(now_ms()));
+    if let Some(r) = &n.asking {
+        let name = if r.device_name.is_empty() {
+            "A phone"
+        } else {
+            r.device_name.as_str()
         };
+        col = col
+            .child(ico("smartphone", 24.0, 1.75, c(look::GRAY_300)))
+            .child(
+                text(format!("{name} wants to pair"), 14.0, c(look::GRAY_200))
+                    .weight(500)
+                    .line_height(20.0),
+            )
+            .child_if((!r.address.is_empty()).then(|| {
+                text(r.address.as_str(), 11.0, c(look::GRAY_500))
+                    .mono()
+                    .line_height(16.0)
+                    .silent()
+            }))
+            .child(faint(
+                "It can run terminals here. Approve only a phone you are holding.",
+                12.0,
+            ))
+            .child(
+                div()
+                    .row()
+                    .gap(8.0)
+                    .child(ghost(s, "net-decide", "Deny", NetAct::Decide(false)))
+                    .child(outline(s, "net-decide", "Approve", NetAct::Decide(true))),
+            );
+    } else if !n.can_scan() {
+        col = col.child(faint(
+            &format!("Turn on {SHARE} first, so your phone can reach it."),
+            12.0,
+        ));
+    } else if let (Some(code), Some((_, svg))) = (code.filter(|_| left > 0), &n.qr) {
+        col = col
+            .child(qr(svg))
+            .child(faint("Open the Vorn app on your phone and scan", 12.0))
+            .child(faint("or type", 11.0))
+            .child(
+                text(shown_code(&code.code), 20.0, c(look::GRAY_200))
+                    .mono()
+                    .tracking(0.2)
+                    .line_height(28.0)
+                    .role(Role::Label, "Pairing code"),
+            )
+            .child(
+                text(
+                    format!("expires in {}", format_remaining(left)),
+                    11.0,
+                    c(look::GRAY_500),
+                )
+                .mono()
+                .line_height(16.0)
+                .silent(),
+            );
+    } else if code.is_some() {
+        col = col.child(faint("That code expired.", 12.0)).child(outline(
+            s,
+            "net-expired",
+            "Show another",
+            NetAct::ShowAnother,
+        ));
+    } else {
         col = col.child(
             div()
-                .col()
-                .mt(12.0)
-                .child(caption("Address in the code").mb(4.0))
-                .child(div().row().wrap_children().gap(6.0).children(chips))
-                .child(
-                    text(kind, 11.0, c(look::GRAY_600))
-                        .line_height(16.0)
-                        .mt(6.0)
-                        .silent(),
-                ),
+                .size(160.0, 160.0)
+                .center()
+                .rounded(12.0)
+                .bg(white(0.03))
+                .child(faint("Getting a code\u{2026}", 12.0)),
         );
     }
-    col.child(caption("Or type this code").mt(12.0))
-        .child(
-            text(code, 16.0, c(look::GRAY_200))
-                .mono()
-                .tracking(0.1)
-                .line_height(24.0)
-                .mt(2.0)
-                .role(Role::Label, "Pairing code"),
-        )
-        .child(
-            text(
-                format!("Expires in {}", format_remaining(left)),
-                11.0,
-                c(look::GRAY_500),
-            )
-            .mono()
-            .line_height(16.0)
-            .mt(4.0)
-            .silent(),
-        )
-        .children(n.fingerprint().map(fingerprint))
-        .child(
-            div()
-                .col()
-                .items_start()
-                .gap(4.0)
-                .mt(16.0)
-                .child(
-                    link(
-                        s,
-                        "net-scan",
-                        "Pair manually instead",
-                        NetAct::PairManually,
-                        look::GRAY_400,
-                    )
-                    .ml(-8.0),
-                )
-                .child(link(s, "net-scan", "Cancel", NetAct::CloseAdding, look::GRAY_500).ml(-8.0)),
-        )
+    col = col.child(ghost(s, "net-close", "Cancel", NetAct::CloseAdding));
+    let panel = s.acts.click(col, "dialog", Act::Nothing);
+    super::dialogs::backdrop(s, 0.5).center().child(panel)
 }
 
-fn expired(s: &Screen<'_>) -> El {
+/// The code a phone scans, dark on light whatever the theme.
+fn qr(svg: &str) -> El {
+    // literal-colour: a QR code reads only dark on light, in every theme.
+    let (paper, ink) = (
+        Rgba([0.98, 0.976, 0.969, 1.0]),
+        Rgba([0.05, 0.05, 0.06, 1.0]),
+    );
     div()
-        .col()
-        .mt(12.0)
-        .child(
-            text("That code expired.", 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .silent(),
-        )
-        .child(
-            div()
-                .row()
-                .gap(8.0)
-                .mt(8.0)
-                .child(outline(
-                    s,
-                    "net-expired",
-                    "Show another",
-                    NetAct::ShowAnother,
-                ))
-                .child(ghost(s, "net-expired", "Cancel", NetAct::CloseAdding)),
-        )
-}
-
-fn token_form(s: &Screen<'_>) -> El {
-    div()
-        .col()
-        .mt(12.0)
-        .child(label("What is this device?"))
-        .child(input(s, DEVICE_NAME, "Device name", "My phone", false))
-        .child(
-            div()
-                .row()
-                .gap(8.0)
-                .mt(10.0)
-                .child(outline(s, "net-token", "Create token", NetAct::CreateToken))
-                .child(ghost(s, "net-token", "Cancel", NetAct::CloseAdding)),
-        )
-}
-
-/// `UseAnotherMachine`, editing: this app has no host mode to show as
-/// connected.
-fn another(s: &Screen<'_>, n: &Network) -> El {
-    let mut form = card()
-        .mt(0.0)
-        .child(label("Server address"))
-        .child(input(
-            s,
-            HOST_URL,
-            "Server address",
-            "192.168.0.4:61601",
-            true,
-        ))
-        .child(label("Device token from that machine").mt(12.0))
-        .child(input(
-            s,
-            HOST_TOKEN,
-            "Device token from that machine",
-            "vorn_...",
-            true,
-        ));
-    if let Some(error) = &n.connect_error {
-        form = form.child(
-            text(error.as_str(), 12.0, c(look::AMBER_400).alpha(0.8))
-                .line_height(16.0)
-                .mt(8.0)
-                .wrapping(),
-        );
-    }
-    form = form.child(div().row().gap(8.0).mt(12.0).child(outline(
-        s,
-        "net-connect",
-        "Connect and restart",
-        NetAct::Connect,
-    )));
-    div().col().child(form).child(
-        text(
-            "Vorn restarts to apply this. Workflows and schedules run only while a desktop is \
-             attached to the host, so a server on its own holds your data but fires no schedules.",
-            12.0,
-            c(look::GRAY_600),
-        )
-        .line_height(16.0)
-        .mt(12.0)
-        .wrapping()
-        .silent(),
-    )
+        .size(160.0, 160.0)
+        .p(10.0)
+        .rounded(12.0)
+        .bg(paper)
+        .role(Role::Image, "QR code to scan")
+        .child(shape(svg, 140.0, 140.0, ink))
 }
 
 fn now_ms() -> u64 {
     crate::state::now_ms().max(0.0) as u64
 }
 
-/// The bordered well each block sits in: `rounded-lg border bg-white/[0.02] p-4`.
-fn card() -> El {
-    div()
-        .col()
-        .mt(12.0)
-        .p(16.0)
-        .rounded(8.0)
-        .border(1.0, white(0.06))
-        .bg(white(0.02))
-}
-
-/// The certificate a phone will trust, for typing when pairing by hand.
-fn fingerprint(fp: &str) -> El {
-    div()
-        .col()
-        .mt(12.0)
-        .child(caption("Certificate fingerprint").mb(2.0))
-        .child(
-            text(grouped(fp), 11.0, c(look::GRAY_400))
-                .mono()
-                .line_height(16.0)
-                .wrapping()
-                .role(Role::Label, "Certificate fingerprint"),
-        )
-}
-
-/// `text-[10px] uppercase tracking-wider font-medium text-gray-600`.
-fn caption(t: &str) -> El {
-    text(t.to_uppercase(), 10.0, c(look::GRAY_600))
-        .weight(500)
-        .tracking(0.05)
-        .line_height(14.0)
-        .silent()
-}
-
-fn label(t: &str) -> El {
-    text(t, 12.0, c(look::GRAY_400))
-        .line_height(16.0)
-        .mb(6.0)
-        .silent()
-}
-
-/// The page's `px-3 py-2 text-sm` field on `white/[0.04]`.
-fn input(s: &Screen<'_>, id: Id, name: &str, placeholder: &str, mono: bool) -> El {
+/// A name field on `white/[0.04]`.
+fn input(s: &Screen<'_>, id: Id, name: &str, placeholder: &str) -> El {
     let focus = if s.ui.focused(id) { 1.0 } else { 0.0 };
     let style = TextStyle {
-        line_height: 20.0,
-        mono,
-        ..TextStyle::ui(14.0)
+        line_height: 16.0,
+        ..TextStyle::ui(12.0)
     };
     field(id, name, placeholder, style, c(look::GRAY_200))
-        .px(12.0)
-        .py(8.0)
-        .rounded(6.0)
+        .px(10.0)
+        .py(6.0)
+        .rounded(4.0)
         .bg(white(0.04))
         .border(1.0, white(0.08).mix(white(0.2), focus))
-        .w_full()
 }
 
 /// `px-3 py-1.5 text-xs font-medium` with a hairline: the panel's action.
@@ -826,10 +701,10 @@ fn outline(s: &Screen<'_>, place: &str, label: &str, act: NetAct) -> El {
     div()
         .id(id)
         .on(Action::Click)
-        .ring(6.0)
+        .ring(4.0)
         .px(12.0)
         .py(6.0)
-        .rounded(6.0)
+        .rounded(4.0)
         .shrink0()
         .border(1.0, white(0.08))
         .bg(white(0.0).mix(white(0.06), hot))
@@ -849,10 +724,10 @@ fn ghost(s: &Screen<'_>, place: &str, label: &str, act: NetAct) -> El {
     div()
         .id(id)
         .on(Action::Click)
-        .ring(6.0)
+        .ring(4.0)
         .px(12.0)
         .py(6.0)
-        .rounded(6.0)
+        .rounded(4.0)
         .shrink0()
         .border(1.0, white(0.0))
         .bg(white(0.0).mix(white(0.06), hot))
@@ -865,62 +740,29 @@ fn ghost(s: &Screen<'_>, place: &str, label: &str, act: NetAct) -> El {
         )
 }
 
-/// `px-2 py-1 text-xs` text button in `rest` ink, white on hover.
-fn link(s: &Screen<'_>, place: &str, label: &str, act: NetAct, rest: Color) -> El {
-    let id = net(place, s, act);
-    let hot = s.ui.hover(id);
-    div()
-        .id(id)
-        .on(Action::Click)
-        .ring(6.0)
-        .px(8.0)
-        .py(4.0)
-        .rounded(6.0)
-        .shrink0()
-        .bg(white(0.0).mix(white(0.06), hot))
-        .role(Role::Button, label)
-        .child(
-            text(label, 12.0, c(rest).mix(c(look::WHITE), hot))
-                .line_height(16.0)
-                .silent(),
-        )
-}
-
-/// A link inside a sentence: gray-400 text, white on hover.
-fn inline_link(s: &Screen<'_>, id: Id, label: &str) -> El {
-    let fg = c(look::GRAY_400).mix(c(look::WHITE), s.ui.hover(id));
-    div()
-        .id(id)
-        .on(Action::Click)
-        .ring(4.0)
-        .role(Role::Button, label)
-        .child(text(label, 12.0, fg).line_height(16.0).silent())
-}
-
-/// "Revoke": red, as the destructive step it is.
-fn revoke(s: &Screen<'_>, id: &str) -> El {
+/// "Remove", confirmed: red text on a neutral pill.
+fn remove(s: &Screen<'_>, id: &str) -> El {
     let bid = net("net-revoke", s, NetAct::Revoke(id.to_owned()));
     let hot = s.ui.hover(bid);
-    div()
-        .id(bid)
+    let b = div()
         .on(Action::Click)
-        .ring(6.0)
-        .px(8.0)
-        .py(4.0)
-        .rounded(6.0)
-        .border(1.0, c(look::DANGER).alpha(0.25))
-        .bg(c(look::DANGER).alpha(0.1 * hot))
-        .role(Role::Button, "Revoke")
+        .ring(4.0)
+        .px(12.0)
+        .py(6.0)
+        .rounded(4.0)
+        .bg(white(0.06).mix(white(0.1), hot))
+        .role(Role::Button, "Remove")
         .child(
-            text("Revoke", 12.0, c(look::DANGER))
+            text("Remove", 12.0, c(look::DANGER))
                 .weight(500)
                 .line_height(16.0)
                 .silent(),
-        )
+        );
+    tooltip(s.ui, b, bid, tip::REMOVE, None)
 }
 
 /// "Copy", then "Copied" for two seconds.
-fn copy_button(s: &Screen<'_>, n: &Network, value: &str) -> El {
+fn copy_pill(s: &Screen<'_>, n: &Network, value: &str) -> El {
     let id = net("net-copy", s, NetAct::Copy(value.to_owned()));
     let hot = s.ui.hover(id);
     let label = if n.copied(value, Instant::now()) {
@@ -928,20 +770,19 @@ fn copy_button(s: &Screen<'_>, n: &Network, value: &str) -> El {
     } else {
         "Copy"
     };
-    div()
-        .id(id)
+    let b = div()
         .on(Action::Click)
-        .ring(6.0)
-        .ml(8.0)
+        .ring(4.0)
         .shrink0()
-        .px(8.0)
-        .py(4.0)
-        .rounded(6.0)
-        .bg(white(0.06).mix(white(0.1), hot))
+        .px(10.0)
+        .py(2.0)
+        .rounded(4.0)
+        .bg(white(0.08).mix(white(0.12), hot))
         .role(Role::Button, "Copy to clipboard")
         .child(
-            text(label, 12.0, c(look::GRAY_400).mix(c(look::WHITE), hot))
+            text(label, 12.0, c(look::GRAY_300).mix(c(look::WHITE), hot))
                 .line_height(16.0)
                 .silent(),
-        )
+        );
+    tooltip(s.ui, b, id, tip::COPY, None)
 }

@@ -8,19 +8,15 @@ use serde_json::{json, Value};
 use super::{list, App, Call, MOD};
 use crate::act::Act;
 use crate::client::RpcError;
-use crate::screen::settings::{rotate_id, ROW_SLIDER, SHELL_PATH};
+use crate::screen::settings::{ROW_SLIDER, SHELL_PATH};
 use crate::settings::{
-    self, split_args, AgentField, Category, ConnKey, KeyRowState, SetAct, Shell, UpdateStatus,
-    CONNECTIONS_PAGE,
+    self, split_args, AgentField, Category, SetAct, Shell, UpdateStatus, CONNECTIONS_PAGE,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 
 /// A settings call whose answer changes the page.
 pub(super) enum SetCall {
     Shells,
-    ConnKeys,
-    Preflight(String),
-    Rotated(String),
     Detected,
     /// vornd stopping for Restart Vorn.
     Restart,
@@ -143,6 +139,9 @@ impl App {
             p.selected = Some(key);
             return Ok(());
         }
+        if let Some(states) = name.strip_prefix("net-") {
+            return self.shot_net(ui, states);
+        }
         let prefs = crate::appearance::prefs(self.store.config.get("defaults"));
         let look = crate::appearance::theme_rows(prefs.scheme)[0].look;
         let (place, kind) = match name {
@@ -175,55 +174,64 @@ impl App {
         Ok(())
     }
 
+    /// `shot --open net-A+B`: Remote Access states, once vornd has answered
+    /// the page: `tailnet` (a running tailnet and its address), `advanced`,
+    /// `add-device`, `pair-request` (a phone asking), `device-menu` and
+    /// `confirm-remove` on the first device.
+    fn shot_net(&mut self, ui: &mut Ui, states: &str) -> Result<(), String> {
+        use crate::network::{NetAct, PairingRequest, Tailscale};
+        use crate::state::MenuKind;
+        let n = &self.st.network;
+        if !n.open || n.loading || n.tokens.is_none() {
+            return Err(format!("--open net-{states}: Remote Access has not loaded"));
+        }
+        for state in states.split('+') {
+            let first = self.st.network.active().first().map(|t| t.id.clone());
+            match state {
+                "tailnet" => {
+                    let n = &mut self.st.network;
+                    n.status = Some(Tailscale {
+                        installed: true,
+                        running: true,
+                    });
+                    let r = n.reachable.get_or_insert_with(Default::default);
+                    r.remote = true;
+                    r.urls.insert(0, format!("https://100.101.102.103:{}/app/", r.port));
+                }
+                "advanced" => self.st.network.advanced = true,
+                "add-device" => self.run_net(ui, NetAct::AddDevice),
+                "pair-request" => {
+                    self.run_net(ui, NetAct::AddDevice);
+                    self.st.network.asking = Some(PairingRequest {
+                        request_id: "shot".to_owned(),
+                        device_name: "Studio iPhone".to_owned(),
+                        address: "100.101.102.104".to_owned(),
+                    });
+                }
+                "device-menu" | "confirm-remove" => {
+                    let id = first.ok_or(format!("--open net-{state}: no device"))?;
+                    if state == "confirm-remove" {
+                        self.st.network.confirm_revoke = Some(id);
+                        continue;
+                    }
+                    let kind = MenuKind::Device(id);
+                    let src = super::Src {
+                        id: Some(crate::act::Acts::id("net-device", &Act::Open(kind.clone()))),
+                        at: None,
+                    };
+                    self.open_menu(ui, kind, src);
+                }
+                other => return Err(format!("--open net-{other}: tailnet, advanced, add-device, pair-request, device-menu or confirm-remove")),
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn set_answered(&mut self, call: SetCall, answer: Result<Value, RpcError>) {
         let st = &mut self.st.settings;
         match call {
             SetCall::Shells => {
                 st.shells = Some(list(answer).iter().filter_map(Shell::from_value).collect());
-            }
-            SetCall::ConnKeys => {
-                st.keys = Some(
-                    list(answer)
-                        .iter()
-                        .filter_map(ConnKey::from_value)
-                        .collect(),
-                );
-            }
-            SetCall::Preflight(id) => {
-                let row = st.key_rows.entry(id).or_default();
-                row.testing = false;
-                row.result = Some(match answer {
-                    Ok(v) => (
-                        v.get("ok").and_then(Value::as_bool),
-                        v.get("message").and_then(Value::as_str).map(str::to_owned),
-                    ),
-                    Err(e) => (Some(false), Some(e.to_string())),
-                });
-            }
-            SetCall::Rotated(id) => {
-                let row = st.key_rows.entry(id.clone()).or_default();
-                row.saving = false;
-                let failure = match answer {
-                    Ok(v) if v.get("ok").and_then(Value::as_bool) == Some(true) => None,
-                    Ok(v) => Some(
-                        v.get("error")
-                            .and_then(Value::as_str)
-                            .unwrap_or("The key could not be replaced")
-                            .to_owned(),
-                    ),
-                    Err(e) => Some(e.to_string()),
-                };
-                match failure {
-                    Some(e) => row.error = Some(e),
-                    None => {
-                        *row = KeyRowState::default();
-                        self.call(
-                            Call::Set(SetCall::ConnKeys),
-                            "connection:listKeys",
-                            Value::Null,
-                        );
-                    }
-                }
             }
             SetCall::Restart => self.relaunch(),
             SetCall::Detected => {
@@ -425,13 +433,6 @@ impl App {
                 if self.st.plugins.packs.is_empty() && self.st.plugins.loads == 0 {
                     self.plug_load(false);
                 }
-            }
-            Category::Keys => {
-                self.call(
-                    Call::Set(SetCall::ConnKeys),
-                    "connection:listKeys",
-                    Value::Null,
-                );
             }
             Category::About => {
                 self.health = Some(health(self.port));
@@ -671,49 +672,6 @@ impl App {
                 }
             }
             SetAct::AgentText(..) => {}
-            SetAct::TestKey(id) => {
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.testing = true;
-                row.result = None;
-                self.call(
-                    Call::Set(SetCall::Preflight(id.clone())),
-                    "connection:preflight",
-                    json!(id),
-                );
-            }
-            SetAct::Rotate(id, field) => {
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.rotating = if row.rotating.as_deref() == Some(field.as_str()) {
-                    None
-                } else {
-                    Some(field)
-                };
-                row.error = None;
-                ui.set_edit_text(rotate_id(&id), "");
-                if row.rotating.is_some() {
-                    ui.set_focus(Some(rotate_id(&id)));
-                }
-            }
-            SetAct::SaveRotate(id, field) => {
-                let value = ui.edit_text(rotate_id(&id)).to_owned();
-                if value.trim().is_empty() {
-                    return;
-                }
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.saving = true;
-                row.error = None;
-                self.call(
-                    Call::Set(SetCall::Rotated(id.clone())),
-                    "connection:rotateSecret",
-                    json!({ "connectionId": id, "field": field, "plaintext": value }),
-                );
-            }
-            SetAct::CancelRotate(id) => {
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.rotating = None;
-                row.error = None;
-                ui.set_edit_text(rotate_id(&id), "");
-            }
             SetAct::EndHolder(instance) => {
                 if self.st.settings.confirm_end.as_deref() != Some(instance.as_str()) {
                     self.st.settings.confirm_end = Some(instance);
@@ -785,27 +743,6 @@ impl App {
                     self.commit_shell(ui);
                     return true;
                 }
-                if let Some(k) = self
-                    .st
-                    .settings
-                    .keys
-                    .iter()
-                    .flatten()
-                    .find(|k| rotate_id(&k.connection) == id)
-                {
-                    let row = self
-                        .st
-                        .settings
-                        .key_rows
-                        .get(&k.connection)
-                        .cloned()
-                        .unwrap_or_default();
-                    if let Some(f) = row.rotating {
-                        let c = k.connection.clone();
-                        self.run_set(ui, SetAct::SaveRotate(c, f));
-                    }
-                    return true;
-                }
                 false
             }
             _ => false,
@@ -853,6 +790,11 @@ impl App {
         }
         if self.st.dialog == Some(crate::state::Dialog::ExtInstall) {
             self.run_plug(ui, crate::plugins::PlugAct::CancelInstall);
+            ui.set_focus(None);
+            return true;
+        }
+        if self.st.dialog == Some(crate::state::Dialog::AddDevice) {
+            self.run_net(ui, crate::network::NetAct::CloseAdding);
             ui.set_focus(None);
             return true;
         }

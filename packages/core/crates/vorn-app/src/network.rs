@@ -1,5 +1,5 @@
-//! The Remote Access page's model: sharing this machine,
-//! pairing devices with a code, and using another machine from here.
+//! The Remote Access page's model: sharing this machine, how others reach
+//! it, and the devices paired with it.
 
 use web_time::{Duration, Instant};
 
@@ -9,11 +9,6 @@ use crate::ui::Id;
 
 /// "What is this device?": the name a minted token carries.
 pub const DEVICE_NAME: Id = Id(0x6e65_745f_6465_7669);
-/// "Server address" on the use-another-machine form.
-pub const HOST_URL: Id = Id(0x6e65_745f_686f_7374);
-/// "Device token from that machine" on that form.
-pub const HOST_TOKEN: Id = Id(0x6e65_745f_746f_6b6e);
-
 /// Where "Add Tailscale" leads.
 pub const TAILSCALE_DOWNLOAD: &str = "https://tailscale.com/download";
 
@@ -24,56 +19,39 @@ pub const COPIED_FOR: Duration = Duration::from_secs(2);
 /// rebinds on the config change, which takes a moment.
 pub const REBIND_SETTLE: Duration = Duration::from_millis(500);
 
-/// The use-another-machine form's error when a field is empty.
-pub const BOTH_NEEDED: &str = "Both an address and a token are needed.";
-
-/// What the form says when both fields are filled: this app always talks
-/// to the vornd on this machine, so it cannot switch to a host.
-pub const NO_HOST_MODE: &str = "This app connects only to the Vorn on this machine for now.";
-
-/// Which half of the page is on screen (`Mode` in `NetworkSettings`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum Mode {
-    /// "This machine": share it with other devices.
-    #[default]
-    Local,
-    /// "Another machine": point this desktop at a Vorn elsewhere.
-    Host,
-}
-
 /// What a control on the Remote Access page does.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NetAct {
     /// Loads what the page shows.
     Refresh,
-    /// The segmented control at the top.
-    View(Mode),
     /// The "Share this machine" switch, asking for this value.
     Share(bool),
     /// "Enable anyway" under the warning shown without Tailscale.
     EnableAnyway,
     /// "Cancel" under that warning.
     CancelShare,
-    /// "N other addresses" / "Hide".
-    ToggleAddresses,
+    /// A "how others reach it" tile: the route the code and the browser
+    /// address use.
+    Route(AddressKind),
+    /// "Advanced": the fingerprint, the addresses and the token form.
+    ToggleAdvanced,
     /// A copy button, which says "Copied" for a moment.
     Copy(String),
-    /// "Add device": a code when a phone could reach this machine, else
-    /// the token form.
+    /// "Add a device": the sheet with a code to scan.
     AddDevice,
     /// "Show another" once a code expired.
     ShowAnother,
-    /// "Pair manually instead": retires the code for the token form.
-    PairManually,
-    /// "Cancel" while adding: retires any code.
+    /// Closes the sheet and retires its code.
     CloseAdding,
-    /// Picks the address the code carries.
-    ChooseUrl(String),
+    /// "Create token for another computer": the name field.
+    NameToken,
+    /// "Cancel" beside that field.
+    CancelToken,
     /// "Create token" (or Enter in the name field).
     CreateToken,
     /// "Done" under a freshly minted token.
     DoneMinted,
-    /// "Remove" on a device, which asks first.
+    /// "Remove…" in a device's menu, which asks first.
     AskRevoke(String),
     /// "Cancel" on that question.
     CancelRevoke,
@@ -81,8 +59,6 @@ pub enum NetAct {
     Revoke(String),
     /// Approves (`true`) or denies the phone asking to pair.
     Decide(bool),
-    /// "Connect and restart" on the use-another-machine form.
-    Connect,
 }
 
 /// `TailscaleStatus`, the parts the page reads.
@@ -127,16 +103,42 @@ pub struct DeviceToken {
     pub last_address: Option<String>,
 }
 
+/// What kind of device a token stands for, by the icon it gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Phone,
+    Computer,
+}
+
 impl DeviceToken {
-    /// The line under the device's name.
-    pub fn seen(&self) -> String {
-        let Some(at) = self.last_seen_at.as_deref().filter(|s| !s.is_empty()) else {
-            return "Never connected".to_owned();
-        };
-        let at = crate::tasks::locale_string(at);
-        match self.last_address.as_deref().filter(|s| !s.is_empty()) {
-            Some(from) => format!("Last seen {at} from {from}"),
-            None => format!("Last seen {at}"),
+    /// Tokens carry no kind, so the name tells: a phone names itself.
+    pub fn kind(&self) -> DeviceKind {
+        let name = self.name.to_lowercase();
+        let phone = ["iphone", "ipad", "android", "pixel", "galaxy", "phone"]
+            .iter()
+            .any(|w| name.contains(w));
+        if phone {
+            DeviceKind::Phone
+        } else {
+            DeviceKind::Computer
+        }
+    }
+
+    /// The line under the device's name, `now_ms` since the epoch.
+    pub fn seen(&self, now_ms: f64) -> String {
+        let when = self
+            .last_seen_at
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|at| match crate::runs::relative(at, now_ms) {
+                r if r == "Just now" => "just now".to_owned(),
+                r => r,
+            });
+        match (self.kind(), when) {
+            (DeviceKind::Phone, Some(w)) => format!("Last seen {w}"),
+            (DeviceKind::Phone, None) => "Never connected".to_owned(),
+            (DeviceKind::Computer, Some(w)) => format!("Another Vorn · last seen {w}"),
+            (DeviceKind::Computer, None) => "Another Vorn · never connected".to_owned(),
         }
     }
 }
@@ -167,15 +169,6 @@ impl Code {
     }
 }
 
-/// How a device is being added, if one is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Adding {
-    /// A code to scan or type; past its deadline it reads "That code expired".
-    Scan(Code),
-    /// The form that mints a token to copy.
-    Token,
-}
-
 /// A token just minted: its plaintext is shown this once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Minted {
@@ -192,24 +185,26 @@ pub struct Network {
     pub loading: bool,
     pub status: Option<Tailscale>,
     pub reachable: Option<Reachable>,
-    pub viewing: Mode,
     /// The share switch is on its way up without a tailnet.
     pub confirming: bool,
-    /// Every address shows, not only the first.
-    pub show_all: bool,
+    /// The route the user picked; else the tailnet when it runs.
+    pub route: Option<AddressKind>,
+    /// "Advanced" is open.
+    pub advanced: bool,
+    /// The token form under Advanced is open.
+    pub naming: bool,
     /// `None` until `token:list` first answers.
     pub tokens: Option<Vec<DeviceToken>>,
-    pub adding: Option<Adding>,
+    /// The Add a device sheet is open: `None` inside until vornd hands a code.
+    pub adding: Option<Option<Code>>,
     pub asking: Option<PairingRequest>,
-    /// The address the code carries, when the user picked one.
-    pub chosen_url: Option<String>,
+    /// The QR the sheet draws, and the link it encodes, made once per link.
+    pub qr: Option<(String, String)>,
     pub minted: Option<Minted>,
     /// The device whose "Remove" asks to confirm.
     pub confirm_revoke: Option<String>,
-    /// The device list's error line.
+    /// The page's error line.
     pub error: Option<String>,
-    /// The use-another-machine form's error line.
-    pub connect_error: Option<String>,
     /// The text a copy button copied, and when.
     pub copied: Option<(String, Instant)>,
     /// When to ask for the addresses again after the share switch.
@@ -233,14 +228,37 @@ impl Network {
             .is_some_and(|r| r.remote && !r.urls.is_empty())
     }
 
-    /// The address the code carries: the chosen one while it is still
-    /// offered, else the first.
+    /// Tailscale is up, so the tailnet route is there to pick.
+    pub fn tailnet(&self) -> bool {
+        self.status.as_ref().is_some_and(|s| s.running)
+    }
+
+    /// The route the code and the browser address use: the one picked while
+    /// it is there, else the tailnet when it runs, else this network.
+    pub fn route(&self) -> AddressKind {
+        match self.route {
+            Some(AddressKind::Tailnet) | None if self.tailnet() => AddressKind::Tailnet,
+            _ => AddressKind::Lan,
+        }
+    }
+
+    /// The address the code carries: the first on the route, else the first.
     pub fn pair_url(&self) -> Option<&str> {
         let urls = self.reachable.as_ref().map_or(&[][..], |r| &r.urls[..]);
-        self.chosen_url
-            .as_deref()
-            .filter(|u| urls.iter().any(|x| x == u))
-            .or_else(|| urls.first().map(String::as_str))
+        let route = self.route();
+        urls.iter()
+            .find(|u| address_kind(u) == route)
+            .or_else(|| urls.first())
+            .map(String::as_str)
+    }
+
+    /// The link the sheet's QR encodes, while it shows a live code.
+    pub fn code_link(&self, now_ms: u64) -> Option<String> {
+        let code = self.adding.as_ref()?.as_ref()?;
+        if code.remaining(now_ms) == 0 || self.asking.is_some() {
+            return None;
+        }
+        Some(pair_link(self.pair_url()?, &code.code, self.fingerprint()))
     }
 
     /// The certificate fingerprint a phone pins, while vornd shares this machine.
@@ -258,11 +276,11 @@ impl Network {
             .is_some_and(|(t, at)| t == text && now.duration_since(*at) < COPIED_FOR)
     }
 
-    /// Puts away what the device list was doing.
+    /// Puts the sheet away.
     pub fn close_adding(&mut self) {
         self.adding = None;
         self.asking = None;
-        self.chosen_url = None;
+        self.qr = None;
     }
 
     /// What the page forgets when it closes.
@@ -272,7 +290,7 @@ impl Network {
 }
 
 /// Which network an address reaches this machine over.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AddressKind {
     /// Tailscale's 100.64.0.0/10, encrypted.
     Tailnet,
@@ -345,34 +363,47 @@ pub fn grouped(fingerprint: &str) -> String {
         .join(" ")
 }
 
-/// The device list's heading: "Devices", with the count when there are any.
-pub fn devices_label(active: usize) -> String {
-    if active > 0 {
-        format!("Devices · {active}")
-    } else {
-        "Devices".to_owned()
+/// The line under "Share this Mac": off, or on with how many devices.
+pub fn share_line(on: bool, devices: usize) -> String {
+    match (on, devices) {
+        (false, _) => "Off".to_owned(),
+        (true, 0) => "On · No devices paired".to_owned(),
+        (true, 1) => "On · 1 device paired".to_owned(),
+        (true, n) => format!("On · {n} devices paired"),
     }
 }
 
-/// The toggle under the first address: "Hide", or how many others there are.
-pub fn others_label(others: usize, showing: bool) -> String {
-    if showing {
-        "Hide".to_owned()
-    } else {
-        format!(
-            "{others} other address{}",
-            if others > 1 { "es" } else { "" }
-        )
-    }
+/// The code as the sheet shows it: `ABCD EFGH`, its groups split by a space.
+pub fn shown_code(code: &str) -> String {
+    code.replace('-', " ")
 }
 
-/// What the use-another-machine form says for these fields.
-pub fn connect_error(url: &str, token: &str) -> &'static str {
-    if url.trim().is_empty() || token.trim().is_empty() {
-        BOTH_NEEDED
-    } else {
-        NO_HOST_MODE
+/// `link` as a QR code: one SVG path of dark modules over a `0 0 N N` box,
+/// for `shape` to tint. Runs of modules merge so the edges between them
+/// do not show. `None` when the link is too long for a code.
+pub fn qr_svg(link: &str) -> Option<String> {
+    use qrcodegen::{QrCode, QrCodeEcc};
+    use std::fmt::Write;
+    let qr = QrCode::encode_text(link, QrCodeEcc::Medium).ok()?;
+    let n = qr.size();
+    let mut path = String::new();
+    for y in 0..n {
+        let mut x = 0;
+        while x < n {
+            if !qr.get_module(x, y) {
+                x += 1;
+                continue;
+            }
+            let start = x;
+            while x < n && qr.get_module(x, y) {
+                x += 1;
+            }
+            let _ = write!(path, "M{start} {y}h{}v1h-{}z", x - start, x - start);
+        }
     }
+    Some(format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {n} {n}"><path d="{path}"/></svg>"#
+    ))
 }
 
 #[cfg(test)]
@@ -439,41 +470,80 @@ mod tests {
 
     #[test]
     fn labels_read_as_the_page_writes_them() {
-        assert_eq!(devices_label(0), "Devices");
-        assert_eq!(devices_label(2), "Devices · 2");
-        assert_eq!(others_label(1, false), "1 other address");
-        assert_eq!(others_label(3, false), "3 other addresses");
-        assert_eq!(others_label(3, true), "Hide");
-        let never = DeviceToken {
+        assert_eq!(share_line(false, 3), "Off");
+        assert_eq!(share_line(true, 0), "On · No devices paired");
+        assert_eq!(share_line(true, 1), "On · 1 device paired");
+        assert_eq!(share_line(true, 2), "On · 2 devices paired");
+        assert_eq!(shown_code("ABCD-EFGH"), "ABCD EFGH");
+        let at = "2030-01-01T09:00:00.000Z";
+        let t = crate::tasks::ms(at).unwrap();
+        let phone = DeviceToken {
             id: "a".into(),
-            name: "Phone".into(),
+            name: "Ana's iPhone".into(),
             last_seen_at: None,
             revoked_at: None,
             last_address: None,
         };
-        assert_eq!(never.seen(), "Never connected");
-        let seen = DeviceToken {
-            last_seen_at: Some("2030-01-01T09:00:00.000Z".into()),
-            ..never
+        assert_eq!(phone.seen(t), "Never connected");
+        let phone = DeviceToken {
+            last_seen_at: Some(at.into()),
+            ..phone
         };
-        assert_eq!(seen.seen(), "Last seen 1/1/2030, 9:00:00 AM");
-        let from = DeviceToken {
-            last_address: Some("192.168.1.7".into()),
-            ..seen
+        assert_eq!(phone.seen(t + 1000.0), "Last seen just now");
+        assert_eq!(phone.seen(t + 7_200_000.0), "Last seen 2h ago");
+        let mac = DeviceToken {
+            name: "Studio Mac mini".into(),
+            ..phone
         };
         assert_eq!(
-            from.seen(),
-            "Last seen 1/1/2030, 9:00:00 AM from 192.168.1.7"
+            mac.seen(t + 86_400_000.0),
+            "Another Vorn · last seen 1d ago"
         );
     }
 
     #[test]
-    fn the_code_carries_the_chosen_address_while_it_is_offered() {
+    fn a_device_is_a_phone_when_its_name_says_so() {
+        let kind = |name: &str| {
+            DeviceToken {
+                id: "a".into(),
+                name: name.into(),
+                last_seen_at: None,
+                revoked_at: None,
+                last_address: None,
+            }
+            .kind()
+        };
+        assert_eq!(kind("Javier's iPhone"), DeviceKind::Phone);
+        assert_eq!(kind("Pixel 9"), DeviceKind::Phone);
+        assert_eq!(kind("android tablet"), DeviceKind::Phone);
+        assert_eq!(kind("My phone"), DeviceKind::Phone);
+        assert_eq!(kind("Studio Mac mini"), DeviceKind::Computer);
+        assert_eq!(kind("Device"), DeviceKind::Computer);
+    }
+
+    #[test]
+    fn the_qr_is_one_path_of_merged_runs() {
+        let svg = qr_svg("vorn://pair?url=http%3A%2F%2F10.0.0.2%3A1%2F&code=ABCD-EFGH").unwrap();
+        let n = qrcodegen::QrCode::encode_text(
+            "vorn://pair?url=http%3A%2F%2F10.0.0.2%3A1%2F&code=ABCD-EFGH",
+            qrcodegen::QrCodeEcc::Medium,
+        )
+        .unwrap()
+        .size();
+        assert!(svg.starts_with("<svg") && svg.contains(&format!(r#"viewBox="0 0 {n} {n}""#)));
+        assert_eq!(svg.matches("<path").count(), 1);
+        // The finder pattern's top edge is one run of seven modules.
+        assert!(svg.contains("M0 0h7v1h-7z"));
+        assert!(qr_svg(&"x".repeat(5000)).is_none());
+    }
+
+    #[test]
+    fn the_code_carries_the_address_of_the_chosen_route() {
         let mut n = Network {
             reachable: Some(Reachable {
                 urls: vec![
-                    "http://100.64.0.1:1/app/".into(),
                     "http://10.0.0.2:1/app/".into(),
+                    "http://100.64.0.1:1/app/".into(),
                 ],
                 port: 1,
                 remote: true,
@@ -482,12 +552,29 @@ mod tests {
             ..Network::default()
         };
         assert!(n.can_scan());
+        // No tailnet: this network, whatever was picked.
+        assert_eq!(n.route(), AddressKind::Lan);
+        n.route = Some(AddressKind::Tailnet);
+        assert_eq!(n.route(), AddressKind::Lan);
+        assert_eq!(n.pair_url(), Some("http://10.0.0.2:1/app/"));
+        n.status = Some(Tailscale {
+            installed: true,
+            running: true,
+        });
+        assert_eq!(n.route(), AddressKind::Tailnet);
         assert_eq!(n.pair_url(), Some("http://100.64.0.1:1/app/"));
         assert_eq!(n.fingerprint(), Some("ab".repeat(32).as_str()));
-        n.chosen_url = Some("http://10.0.0.2:1/app/".into());
+        n.route = Some(AddressKind::Lan);
         assert_eq!(n.pair_url(), Some("http://10.0.0.2:1/app/"));
-        n.chosen_url = Some("http://gone:1/app/".into());
-        assert_eq!(n.pair_url(), Some("http://100.64.0.1:1/app/"));
+        n.route = None;
+        assert_eq!(n.route(), AddressKind::Tailnet);
+        assert_eq!(n.code_link(0), None);
+        n.adding = Some(Some(Code {
+            code: "ABCD-EFGH".into(),
+            expires_at: 10,
+        }));
+        assert!(n.code_link(0).unwrap().contains("100.64.0.1"));
+        assert_eq!(n.code_link(10), None);
         n.reachable = Some(Reachable::default());
         assert!(!n.can_scan());
         assert_eq!(n.pair_url(), None);
@@ -520,13 +607,6 @@ mod tests {
         assert!(n.copied("x", at + Duration::from_millis(1999)));
         assert!(!n.copied("x", at + COPIED_FOR));
         assert!(!n.copied("y", at));
-    }
-
-    #[test]
-    fn the_form_asks_for_both_fields() {
-        assert_eq!(connect_error("", "vorn_x"), BOTH_NEEDED);
-        assert_eq!(connect_error("10.0.0.2:1", "  "), BOTH_NEEDED);
-        assert_eq!(connect_error("10.0.0.2:1", "vorn_x"), NO_HOST_MODE);
     }
 
     #[test]

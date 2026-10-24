@@ -547,6 +547,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::Welcome => super::onboarding::modal(s)?,
         Dialog::SignIn => super::signin::sheet(s)?,
         Dialog::ExtInstall => super::plugins::dialog(s)?,
+        Dialog::AddDevice => super::network::sheet(s),
     })
 }
 

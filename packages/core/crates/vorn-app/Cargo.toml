@@ -53,6 +53,7 @@ sha2 = "0.10"
 semver = "1"
 # std's clock on a desktop; the page's `performance.now()` in a browser.
 web-time = "1"
+qrcodegen = "1.8"
 
 # A desktop's: vornd over a local socket, child processes, the OS web view
 # for the browser pane and the updater.

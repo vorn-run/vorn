@@ -650,14 +650,13 @@ pub struct Point {
 }
 
 /// The app's own settings pages a settings contribution can follow.
-pub const SETTINGS_PAGES: [&str; 8] = [
+pub const SETTINGS_PAGES: [&str; 7] = [
     "appearance",
     "general",
     "updates",
     "notifications",
     "agents",
     "mcp",
-    "keys",
     "network",
 ];
 

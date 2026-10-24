@@ -1601,6 +1601,7 @@ impl App {
                         | MenuKind::NotifSound
                         | MenuKind::NotifSources
                         | MenuKind::Holder(_)
+                        | MenuKind::Device(_)
                         | MenuKind::SetShell
                         | MenuKind::ExtChoice(..)
                 ) =>

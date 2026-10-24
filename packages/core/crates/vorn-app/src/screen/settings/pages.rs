@@ -1,5 +1,5 @@
 //! The smaller panels: Appearance, General (with `ShellPicker`),
-//! Notifications, Skills & MCP, Keys and About.
+//! Notifications and About.
 
 use serde_json::Value;
 
@@ -9,9 +9,7 @@ use super::{button, card, card_row, header, section, segmented, set, svg, toggle
 use crate::act::{Act, Acts};
 use crate::look;
 use crate::screen::{agent_icon, c, ico, white, Screen};
-use crate::settings::{
-    self, describe_field, describe_usage, sigil, SetAct, UpdateAction, UpdateStatus,
-};
+use crate::settings::{self, sigil, SetAct, UpdateAction, UpdateStatus};
 use crate::state::{now_ms, MenuKind};
 use crate::ui::{
     div, field, icon, image, text, tooltip, Action, El, Id, Rgba, Role, Sense, TextStyle,
@@ -81,7 +79,7 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
 }
 
 /// Inline icons the page draws, stroked on a 24 grid.
-pub(super) mod glyph {
+pub(in crate::screen) mod glyph {
     pub const MONITOR: &str =
         r#"<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>"#;
     pub const SUN: &str = r#"<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>"#;
@@ -209,7 +207,7 @@ pub(crate) mod tip {
         "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
 }
 
-pub(super) fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
+pub(in crate::screen) fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
     icon(svg(body, 2.0), size, color)
 }
 
@@ -402,7 +400,13 @@ fn theme_swatch(t: &Theme, size: f32) -> El {
 }
 
 /// A neutral 26 px icon button: gray, white on a faint wash when hovered.
-fn icon_button(s: &Screen<'_>, id: Id, body: &str, label: &str, tip: &str) -> El {
+pub(in crate::screen) fn icon_button(
+    s: &Screen<'_>,
+    id: Id,
+    body: &str,
+    label: &str,
+    tip: &str,
+) -> El {
     let hot = s.ui.hover(id);
     let b = div()
         .id(id)
@@ -1978,291 +1982,6 @@ pub(crate) fn notice_sources(s: &Screen<'_>) -> El {
         )
 }
 
-/// The rotation field of a key row.
-pub fn rotate_id(connection: &str) -> Id {
-    Id::new("key-rotate").child(connection)
-}
-
-fn key_button(
-    s: &Screen<'_>,
-    place: &str,
-    label: &str,
-    act: SetAct,
-    icon_name: Option<&str>,
-    enabled: bool,
-) -> El {
-    let id = s.acts.on(place, set(act));
-    let hot = s.ui.hover(id);
-    let fg = c(look::GRAY_400).mix(c(look::GRAY_200), hot);
-    let mut b = div()
-        .id(id)
-        .row()
-        .items_center()
-        .gap(4.0)
-        .px(8.0)
-        .py(4.0)
-        .rounded(2.0)
-        .shrink0()
-        .border(1.0, white(0.1))
-        .role(Role::Button, label);
-    if let Some(n) = icon_name {
-        b = b.child(ico(n, 11.0, 2.0, fg));
-    }
-    b = b.child(text(label, 11.0, fg).line_height(16.5).silent());
-    if enabled {
-        b.on(Action::Click)
-    } else {
-        b.opacity(0.5)
-    }
-}
-
-pub(super) fn keys(s: &Screen<'_>) -> El {
-    let mut list = div().col().gap(8.0);
-    for k in s.st.settings.keys.iter().flatten() {
-        let st =
-            s.st.settings
-                .key_rows
-                .get(&k.connection)
-                .cloned()
-                .unwrap_or_default();
-        let summary = format!(
-            "{} \u{b7} {}",
-            k.fields
-                .iter()
-                .map(describe_field)
-                .collect::<Vec<_>>()
-                .join(" \u{b7} "),
-            describe_usage(k.usage)
-        );
-        let mut top = div()
-            .row()
-            .items_center()
-            .gap(12.0)
-            .child(connector_mark(&k.connector, 14.0, c(look::GRAY_400)))
-            .child(
-                div()
-                    .col()
-                    .grow()
-                    .min_w0()
-                    .child(
-                        text(&k.name, 13.0, c(look::GRAY_200))
-                            .line_height(19.5)
-                            .truncate()
-                            .silent(),
-                    )
-                    .child(
-                        text(summary, 11.0, c(look::GRAY_500))
-                            .line_height(16.5)
-                            .truncate()
-                            .silent(),
-                    ),
-            );
-        if let Some((ok, _)) = &st.result {
-            let dot = match ok {
-                None => c(look::GRAY_600),
-                Some(true) => c(look::DIFF_ADD),
-                Some(false) => c(look::DANGER),
-            };
-            top = top.child(div().size(6.0, 6.0).rounded(3.0).shrink0().bg(dot));
-        }
-        if k.connector == "http" {
-            top = top.child(key_button(
-                s,
-                "key-test",
-                if st.testing {
-                    "Testing\u{2026}"
-                } else {
-                    "Test"
-                },
-                SetAct::TestKey(k.connection.clone()),
-                None,
-                !st.testing,
-            ));
-        }
-        for f in &k.fields {
-            let label = if k.fields.len() > 1 {
-                format!("Rotate {}", f.label)
-            } else {
-                "Rotate".to_owned()
-            };
-            top = top.child(key_button(
-                s,
-                "key-rotate",
-                &label,
-                SetAct::Rotate(k.connection.clone(), f.key.clone()),
-                Some("refresh-cw"),
-                true,
-            ));
-        }
-        let mut card = div()
-            .col()
-            .px(16.0)
-            .py(10.0)
-            .rounded(2.0)
-            .bg(white(0.03))
-            .border(1.0, white(0.06))
-            .child(top);
-        if let Some((ok, message)) = &st.result {
-            let line = match ok {
-                None => "This connector has nothing to check".to_owned(),
-                Some(o) => message.clone().unwrap_or_else(|| {
-                    if *o {
-                        "Reached it"
-                    } else {
-                        "Could not reach it"
-                    }
-                    .to_owned()
-                }),
-            };
-            let color = if *ok == Some(false) {
-                c(look::DANGER)
-            } else {
-                c(look::GRAY_500)
-            };
-            card = card.child(text(line, 11.0, color).line_height(16.5).mt(6.0).silent());
-        }
-        if let Some(field) = &st.rotating {
-            let id = rotate_id(&k.connection);
-            let env = k.fields.iter().any(|f| &f.key == field && f.env.is_some());
-            let empty = s.ui.edit_text(id).trim().is_empty();
-            card = card.child(
-                div()
-                    .row()
-                    .items_center()
-                    .gap(8.0)
-                    .mt(8.0)
-                    .child(
-                        div()
-                            .grow()
-                            .min_w0()
-                            .px(8.0)
-                            .py(4.0)
-                            .rounded(2.0)
-                            .bg(white(0.05))
-                            .border(
-                                1.0,
-                                if s.ui.focused(id) {
-                                    white(0.2)
-                                } else {
-                                    white(0.1)
-                                },
-                            )
-                            .frames(id)
-                            .child(
-                                crate::ui::field(
-                                    id,
-                                    "Replacement value",
-                                    if env {
-                                        "{\"TOKEN\": \"\u{2026}\"}"
-                                    } else {
-                                        "The replacement value"
-                                    },
-                                    TextStyle {
-                                        line_height: 16.0,
-                                        ..TextStyle::ui(12.0)
-                                    },
-                                    c(look::GRAY_200),
-                                )
-                                .secure()
-                                .w_full(),
-                            ),
-                    )
-                    .child(key_button(
-                        s,
-                        "key-save",
-                        if st.saving { "Saving\u{2026}" } else { "Save" },
-                        SetAct::SaveRotate(k.connection.clone(), field.clone()),
-                        None,
-                        !st.saving && !empty,
-                    ))
-                    .child({
-                        let id = s.acts.on(
-                            "key-cancel",
-                            set(SetAct::CancelRotate(k.connection.clone())),
-                        );
-                        let hot = s.ui.hover(id);
-                        div()
-                            .id(id)
-                            .on(Action::Click)
-                            .px(8.0)
-                            .py(4.0)
-                            .role(Role::Button, "Cancel")
-                            .child(
-                                text(
-                                    "Cancel",
-                                    11.0,
-                                    c(look::GRAY_500).mix(c(look::GRAY_300), hot),
-                                )
-                                .line_height(16.5)
-                                .silent(),
-                            )
-                    }),
-            );
-        }
-        if let Some(e) = &st.error {
-            card = card.child(
-                text(e, 11.0, c(look::DANGER))
-                    .line_height(16.5)
-                    .mt(6.0)
-                    .silent(),
-            );
-        }
-        list = list.child(card);
-    }
-    let mut page = div()
-        .col()
-        .child(
-            text("Keys", 20.0, c(look::WHITE))
-                .weight(600)
-                .line_height(28.0)
-                .mb(4.0)
-                .role(Role::Heading, "Keys"),
-        )
-        .child(
-            text(
-                "The secrets your connections hold, stored encrypted with your OS keychain",
-                14.0,
-                c(look::GRAY_500),
-            )
-            .line_height(20.0)
-            .mb(24.0)
-            .silent(),
-        )
-        .child(list);
-    if s.st.settings.keys.as_ref().is_some_and(Vec::is_empty) {
-        page = page.child(
-            div()
-                .col()
-                .items_center()
-                .px(16.0)
-                .py(24.0)
-                .rounded(2.0)
-                .border(1.0, white(0.06))
-                .child(
-                    div()
-                        .mb(8.0)
-                        .child(ico("key-round", 16.0, 2.0, c(look::GRAY_600))),
-                )
-                .child(
-                    text("No keys yet", 14.0, c(look::GRAY_400))
-                        .line_height(20.0)
-                        .silent(),
-                )
-                .child(
-                    text(
-                        "A connection that signs in with a key or a token shows up here.",
-                        11.0,
-                        c(look::GRAY_600),
-                    )
-                    .line_height(16.5)
-                    .mt(4.0)
-                    .silent(),
-                ),
-        );
-    }
-    page
-}
-
 pub(super) fn about(s: &Screen<'_>) -> El {
     let st = &s.st.settings;
     let app = env!("CARGO_PKG_VERSION");
@@ -2670,17 +2389,6 @@ fn link_pill(s: &Screen<'_>, id: Id, label: &str) -> El {
                 .silent(),
         )
         .child(glyph_icon(glyph::ARROW_UP_RIGHT, 11.0, c(look::GRAY_500)))
-}
-
-/// `ConnectorIcon`: a built-in connector's mark, else the external link.
-fn connector_mark(id: &str, size: f32, color: Rgba) -> El {
-    let name = match id {
-        "http" => "globe",
-        "mcp" | "sdk" => "mcp",
-        other if look::icon(other, 2.0).is_some() => other,
-        _ => "external-link",
-    };
-    ico(name, size, 2.0, color)
 }
 
 #[cfg(test)]

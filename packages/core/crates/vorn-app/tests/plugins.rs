@@ -153,7 +153,7 @@ fn plugins_page_lists_adds_and_connects() {
     // Leaving the page forgets the form state.
     shot.click(
         &mut app,
-        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Network))),
     );
     assert!(!app.st.shown(Category::Connectors));
     assert!(app.st.plugins.adding.is_none());

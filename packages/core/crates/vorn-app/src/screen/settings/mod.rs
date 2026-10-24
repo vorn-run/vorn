@@ -11,7 +11,8 @@ pub(crate) use pages::{
     agent_picker, channel_items, font_picker, holder_items, notice_sources, shell_panel,
     sound_items, theme_info, theme_picker,
 };
-pub use pages::{rotate_id, AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH};
+pub(in crate::screen) use pages::{glyph, glyph_icon, icon_button};
+pub use pages::{AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH};
 
 use super::{c, white, Screen};
 use crate::act::Act;
@@ -46,9 +47,6 @@ fn nav_svg(cat: Category) -> String {
         }
         Category::Connections => {
             r#"<path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 010 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>"#
-        }
-        Category::Keys => {
-            r#"<circle cx="8" cy="12" r="4"/><line x1="12" y1="12" x2="21" y2="12"/><line x1="18" y1="12" x2="18" y2="16"/>"#
         }
         Category::Network => {
             r#"<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>"#
@@ -273,7 +271,6 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
         Category::General => pages::general(s),
         Category::Notifications => pages::notifications(s),
         Category::Agents => agents::page(s),
-        Category::Keys => pages::keys(s),
         Category::About => pages::about(s),
         Category::Connectors => super::plugins::page(s),
         Category::Connections => super::points::settings_page(s, CONNECTIONS_PAGE),
@@ -341,54 +338,6 @@ pub(in crate::screen) fn header(title: &str, description: &str, actions: Option<
                 })),
         )
         .child_if(actions)
-}
-
-/// The label and description beside `control`, a note
-/// under the description, dimmed when `disabled`.
-pub(in crate::screen) fn row(
-    label: &str,
-    description: &str,
-    note: Option<&str>,
-    control: El,
-    disabled: bool,
-) -> El {
-    let mut left = div()
-        .col()
-        .child(
-            text(label, 14.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(20.0)
-                .role(Role::Label, label),
-        )
-        .child(
-            text(description, 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .mt(2.0)
-                .wrapping()
-                .silent(),
-        );
-    if let Some(n) = note {
-        left = left.child(
-            div().mt(6.0).pl(8.0).border_left(1.0, white(0.12)).child(
-                text(n, 12.0, c(look::GRAY_400))
-                    .line_height(16.0)
-                    .wrapping()
-                    .silent(),
-            ),
-        );
-    }
-    let mut el = div()
-        .row()
-        .items_center()
-        .justify_between()
-        .py(16.0)
-        .border_bottom(1.0, white(0.06))
-        .child(left)
-        .child(control);
-    if disabled {
-        el = el.opacity(0.4);
-    }
-    el
 }
 
 /// A title above a [`card`]: `text-[13px] font-semibold`, faint.

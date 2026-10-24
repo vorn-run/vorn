@@ -9,7 +9,7 @@
 //!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
 //!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|
 //!                       channel-menu|holder-menu|agent:KEY|agent-advanced:KEY|
-//!                       agent-remove:KEY|extension:ID]
+//!                       agent-remove:KEY|extension:ID|net-STATE+STATE]
 //!               [--update idle|checking|ready:VER|error:TEXT] [--holder BUILD:N]
 //!               [--outdated ID,ID] [--confirm-end on] [--missing KEY,KEY]
 //!               [--click X,Y]... [--type TEXT] [--hover X,Y]
@@ -38,7 +38,9 @@
 //! `--set colorScheme="dark"` to the defaults (vornd keeps them), and
 //! `--open` opens one of its popovers from its control, or with
 //! `extension:vorn.tasks` that extension's page under `--settings extensions`,
-//! or with `agent:claude` that agent's page under `--settings agents`.
+//! or with `agent:claude` that agent's page under `--settings agents`;
+//! `net-tailnet+add-device` (also `advanced`, `pair-request`, `device-menu`,
+//! `confirm-remove`) sets Remote Access states under `--settings network`.
 //! Then each `--click X,Y` presses there, `--type` types letters into the
 //! focused field, and `--hover X,Y` rests the pointer past the tooltip delay.
 //! `--reduced-transparency on`, `--tui-drawing` and `--notif-denied on` (the
@@ -252,10 +254,11 @@ fn shot(args: &Args) -> Result<(), String> {
         app.frame(&mut ui, size);
     }
     if let Some(name) = args.get("open") {
-        // An extension's page waits for vornd to list it.
+        // An extension's page, or Remote Access, waits for vornd to answer.
         let until = Instant::now() + Duration::from_secs(10);
         while let Err(e) = app.shot_open(&mut ui, name) {
-            if !name.starts_with("extension:") || Instant::now() > until {
+            let waits = name.starts_with("extension:") || name.starts_with("net-");
+            if !waits || Instant::now() > until {
                 return Err(e);
             }
             app.frame(&mut ui, size);

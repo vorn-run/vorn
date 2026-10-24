@@ -9,10 +9,11 @@ use super::{App, Call};
 use crate::client::rpc::decode;
 use crate::client::RpcError;
 use crate::network::{
-    connect_error, Adding, Code, DeviceToken, Minted, NetAct, Network, PairingRequest, Reachable,
-    Tailscale, DEVICE_NAME, HOST_TOKEN, HOST_URL, REBIND_SETTLE,
+    qr_svg, AddressKind, Code, DeviceToken, Minted, NetAct, Network, PairingRequest, Reachable,
+    Tailscale, DEVICE_NAME, REBIND_SETTLE, TAILSCALE_DOWNLOAD,
 };
 use crate::settings::Category;
+use crate::state::Dialog;
 use crate::ui::{Event as UiEvent, Ui};
 
 /// A Remote Access call whose answer changes the screen.
@@ -48,12 +49,6 @@ impl App {
                 self.net_fetch_status();
                 self.net_load_tokens();
             }
-            NetAct::View(mode) => {
-                n.viewing = mode;
-                if mode == crate::network::Mode::Host {
-                    ui.set_focus(Some(HOST_URL));
-                }
-            }
             NetAct::Share(on) => {
                 let tailnet = n.status.as_ref().is_some_and(|s| s.running);
                 if !on || tailnet {
@@ -64,37 +59,50 @@ impl App {
             }
             NetAct::EnableAnyway => self.net_share(true),
             NetAct::CancelShare => n.confirming = false,
-            NetAct::ToggleAddresses => n.show_all = !n.show_all,
+            NetAct::Route(AddressKind::Tailnet)
+                if !n.status.as_ref().is_some_and(|s| s.installed) =>
+            {
+                super::tasks::open_url(TAILSCALE_DOWNLOAD);
+            }
+            NetAct::Route(kind) => n.route = Some(kind),
+            NetAct::ToggleAdvanced => n.advanced = !n.advanced,
             NetAct::Copy(text) => {
                 ui.clipboard().set(&text);
                 n.copied = Some((text, Instant::now()));
             }
             NetAct::AddDevice => {
-                if n.can_scan() {
+                n.adding = Some(None);
+                self.st.dialog = Some(Dialog::AddDevice);
+                if self.st.network.can_scan() {
                     self.net_start_scan();
-                } else {
-                    n.adding = Some(Adding::Token);
-                    net_name_form(ui);
                 }
             }
-            NetAct::ShowAnother => self.net_start_scan(),
-            NetAct::PairManually => {
-                n.adding = Some(Adding::Token);
-                net_name_form(ui);
-                self.net_cancel_pairing();
+            NetAct::ShowAnother => {
+                n.adding = Some(None);
+                self.net_start_scan();
             }
             NetAct::CloseAdding => {
-                n.close_adding();
-                ui.set_edit_text(DEVICE_NAME, "");
+                if self.st.dialog == Some(Dialog::AddDevice) {
+                    self.st.dialog = None;
+                }
+                self.st.network.close_adding();
                 // Retired, not merely hidden: a photographed code stops working.
                 self.net_cancel_pairing();
             }
-            NetAct::ChooseUrl(url) => n.chosen_url = Some(url),
+            NetAct::NameToken => {
+                n.naming = true;
+                ui.set_edit_text(DEVICE_NAME, "");
+                ui.set_focus(Some(DEVICE_NAME));
+            }
+            NetAct::CancelToken => {
+                n.naming = false;
+                ui.set_edit_text(DEVICE_NAME, "");
+            }
             NetAct::CreateToken => {
                 n.error = None;
                 let typed = ui.edit_text(DEVICE_NAME);
                 let name = match typed.trim() {
-                    "" => "Device",
+                    "" => "Computer",
                     t => t,
                 };
                 let params = json!({ "name": name });
@@ -118,10 +126,6 @@ impl App {
                 };
                 let params = json!({ "requestId": request.request_id });
                 self.call(Call::Net(NetCall::Decided), method, params);
-            }
-            NetAct::Connect => {
-                let message = connect_error(ui.edit_text(HOST_URL), ui.edit_text(HOST_TOKEN));
-                n.connect_error = Some(message.to_owned());
             }
         }
     }
@@ -149,7 +153,8 @@ impl App {
                 Err(_) => n.error = Some("Could not read the device list.".to_owned()),
             },
             NetCall::Started => match answer.and_then(decode::<Code>) {
-                Ok(code) => n.adding = Some(Adding::Scan(code)),
+                Ok(code) if n.adding.is_some() => n.adding = Some(Some(code)),
+                Ok(_) => self.net_cancel_pairing(),
                 Err(_) => n.error = Some("Could not start pairing.".to_owned()),
             },
             NetCall::Created => match answer {
@@ -157,7 +162,7 @@ impl App {
                     let name = v["token"]["name"].as_str().unwrap_or_default().to_owned();
                     let plaintext = v["plaintext"].as_str().unwrap_or_default().to_owned();
                     n.minted = Some(Minted { name, plaintext });
-                    n.adding = None;
+                    n.naming = false;
                     self.net_load_tokens();
                 }
                 Err(_) => n.error = Some("Could not create a token.".to_owned()),
@@ -171,6 +176,9 @@ impl App {
                     n.error = Some("Could not answer that request.".to_owned());
                 }
                 n.close_adding();
+                if self.st.dialog == Some(Dialog::AddDevice) {
+                    self.st.dialog = None;
+                }
                 self.net_cancel_pairing();
                 self.net_load_tokens();
             }
@@ -212,6 +220,9 @@ impl App {
         match (shown, self.st.network.open) {
             (false, false) => return,
             (false, true) => {
+                if self.st.dialog == Some(Dialog::AddDevice) {
+                    self.st.dialog = None;
+                }
                 self.st.network.closed();
                 // Closing the page puts any code away: it is only safe while watched.
                 self.net_cancel_pairing();
@@ -220,6 +231,19 @@ impl App {
             // Just opened: load it.
             (true, false) => self.run_net(ui, NetAct::Refresh),
             (true, true) => {}
+        }
+        // The sheet closed some other way (Escape, the backdrop): retire its code.
+        if self.st.network.adding.is_some() && self.st.dialog != Some(Dialog::AddDevice) {
+            self.run_net(ui, NetAct::CloseAdding);
+        }
+        let link = self.st.network.code_link(now_ms());
+        let n = &mut self.st.network;
+        match link {
+            Some(link) if n.qr.as_ref().is_none_or(|(l, _)| *l != link) => {
+                n.qr = qr_svg(&link).map(|svg| (link, svg));
+            }
+            Some(_) => {}
+            None => n.qr = None,
         }
         let now = Instant::now();
         if self.st.network.recheck_at.is_some_and(|at| at <= now) {
@@ -236,7 +260,7 @@ impl App {
                 ui.wake_at(until);
             }
         }
-        if let Some(Adding::Scan(code)) = &n.adding {
+        if let Some(Some(code)) = &n.adding {
             let left = code.remaining(now_ms());
             if left > 0 {
                 // The next whole-second boundary, where the countdown changes.
@@ -283,10 +307,4 @@ impl App {
         config["defaults"]["networkAccessEnabled"] = json!(on);
         self.save_config(config, Call::Net(NetCall::Ignored));
     }
-}
-
-/// Opens the token form empty with its field focused.
-fn net_name_form(ui: &mut Ui) {
-    ui.set_edit_text(DEVICE_NAME, "");
-    ui.set_focus(Some(DEVICE_NAME));
 }
