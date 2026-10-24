@@ -14,8 +14,8 @@ pub enum Category {
     Appearance,
     General,
     Notifications,
+    /// The agents on this machine and their setup, Vorn's tools included.
     Agents,
-    Mcp,
     /// The Extensions manager (its route keeps the old `connectors`).
     Connectors,
     /// Settings › Connections: opens the Connectors built-in's own page,
@@ -34,7 +34,6 @@ impl Category {
             "general" => Category::General,
             "notifications" => Category::Notifications,
             "agents" => Category::Agents,
-            "mcp" => Category::Mcp,
             "connectors" | "extensions" | "plugins" => Category::Connectors,
             "connections" => Category::Connections,
             "keys" => Category::Keys,
@@ -49,8 +48,7 @@ impl Category {
             Category::Appearance => "Appearance",
             Category::General => "General",
             Category::Notifications => "Notifications",
-            Category::Agents => "Coding Agents",
-            Category::Mcp => "Skills & MCP",
+            Category::Agents => "Agents",
             Category::Connectors => "Extensions",
             Category::Connections => "Connections",
             Category::Keys => "Keys",
@@ -77,12 +75,7 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
     ),
     (
         "CONNECTIONS",
-        &[
-            Category::Agents,
-            Category::Mcp,
-            Category::Keys,
-            Category::Network,
-        ],
+        &[Category::Agents, Category::Keys, Category::Network],
     ),
 ];
 
@@ -130,15 +123,23 @@ pub enum SetAct {
     UpdateNow,
     /// The sidebar's update notice put away; the gear keeps a dot.
     DismissUpdate,
-    // Coding agents.
+    // Agents.
     Redetect,
+    /// An agent's detail shown in place of the list, or the list again.
+    OpenAgent(Option<String>),
     ResetAgent(String),
+    /// The detail's Advanced rows, shown or hidden.
     ExpandAgent(String),
-    CopyInstall(String),
+    /// Runs the agent's installer in a terminal card.
+    InstallAgent(String),
+    /// Runs the agent's Vorn tools setup for it.
+    ConnectAgent(String),
+    /// Removes the agent's adapter; the first press asks in the row.
+    RemoveAgent(String),
+    /// The Remove row's Cancel.
+    KeepAgent,
     /// Typing in an agent's command, arguments or headless arguments.
     AgentText(String, AgentField),
-    // Skills and MCP.
-    Copy(String),
     // Keys.
     TestKey(String),
     Rotate(String, String),
@@ -692,9 +693,12 @@ pub struct Settings {
     /// The sidebar's ready-update notice was dismissed (`updateBannerDismissed`).
     pub update_dismissed: bool,
     pub detecting: bool,
+    /// The agents whose Advanced rows are shown.
     pub agents_open: HashSet<String>,
-    /// The agent whose install command was copied, and until when.
-    pub copied: Option<(String, web_time::Instant)>,
+    /// The agent whose detail is open on the Agents page.
+    pub agent: Option<String>,
+    /// The agent whose Remove asks first.
+    pub confirm_remove: Option<String>,
     /// Typed arguments not yet committed, by (agent, field).
     pub args: HashMap<(String, AgentField), String>,
     pub keys: Option<Vec<ConnKey>>,
@@ -794,6 +798,78 @@ pub fn modified(cmd: &Value, a: &Agent) -> bool {
 /// Typed arguments as the list they are saved as.
 pub fn split_args(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_owned).collect()
+}
+
+/// Whether the agent's command is on this machine; until detection first
+/// answers, every agent counts, so the list does not flash "Needs setup".
+pub fn is_ready(installed: Option<&[String]>, key: &str) -> bool {
+    installed.is_none_or(|l| l.iter().any(|k| k == key))
+}
+
+/// The agents whose command was found, then the ones that need setup, each
+/// in the order Vorn lists them.
+pub fn partition_agents<'a>(
+    agents: impl IntoIterator<Item = &'a Agent>,
+    installed: Option<&[String]>,
+) -> (Vec<&'a Agent>, Vec<&'a Agent>) {
+    agents
+        .into_iter()
+        .partition(|a| is_ready(installed, &a.key))
+}
+
+/// `defaults[AGENT_TOOLS][agent]`: Vorn ran Connect for the agent and it worked.
+pub const AGENT_TOOLS: &str = "agentTools";
+
+/// Whether the agent can use Vorn's tools, as far as Vorn knows.
+pub fn tools_connected(config: &Value, agent: &str) -> bool {
+    config
+        .get("defaults")
+        .and_then(|d| d.get(AGENT_TOOLS))
+        .and_then(|t| t.get(agent))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// What a setup typed into a shell runs: the commands in order, then `exit`,
+/// so the shell's exit code says whether every one of them worked.
+pub fn setup_line(commands: &[String]) -> String {
+    format!("{} && exit\r", commands.join(" && "))
+}
+
+/// How long an agent's session stays quiet before Vorn types into it.
+pub const QUIET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// The longest Vorn waits for that quiet before typing anyway.
+pub const QUIET_CAP: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// A terminal Vorn started to set an agent up, by its session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentJob {
+    /// The installer; detection runs again when its shell exits.
+    Install(String),
+    /// Setup commands in a shell; connected when the shell exits cleanly.
+    Connect(String),
+    /// Setup commands typed into a session of the agent, one at a time, each
+    /// once the session has gone quiet after `since`.
+    ConnectInAgent {
+        agent: String,
+        pending: std::collections::VecDeque<String>,
+        since: web_time::Instant,
+    },
+}
+
+/// When the next setup command can be typed: once output that came after
+/// `since` has been quiet for [`QUIET`], and by [`QUIET_CAP`] after `since`
+/// even if the session never printed.
+pub fn type_due(
+    last_output: Option<web_time::Instant>,
+    since: web_time::Instant,
+) -> web_time::Instant {
+    let cap = since + QUIET_CAP;
+    match last_output {
+        Some(o) if o >= since => (o + QUIET).min(cap),
+        _ => cap,
+    }
 }
 
 #[cfg(test)]
@@ -971,5 +1047,56 @@ mod tests {
             extensions_note(9, &["A", "B", "C", "D", "E"]),
             "A, B and 3 more"
         );
+    }
+
+    #[test]
+    fn ready_agents_come_first_and_the_rest_need_setup() {
+        let agents = crate::agents::testing::agents();
+        let keys = |l: Vec<&Agent>| l.iter().map(|a| a.key.clone()).collect::<Vec<_>>();
+        let found = vec!["gamma".to_owned(), "acme".to_owned()];
+        let (ready, setup) = partition_agents(&agents, Some(&found));
+        assert_eq!(keys(ready), ["acme", "gamma"]);
+        assert_eq!(keys(setup), ["beta"]);
+        let (ready, setup) = partition_agents(&agents, None);
+        assert_eq!(ready.len(), 3, "every agent counts until detection answers");
+        assert!(setup.is_empty());
+        assert!(partition_agents(&agents, Some(&[])).0.is_empty());
+    }
+
+    #[test]
+    fn vorn_tools_are_connected_only_where_connect_worked() {
+        let config = json!({ "defaults": { AGENT_TOOLS: { "acme": true, "beta": false } } });
+        assert!(tools_connected(&config, "acme"));
+        assert!(!tools_connected(&config, "beta"));
+        assert!(!tools_connected(&config, "gamma"));
+        assert!(!tools_connected(&json!({}), "acme"));
+    }
+
+    #[test]
+    fn a_shell_setup_exits_only_when_every_command_worked() {
+        let cmds = ["a add vorn".to_owned(), "a install vorn".to_owned()];
+        assert_eq!(setup_line(&cmds), "a add vorn && a install vorn && exit\r");
+        assert_eq!(setup_line(&cmds[..1]), "a add vorn && exit\r");
+    }
+
+    #[test]
+    fn types_into_an_agent_once_it_has_gone_quiet() {
+        use std::time::Duration;
+        let since = web_time::Instant::now();
+        let ms = Duration::from_millis;
+        // Nothing printed yet: wait up to the cap.
+        assert_eq!(type_due(None, since), since + QUIET_CAP);
+        // Output from before the last command typed does not count.
+        let before = since.checked_sub(ms(10)).unwrap_or(since);
+        if before < since {
+            assert_eq!(type_due(Some(before), since), since + QUIET_CAP);
+        }
+        // Output after it: due once quiet.
+        assert_eq!(
+            type_due(Some(since + ms(400)), since),
+            since + ms(400) + QUIET
+        );
+        // A session that keeps printing still gets typed into at the cap.
+        assert_eq!(type_due(Some(since + ms(19_900)), since), since + QUIET_CAP);
     }
 }

@@ -41,9 +41,6 @@ fn nav_svg(cat: Category) -> String {
         Category::Agents => {
             r#"<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>"#
         }
-        Category::Mcp => {
-            r#"<path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="4"/>"#
-        }
         Category::Connectors => {
             r#"<path d="M15.39 4.39a1 1 0 001.68-.474 2.5 2.5 0 113.014 3.015 1 1 0 00-.474 1.68l1.683 1.682a2.414 2.414 0 010 3.414L19.61 15.39a1 1 0 01-1.68-.474 2.5 2.5 0 10-3.014 3.015 1 1 0 01.474 1.68l-1.683 1.682a2.414 2.414 0 01-3.414 0L8.61 19.61a1 1 0 00-1.68.474 2.5 2.5 0 11-3.014-3.015 1 1 0 00.474-1.68l-1.683-1.682a2.414 2.414 0 010-3.414L4.39 8.61a1 1 0 011.68.474 2.5 2.5 0 103.014-3.015 1 1 0 01-.474-1.68l1.683-1.682a2.414 2.414 0 013.414 0z"/>"#
         }
@@ -276,7 +273,6 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
         Category::General => pages::general(s),
         Category::Notifications => pages::notifications(s),
         Category::Agents => agents::page(s),
-        Category::Mcp => pages::mcp(s),
         Category::Keys => pages::keys(s),
         Category::About => pages::about(s),
         Category::Connectors => super::plugins::page(s),

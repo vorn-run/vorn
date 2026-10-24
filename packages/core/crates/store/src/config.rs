@@ -184,6 +184,7 @@ impl Store {
                 "contrastCorrection",
                 "materials",
                 "terminalFontFamily",
+                "agentTools",
             ],
         );
         Ok(out)

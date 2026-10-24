@@ -300,6 +300,18 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         .find(|a| first.contains(&a.key))
         .cloned()
     {
+        // A row opens the agent's page; its arguments wait under Advanced.
+        let open = Act::Set(SetAct::OpenAgent(Some(agent.key.clone())));
+        shot.click(&mut app, control(&format!("agent-row:{}", agent.key), open));
+        assert_eq!(app.st.settings.agent.as_deref(), Some(agent.key.as_str()));
+        shot.save(&mut app, "set-agent");
+        shot.click(
+            &mut app,
+            control(
+                "agent-advanced",
+                Act::Set(SetAct::ExpandAgent(agent.key.clone())),
+            ),
+        );
         let id = vorn_app::screen::settings::agent_field_id(&agent.key, AgentField::Args);
         shot.click(&mut app, id);
         shot.type_text(&mut app, "--verbose");
@@ -325,12 +337,12 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
         "settings-nav",
         Act::Set(SetAct::Open(Category::Agents)),
     ));
-    let mcp = y(control(
+    let keys = y(control(
         "settings-nav",
-        Act::Set(SetAct::Open(Category::Mcp)),
+        Act::Set(SetAct::Open(Category::Keys)),
     ));
     let ssh = y(nav);
-    assert!(agents < ssh && ssh < mcp, "{agents} < {ssh} < {mcp}");
+    assert!(agents < ssh && ssh < keys, "{agents} < {ssh} < {keys}");
     shot.click(&mut app, nav);
     shot.until(&mut app, "the hosts", |a, _| {
         entry_titled(a.st.points.trees.get(page)?.as_ref().ok()?, "Build box")
@@ -401,15 +413,6 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     saved(&mut app, "a second host", |c| {
         c["remoteHosts"].as_array().map_or(0, Vec::len) == 2
     });
-
-    open(&mut shot, &mut app, Category::Mcp);
-    shot.save(&mut app, "set-mcp");
-    let cmd = "/plugin install vorn".to_owned();
-    shot.click(
-        &mut app,
-        control("mcp-copy", Act::Set(SetAct::Copy(cmd.clone()))),
-    );
-    assert_eq!(shot.ui.clipboard().get(), Some(cmd));
 
     open(&mut shot, &mut app, Category::Keys);
     shot.until(&mut app, "the keys", |a, _| {

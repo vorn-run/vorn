@@ -32,7 +32,7 @@ fn num(s: &Screen<'_>, key: &str) -> Option<f64> {
     defaults(s).and_then(|d| d.get(key)).and_then(Value::as_f64)
 }
 
-fn default_act(key: &str, v: impl ToString) -> SetAct {
+pub(super) fn default_act(key: &str, v: impl ToString) -> SetAct {
     SetAct::Default(key.to_owned(), v.to_string())
 }
 
@@ -81,7 +81,7 @@ fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
 }
 
 /// Inline icons the page draws, stroked on a 24 grid.
-mod glyph {
+pub(super) mod glyph {
     pub const MONITOR: &str =
         r#"<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>"#;
     pub const SUN: &str = r#"<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>"#;
@@ -93,6 +93,10 @@ mod glyph {
     pub const CHEVRON_DOWN: &str = r#"<path d="M6 9l6 6 6-6"/>"#;
     pub const CHEVRON_UP: &str = r#"<path d="M18 15l-6-6-6 6"/>"#;
     pub const SEARCH: &str = r#"<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>"#;
+    pub const CHECK: &str = r#"<path d="M20 6L9 17l-5-5"/>"#;
+    pub const REFRESH: &str = r#"<path d="M21 12a9 9 0 01-15.5 6.2L3 16M3 12a9 9 0 0115.5-6.2L21 8M21 3v5h-5M3 21v-5h5"/>"#;
+    pub const CHEVRON_RIGHT: &str = r#"<path d="M9 18l6-6-6-6"/>"#;
+    pub const CHEVRON_LEFT: &str = r#"<path d="M15 18l-6-6 6-6"/>"#;
     pub const TERMINAL: &str = r#"<path d="M4 17l6-6-6-6M12 19h8"/>"#;
     pub const ARROW_UP_RIGHT: &str = r#"<path d="M7 17L17 7M7 7h10v10"/>"#;
     pub const BELL: &str = r#"<path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 003.4 0"/>"#;
@@ -106,7 +110,7 @@ mod glyph {
     pub const ELLIPSIS: &str = r#"<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>"#;
 }
 
-/// What each Appearance, General and About row, tile and chip says when hovered.
+/// What each settings row, tile and chip says when hovered.
 pub(crate) mod tip {
     #[cfg(target_os = "macos")]
     pub const SCHEME: &str =
@@ -149,19 +153,29 @@ pub(crate) mod tip {
     pub const LOGIN: &str = "Start Vorn when you sign in to your computer.";
     pub const REOPEN: &str = "Bring back the sessions that were open when Vorn quit.";
     pub const AGENT: &str = "The agent a new session starts with.";
-    #[cfg(target_os = "macos")]
-    pub const INSTALLED: &str = "Agents on this Mac.";
-    #[cfg(not(target_os = "macos"))]
-    pub const INSTALLED: &str = "Agents on this computer.";
-    pub const AVAILABLE: &str = "Agents you can add.";
-    #[cfg(target_os = "macos")]
-    pub const SET_UP: &str =
-        "This agent's adapter is installed but its command isn't on this Mac yet.";
-    #[cfg(not(target_os = "macos"))]
-    pub const SET_UP: &str =
-        "This agent's adapter is installed but its command isn't on this computer yet.";
-    pub const INSTALL: &str = "Adds this agent from the catalog.";
     pub const MORE_AGENTS: &str = "Opens the extensions catalog, filtered to agents.";
+    #[cfg(target_os = "macos")]
+    pub const AGENT_ROW: &str = "Ready means Vorn found this agent's command on this Mac.";
+    #[cfg(not(target_os = "macos"))]
+    pub const AGENT_ROW: &str = "Ready means Vorn found this agent's command on this computer.";
+    pub const TOOLS: &str =
+        "Whether this agent can use Vorn's tools: open panes, read sessions, run workflows.";
+    pub const DEFAULT_TAG: &str = "New sessions start with this agent.";
+    pub const INSTALL_AGENT: &str =
+        "Runs the agent's installer in a terminal card so you can watch it.";
+    pub const CONNECT: &str =
+        "Vorn runs the setup shown below for this agent, then checks it worked.";
+    pub const MAKE_DEFAULT: &str = "Start new sessions with this agent.";
+    pub const ADVANCED: &str = "The command and arguments Vorn uses to start this agent.";
+    #[cfg(target_os = "macos")]
+    pub const REMOVE_AGENT: &str =
+        "Uninstalls this agent's adapter from Vorn; the agent itself stays on your Mac.";
+    #[cfg(not(target_os = "macos"))]
+    pub const REMOVE_AGENT: &str =
+        "Uninstalls this agent's adapter from Vorn; the agent itself stays on your computer.";
+    pub const MANAGE_AGENTS: &str = "Opens Settings \u{203a} Agents.";
+    pub const DOCS: &str = "Opens the agent's documentation in your browser.";
+    pub const REDETECT: &str = "Look for agents on this machine again.";
     pub const SHELL: &str = "The shell a new terminal session runs.";
     pub const CHOOSE_PATH: &str = "Use a shell that isn't in the list.";
     pub const BEHIND: &str = "Your running terminals still use the last version; restarting moves them over without ending them.";
@@ -195,7 +209,7 @@ pub(crate) mod tip {
         "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
 }
 
-fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
+pub(super) fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
     icon(svg(body, 2.0), size, color)
 }
 
@@ -1411,7 +1425,7 @@ pub(super) fn general(s: &Screen<'_>) -> El {
 }
 
 /// The agent new sessions start with: the stored one, else the first.
-fn default_agent<'a>(s: &Screen<'a>) -> &'a str {
+pub(super) fn default_agent<'a>(s: &Screen<'a>) -> &'a str {
     defaults(s)
         .and_then(|d| d.get("defaultAgent"))
         .and_then(Value::as_str)
@@ -1442,46 +1456,26 @@ fn agent_chip(s: &Screen<'_>) -> El {
 /// The field the agent picker searches in.
 pub const AGENT_SEARCH: Id = Id(0x6167_656e_7473_7263);
 
-/// The agent picker: search, the agents on this machine, the ones that can
-/// be added, and more from the catalog.
+/// The agent picker: search, the agents ready on this machine with a check
+/// on the default, then Manage agents… and more from the catalog.
 pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
-    use crate::plugins::{Kind, Source};
     let query = s.ui.edit_text(AGENT_SEARCH).trim().to_lowercase();
-    let hit = |name: &str| query.is_empty() || name.to_lowercase().contains(&query);
     let chosen = default_agent(s);
-    let on_machine = |key: &str| {
-        s.st.installed
-            .as_ref()
-            .is_none_or(|l| l.iter().any(|k| k == key))
-    };
-    let heading = |label: &str, tip_text: &str| {
-        let id = Id::new("agent-section").child(label);
-        let t = text(label.to_uppercase(), 11.0, c(look::GRAY_500))
-            .tracking(0.06)
-            .line_height(14.0)
-            .id(id)
-            .sense(Sense::HOVER)
-            .role(Role::Heading, label);
-        div()
-            .px(10.0)
-            .pt(8.0)
-            .pb(4.0)
-            .child(tooltip(s.ui, t, id, tip_text, None))
-    };
-    let mut installed = Vec::new();
-    let mut available = Vec::new();
-    for a in &s.store.agents {
-        if !hit(&a.name) {
-            continue;
-        }
-        if on_machine(&a.key) {
-            let id = s.acts.on(
-                "agent-option",
-                set(default_act("defaultAgent", format!("\"{}\"", a.key))),
-            );
-            let on = a.key == chosen;
-            let lit = s.ui.hover(id).max(if on { 1.0 } else { 0.0 });
-            let mut r = div()
+    let mut list = div().col().p(6.0).role(Role::ListBox, "Agents");
+    let mut any = false;
+    for a in s.store.agents.iter().filter(|a| {
+        settings::is_ready(s.st.installed.as_deref(), &a.key)
+            && (query.is_empty() || a.name.to_lowercase().contains(&query))
+    }) {
+        any = true;
+        let id = s.acts.on(
+            "agent-option",
+            set(default_act("defaultAgent", format!("\"{}\"", a.key))),
+        );
+        let on = a.key == chosen;
+        let lit = s.ui.hover(id).max(if on { 1.0 } else { 0.0 });
+        list = list.child(
+            div()
                 .id(id)
                 .on(Action::Click)
                 .row()
@@ -1501,64 +1495,17 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
                             .truncate()
                             .silent(),
                     ),
-                );
-            if on {
-                r = r.child(
-                    text("Default", 11.0, c(look::GRAY_500))
-                        .line_height(14.0)
-                        .silent(),
-                );
-            }
-            installed.push(r);
-        } else {
-            available.push(available_row(
-                s,
-                &a.key,
-                Some(&a.key),
-                &a.name,
-                "Set up",
-                tip::SET_UP,
-                set(SetAct::Open(settings::Category::Agents)),
-            ));
-        }
+                )
+                .child_if(on.then(|| glyph_icon(glyph::CHECK, 12.0, c(look::GRAY_400)))),
+        );
     }
-    for l in &s.st.plugins.listings {
-        let agent = l.kind == Kind::Extension
-            && l.source == Source::Catalog
-            && l.id
-                .strip_prefix(AGENT_EXTENSIONS)
-                .is_some_and(|k| s.store.agents.iter().all(|a| a.key != k));
-        if agent && hit(&l.name) {
-            let act = set(SetAct::Browse("agent".into(), Some(l.key.clone())));
-            available.push(available_row(
-                s,
-                &l.key,
-                None,
-                &l.name,
-                "Install",
-                tip::INSTALL,
-                act,
-            ));
-        }
-    }
-    let mut list = div().col().p(6.0).role(Role::ListBox, "Agents");
-    if installed.is_empty() && available.is_empty() {
+    if !any {
         list = list.child(
             text("No agents match", 12.0, c(look::GRAY_500))
                 .line_height(16.0)
                 .px(10.0)
                 .py(16.0),
         );
-    }
-    if !installed.is_empty() {
-        list = list
-            .child(heading("Installed", tip::INSTALLED))
-            .children(installed);
-    }
-    if !available.is_empty() {
-        list = list
-            .child(heading("Available", tip::AVAILABLE))
-            .children(available);
     }
     let focus = if s.ui.focused(AGENT_SEARCH) { 1.0 } else { 0.0 };
     let style = TextStyle {
@@ -1588,6 +1535,21 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
             .grow()
             .min_w0(),
         );
+    let manage_id = s.acts.on(
+        "manage-agents",
+        set(SetAct::Open(settings::Category::Agents)),
+    );
+    let manage_ink = c(look::GRAY_300).mix(c(look::WHITE), s.ui.hover(manage_id));
+    let manage = div()
+        .id(manage_id)
+        .on(Action::Click)
+        .role(Role::Link, "Manage agents")
+        .ring(2.0)
+        .child(
+            text("Manage agents\u{2026}", 12.0, manage_ink)
+                .line_height(16.0)
+                .silent(),
+        );
     let more_id = s
         .acts
         .on("more-agents", set(SetAct::Browse("agent".into(), None)));
@@ -1598,7 +1560,7 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
         .role(Role::Link, "Get more agents")
         .ring(2.0)
         .child(
-            text("Get more agents\u{2026}", 12.0, more_ink)
+            text("Get more\u{2026}", 12.0, more_ink)
                 .line_height(16.0)
                 .silent(),
         );
@@ -1621,62 +1583,15 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
         )
         .child(
             div()
-                .px(12.0)
-                .py(8.0)
+                .row()
+                .items_center()
+                .justify_between()
+                .px(14.0)
+                .py(10.0)
                 .border_top(1.0, white(0.06))
+                .child(tooltip(s.ui, manage, manage_id, tip::MANAGE_AGENTS, None))
                 .child(tooltip(s.ui, more, more_id, tip::MORE_AGENTS, None)),
         )
-}
-
-/// The catalog's agent adapters are extensions under this id.
-const AGENT_EXTENSIONS: &str = "vorn.agents.";
-
-/// An agent that can be added: its mark (a known one's, else a blank),
-/// faded name, and the button that adds it.
-fn available_row(
-    s: &Screen<'_>,
-    place: &str,
-    agent: Option<&str>,
-    name: &str,
-    label: &str,
-    tip_text: &str,
-    act: Act,
-) -> El {
-    let id = s.acts.on(&format!("agent-add:{place}"), act);
-    let mark = agent.map_or_else(
-        || div().size(20.0, 20.0).rounded(4.0).bg(white(0.08)),
-        |k| agent_icon(s, k, 20.0),
-    );
-    let b = div()
-        .id(id)
-        .on(Action::Click)
-        .px(10.0)
-        .py(3.0)
-        .rounded(4.0)
-        .bg(white(0.06).mix(white(0.12), s.ui.hover(id)))
-        .role(Role::Button, format!("{label} {name}"))
-        .ring(4.0)
-        .child(
-            text(label, 11.0, c(look::GRAY_200))
-                .line_height(14.0)
-                .silent(),
-        );
-    div()
-        .row()
-        .items_center()
-        .gap(10.0)
-        .px(10.0)
-        .py(6.0)
-        .child(div().opacity(0.6).child(mark))
-        .child(
-            div().grow().min_w0().child(
-                text(name, 13.0, c(look::GRAY_400))
-                    .line_height(18.0)
-                    .truncate()
-                    .silent(),
-            ),
-        )
-        .child(tooltip(s.ui, b, id, tip_text, None))
 }
 
 /// The `defaults.notifications` preferences, as the notifier reads them.
@@ -2061,136 +1976,6 @@ pub(crate) fn notice_sources(s: &Screen<'_>) -> El {
             .border_top(1.0, white(0.06))
             .silent(),
         )
-}
-
-pub(super) fn mcp(s: &Screen<'_>) -> El {
-    let mut list = div().col().gap(12.0);
-    for a in &s.store.agents {
-        let Some(setup) = &a.mcp else {
-            continue;
-        };
-        let mut cmds = div().col().gap(8.0);
-        for cmd in &setup.commands {
-            let id = s.acts.on("mcp-copy", set(SetAct::Copy(cmd.clone())));
-            let hot = s.ui.hover(id);
-            let copied = s.st.settings.copied.as_ref().is_some_and(|(k, _)| k == cmd);
-            cmds = cmds.child(
-                div()
-                    .row()
-                    .items_center()
-                    .gap(8.0)
-                    .child(
-                        div()
-                            .grow()
-                            .min_w0()
-                            .px(12.0)
-                            .py(6.0)
-                            .rounded(6.0)
-                            .bg(white(0.04))
-                            .border(1.0, white(0.08))
-                            .clip()
-                            .child(
-                                text(cmd.as_str(), 12.0, c(look::GRAY_300))
-                                    .mono()
-                                    .line_height(16.0)
-                                    .silent(),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id(id)
-                            .on(Action::Click)
-                            .px(8.0)
-                            .py(4.0)
-                            .rounded(4.0)
-                            .shrink0()
-                            .bg(white(0.04).mix(white(0.08), hot))
-                            .role(Role::Button, "Copy")
-                            .child(
-                                text(
-                                    if copied { "Copied" } else { "Copy" },
-                                    12.0,
-                                    c(look::GRAY_400).mix(c(look::GRAY_200), hot),
-                                )
-                                .line_height(16.0)
-                                .silent(),
-                            ),
-                    ),
-            );
-        }
-        let mut card = div()
-            .col()
-            .p(16.0)
-            .rounded(8.0)
-            .border(1.0, white(0.06))
-            .bg(c(look::SURFACE_SUNKEN))
-            .child(
-                div()
-                    .row()
-                    .items_center()
-                    .gap(12.0)
-                    .mb(12.0)
-                    .child(agent_icon(s, &a.key, 20.0))
-                    .child(
-                        text(a.name.as_str(), 14.0, c(look::GRAY_200))
-                            .weight(500)
-                            .line_height(20.0)
-                            .silent(),
-                    )
-                    .child(
-                        text(
-                            if setup.in_agent {
-                                format!("Run in {}", a.name)
-                            } else {
-                                "Run in your terminal".to_owned()
-                            },
-                            11.0,
-                            c(look::GRAY_500),
-                        )
-                        .line_height(16.5)
-                        .silent(),
-                    ),
-            )
-            .child(cmds);
-        if let Some(n) = &setup.note {
-            card = card.child(
-                text(n.as_str(), 11.0, c(look::GRAY_500))
-                    .line_height(16.5)
-                    .mt(8.0)
-                    .wrapping()
-                    .silent(),
-            );
-        }
-        list = list.child(card);
-    }
-    div()
-        .col()
-        .child(
-            text("Skills & MCP", 20.0, c(look::WHITE))
-                .weight(600)
-                .line_height(28.0)
-                .mb(4.0)
-                .role(Role::Heading, "Skills & MCP"),
-        )
-        .child(
-            text(
-                "Connect your coding agents to Vorn. Each setup below installs the MCP server along with the guidance that explains what its tools are for.",
-                14.0,
-                c(look::GRAY_500),
-            )
-            .line_height(20.0)
-            .mb(24.0)
-            .wrapping()
-            .silent(),
-        )
-        .child(
-            text("Set up an agent", 14.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(20.0)
-                .mb(12.0)
-                .silent(),
-        )
-        .child(list)
 }
 
 /// The rotation field of a key row.
@@ -2671,7 +2456,7 @@ pub(crate) fn holder_items(instance: &str) -> Vec<crate::screen::menus::Item> {
 }
 
 /// A neutral pill, or the surface's one filled button when `primary`.
-fn pill_button(
+pub(super) fn pill_button(
     s: &Screen<'_>,
     place: &str,
     label: &str,

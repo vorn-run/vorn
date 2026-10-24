@@ -1545,6 +1545,8 @@ export interface AppConfig {
     materials?: 'solid' | 'native' | 'themed'
     /** The family the terminal draws in; the bundled monospace face when unset. */
     terminalFontFamily?: string
+    /** The agents Vorn connected its tools to, by agent id. */
+    agentTools?: Partial<Record<AiAgentType, boolean>>
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>

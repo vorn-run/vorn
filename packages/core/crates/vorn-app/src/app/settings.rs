@@ -24,6 +24,8 @@ pub(super) enum SetCall {
     Detected,
     /// vornd stopping for Restart Vorn.
     Restart,
+    /// A terminal started to install or connect an agent.
+    Setup(settings::AgentJob),
 }
 
 impl App {
@@ -106,6 +108,25 @@ impl App {
     pub fn shot_open(&mut self, ui: &mut Ui, name: &str) -> Result<(), String> {
         use crate::state::MenuKind;
         use vorn_theme::Appearance as Look;
+        let agent = [
+            ("agent:", false, false),
+            ("agent-advanced:", true, false),
+            ("agent-remove:", false, true),
+        ]
+        .into_iter()
+        .find_map(|(p, adv, rm)| Some((name.strip_prefix(p)?, adv, rm)));
+        if let Some((key, advanced, remove)) = agent {
+            if self.store.agents.get(key).is_none() {
+                return Err(format!("--open {name:?}: no agent {key}"));
+            }
+            let st = &mut self.st.settings;
+            st.agent = Some(key.to_owned());
+            if advanced {
+                st.agents_open.insert(key.to_owned());
+            }
+            st.confirm_remove = remove.then(|| key.to_owned());
+            return Ok(());
+        }
         if let Some(id) = name.strip_prefix("extension:") {
             if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
                 self.run_plug(ui, crate::plugins::PlugAct::Refresh);
@@ -142,7 +163,7 @@ impl App {
             "holder-menu" => ("holder-more", MenuKind::Holder("shot".to_owned())),
             _ => {
                 return Err(format!(
-                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu, sound-menu, notice-sources or extension:ID"
+                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu, sound-menu, notice-sources, agent:KEY, agent-advanced:KEY, agent-remove:KEY or extension:ID"
                 ))
             }
         };
@@ -214,6 +235,161 @@ impl App {
                     self.st.agent_paths = paths;
                 }
             }
+            SetCall::Setup(job) => self.setup_started(job, answer),
+        }
+    }
+
+    /// Looks for the agents again.
+    fn redetect(&mut self) {
+        if self.st.settings.detecting {
+            return;
+        }
+        self.st.settings.detecting = true;
+        self.call(
+            Call::Set(SetCall::Detected),
+            "agent:locate",
+            json!({ "refresh": true }),
+        );
+    }
+
+    /// Where an agent's setup terminal starts: the composer's project, else
+    /// the first one, else home.
+    fn setup_place(&self) -> Option<(String, String)> {
+        self.composer_project().or_else(|| {
+            let p = self.store.projects.first()?;
+            Some((p.name.clone(), p.path.clone()))
+        })
+    }
+
+    /// Runs the agent's installer, or its Vorn tools setup, in a terminal card.
+    fn start_setup(&mut self, key: &str, install: bool) {
+        let Some(a) = self.store.agents.get(key) else {
+            return;
+        };
+        let place = self.setup_place();
+        let cwd = place.as_ref().map_or(Value::Null, |p| json!(p.1));
+        let (job, params) = match (&a.mcp, install) {
+            (_, true) if !a.install.is_empty() => {
+                (settings::AgentJob::Install(a.key.clone()), None)
+            }
+            (Some(m), false) if m.in_agent => {
+                let Some((name, path)) = place else {
+                    self.st
+                        .toast(format!("Add a project to connect {}.", a.name), true);
+                    return;
+                };
+                let job = settings::AgentJob::ConnectInAgent {
+                    agent: a.key.clone(),
+                    pending: m.commands.iter().cloned().collect(),
+                    since: web_time::Instant::now(),
+                };
+                let params =
+                    json!({ "agentType": a.key, "projectName": name, "projectPath": path });
+                (job, Some(params))
+            }
+            (Some(_), false) => (settings::AgentJob::Connect(a.key.clone()), None),
+            _ => return,
+        };
+        let call = Call::Set(SetCall::Setup(job));
+        match params {
+            Some(p) => self.call(call, "terminal:create", p),
+            None => self.call(call, "shell:create", cwd),
+        }
+    }
+
+    /// The setup terminal exists: shows it, and types a shell setup into it.
+    fn setup_started(&mut self, mut job: settings::AgentJob, answer: Result<Value, RpcError>) {
+        let info =
+            match answer.and_then(crate::client::rpc::decode::<vorn_protocol::TerminalSession>) {
+                Ok(info) => info,
+                Err(e) => return self.st.toast(e.to_string(), true),
+            };
+        let id = info.id.clone();
+        self.st.selected = Some(id.clone());
+        self.st.focus_terminal = true;
+        self.st.view = crate::screen::MainView::Sessions;
+        self.st.settings.open = false;
+        self.store.upsert(info);
+        let line = match &mut job {
+            settings::AgentJob::Install(k) => self
+                .store
+                .agents
+                .get(k)
+                .map(|a| format!("{} && exit\r", a.install)),
+            settings::AgentJob::Connect(k) => self
+                .store
+                .agents
+                .get(k)
+                .and_then(|a| a.mcp.as_ref())
+                .map(|m| settings::setup_line(&m.commands)),
+            settings::AgentJob::ConnectInAgent { since, .. } => {
+                *since = web_time::Instant::now();
+                None
+            }
+        };
+        if let (Some(line), Some(g)) = (line, &self.grid) {
+            g.text(&id, &line);
+        }
+        self.agent_jobs.insert(id, job);
+    }
+
+    /// A setup terminal ended: detection runs again after an installer, and
+    /// a shell setup that exited cleanly marks the agent connected.
+    pub(super) fn agent_notified(&mut self, method: &str, params: &Value) {
+        if method != "terminal:exit" {
+            return;
+        }
+        let Some(id) = params.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(job) = self.agent_jobs.remove(id) else {
+            return;
+        };
+        let ok = params.get("exitCode").and_then(Value::as_i64).unwrap_or(0) == 0;
+        match job {
+            settings::AgentJob::Install(_) => self.redetect(),
+            settings::AgentJob::Connect(k) if ok => self.mark_connected(&k),
+            _ => {}
+        }
+    }
+
+    fn mark_connected(&mut self, agent: &str) {
+        self.write_defaults(|d| {
+            if !d.get(settings::AGENT_TOOLS).is_some_and(Value::is_object) {
+                d[settings::AGENT_TOOLS] = json!({});
+            }
+            d[settings::AGENT_TOOLS][agent] = json!(true);
+        });
+    }
+
+    /// Types the next setup command into each agent session that has gone quiet.
+    pub(super) fn agent_tick(&mut self, ui: &mut Ui, now: web_time::Instant) {
+        let mut done = Vec::new();
+        for (id, job) in &mut self.agent_jobs {
+            let settings::AgentJob::ConnectInAgent {
+                agent,
+                pending,
+                since,
+            } = job
+            else {
+                continue;
+            };
+            let due = settings::type_due(self.st.last_output.get(id).copied(), *since);
+            if now < due {
+                ui.wake_at(due);
+                continue;
+            }
+            if let (Some(cmd), Some(g)) = (pending.pop_front(), &self.grid) {
+                g.text(id, &format!("{cmd}\r"));
+            }
+            *since = now;
+            if pending.is_empty() {
+                done.push((id.clone(), agent.clone()));
+            }
+        }
+        for (id, agent) in done {
+            self.agent_jobs.remove(&id);
+            self.mark_connected(&agent);
         }
     }
 
@@ -224,6 +400,14 @@ impl App {
         s.category = cat;
         s.ext_page = (cat == Category::Connections).then(|| CONNECTIONS_PAGE.to_owned());
         match cat {
+            Category::Agents => {
+                s.agent = None;
+                s.confirm_remove = None;
+                self.redetect();
+                if self.st.plugins.packs.is_empty() && self.st.plugins.loads == 0 {
+                    self.plug_load(false);
+                }
+            }
             Category::General => {
                 if s.shells.is_none() {
                     self.call(
@@ -297,22 +481,13 @@ impl App {
     }
 
     /// Takes in the health check once it answers.
-    pub(super) fn settings_tick(&mut self, now: web_time::Instant) {
+    pub(super) fn settings_tick(&mut self) {
         self.cli_tick();
         if let Some(rx) = &self.health {
             if let Ok(v) = rx.try_recv() {
                 self.st.settings.holders = v.as_ref().and_then(settings::Holders::from_health);
                 self.health = None;
             }
-        }
-        if self
-            .st
-            .settings
-            .copied
-            .as_ref()
-            .is_some_and(|(_, at)| now.duration_since(*at).as_secs() >= 2)
-        {
-            self.st.settings.copied = None;
         }
     }
 
@@ -458,14 +633,28 @@ impl App {
             SetAct::CheckUpdates => self.check_updates(),
             SetAct::UpdateNow => self.update_action(),
             SetAct::DismissUpdate => self.st.settings.update_dismissed = true,
-            SetAct::Redetect => {
-                self.st.settings.detecting = true;
-                self.call(
-                    Call::Set(SetCall::Detected),
-                    "agent:locate",
-                    json!({ "refresh": true }),
-                );
+            SetAct::Redetect => self.redetect(),
+            SetAct::OpenAgent(key) => {
+                let st = &mut self.st.settings;
+                st.agent = key;
+                st.confirm_remove = None;
+                ui.set_focus(None);
             }
+            SetAct::InstallAgent(k) => self.start_setup(&k, true),
+            SetAct::ConnectAgent(k) => self.start_setup(&k, false),
+            SetAct::RemoveAgent(k) => {
+                if self.st.settings.confirm_remove.as_deref() != Some(k.as_str()) {
+                    self.st.settings.confirm_remove = Some(k);
+                    return;
+                }
+                self.st.settings.confirm_remove = None;
+                let Some(ext) = self.store.agents.get(&k).map(|a| a.extension.clone()) else {
+                    return;
+                };
+                self.st.settings.agent = None;
+                self.run_plug(ui, crate::plugins::PlugAct::Remove(ext));
+            }
+            SetAct::KeepAgent => self.st.settings.confirm_remove = None,
             SetAct::ResetAgent(k) => {
                 let Some(a) = self.store.agents.get(&k) else {
                     return;
@@ -480,16 +669,6 @@ impl App {
                 if !o.remove(&k) {
                     o.insert(k);
                 }
-            }
-            SetAct::CopyInstall(k) => {
-                if let Some(a) = self.store.agents.get(&k) {
-                    ui.clipboard().set(&a.install);
-                    self.st.settings.copied = Some((k, web_time::Instant::now()));
-                }
-            }
-            SetAct::Copy(text) => {
-                ui.clipboard().set(&text);
-                self.st.settings.copied = Some((text, web_time::Instant::now()));
             }
             SetAct::AgentText(..) => {}
             SetAct::TestKey(id) => {

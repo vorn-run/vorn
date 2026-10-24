@@ -458,6 +458,8 @@ pub struct App {
     cli_launch: Option<std::sync::mpsc::Receiver<Option<crate::cli_link::Notice>>>,
     /// The administrator prompt that adds the command's folder to PATH, while it is up.
     cli_prompt: Option<std::sync::mpsc::Receiver<Result<bool, String>>>,
+    /// Terminals Vorn started to install or connect an agent, by session.
+    agent_jobs: HashMap<String, crate::settings::AgentJob>,
 }
 
 /// Everything connecting to vornd waits on (the RPC socket, the models, the
@@ -604,6 +606,7 @@ impl App {
             updater: None,
             cli_launch: None,
             cli_prompt: None,
+            agent_jobs: HashMap::new(),
         };
         app.st.grids =
             crate::flex::grids_from_json(app.store.config.pointer("/defaults/gridLayout"));
@@ -948,6 +951,7 @@ impl App {
                     self.plug_notified(&method, &params);
                     self.net_notified(&method, &params);
                     self.ext_notified(&method, &params);
+                    self.agent_notified(&method, &params);
                     if method == "layout:opened" {
                         self.layout_opened(&params);
                     }
@@ -3445,7 +3449,8 @@ impl App {
         if let Some(at) = self.session_tick(now) {
             ui.wake_at(at);
         }
-        self.settings_tick(now);
+        self.settings_tick();
+        self.agent_tick(ui, now);
         let focus = ui.focus();
         if focus != self.last_focus {
             if let Some(old) = self.last_focus {
