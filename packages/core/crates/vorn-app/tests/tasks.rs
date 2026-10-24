@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, seed_runs, seed_tasks, Shot, TestVornd};
+use support::{add_project, connect, key, seed_runs, seed_tasks, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::runs::RunAct;
@@ -79,8 +79,9 @@ fn the_default_view_is_chosen_on_the_tasks_extension_page() {
             &Act::Set(SetAct::Open(Category::Connectors)),
         ),
     );
-    // A listing still loading is redrawn when it lands, so wait for the row itself.
-    let tasks_row = shot.until(&mut app, "Tasks listed", |app, ui| {
+    // The list reloads as extensions start, so press the row again until its page opens.
+    wait_for("the Tasks page", || {
+        shot.frame(&mut app);
         let p = &app.st.plugins;
         let key = p
             .listings
@@ -88,10 +89,15 @@ fn the_default_view_is_chosen_on_the_tasks_extension_page() {
             .find(|l| l.id == "vorn.tasks")?
             .key
             .clone();
+        if p.selected.as_ref() == Some(&key) {
+            return Some(());
+        }
         let row = App::control("plug-installed-row", &Act::Plug(PlugAct::Select(Some(key))));
-        (p.loads == 0 && ui.rect_of(row).is_some()).then_some(row)
+        if p.loads == 0 {
+            shot.try_click(&mut app, row);
+        }
+        None
     });
-    shot.click(&mut app, tasks_row);
     let board = Act::Point(PointAct::Preference {
         id: "vorn.tasks".into(),
         key: "default_view".into(),
