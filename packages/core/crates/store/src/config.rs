@@ -198,6 +198,16 @@ impl Store {
         Ok(())
     }
 
+    /// Writes one `defaults` row as it is, for a one-time rewrite of a stored setting.
+    pub fn put_default(&self, key: &str, value: &Value) -> Result<()> {
+        self.conn().execute(
+            "INSERT INTO defaults (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value.to_string().as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Writes a whole `AppConfig` snapshot in one transaction.
     /// `deleted_defaults` names the `defaults` keys the caller cleared: those
     /// rows are deleted, while a key simply absent from `defaults` is left as

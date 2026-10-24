@@ -104,8 +104,8 @@ pub enum SetAct {
     Close,
     /// `defaults[key] = value`, the value as JSON text.
     Default(String, String),
-    /// `defaults.notifications[key] = value`.
-    Notify(String, bool),
+    /// `defaults.notifications[key] = value`, the value as JSON text.
+    Notify(String, String),
     /// A theme from the picker, by id: its side's key, and the scheme when
     /// a fixed one is of the other side.
     PickTheme(String),
@@ -114,7 +114,8 @@ pub enum SetAct {
     /// The catalog's extensions matching a query, with one listing's page
     /// open when given: Get more themes…, Get more agents… and Install.
     Browse(String, Option<String>),
-    TestSound,
+    /// Opens the system's notification settings for Vorn.
+    OpenNotifSettings,
     ShellMenu,
     PickShell(String),
     EditShell,

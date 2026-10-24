@@ -1,6 +1,7 @@
 //! Settings Vorn kept in `defaults` for Shell blocks, Workflows and Tasks,
 //! moved once into those extensions' own preferences, and settings nothing
-//! reads any more; both are then dropped from `defaults`.
+//! reads any more; both are then dropped from `defaults`, as are the
+//! notification settings nothing reads.
 
 use std::collections::BTreeMap;
 
@@ -44,6 +45,18 @@ const GONE: &[&str] = &[
     "enableHoverPreview",
     "updateAutoDownload",
 ];
+
+/// Notification settings nothing reads: errors, a sound switch and a volume
+/// gave way to the system's sound.
+const GONE_NOTICES: &[&str] = &["onError", "soundEnabled", "soundVolume"];
+
+/// `notifications` without [`GONE_NOTICES`], when it held any of them.
+fn notices_without_gone(stored: &Map<String, Value>) -> Option<Value> {
+    let mut notices = stored.get("notifications")?.as_object()?.clone();
+    let before = notices.len();
+    notices.retain(|k, _| !GONE_NOTICES.contains(&k.as_str()));
+    (notices.len() != before).then_some(Value::Object(notices))
+}
 
 /// The moved settings among `stored`, by extension, as their preferences take them.
 fn moved(stored: &Map<String, Value>) -> BTreeMap<&'static str, Map<String, Value>> {
@@ -95,6 +108,11 @@ pub fn migrate(native: &Native, router: &Router) {
             return;
         }
     };
+    if let Some(notices) = notices_without_gone(&stored) {
+        if let Err(err) = store.put_default("notifications", &notices) {
+            warn!(%err, "could not drop the notification settings nothing reads");
+        }
+    }
     let dropped: Vec<&str> = MOVED
         .iter()
         .map(|(key, ..)| *key)
@@ -151,6 +169,20 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn only_the_notification_settings_nothing_reads_are_dropped() {
+        let stored = json!({ "notifications": {
+            "enabled": true, "onBell": false, "onError": true,
+            "soundEnabled": true, "soundVolume": 0.5
+        } });
+        assert_eq!(
+            notices_without_gone(stored.as_object().unwrap()),
+            Some(json!({ "enabled": true, "onBell": false }))
+        );
+        let clean = json!({ "notifications": { "enabled": false } });
+        assert_eq!(notices_without_gone(clean.as_object().unwrap()), None);
     }
 
     #[test]

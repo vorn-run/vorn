@@ -1415,12 +1415,11 @@ export interface TailscaleStatus {
 }
 
 export interface NotificationConfig {
-  enabled: boolean
-  onWaiting: boolean
-  onError: boolean
-  onBell: boolean
-  soundEnabled?: boolean
-  soundVolume?: number // 0.0 – 1.0, default 0.5
+  enabled?: boolean // default true
+  onWaiting?: boolean
+  onBell?: boolean
+  show?: 'background' | 'always'
+  sound?: string // 'default', 'none' or a system sound's name
 }
 
 /**

@@ -393,6 +393,10 @@ pub struct Contributions {
     /// page in Settings and read at run time as its `preferences` rows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preferences: Option<Vec<Preference>>,
+    /// The kinds of notice it sends through `notifications.send`, each a
+    /// switch the host draws on its Settings page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<Vec<NoticeKind>>,
     /// What it draws from templates, by where it shows.
     #[serde(flatten)]
     pub points: BTreeMap<Place, Vec<Point>>,
@@ -429,6 +433,10 @@ impl Contributions {
 
     pub fn preferences(&self) -> &[Preference] {
         self.preferences.as_deref().unwrap_or_default()
+    }
+
+    pub fn notifications(&self) -> &[NoticeKind] {
+        self.notifications.as_deref().unwrap_or_default()
     }
 
     pub fn points(&self, place: Place) -> &[Point] {
@@ -744,6 +752,18 @@ pub enum PreferenceKind {
     },
 }
 
+/// A kind of notice an extension sends (`[[contributes.notifications]]`):
+/// its title is the switch's label, `default` whether that starts on.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NoticeKind {
+    #[serde(flatten)]
+    pub base: Contribution,
+    pub default: bool,
+}
+
+/// The kind id the extension-wide notification switch is kept under, so no kind may take it.
+pub const ALL_NOTICES: &str = "all";
+
 /// One choice of a [`PreferenceKind::Choice`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PreferenceOption {
@@ -845,6 +865,9 @@ pub enum Permission {
     WorkflowsWrite,
     #[serde(rename = "inbox.write")]
     InboxWrite,
+    /// Sends the notices its manifest declares, under their switches.
+    #[serde(rename = "notifications.send")]
+    NotificationsSend,
     /// Drives the client's web views: loads, reads and acts on their pages.
     Web,
     /// Drives the devices the client shows: lists, starts and stops
@@ -856,7 +879,7 @@ pub enum Permission {
 }
 
 impl Permission {
-    pub const ALL: [Permission; 27] = [
+    pub const ALL: [Permission; 28] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -881,6 +904,7 @@ impl Permission {
         Permission::WorkflowsRead,
         Permission::WorkflowsWrite,
         Permission::InboxWrite,
+        Permission::NotificationsSend,
         Permission::Web,
         Permission::Video,
         Permission::Remote,
@@ -912,6 +936,7 @@ impl Permission {
             Permission::WorkflowsRead => "workflows.read",
             Permission::WorkflowsWrite => "workflows.write",
             Permission::InboxWrite => "inbox.write",
+            Permission::NotificationsSend => "notifications.send",
             Permission::Web => "web",
             Permission::Video => "video",
             Permission::Remote => "remote",
@@ -1633,6 +1658,15 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
             preferences.push(Preference { base, kind });
         }
     }
+    let mut notifications: Vec<NoticeKind> = Vec::new();
+    for (mut base, raw) in declared("notifications") {
+        base.when = None;
+        if base.id == ALL_NOTICES || notifications.iter().any(|n| n.base.id == base.id) {
+            continue;
+        }
+        let default = raw.get("default").and_then(Value::as_bool).unwrap_or(true);
+        notifications.push(NoticeKind { base, default });
+    }
 
     let mut points: BTreeMap<Place, Vec<Point>> = BTreeMap::new();
     // `ui.render` names a tree by its id alone, so a tree pane's id is taken too.
@@ -1675,6 +1709,7 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         && triggers.is_empty()
         && flows.is_empty()
         && preferences.is_empty()
+        && notifications.is_empty()
     {
         return None;
     }
@@ -1687,6 +1722,7 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         triggers: (!triggers.is_empty()).then_some(triggers),
         workflows: (!flows.is_empty()).then_some(flows),
         preferences: (!preferences.is_empty()).then_some(preferences),
+        notifications: (!notifications.is_empty()).then_some(notifications),
         points,
     })
 }

@@ -8,9 +8,10 @@ mod pages;
 pub use agents::agent_field_id;
 pub use pages::theme_tile_id;
 pub(crate) use pages::{
-    agent_picker, channel_items, font_picker, holder_items, shell_panel, theme_info, theme_picker,
+    agent_picker, channel_items, font_picker, holder_items, notice_sources, shell_panel,
+    sound_items, theme_info, theme_picker,
 };
-pub use pages::{rotate_id, AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH, VOLUME_SLIDER};
+pub use pages::{rotate_id, AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH};
 
 use super::{c, white, Screen};
 use crate::act::Act;
@@ -485,6 +486,8 @@ pub(in crate::screen) struct Seg<'a> {
     pub act: Act,
     pub on: bool,
     pub disabled: bool,
+    /// Explains this option while it is hovered.
+    pub tip: Option<&'a str>,
 }
 
 /// `bg-white/[0.04] rounded-lg p-0.5 gap-0.5`.
@@ -529,6 +532,9 @@ pub(in crate::screen) fn segmented(s: &Screen<'_>, place: &str, opts: Vec<Seg<'_
         } else {
             b.on(Action::Click)
         };
+        if let Some(tip) = o.tip {
+            b = crate::ui::tooltip(s.ui, b, id, tip, None);
+        }
         row = row.child(b);
     }
     row

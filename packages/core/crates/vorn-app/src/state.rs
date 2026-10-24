@@ -231,6 +231,10 @@ pub enum MenuKind {
     FontPicker,
     /// Settings › About's Stable / Beta chip.
     UpdateChannel,
+    /// Settings › Notifications' Sound chip.
+    NotifSound,
+    /// Settings › Notifications' From extensions popover: a switch per extension.
+    NotifSources,
     /// Settings › About's terminals row, by the older session holder's instance.
     Holder(String),
     /// A session's branch switcher.

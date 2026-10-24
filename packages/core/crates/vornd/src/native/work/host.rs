@@ -243,10 +243,21 @@ impl Host for VorndHost {
     fn publish(&self, run: &WorkflowExecution) {
         self.broadcast("workflow:runUpdated", without_definition(run));
         if let Some(native) = self.native.upgrade() {
-            if let Some(told) = native.waiting().changed(run) {
+            let waiting = native.waiting();
+            if let Some(told) = waiting.changed(run) {
                 native
                     .events()
                     .emit(super::waiting::WORKFLOW_GATES, || told);
+            }
+            for told in waiting.signing_in(run) {
+                native
+                    .events()
+                    .emit(super::waiting::WORKFLOW_SIGN_IN, || told);
+            }
+            if let Some(told) = waiting.ended(run) {
+                native
+                    .events()
+                    .emit(super::waiting::WORKFLOW_ENDED, || told);
             }
         }
     }

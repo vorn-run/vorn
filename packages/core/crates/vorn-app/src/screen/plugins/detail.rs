@@ -120,6 +120,7 @@ fn extension_page(s: &Screen<'_>, page: Page<'_>) -> El {
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
+                .filter(|p| !shown_elsewhere(p))
                 .filter_map(|p| preference(s, id, p)),
         )
         .collect();
@@ -706,6 +707,12 @@ pub(in crate::screen) fn choice_items(s: &Screen<'_>, ext: &str, key: &str) -> V
         .collect()
 }
 
+/// Whether `p` is the switch for all of an extension's notifications, which
+/// Settings › Notifications shows instead of its page.
+fn shown_elsewhere(p: &Value) -> bool {
+    sv(p, "notifications") == Some("all")
+}
+
 /// One preference: a card row with its title beside a switch, a segmented
 /// choice, or a chip that opens a long one.
 fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
@@ -763,6 +770,7 @@ fn preference(s: &Screen<'_>, ext: &str, p: &Value) -> Option<El> {
                     act: act(Value::from(id)),
                     on: chosen == Some(id),
                     disabled: false,
+                    tip: None,
                 })
                 .collect();
             crate::screen::settings::segmented(s, &place, opts, 10.0)
@@ -849,4 +857,19 @@ fn fact(term: &str, value: &str, mono: bool) -> El {
                 .shrink0(),
         )
         .child(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn only_the_switch_for_all_notifications_leaves_the_page() {
+        let all = json!({ "id": "notify:all", "notifications": "all" });
+        let kind = json!({ "id": "notify:finished", "notifications": "kind" });
+        let plain = json!({ "id": "top_bar" });
+        assert!(super::shown_elsewhere(&all));
+        assert!(!super::shown_elsewhere(&kind));
+        assert!(!super::shown_elsewhere(&plain));
+    }
 }

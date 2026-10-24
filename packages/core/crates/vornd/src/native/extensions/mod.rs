@@ -909,7 +909,10 @@ impl Extensions {
     }
 
     /// The manifest of built-in or installed extension `id`.
-    fn manifest_of(&self, id: &str) -> Result<Arc<vorn_extensions::manifest::Manifest>, String> {
+    pub(crate) fn manifest_of(
+        &self,
+        id: &str,
+    ) -> Result<Arc<vorn_extensions::manifest::Manifest>, String> {
         if let Some(m) = self.builtins.manifest(id) {
             return Ok(m);
         }

@@ -3,6 +3,10 @@
 //! id. An extension reads its own as the rows of [`COLLECTION`], each
 //! `{id, value}` with its default until changed; a change is published to
 //! those rows, so trees drawn from them draw again at once.
+//!
+//! The kinds of notice it declares (`[[contributes.notifications]]`) are
+//! switches kept here too, beside one switch for all of them: the host draws
+//! them, so no extension builds its own, and they go with the extension.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -11,7 +15,7 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use crate::api::ExtError;
-use crate::manifest::{Manifest, Preference, PreferenceKind};
+use crate::manifest::{Contribution, Manifest, Preference, PreferenceKind, ALL_NOTICES};
 
 /// The collection an extension reads its preferences from; only the host writes it.
 pub const COLLECTION: &str = "preferences";
@@ -23,12 +27,44 @@ pub struct Preferences {
     values: BTreeMap<String, Map<String, Value>>,
 }
 
-fn declared(manifest: &Manifest) -> &[Preference] {
-    manifest
-        .contributes
-        .as_ref()
-        .map(|c| c.preferences())
-        .unwrap_or_default()
+/// The preference a kind of notice is kept under; [`ALL_NOTICES`] is the extension-wide switch.
+pub fn notice_key(kind: &str) -> String {
+    format!("notify:{kind}")
+}
+
+/// Its own preferences, then a switch for each kind of notice it declares
+/// and, when it declares any, the one for all of them.
+fn declared(manifest: &Manifest) -> Vec<Preference> {
+    let Some(c) = manifest.contributes.as_ref() else {
+        return Vec::new();
+    };
+    let switch = |id: &str, title: &str, default: bool| Preference {
+        base: Contribution {
+            id: notice_key(id),
+            title: title.to_owned(),
+            description: None,
+            when: None,
+        },
+        kind: PreferenceKind::Bool { default },
+    };
+    let mut out = c.preferences().to_vec();
+    out.extend(
+        c.notifications()
+            .iter()
+            .map(|n| switch(&n.base.id, &n.base.title, n.default)),
+    );
+    if !c.notifications().is_empty() {
+        out.push(switch(ALL_NOTICES, "Notifications", true));
+    }
+    out
+}
+
+/// Which notice switch a preference is: `"kind"`, `"all"`, or none.
+fn notice_role(id: &str) -> Option<&'static str> {
+    match id.strip_prefix("notify:")? {
+        ALL_NOTICES => Some("all"),
+        _ => Some("kind"),
+    }
 }
 
 impl Preferences {
@@ -76,6 +112,9 @@ impl Preferences {
             .map(|p| {
                 let mut v = serde_json::to_value(p).unwrap_or_else(|_| json!({}));
                 v["value"] = resolved.get(&p.base.id).cloned().unwrap_or(Value::Null);
+                if let Some(role) = notice_role(&p.base.id) {
+                    v["notifications"] = json!(role);
+                }
                 v
             })
             .collect()
@@ -85,7 +124,8 @@ impl Preferences {
     /// to publish. Refuses a preference it does not declare and a value of
     /// the wrong type or not among its options.
     pub fn set(&mut self, manifest: &Manifest, key: &str, value: Value) -> Result<Value, ExtError> {
-        let Some(p) = declared(manifest).iter().find(|p| p.base.id == key) else {
+        let declared = declared(manifest);
+        let Some(p) = declared.iter().find(|p| p.base.id == key) else {
             return Err(ExtError::new(
                 "invalid",
                 format!("{} has no preference \"{key}\"", manifest.name),
@@ -242,5 +282,49 @@ options = [{ id = "new", title = "Newest" }, { id = "old", title = "Oldest" }]
         );
         p.adopt("other", Map::new());
         assert!(!p.values.contains_key("other"));
+    }
+
+    #[test]
+    fn notice_kinds_are_switches_beside_one_for_all_and_go_with_the_extension() {
+        let m = parse(
+            r#"id = "flows"
+name = "Flows"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+[service]
+command = ["x"]
+[[contributes.notifications]]
+id = "finished"
+title = "Notify when a run finishes"
+[[contributes.notifications]]
+id = "approval"
+title = "Notify when a run needs approval"
+default = false
+"#,
+        )
+        .unwrap();
+        let mut p = Preferences::load(None);
+        let listed = p.listed(&m);
+        let row = |id: &str| listed.iter().find(|r| r["id"] == id).cloned().unwrap();
+        assert_eq!(
+            row("notify:finished")["title"],
+            "Notify when a run finishes"
+        );
+        assert_eq!(row("notify:finished")["value"], true);
+        assert_eq!(row("notify:finished")["notifications"], "kind");
+        assert_eq!(row("notify:approval")["value"], false);
+        assert_eq!(row("notify:all")["notifications"], "all");
+        assert_eq!(row("notify:all")["value"], true);
+        p.set(&m, "notify:approval", Value::Bool(true)).unwrap();
+        assert_eq!(p.resolved(&m)["notify:approval"], true);
+        assert!(p.set(&m, "notify:other", Value::Bool(true)).is_err());
+        p.forget("flows");
+        assert_eq!(p.resolved(&m)["notify:approval"], false);
+    }
+
+    #[test]
+    fn a_manifest_without_notices_has_no_notice_switches() {
+        let listed = Preferences::load(None).listed(&manifest());
+        assert!(listed.iter().all(|r| r.get("notifications").is_none()));
     }
 }

@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use super::{list, App, Call, MOD};
 use crate::act::Act;
 use crate::client::RpcError;
-use crate::screen::settings::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
+use crate::screen::settings::{rotate_id, ROW_SLIDER, SHELL_PATH};
 use crate::settings::{
     self, split_args, AgentField, Category, ConnKey, KeyRowState, SetAct, Shell, UpdateStatus,
     CONNECTIONS_PAGE,
@@ -137,10 +137,12 @@ impl App {
             "agent-picker" => ("agent-chip", MenuKind::AgentPicker),
             "shell-picker" => ("shell-picker", MenuKind::SetShell),
             "channel-menu" => ("update-channel", MenuKind::UpdateChannel),
+            "sound-menu" => ("notif-sound", MenuKind::NotifSound),
+            "notice-sources" => ("notif-sources", MenuKind::NotifSources),
             "holder-menu" => ("holder-more", MenuKind::Holder("shot".to_owned())),
             _ => {
                 return Err(format!(
-                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu or extension:ID"
+                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu, sound-menu, notice-sources or extension:ID"
                 ))
             }
         };
@@ -234,6 +236,7 @@ impl App {
                     self.st.settings.cli = Some(crate::cli_link::state());
                 }
             }
+            Category::Notifications => crate::notify::refresh(),
             Category::Keys => {
                 self.call(
                     Call::Set(SetCall::ConnKeys),
@@ -362,17 +365,17 @@ impl App {
                 }
                 self.write_defaults(|d| d[key.as_str()] = value);
             }
-            SetAct::Notify(key, on) => self.write_defaults(|d| {
-                let mut n =
-                    json!({ "enabled": false, "onWaiting": true, "onError": true, "onBell": true });
-                if let Some(Value::Object(old)) = d.get("notifications") {
-                    for (k, v) in old {
-                        n[k] = v.clone();
+            SetAct::Notify(key, value) => {
+                let Ok(value) = serde_json::from_str::<Value>(&value) else {
+                    return;
+                };
+                self.write_defaults(|d| {
+                    if !d.get("notifications").is_some_and(Value::is_object) {
+                        d["notifications"] = json!({});
                     }
-                }
-                n[key.as_str()] = json!(on);
-                d["notifications"] = n;
-            }),
+                    d["notifications"][key.as_str()] = value;
+                });
+            }
             SetAct::PickTheme(id) => {
                 let installed = self.st.settings.appearance.installed();
                 let Some(look) = crate::appearance::find(installed, &id).map(|t| t.appearance)
@@ -402,7 +405,7 @@ impl App {
                 p.selected = listing;
                 p.adding = None;
             }
-            SetAct::TestSound => crate::system::bell(),
+            SetAct::OpenNotifSettings => crate::notify::open_system_settings(),
             SetAct::ShellMenu => {}
             SetAct::PickShell(path) => {
                 let cur = self
@@ -561,23 +564,10 @@ impl App {
     /// Text typed in a settings field, and the sliders' drags.
     pub(super) fn settings_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
         match *event {
-            UiEvent::Move { id, x, .. } | UiEvent::Drop { id, x, .. }
-                if id == ROW_SLIDER || id == VOLUME_SLIDER =>
-            {
+            UiEvent::Move { id, x, .. } | UiEvent::Drop { id, x, .. } if id == ROW_SLIDER => {
                 let Some(r) = ui.rect_of(id) else { return true };
-                if id == ROW_SLIDER {
-                    let f = ((x - r.x - 8.0) / (r.w - 16.0)).clamp(0.0, 1.0);
-                    self.st.settings.row_height = (100.0 + f * 500.0).round();
-                } else {
-                    let f = ((x - r.x) / r.w).clamp(0.0, 1.0);
-                    let v = (f * 100.0).round() / 100.0;
-                    self.write_defaults(|d| {
-                        if !d.get("notifications").is_some_and(Value::is_object) {
-                            d["notifications"] = json!({});
-                        }
-                        d["notifications"]["soundVolume"] = json!(v);
-                    });
-                }
+                let f = ((x - r.x - 8.0) / (r.w - 16.0)).clamp(0.0, 1.0);
+                self.st.settings.row_height = (100.0 + f * 500.0).round();
                 true
             }
             UiEvent::Changed(id) => {

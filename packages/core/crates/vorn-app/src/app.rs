@@ -1594,6 +1594,8 @@ impl App {
                         | MenuKind::FontPicker
                         | MenuKind::AgentPicker
                         | MenuKind::UpdateChannel
+                        | MenuKind::NotifSound
+                        | MenuKind::NotifSources
                         | MenuKind::Holder(_)
                         | MenuKind::SetShell
                         | MenuKind::ExtChoice(..)
@@ -3418,9 +3420,12 @@ impl App {
         }
         self.was_composing = composing;
         let now = web_time::Instant::now();
-        for notice in std::mem::take(&mut self.notices) {
-            if self.notifier.admit(&notice, ui.window_focused(), now) {
-                self.notice_sink.show(notice);
+        if !self.notices.is_empty() {
+            let show = crate::notify::Prefs::of(&self.store.config).show;
+            for notice in std::mem::take(&mut self.notices) {
+                if self.notifier.admit(&notice, ui.window_focused(), show, now) {
+                    self.notice_sink.show(notice);
+                }
             }
         }
         self.seen_tick(ui);

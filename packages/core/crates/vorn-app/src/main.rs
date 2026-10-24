@@ -13,6 +13,7 @@
 //!               [--outdated ID,ID] [--confirm-end on]
 //!               [--click X,Y]... [--type TEXT] [--hover X,Y]
 //!               [--reduced-transparency on] [--tui-drawing cells|pixels]
+//!               [--notif-denied on]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
 //!               [--keys K1,K2] [--click COL:ROW] [--png a.png] [--scale S]
 //!               [--layout tabs]
@@ -38,7 +39,8 @@
 //! `extension:vorn.tasks` that extension's page under `--settings extensions`.
 //! Then each `--click X,Y` presses there, `--type` types letters into the
 //! focused field, and `--hover X,Y` rests the pointer past the tooltip delay.
-//! `--reduced-transparency on` and `--tui-drawing` stand in for the system.
+//! `--reduced-transparency on`, `--tui-drawing` and `--notif-denied on` (the
+//! system blocks Vorn's notifications) stand in for the system.
 //! On About, `--update`, `--holder` (an older session holder with N
 //! terminals), `--outdated` (installed packs shown as behind) and
 //! `--confirm-end` fake the states once vornd has answered.
@@ -195,6 +197,9 @@ fn shot(args: &Args) -> Result<(), String> {
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
     ui.set_reduced_transparency(args.get("reduced-transparency") == Some("on"));
+    if args.get("notif-denied") == Some("on") {
+        vorn_app::notify::show_blocked();
+    }
     app.term_drawing = args
         .get("tui-drawing")
         .map(|d| vorn_app::screen::TermDrawing {

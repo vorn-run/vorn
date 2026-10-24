@@ -291,6 +291,43 @@ pub fn admit_op(method: &str, op: &str) -> Result<(), ExtError> {
     Err(ExtError::new("denied", format!("{method} has no op {op}")))
 }
 
+/// `notifications.send`: refused unless the manifest declares `kind`, its
+/// switch and the extension's are on (`settings`, its resolved preferences),
+/// and the person's main Notifications switch is on (`main`).
+pub fn admit_notice(
+    manifest: &Manifest,
+    kind: &str,
+    settings: &serde_json::Map<String, serde_json::Value>,
+    main: bool,
+) -> Result<(), ExtError> {
+    use crate::manifest::ALL_NOTICES;
+    use crate::preferences::notice_key;
+    let declared = manifest
+        .contributes
+        .as_ref()
+        .is_some_and(|c| c.notifications().iter().any(|n| n.base.id == kind));
+    if !declared || kind == ALL_NOTICES {
+        return Err(ExtError::new(
+            "denied",
+            format!(
+                "{} declares no notification \"{kind}\" under [[contributes.notifications]]",
+                manifest.id
+            ),
+        ));
+    }
+    let on = |key: &str| settings.get(key).and_then(serde_json::Value::as_bool) == Some(true);
+    if !main || !on(&notice_key(ALL_NOTICES)) || !on(&notice_key(kind)) {
+        return Err(ExtError::new(
+            "off",
+            format!(
+                "{}'s \"{kind}\" notifications are switched off",
+                manifest.id
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// `storage.*` and `blobs.*`: refused unless the manifest declares `storage`.
 pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
     if declares(manifest, Permission::Storage) {
@@ -368,6 +405,7 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("inbox.cursor", Permission::InboxWrite),
     ("inbox.recordPage", Permission::InboxWrite),
     ("inbox.recordError", Permission::InboxWrite),
+    ("notifications.send", Permission::NotificationsSend),
     ("signin.check", Permission::BrowserSession),
     ("signin.forget", Permission::BrowserSession),
     ("signin.completed", Permission::BrowserSession),
@@ -890,5 +928,89 @@ header = "Authorization: Bearer {token}"
         assert!(declared_host(&["*.a.com".into()], "b.a.com"));
         assert!(!declared_host(&["*.a.com".into()], "a.com"));
         assert!(!declared_host(&["*.a.com".into()], "ba.com"));
+    }
+
+    fn notifier() -> Manifest {
+        crate::manifest::file::parse(
+            r#"id = "flows"
+name = "Flows"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+[service]
+command = ["x"]
+[declares]
+uses = ["notifications.send"]
+[[contributes.notifications]]
+id = "finished"
+title = "Notify when a run finishes"
+[[contributes.notifications]]
+id = "approval"
+title = "Notify when a run needs approval"
+default = false
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_notice_needs_its_kind_declared_and_every_switch_on() {
+        let m = notifier();
+        assert_eq!(
+            admit_call(&m, "notifications.send").unwrap(),
+            Permission::NotificationsSend
+        );
+        let prefs = crate::preferences::Preferences::load(None);
+        let settings = prefs.resolved(&m);
+        assert!(admit_notice(&m, "finished", &settings, true).is_ok());
+        let undeclared = admit_notice(&m, "other", &settings, true).unwrap_err();
+        assert_eq!(undeclared.code, "denied");
+        assert_eq!(
+            admit_notice(&m, "all", &settings, true).unwrap_err().code,
+            "denied"
+        );
+        // Declared off by default.
+        assert_eq!(
+            admit_notice(&m, "approval", &settings, true)
+                .unwrap_err()
+                .code,
+            "off"
+        );
+        // The main Notifications switch gates every kind.
+        assert_eq!(
+            admit_notice(&m, "finished", &settings, false)
+                .unwrap_err()
+                .code,
+            "off"
+        );
+        let mut prefs = crate::preferences::Preferences::load(None);
+        prefs.set(&m, "notify:all", Value::Bool(false)).unwrap();
+        let all_off = prefs.resolved(&m);
+        assert_eq!(
+            admit_notice(&m, "finished", &all_off, true)
+                .unwrap_err()
+                .code,
+            "off"
+        );
+        prefs.set(&m, "notify:all", Value::Bool(true)).unwrap();
+        prefs
+            .set(&m, "notify:finished", Value::Bool(false))
+            .unwrap();
+        let kind_off = prefs.resolved(&m);
+        assert_eq!(
+            admit_notice(&m, "finished", &kind_off, true)
+                .unwrap_err()
+                .code,
+            "off"
+        );
+    }
+
+    #[test]
+    fn notifications_send_is_refused_without_its_permission() {
+        let err = admit_call(&manifest(), "notifications.send").unwrap_err();
+        assert!(
+            err.message.contains("notifications.send"),
+            "{}",
+            err.message
+        );
     }
 }

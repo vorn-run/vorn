@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use vorn_theme::{Appearance as Look, Chrome, Materials, Scheme, Theme};
 
-use super::{button, card, card_row, header, row, section, segmented, set, svg, toggle, Seg};
+use super::{button, card, card_row, header, section, segmented, set, svg, toggle, Seg};
 use crate::act::{Act, Acts};
 use crate::look;
 use crate::screen::{agent_icon, c, ico, white, Screen};
@@ -42,8 +42,6 @@ fn seg_act(key: &str, v: impl ToString) -> Act {
 
 /// The Card Row Height slider's track.
 pub const ROW_SLIDER: Id = Id(0x726f_7768_6569_6768);
-/// The notification volume slider's track.
-pub const VOLUME_SLIDER: Id = Id(0x766f_6c75_6d65_7364);
 
 /// A range input: the accent up to a white knob.
 fn slider(id: Id, w: f32, frac: f32, label: &str) -> El {
@@ -97,6 +95,14 @@ mod glyph {
     pub const SEARCH: &str = r#"<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>"#;
     pub const TERMINAL: &str = r#"<path d="M4 17l6-6-6-6M12 19h8"/>"#;
     pub const ARROW_UP_RIGHT: &str = r#"<path d="M7 17L17 7M7 7h10v10"/>"#;
+    pub const BELL: &str = r#"<path d="M6 8a6 6 0 0112 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 003.4 0"/>"#;
+    pub const BELL_OFF: &str = r#"<path d="M10.3 21a1.9 1.9 0 003.4 0M2 2l20 20M8.7 3A6 6 0 0118 8a20 20 0 00.8 5.8M17 17H3s3-2 3-9"/>"#;
+    pub const APP_WINDOW: &str =
+        r#"<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/>"#;
+    pub const VOLUME: &str =
+        r#"<path d="M11 5L6 9H2v6h4l5 4zM15.5 8.5a5 5 0 010 7M19 5a10 10 0 010 14"/>"#;
+    pub const MESSAGE_QUESTION: &str = r#"<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><path d="M9.5 9a2.5 2.5 0 113.5 2.3c-.6.3-1 .8-1 1.5M12 15h.01"/>"#;
+    pub const FILE: &str = r#"<path d="M20 7h-3a2 2 0 01-2-2V2M9 18a2 2 0 01-2-2V4a2 2 0 012-2h7l4 4v10a2 2 0 01-2 2z"/>"#;
     pub const ELLIPSIS: &str = r#"<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>"#;
 }
 
@@ -168,6 +174,23 @@ pub(crate) mod tip {
         "Install the new version; Vorn reopens in a few seconds and your sessions keep running.";
     pub const WHATS_NEW: &str = "Opens the release notes for this version.";
     pub const UPDATE_EXTENSIONS: &str = "Update the listed extensions to their newest versions.";
+    #[cfg(target_os = "macos")]
+    pub const NOTIFY: &str =
+        "Let Vorn tell you, through macOS, when something needs you while you are in another app.";
+    #[cfg(not(target_os = "macos"))]
+    pub const NOTIFY: &str = "Let Vorn tell you, through the system, when something needs you while you are in another app.";
+    pub const SHOW_BACKGROUND: &str = "Only notify while you are in another app.";
+    pub const SHOW_ALWAYS: &str = "Notify even while you are looking at Vorn.";
+    pub const SOUND: &str = "The sound a notification plays; None for silent.";
+    pub const ON_WAITING: &str = "An agent stopped and is waiting for you to reply or approve.";
+    pub const ON_BELL: &str = "A program in a terminal asked for your attention.";
+    pub const FROM_EXTENSIONS: &str = "Turn notifications from each installed extension on or off; pick which kinds on its own page.";
+    #[cfg(target_os = "macos")]
+    pub const OPEN_SYSTEM_SETTINGS: &str =
+        "macOS is blocking Vorn's notifications; turn them on there.";
+    #[cfg(not(target_os = "macos"))]
+    pub const OPEN_SYSTEM_SETTINGS: &str =
+        "The system is blocking Vorn's notifications; turn them on there.";
     pub const DRAWING: &str =
         "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
 }
@@ -255,6 +278,7 @@ fn colour_rows(s: &Screen<'_>) -> Vec<El> {
             act: seg_act(a::SCHEME, format!("\"{}\"", scheme.key())),
             on,
             disabled: false,
+            tip: None,
         }
     };
     let scheme = segmented(
@@ -1091,6 +1115,7 @@ fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {
         act: seg_act("tuiDrawing", format!("\"{v}\"")),
         on: chosen == v,
         disabled,
+        tip: None,
     };
     let choice = segmented(
         s,
@@ -1654,184 +1679,387 @@ fn available_row(
         .child(tooltip(s.ui, b, id, tip_text, None))
 }
 
-fn notif(s: &Screen<'_>) -> (bool, bool, bool, bool, bool, f64) {
-    let n = defaults(s).and_then(|d| d.get("notifications"));
-    let b = |k: &str, d: bool| {
-        n.and_then(|n| n.get(k))
-            .and_then(Value::as_bool)
-            .unwrap_or(d)
-    };
-    (
-        b("enabled", false),
-        b("onWaiting", true),
-        b("onError", true),
-        b("onBell", true),
-        b("soundEnabled", false),
-        n.and_then(|n| n.get("soundVolume"))
-            .and_then(Value::as_f64)
-            .unwrap_or(0.5),
-    )
+/// The `defaults.notifications` preferences, as the notifier reads them.
+fn notif(s: &Screen<'_>) -> crate::notify::Prefs {
+    crate::notify::Prefs::of(&s.store.config)
+}
+
+/// What a Notifications control stores under `defaults.notifications[key]`.
+pub(super) fn notify_act(key: &str, v: impl ToString) -> SetAct {
+    SetAct::Notify(key.to_owned(), v.to_string())
+}
+
+/// A row icon on the Notifications page.
+fn notif_mark(body: &str) -> El {
+    glyph_icon(body, 15.0, c(look::GRAY_500))
 }
 
 pub(super) fn notifications(s: &Screen<'_>) -> El {
-    let (enabled, waiting, error, bell, sound, volume) = notif(s);
-    let sub = |key: &str, on: bool, title: &str, description: &str| {
-        let t = toggle(
-            s,
-            key,
-            on,
-            SetAct::Notify(key.to_owned(), !on),
-            !enabled,
-            title,
-        );
-        row(title, description, None, t, !enabled)
+    use crate::notify::Show;
+    let p = notif(s);
+    let off = !p.enabled;
+    let switch = |place: &str, key: &str, on: bool, label: &str, disabled: bool| {
+        toggle(s, place, on, set(notify_act(key, !on)), disabled, label).shrink0()
     };
-    let main = toggle(
+    let show = |label, v: Show, tip| Seg {
+        label,
+        icon: None,
+        act: set(notify_act("show", format!("\"{}\"", v.key()))),
+        on: p.show == v,
+        disabled: off,
+        tip: Some(tip),
+    };
+    let shown = segmented(
         s,
-        "enabled",
-        enabled,
-        SetAct::Notify("enabled".into(), !enabled),
-        false,
-        "Enable Notifications",
+        "notif-show",
+        vec![
+            show(
+                "When Vorn is in the background",
+                Show::Background,
+                tip::SHOW_BACKGROUND,
+            ),
+            show("Always", Show::Always, tip::SHOW_ALWAYS),
+        ],
+        10.0,
     );
-    let mut sounds = div().col().gap(12.0).child(sub(
-        "soundEnabled",
-        sound,
-        "Sound Effects",
-        "Play a tone on waiting, error, and bell events (works even when focused)",
-    ));
-    if sound && enabled {
-        let pct = (volume * 100.0).round();
-        let test = s.acts.on("sound-test", set(SetAct::TestSound));
-        let hot = s.ui.hover(test);
-        sounds = sounds.child(
-            div()
-                .row()
-                .items_center()
-                .gap(12.0)
-                .px(16.0)
-                .py(8.0)
-                .child(
-                    div().w(48.0).shrink0().child(
-                        text("Volume", 12.0, c(look::GRAY_400))
-                            .line_height(16.0)
-                            .silent(),
-                    ),
-                )
-                .child(
-                    div()
-                        .id(VOLUME_SLIDER)
-                        .sense(Sense::MOVE)
-                        .grow()
-                        .h(12.0)
-                        .role(Role::Slider, "Volume")
-                        .child(
-                            div()
-                                .absolute(0.0, 4.0)
-                                .w_full()
-                                .h(4.0)
-                                .rounded(2.0)
-                                .bg(white(0.08)),
-                        )
-                        .child(volume_knob(volume as f32)),
-                )
-                .child(
-                    div().w(32.0).row().justify_end().child(
-                        text(format!("{pct}%"), 12.0, c(look::GRAY_500))
-                            .line_height(16.0)
-                            .silent(),
-                    ),
-                )
-                .child(
-                    div()
-                        .id(test)
-                        .on(Action::Click)
-                        .px(8.0)
-                        .py(4.0)
-                        .rounded(4.0)
-                        .bg(white(0.06).mix(white(0.1), hot))
-                        .role(Role::Button, "Test")
-                        .child(
-                            text("Test", 11.0, c(look::GRAY_400).mix(c(look::WHITE), hot))
-                                .line_height(16.5)
-                                .silent(),
-                        ),
-                ),
-        );
+    let mut main = Vec::new();
+    if crate::notify::blocked() {
+        main.push(blocked_row(s));
     }
+    main.push(card_row(
+        s,
+        Some(notif_mark(glyph::BELL)),
+        "Notifications",
+        Some(tip::NOTIFY),
+        switch(
+            "notif-enabled",
+            "enabled",
+            p.enabled,
+            "Notifications",
+            false,
+        ),
+    ));
+    main.push(card_row(
+        s,
+        Some(notif_mark(glyph::APP_WINDOW)),
+        "Show them",
+        None,
+        shown,
+    ));
+    main.push(card_row(
+        s,
+        Some(notif_mark(glyph::VOLUME)),
+        "Sound",
+        None,
+        sound_chip(s, &p.sound, off),
+    ));
+    let when = card(vec![
+        card_row(
+            s,
+            Some(notif_mark(glyph::MESSAGE_QUESTION)),
+            "An agent needs your answer",
+            Some(tip::ON_WAITING),
+            switch(
+                "notif-waiting",
+                "onWaiting",
+                p.on_waiting,
+                "An agent needs your answer",
+                off,
+            ),
+        ),
+        card_row(
+            s,
+            Some(notif_mark(glyph::TERMINAL)),
+            "A terminal rings the bell",
+            Some(tip::ON_BELL),
+            switch(
+                "notif-bell",
+                "onBell",
+                p.on_bell,
+                "A terminal rings the bell",
+                off,
+            ),
+        ),
+    ]);
     div()
         .col()
-        .child(header(
-            "Notifications",
-            "Get notified when agents need your attention",
-            None,
-        ))
+        .child(header("Notifications", "", None))
+        .child(notice_preview(s))
+        .child(card(main).mt(16.0))
+        .child(section("Tell me when"))
+        .child(when)
+        .child_if(sources_row(s).map(|r| card(vec![r]).mt(16.0)))
+}
+
+/// A drawn notice, as the system shows a real one: the agent, the
+/// session and the question.
+fn notice_preview(s: &Screen<'_>) -> El {
+    let key = default_agent(s);
+    let agent = s.store.agents.get(key).map_or(key, |a| a.name.as_str());
+    let mut mark = div()
+        .size(34.0, 34.0)
+        .shrink0()
+        .center()
+        .rounded(4.0)
+        .bg(c(look::SURFACE_BASE));
+    if let Some(id) = s.logo {
+        mark = mark.child(image(id, 12.0 * look::LOGO_ASPECT, 12.0));
+    }
+    let line = |t: &str, color| text(t, 12.0, color).line_height(16.0).truncate().silent();
+    let notice = div()
+        .row()
+        .gap(10.0)
+        .w(360.0)
+        .px(12.0)
+        .py(10.0)
+        .rounded(4.0)
+        .bg(c(look::SURFACE_OVERLAY))
+        .border(1.0, white(0.08))
+        .child(mark)
         .child(
             div()
                 .col()
-                .gap(4.0)
-                .child(row(
-                    "Enable Notifications",
-                    "Show OS notifications when agents need attention",
-                    None,
-                    main,
-                    false,
-                ))
-                .child(sub(
-                    "onWaiting",
-                    waiting,
-                    "Waiting for Input",
-                    "Notify when an agent is waiting for your response",
-                ))
-                .child(sub(
-                    "onError",
-                    error,
-                    "Errors",
-                    "Notify when an agent encounters an error",
-                ))
-                .child(sub(
-                    "onBell",
-                    bell,
-                    "Terminal Bell",
-                    "Notify when an agent explicitly sends a notification signal",
-                )),
-        )
-        .child(
-            text("Sound", 14.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(20.0)
-                .mt(32.0)
-                .mb(8.0)
-                .role(Role::Heading, "Sound"),
-        )
-        .child(
-            text(
-                "Play audio tones when agents change status",
-                14.0,
-                c(look::GRAY_500),
-            )
-            .line_height(20.0)
-            .mb(24.0)
-            .silent(),
-        )
-        .child(sounds)
+                .gap(2.0)
+                .grow()
+                .min_w0()
+                .child(
+                    div()
+                        .row()
+                        .justify_between()
+                        .gap(8.0)
+                        .child(
+                            text(format!("{agent} \u{b7} vorn"), 12.0, c(look::WHITE))
+                                .weight(600)
+                                .line_height(16.0)
+                                .truncate()
+                                .silent(),
+                        )
+                        .child(line("now", c(look::GRAY_500))),
+                )
+                .child(line("Waiting for your answer", c(look::GRAY_200)))
+                .child(line("Allow edit to src/notify.rs?", c(look::GRAY_500))),
+        );
+    div()
+        .row()
+        .p(22.0)
+        .rounded(4.0)
+        .bg(white(0.03))
+        .border(1.0, white(0.06))
+        .role(Role::Image, "A notification as the system shows it")
+        .child(notice)
 }
 
-/// The volume knob, placed by its share of the track (laid out by flex).
-fn volume_knob(v: f32) -> El {
-    let v = v.clamp(0.0, 1.0);
+/// The system refuses Vorn's notifications: say so, with the way to fix it.
+fn blocked_row(s: &Screen<'_>) -> El {
+    let open = pill_button(
+        s,
+        "notif-system",
+        "Open System Settings",
+        SetAct::OpenNotifSettings,
+        tip::OPEN_SYSTEM_SETTINGS,
+        false,
+        true,
+    );
     div()
-        .absolute(0.0, 0.0)
-        .w_full()
-        .h(12.0)
         .row()
-        .child(div().w_pct(v * 0.999).h(1.0))
+        .items_center()
+        .justify_between()
+        .gap(16.0)
+        .min_h(56.0)
+        .px(14.0)
+        .py(12.0)
         .child(
             div()
-                .size(12.0, 12.0)
-                .ml(-6.0)
-                .rounded(6.0)
-                .bg(c(look::WHITE)),
+                .row()
+                .items_start()
+                .gap(8.0)
+                .min_w0()
+                .child(glyph_icon(glyph::BELL_OFF, 15.0, c(look::BRONZO)).mt(2.0))
+                .child(
+                    div()
+                        .col()
+                        .gap(2.0)
+                        .min_w0()
+                        .child(
+                            text(BLOCKED, 13.0, c(look::GRAY_200))
+                                .line_height(18.0)
+                                .role(Role::Label, BLOCKED),
+                        )
+                        .child(
+                            text(BLOCKED_FIX, 12.0, c(look::GRAY_500))
+                                .line_height(16.0)
+                                .wrapping()
+                                .silent(),
+                        ),
+                ),
+        )
+        .child(open)
+}
+
+#[cfg(target_os = "macos")]
+const BLOCKED: &str = "macOS is blocking Vorn's notifications";
+#[cfg(not(target_os = "macos"))]
+const BLOCKED: &str = "The system is blocking Vorn's notifications";
+#[cfg(target_os = "macos")]
+const BLOCKED_FIX: &str = "Turn them on for Vorn in System Settings \u{203a} Notifications";
+#[cfg(not(target_os = "macos"))]
+const BLOCKED_FIX: &str = "Turn them on for Vorn in the system's notification settings";
+
+/// How a stored sound reads: Default, None or the system sound's name.
+fn sound_name(sound: &str) -> &str {
+    match sound {
+        "default" => "Default",
+        "none" => "None",
+        name => name,
+    }
+}
+
+/// The Sound chip, opening the list of sounds.
+fn sound_chip(s: &Screen<'_>, sound: &str, disabled: bool) -> El {
+    let kind = MenuKind::NotifSound;
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let id = s.acts.on("notif-sound", Act::Open(kind));
+    let name = sound_name(sound);
+    let mut el = chip(s, id, name, open)
+        .child(
+            text(name, 12.0, c(look::GRAY_200))
+                .line_height(16.0)
+                .silent(),
+        )
+        .child(chevron(open));
+    if disabled {
+        el = el.opacity(0.4);
+    }
+    tooltip(s.ui, el, id, tip::SOUND, None)
+}
+
+/// The Sound menu: Default, None, then the system's own sounds.
+pub(crate) fn sound_items(s: &Screen<'_>) -> Vec<crate::screen::menus::Item> {
+    use crate::screen::menus::Item;
+    let cur = notif(s).sound;
+    let pick = |label: &str, v: &str| {
+        let act = set(notify_act("sound", Value::from(v)));
+        Item::pick(label, cur == v, act)
+    };
+    let mut items = vec![pick("Default", "default"), pick("None", "none")];
+    items.extend(crate::notify::system_sounds().iter().map(|n| pick(n, n)));
+    items
+}
+
+/// The From extensions row: the extensions that send notifications and how
+/// many are on; none installed, no row.
+fn sources_row(s: &Screen<'_>) -> Option<El> {
+    let lists = [
+        s.st.points.builtins.as_slice(),
+        s.st.plugins.packs.as_slice(),
+    ];
+    let sources = crate::notify::sources(&lists);
+    if sources.is_empty() {
+        return None;
+    }
+    let on = sources.iter().filter(|x| x.on).count();
+    let mut marks = div().row().items_center();
+    for (i, x) in sources.iter().take(4).enumerate() {
+        let mark = source_mark(s, x.id, 16.0).border(2.0, c(look::SURFACE_OVERLAY));
+        marks = marks.child(if i == 0 { mark } else { mark.ml(-4.0) });
+    }
+    let kind = MenuKind::NotifSources;
+    let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
+    let id = s.acts.on("notif-sources", Act::Open(kind));
+    let label = format!("{on} of {} on", sources.len());
+    let count = chip(s, id, &label, open)
+        .child(
+            text(&label, 12.0, c(look::GRAY_200))
+                .line_height(16.0)
+                .silent(),
+        )
+        .child(chevron(open));
+    let control = div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .child(marks)
+        .child(tooltip(s.ui, count, id, tip::FROM_EXTENSIONS, None));
+    Some(card_row(
+        s,
+        Some(notif_mark(glyph::FILE)),
+        "From extensions",
+        Some(tip::FROM_EXTENSIONS),
+        control,
+    ))
+}
+
+/// An extension's mark on a small square.
+fn source_mark(s: &Screen<'_>, id: &str, size: f32) -> El {
+    let listing = s.st.plugins.listings.iter().find(|l| l.id == id);
+    let glyph = crate::screen::plugins::glyph(listing, id, size * 0.625, c(look::GRAY_200));
+    div()
+        .size(size, size)
+        .shrink0()
+        .center()
+        .rounded(4.0)
+        .bg(c(look::GRAY_700))
+        .child(glyph)
+}
+
+/// The From extensions popover: a switch per extension for all its
+/// notifications; which kinds stay on each extension's page.
+pub(crate) fn notice_sources(s: &Screen<'_>) -> El {
+    use crate::points::PointAct;
+    let lists = [
+        s.st.points.builtins.as_slice(),
+        s.st.plugins.packs.as_slice(),
+    ];
+    let mut list = div().col();
+    for x in crate::notify::sources(&lists) {
+        let act = Act::Point(PointAct::Preference {
+            id: x.id.to_owned(),
+            key: crate::notify::ALL_KEY.to_owned(),
+            value: (!x.on).to_string(),
+        });
+        let place = format!("notif-source-{}", x.id);
+        list = list.child(
+            div()
+                .row()
+                .items_center()
+                .justify_between()
+                .gap(12.0)
+                .px(10.0)
+                .py(8.0)
+                .child(
+                    div()
+                        .row()
+                        .items_center()
+                        .gap(10.0)
+                        .min_w0()
+                        .child(source_mark(s, x.id, 18.0))
+                        .child(
+                            text(x.name, 13.0, c(look::GRAY_200))
+                                .line_height(18.0)
+                                .truncate()
+                                .role(Role::Label, x.name),
+                        ),
+                )
+                .child(toggle(s, &place, x.on, act, false, x.name).shrink0()),
+        );
+    }
+    crate::ui::widgets::popover("From extensions")
+        .w(290.0)
+        .p(6.0)
+        .child(list)
+        .child(
+            text(
+                "Choose which ones on each extension's page",
+                11.0,
+                c(look::GRAY_500),
+            )
+            .line_height(14.0)
+            .px(10.0)
+            .pt(8.0)
+            .pb(4.0)
+            .mt(4.0)
+            .border_top(1.0, white(0.06))
+            .silent(),
         )
 }
 

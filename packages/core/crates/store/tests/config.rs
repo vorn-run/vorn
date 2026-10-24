@@ -88,6 +88,23 @@ fn settings_that_moved_or_went_away_are_not_loaded() {
 }
 
 #[test]
+fn put_default_rewrites_one_stored_row() {
+    let mut store = memory();
+    save_config(
+        &mut store,
+        config_with(json!({ "notifications": { "enabled": true, "soundVolume": 0.5 } })),
+        &[],
+    );
+    store
+        .put_default("notifications", &json!({ "enabled": true }))
+        .unwrap();
+    assert_eq!(
+        store.stored_defaults().unwrap().get("notifications"),
+        Some(&json!({ "enabled": true }))
+    );
+}
+
+#[test]
 fn a_false_the_user_chose_is_kept_rather_than_treated_as_unset() {
     let mut store = memory();
     save_config(

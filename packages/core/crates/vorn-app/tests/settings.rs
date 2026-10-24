@@ -218,28 +218,25 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
 
     open(&mut shot, &mut app, Category::Notifications);
     shot.save(&mut app, "set-notifications");
-    shot.click(
-        &mut app,
-        control("enabled", Act::Set(SetAct::Notify("enabled".into(), true))),
-    );
-    saved(&mut app, "notifications on", |c| {
-        c.pointer("/defaults/notifications/enabled") == Some(&json!(true))
+    let notify =
+        |place, key: &str, v: &str| control(place, Act::Set(SetAct::Notify(key.into(), v.into())));
+    // Notifications are on until switched off, and each control writes one key.
+    shot.click(&mut app, notify("notif-enabled", "enabled", "false"));
+    saved(&mut app, "notifications off", |c| {
+        c.pointer("/defaults/notifications/enabled") == Some(&json!(false))
     });
-    shot.click(
-        &mut app,
-        control("onBell", Act::Set(SetAct::Notify("onBell".into(), false))),
-    );
+    shot.click(&mut app, notify("notif-enabled", "enabled", "true"));
+    shot.click(&mut app, notify("notif-bell", "onBell", "false"));
     saved(&mut app, "the bell off", |c| {
         c.pointer("/defaults/notifications/onBell") == Some(&json!(false))
+            && c.pointer("/defaults/notifications/enabled") == Some(&json!(true))
     });
-    shot.click(
-        &mut app,
-        control("onBell", Act::Set(SetAct::Notify("onBell".into(), true))),
-    );
-    shot.click(
-        &mut app,
-        control("enabled", Act::Set(SetAct::Notify("enabled".into(), false))),
-    );
+    shot.click(&mut app, notify("notif-show", "show", "\"always\""));
+    saved(&mut app, "shown always", |c| {
+        c.pointer("/defaults/notifications/show") == Some(&json!("always"))
+            && c.pointer("/defaults/notifications/onBell") == Some(&json!(false))
+    });
+    shot.click(&mut app, notify("notif-bell", "onBell", "true"));
 
     // Worktrees is the cleanup extension's page.
     let page = "vorn.worktrees/settings/worktrees";

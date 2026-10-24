@@ -491,7 +491,28 @@ current, isGitRepo}`, under `git.read`.
   may run commands.
 - The events `workflow.changed` (`{}`: a workflow was made, edited, switched
   or removed) and `workflow.gates` (`{runId, gates}`: a run's waiting gates
-  changed).
+  changed), `workflow.signIn` (`{runId, workflowId, workflow, node, title,
+  message}`: a step waits for a sign-in) and `workflow.ended` (`{runId,
+  workflowId, workflow, outcome, steps}`, once per run, `outcome` one of
+  `completed`, `failed`, `rejected`).
+
+### `notifications.send`: notices through the OS
+
+An extension declares each kind of notice it sends:
+
+```toml
+[[contributes.notifications]]
+id = "finished"
+title = "Notify when a run finishes"
+default = true
+```
+
+Each kind shows as a switch on the extension's page, and Settings ›
+Notifications has one switch per extension for all of them. A call
+`notifications.send` (`{kind, title, body?, open?}`, under the permission
+`notifications.send`) reaches the OS only while Notifications, the
+extension's switch and the kind's switch are all on; otherwise it fails
+with `off`, and a kind it did not declare fails with `denied`.
 
 ### `web.call`: the Browser's web views
 

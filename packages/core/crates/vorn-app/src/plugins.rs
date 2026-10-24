@@ -1031,6 +1031,11 @@ fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
         "terminal.selection" => ("Terminal", "reads the selected text in sessions it started", true),
         "terminal.send" => ("Terminal", "types into sessions it started", true),
         "card.rename" => ("Cards", "renames session cards", true),
+        "notifications.send" => (
+            "Notifications",
+            "sends notifications you can switch off on its page",
+            true,
+        ),
         "agent.usage" => ("Agents", "reads context and allowance", true),
         "agent.permissions" => (
             "Agents",

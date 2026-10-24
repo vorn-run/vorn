@@ -101,3 +101,8 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 # Whether a WKWebView is still loading, which wry does not say.
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKWebView"] }
+# Notices as Vorn.app, with its permission state, through the notification center.
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNUserNotificationCenter", "UNNotificationContent", "UNNotificationRequest", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSBundle", "NSError", "NSString"] }
+block2 = "0.6"

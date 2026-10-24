@@ -217,6 +217,7 @@ impl Screen<'_> {
                 crate::state::MenuKind::ThemePicker(look) => settings::theme_picker(self, *look),
                 crate::state::MenuKind::ThemeInfo(ref id) => settings::theme_info(self, id),
                 crate::state::MenuKind::FontPicker => settings::font_picker(self),
+                crate::state::MenuKind::NotifSources => settings::notice_sources(self),
                 crate::state::MenuKind::LaunchModel => composer::model_panel(self),
                 crate::state::MenuKind::Branch(_) => git::branch_panel(self),
                 crate::state::MenuKind::OpenIn(ref sid) => git::open_in_panel(self, sid),
