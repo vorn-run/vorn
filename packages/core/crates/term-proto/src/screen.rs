@@ -86,6 +86,46 @@ pub enum Underline {
     Unknown,
 }
 
+/// The foreground a session's terminal starts with. vornd answers colour
+/// queries with these start colours; a client draws its own theme wherever a
+/// colour is still the start one, so only colours a program set override it.
+pub const START_FG: [u8; 3] = [0xd4, 0xd4, 0xd8];
+/// The background a session's terminal starts with.
+pub const START_BG: [u8; 3] = [0x14, 0x14, 0x16];
+/// The sixteen ANSI colours a session's terminal starts with.
+pub const START_ANSI: [[u8; 3]; 16] = [
+    [0x27, 0x27, 0x2a],
+    [0xef, 0x44, 0x44],
+    [0x22, 0xc5, 0x5e],
+    [0xea, 0xb3, 0x08],
+    [0x3b, 0x82, 0xf6],
+    [0xa8, 0x55, 0xf7],
+    [0x06, 0xb6, 0xd4],
+    [0xd4, 0xd4, 0xd8],
+    [0x52, 0x52, 0x5b],
+    [0xf8, 0x71, 0x71],
+    [0x4a, 0xde, 0x80],
+    [0xfa, 0xcc, 0x15],
+    [0x60, 0xa5, 0xfa],
+    [0xc0, 0x84, 0xfc],
+    [0x22, 0xd3, 0xee],
+    [0xfa, 0xfa, 0xfa],
+];
+
+/// Palette entry `i` as a session's terminal starts with it: the start ANSI
+/// colours, then xterm's colour cube and gray ramp.
+pub fn start_entry(i: u8) -> [u8; 3] {
+    match i {
+        0..=15 => START_ANSI[usize::from(i)],
+        16..=231 => {
+            let i = i - 16;
+            let level = |v: u8| if v == 0 { 0 } else { 55 + 40 * v };
+            [level(i / 36), level((i / 6) % 6), level(i % 6)]
+        }
+        _ => [8 + 10 * (i - 232); 3],
+    }
+}
+
 /// The palette's defaults and the entries that changed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ColorsDelta {
@@ -331,6 +371,16 @@ pub struct EffectId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_start_palette_is_the_ansi_colours_then_xterms_cube_and_ramp() {
+        assert_eq!(start_entry(1), START_ANSI[1]);
+        assert_eq!(start_entry(16), [0, 0, 0]);
+        assert_eq!(start_entry(196), [0xff, 0, 0]);
+        assert_eq!(start_entry(231), [0xff; 3]);
+        assert_eq!(start_entry(232), [8; 3]);
+        assert_eq!(start_entry(255), [238; 3]);
+    }
 
     #[test]
     fn shrink_keeps_the_aspect_and_averages_by_alpha() {

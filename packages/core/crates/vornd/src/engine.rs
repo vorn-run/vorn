@@ -52,7 +52,7 @@ use vorn_sessiond_wire::{
     ToSessiond, ToVornd, Welcome, Write,
 };
 use vorn_term_proto::msg::{ResizeReason, ServerMsg};
-use vorn_term_proto::{Cursor, Entry, Record};
+use vorn_term_proto::{screen, Cursor, Entry, Record};
 
 use crate::holder::{Conn, Writer};
 use crate::journal::{Journal, Kind};
@@ -81,30 +81,12 @@ pub const WRITE_QUEUE_CAP: usize = 64 << 20;
 pub const DEFAULT_SCROLLBACK: usize = 1 << 20;
 
 /// The colours a session's terminal answers colour queries (OSC 4, 10 to 12)
-/// with: the app's terminal theme, which is what xterm.js answered with
-/// before vornd answered every query.
+/// with; the app draws its theme wherever a colour is still one of these.
 pub const DEFAULT_COLORS: vorn_engine::Theme = vorn_engine::Theme {
-    fg: [0xd4, 0xd4, 0xd8],
-    bg: [0x14, 0x14, 0x16],
-    cursor: Some([0xd4, 0xd4, 0xd8]),
-    ansi: Some([
-        [0x27, 0x27, 0x2a],
-        [0xef, 0x44, 0x44],
-        [0x22, 0xc5, 0x5e],
-        [0xea, 0xb3, 0x08],
-        [0x3b, 0x82, 0xf6],
-        [0xa8, 0x55, 0xf7],
-        [0x06, 0xb6, 0xd4],
-        [0xd4, 0xd4, 0xd8],
-        [0x52, 0x52, 0x5b],
-        [0xf8, 0x71, 0x71],
-        [0x4a, 0xde, 0x80],
-        [0xfa, 0xcc, 0x15],
-        [0x60, 0xa5, 0xfa],
-        [0xc0, 0x84, 0xfc],
-        [0x22, 0xd3, 0xee],
-        [0xfa, 0xfa, 0xfa],
-    ]),
+    fg: screen::START_FG,
+    bg: screen::START_BG,
+    cursor: Some(screen::START_FG),
+    ansi: Some(screen::START_ANSI),
 };
 
 /// How long a session goes with no output and no viewer before its terminal

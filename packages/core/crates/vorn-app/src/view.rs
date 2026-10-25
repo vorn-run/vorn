@@ -9,7 +9,7 @@ use vorn_term_mirror::{kitty, Mirror};
 use vorn_term_proto::msg::GridPoint;
 use vorn_term_proto::row;
 use vorn_term_proto::screen::{
-    attrs, row_flags, Color, CursorStyle, Image, MouseMode, Row, Screen, StyleDef, Underline,
+    self, attrs, row_flags, Color, CursorStyle, Image, MouseMode, Row, Screen, StyleDef, Underline,
 };
 
 use crate::look::{self, Rgb, Term};
@@ -136,6 +136,12 @@ fn rgb((r, g, b): (u8, u8, u8)) -> Rgb {
     (r as u32) << 16 | (g as u32) << 8 | b as u32
 }
 
+/// `c` when a program set it: vornd reports its start colours too, and the
+/// theme is drawn in their place, so picking a theme recolours running terminals.
+fn program_set(c: Option<(u8, u8, u8)>, start: [u8; 3]) -> Option<(u8, u8, u8)> {
+    c.filter(|&(r, g, b)| [r, g, b] != start)
+}
+
 struct Palette {
     fg: Rgb,
     bg: Rgb,
@@ -147,10 +153,15 @@ impl Palette {
     fn of(m: &Mirror, theme: Term) -> Palette {
         let c = &m.term().colors;
         Palette {
-            fg: c.fg.map_or(theme.fg, rgb),
-            bg: c.bg.map_or(theme.bg, rgb),
+            fg: program_set(c.fg, screen::START_FG).map_or(theme.fg, rgb),
+            bg: program_set(c.bg, screen::START_BG).map_or(theme.bg, rgb),
             theme,
-            over: c.palette.iter().map(|(i, v)| (*i, rgb(*v))).collect(),
+            over: c
+                .palette
+                .iter()
+                .filter(|(i, v)| program_set(Some(*v), screen::start_entry(*i)).is_some())
+                .map(|(i, v)| (*i, rgb(*v)))
+                .collect(),
         }
     }
 
@@ -239,7 +250,7 @@ pub fn build(m: &Mirror, top: Option<u64>) -> PaneView {
         CursorStyle::Underline => Cursor::Underline,
         _ => Cursor::Block,
     };
-    v.cursor_color = t.colors.cursor.map_or(v.cursor_color, rgb);
+    v.cursor_color = program_set(t.colors.cursor, screen::START_FG).map_or(v.cursor_color, rgb);
     v.sb_epoch = t.sb_epoch;
     v.primary = primary;
     v.mouse = t.mouse != MouseMode::None;
@@ -481,6 +492,32 @@ mod tests {
         assert_eq!(xterm(231, &look::term().ansi), 0xffffff);
         assert_eq!(xterm(232, &look::term().ansi), 0x080808);
         assert_eq!(xterm(196, &look::term().ansi), 0xff0000);
+    }
+
+    #[test]
+    fn start_colours_draw_in_the_theme_and_a_programs_own_stay() {
+        let mut snap = scrolled_snapshot();
+        let t = |[r, g, b]: [u8; 3]| (r, g, b);
+        let c = &mut snap.term.colors;
+        c.fg = Some(t(screen::START_FG));
+        c.bg = Some((1, 2, 3));
+        c.cursor = Some(t(screen::START_FG));
+        c.palette = (0..=255).map(|i| (i, t(screen::start_entry(i)))).collect();
+        c.palette[2].1 = (9, 9, 9);
+        let m = Mirror::from_snapshot(snap).expect("valid snapshot");
+        let theme = Term {
+            fg: 0xaaaaaa,
+            bg: 0x111111,
+            cursor: 0xbbbbbb,
+            selection: 0,
+            ansi: [0x010101; 16],
+        };
+        let p = Palette::of(&m, theme);
+        assert_eq!((p.fg, p.bg), (0xaaaaaa, 0x010203));
+        assert_eq!(p.color(Color::Palette(1), 0), 0x010101);
+        assert_eq!(p.color(Color::Palette(2), 0), 0x090909);
+        assert_eq!(p.color(Color::Palette(196), 0), 0xff0000);
+        assert_eq!(p.over.len(), 1, "only the entry a program set overrides");
     }
 
     #[test]
