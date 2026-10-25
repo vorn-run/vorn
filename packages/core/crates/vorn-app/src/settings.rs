@@ -93,6 +93,8 @@ pub enum SetAct {
     Default(String, String),
     /// `defaults.notifications[key] = value`, the value as JSON text.
     Notify(String, String),
+    /// The terminal font size, one step down (-1) or up (+1).
+    FontSize(i32),
     /// A theme from the picker, by id: its side's key, and the scheme when
     /// a fixed one is of the other side.
     PickTheme(String),
@@ -410,6 +412,14 @@ impl Holders {
 }
 
 /// The links under About's card.
+/// The terminal font sizes a person can pick, in px.
+pub const FONT_SIZES: std::ops::RangeInclusive<i64> = 8..=24;
+
+/// The terminal font size one step of `delta` from `cur`, kept in [`FONT_SIZES`].
+pub fn step_font_size(cur: i64, delta: i32) -> i64 {
+    (cur + i64::from(delta)).clamp(*FONT_SIZES.start(), *FONT_SIZES.end())
+}
+
 pub const WEBSITE: &str = "https://vorn.run";
 pub const DOCUMENTATION: &str = "https://github.com/vorn-run/vorn/tree/main/docs";
 pub const FEEDBACK: &str = "https://github.com/vorn-run/vorn/issues/new";
@@ -772,6 +782,16 @@ pub fn type_due(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn the_font_size_steps_by_one_within_its_range() {
+        assert_eq!(step_font_size(13, 1), 14);
+        assert_eq!(step_font_size(13, -1), 12);
+        assert_eq!(step_font_size(24, 1), 24);
+        assert_eq!(step_font_size(8, -1), 8);
+        assert_eq!(step_font_size(40, -1), 24);
+    }
 
     #[test]
     fn reads_where_each_agent_was_found() {
@@ -794,7 +814,6 @@ mod tests {
         );
     }
 
-    use super::*;
     use serde_json::json;
 
     #[test]

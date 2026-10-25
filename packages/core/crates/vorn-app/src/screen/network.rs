@@ -25,30 +25,23 @@ const SHARE: &str = "Share this computer";
 /// What each row, tile and button says while it is hovered.
 mod tip {
     #[cfg(target_os = "macos")]
-    pub const SHARE: &str = "Lets your phone and other computers reach the sessions on this Mac.";
+    pub const SHARE: &str = "Opens this Mac's sessions to the devices you pair";
     #[cfg(not(target_os = "macos"))]
-    pub const SHARE: &str =
-        "Lets your phone and other computers reach the sessions on this computer.";
-    pub const TAILSCALE: &str =
-        "Encrypted. Works wherever your devices are signed in to Tailscale.";
-    pub const LAN: &str = "Not encrypted. Works only on the same home or office network.";
-    pub const ADD: &str = "Pair a phone: scan the QR code with the Vorn app, or type the code.";
-    pub const DEVICE: &str = "Last time this device connected.";
+    pub const SHARE: &str = "Opens this computer's sessions to the devices you pair";
+    pub const TAILSCALE: &str = "Encrypts the connection; works anywhere Tailscale reaches";
+    pub const LAN: &str = "Skips encryption; works only on the same home or office network";
+    pub const ADD: &str = "Pairs a phone with a QR code or a typed code";
+    pub const DEVICE: &str = "Shows when this device last connected";
     pub const MORE: &str = "More";
-    pub const REMOVE: &str = "Signs this device out now. It must pair again to reconnect.";
+    pub const REMOVE: &str = "Signs the device out; it must pair again to reconnect";
     #[cfg(target_os = "macos")]
-    pub const BROWSER: &str =
-        "Address to open Vorn from a browser on a device that can reach this Mac.";
+    pub const BROWSER: &str = "Opens Vorn in a browser on a device that can reach this Mac";
     #[cfg(not(target_os = "macos"))]
-    pub const BROWSER: &str =
-        "Address to open Vorn from a browser on a device that can reach this computer.";
-    pub const ADVANCED: &str =
-        "Certificate fingerprint, server address and tokens for setups by hand.";
-    pub const FINGERPRINT: &str =
-        "The certificate the address presents. Compare it when you pair by hand.";
-    pub const ADDRESSES: &str = "Every address Vorn answers on, for typing into another device.";
-    pub const TOKEN: &str =
-        "Makes a token another computer uses to connect by hand. It is shown once.";
+    pub const BROWSER: &str = "Opens Vorn in a browser on a device that can reach this computer";
+    pub const ADVANCED: &str = "Shows the fingerprint, address and tokens for pairing by hand";
+    pub const FINGERPRINT: &str = "Compare with the one shown when you pair by hand";
+    pub const ADDRESSES: &str = "Lists every address Vorn answers on";
+    pub const TOKEN: &str = "Makes a token for connecting by hand; it's shown only once";
     pub const COPY: &str = "Copy";
 }
 
@@ -526,7 +519,7 @@ fn minted(s: &Screen<'_>, n: &Network, name: &str, plaintext: &str) -> El {
         .bg(white(0.03))
         .child(
             text(
-                format!("Token for \u{201c}{name}\u{201d}. Copy it now; it is not shown again."),
+                format!("Token for \u{201c}{name}\u{201d}. Copy it now; it won't show again."),
                 12.0,
                 c(look::GRAY_300),
             )
@@ -600,7 +593,7 @@ pub(super) fn sheet(s: &Screen<'_>) -> El {
                     .silent()
             }))
             .child(faint(
-                "It can run terminals here. Approve only a phone you are holding.",
+                "It can run terminals here. Pair only a phone you're holding.",
                 12.0,
             ))
             .child(

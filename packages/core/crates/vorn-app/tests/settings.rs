@@ -117,6 +117,22 @@ fn every_settings_panel_opens_and_saves_to_vornd() {
     saved(&mut app, "the font back", |c| {
         c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(13)
     });
+    // The steppers reach any whole size between the presets.
+    shot.click(
+        &mut app,
+        control("font-size", Act::Set(SetAct::FontSize(1))),
+    );
+    saved(&mut app, "one size larger", |c| {
+        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(14)
+    });
+    shot.save(&mut app, "set-font-stepped");
+    shot.click(
+        &mut app,
+        control("font-size", Act::Set(SetAct::FontSize(-1))),
+    );
+    saved(&mut app, "one size smaller", |c| {
+        c.pointer("/defaults/fontSize").and_then(Value::as_i64) == Some(13)
+    });
     let tabs = SetAct::Default("layoutMode".into(), "\"tabs\"".into());
     shot.click(&mut app, control("layout", Act::Set(tabs)));
     saved(&mut app, "the tabs layout", |c| {

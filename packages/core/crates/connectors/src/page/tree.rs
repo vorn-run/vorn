@@ -96,7 +96,7 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
     actions.push(button(format!("backfill:{id}"), "Import now").icon("import"));
     let mut more = vec![button(format!("test:{id}"), "Test key")
         .icon("zap")
-        .tip("Checks the key still works with the service.")];
+        .tip("Checks that the key still works")];
     let fields = r["key_fields"].as_array().map_or(&[][..], Vec::as_slice);
     for f in fields {
         let label = if fields.len() > 1 {
@@ -107,9 +107,7 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
         more.push(
             button(format!("rotate:{id}|{}", s(f, "key")), label)
                 .icon("refresh-cw")
-                .tip(
-                    "Replaces the key with a new one from the service; the old one stops working.",
-                ),
+                .tip("Swaps in a new key from the service; the old one stops working"),
         );
     }
     if on(r, "can_roll_back") {
@@ -163,7 +161,7 @@ fn key_line(r: &Value) -> Option<Node> {
         row([icon("key-round"), words])
             .gap(4.0)
             .id(format!("key:{}", s(r, "id")))
-            .tip("Where this connection's key is kept, and when it last changed."),
+            .tip("Shows where the key is kept and when it last changed"),
     )
 }
 

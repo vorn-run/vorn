@@ -688,7 +688,7 @@ pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Valu
         "rotate" => {
             let (conn, field) = id
                 .rsplit_once('|')
-                .ok_or("Which key to rotate is missing")?;
+                .ok_or("Couldn't tell which key to rotate")?;
             let mut k = keys(c);
             k.rotating = Some((conn.to_owned(), field.to_owned()));
             k.error = None;

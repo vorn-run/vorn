@@ -111,100 +111,82 @@ pub(in crate::screen) mod glyph {
 /// What each settings row, tile and chip says when hovered.
 pub(crate) mod tip {
     #[cfg(target_os = "macos")]
-    pub const SCHEME: &str =
-        "Which theme Vorn uses. System follows your Mac's light or dark setting.";
+    pub const SCHEME: &str = "Matches your Mac's light or dark mode on System";
     #[cfg(not(target_os = "macos"))]
-    pub const SCHEME: &str =
-        "Which theme Vorn uses. System follows your computer's light or dark setting.";
-    pub const THEME: &str = "The colours of Vorn's surfaces, text and terminals.";
+    pub const SCHEME: &str = "Matches your computer's light or dark mode on System";
+    pub const THEME: &str = "Sets the colours of Vorn and its terminals";
     #[cfg(target_os = "macos")]
-    pub const LIGHT_THEME: &str = "The theme used while your Mac is in light mode.";
+    pub const LIGHT_THEME: &str = "Applies while your Mac is in light mode";
     #[cfg(not(target_os = "macos"))]
-    pub const LIGHT_THEME: &str = "The theme used while your computer is in light mode.";
+    pub const LIGHT_THEME: &str = "Applies while your computer is in light mode";
     #[cfg(target_os = "macos")]
-    pub const DARK_THEME: &str = "The theme used while your Mac is in dark mode.";
+    pub const DARK_THEME: &str = "Applies while your Mac is in dark mode";
     #[cfg(not(target_os = "macos"))]
-    pub const DARK_THEME: &str = "The theme used while your computer is in dark mode.";
-    pub const THEME_INFO: &str = "Shows the theme's terminal colours and who made it.";
-    pub const MORE_THEMES: &str = "Opens the extensions catalog, filtered to themes.";
-    pub const SURFACES: &str = "How Vorn draws its sidebar, toolbar and panels.";
-    pub const SOLID: &str = "Opaque surfaces everywhere.";
-    pub const GLASS: &str =
-        "The sidebar and toolbar show the system's translucent material; buttons sit on glass.";
-    pub const TINTED_GLASS: &str = "As Glass, tinted with the theme's colours.";
-    pub const NO_GLASS: &str = "Off while Reduce transparency is on in the system settings.";
-    pub const CHROME: &str =
-        "Paint Vorn's sidebar and panels in the theme's colours instead of Vorn's own.";
-    pub const CONTRAST: &str =
-        "Lighten or darken text that would be hard to read, keeping its colour.";
-    pub const FONT: &str = "The font every terminal uses.";
-    pub const SIZE: &str = "The text size in terminals.";
-    pub const LIGATURES: &str = "This font joins symbols like != and -> into one shape.";
-    pub const LAYOUT: &str = "How sessions are arranged in the window.";
-    pub const GRID: &str = "Sessions side by side in a grid.";
-    pub const TABS: &str = "One session at a time, switched with tabs.";
-    pub const LIST: &str = "A list of sessions beside the open one.";
-    pub const CARD_HEIGHT: &str = "How tall each session card is in the grid.";
+    pub const DARK_THEME: &str = "Applies while your computer is in dark mode";
+    pub const THEME_INFO: &str = "Shows the theme's terminal colours and publisher";
+    pub const MORE_THEMES: &str = "Finds more themes in the extensions catalog";
+    pub const SURFACES: &str = "Changes how the sidebar and toolbar are drawn";
+    pub const SURFACES_RESTART: &str =
+        "Changes how the sidebar and toolbar are drawn, after a restart";
+    pub const SOLID: &str = "Draws every surface opaque";
+    pub const GLASS: &str = "Shows the desktop through the sidebar and toolbar";
+    pub const TINTED_GLASS: &str = "Shows the desktop through, tinted in the theme's colours";
+    pub const NO_GLASS: &str = "Needs Reduce transparency off in System Settings";
+    pub const CHROME: &str = "Paints the sidebar and panels in the theme's colours";
+    pub const CONTRAST: &str = "Lightens or darkens hard-to-read text, keeping its hue";
+    pub const SMALLER: &str = "Makes terminal text 1 px smaller";
+    pub const LARGER: &str = "Makes terminal text 1 px larger";
+    pub const LIGATURES: &str = "Joins symbols like != and -> into one shape";
+    pub const GRID: &str = "Shows sessions side by side";
+    pub const TABS: &str = "Shows one session at a time, with tabs to switch";
+    pub const LIST: &str = "Lists sessions beside the open one";
+    pub const CARD_HEIGHT: &str = "Applies to cards in the Grid layout";
     #[cfg(target_os = "macos")]
-    pub const LOGIN: &str = "Start Vorn when you sign in to your Mac.";
+    pub const LOGIN: &str = "Opens Vorn when you sign in to your Mac";
     #[cfg(not(target_os = "macos"))]
-    pub const LOGIN: &str = "Start Vorn when you sign in to your computer.";
-    pub const REOPEN: &str = "Bring back the sessions that were open when Vorn quit.";
-    pub const AGENT: &str = "The agent a new session starts with.";
-    pub const MORE_AGENTS: &str = "Opens the extensions catalog, filtered to agents.";
+    pub const LOGIN: &str = "Opens Vorn when you sign in to your computer";
+    pub const REOPEN: &str = "Brings back the sessions open when Vorn last quit";
+    pub const AGENT: &str = "Starts new sessions with this agent";
+    pub const MORE_AGENTS: &str = "Finds more agents in the extensions catalog";
     #[cfg(target_os = "macos")]
-    pub const AGENT_ROW: &str = "Ready means Vorn found this agent's command on this Mac.";
+    pub const AGENT_ROW: &str = "Shows Ready once Vorn finds the agent's command on this Mac";
     #[cfg(not(target_os = "macos"))]
-    pub const AGENT_ROW: &str = "Ready means Vorn found this agent's command on this computer.";
-    pub const TOOLS: &str =
-        "Whether this agent can use Vorn's tools: open panes, read sessions, run workflows.";
-    pub const DEFAULT_TAG: &str = "New sessions start with this agent.";
-    pub const INSTALL_AGENT: &str =
-        "Runs the agent's installer in a terminal card so you can watch it.";
-    pub const CONNECT: &str =
-        "Vorn runs the setup shown below for this agent, then checks it worked.";
-    pub const MAKE_DEFAULT: &str = "Start new sessions with this agent.";
-    pub const ADVANCED: &str = "The command and arguments Vorn uses to start this agent.";
+    pub const AGENT_ROW: &str = "Shows Ready once Vorn finds the agent's command here";
+    pub const TOOLS: &str = "Gives the agent Vorn's tools for panes, sessions and workflows";
+    pub const DEFAULT_TAG: &str = "Marks the agent new sessions start with";
+    pub const INSTALL_AGENT: &str = "Runs the installer in a terminal card you can watch";
+    pub const CONNECT: &str = "Runs the setup below, then checks that it worked";
+    pub const MAKE_DEFAULT: &str = "Starts new sessions with this agent";
+    pub const ADVANCED: &str = "Shows the command and arguments that start this agent";
     #[cfg(target_os = "macos")]
-    pub const REMOVE_AGENT: &str =
-        "Uninstalls this agent's adapter from Vorn; the agent itself stays on your Mac.";
+    pub const REMOVE_AGENT: &str = "Removes the adapter from Vorn; the agent stays on your Mac";
     #[cfg(not(target_os = "macos"))]
-    pub const REMOVE_AGENT: &str =
-        "Uninstalls this agent's adapter from Vorn; the agent itself stays on your computer.";
-    pub const MANAGE_AGENTS: &str = "Opens Settings \u{203a} Agents.";
-    pub const DOCS: &str = "Opens the agent's documentation in your browser.";
-    pub const REDETECT: &str = "Look for agents on this machine again.";
-    pub const SHELL: &str = "The shell a new terminal session runs.";
-    pub const CHOOSE_PATH: &str = "Use a shell that isn't in the list.";
-    pub const BEHIND: &str = "Your running terminals still use the last version; restarting moves them over without ending them.";
-    pub const RESTART_VORN: &str =
-        "Restart Vorn so your terminals move to this version; they keep running.";
-    pub const CHECK: &str = "Look for a newer version of Vorn now.";
-    pub const CHANNEL: &str =
-        "Beta gets new versions first; Stable gets them once they have been tested.";
+    pub const REMOVE_AGENT: &str = "Removes the adapter from Vorn; the agent stays installed";
+    pub const MANAGE_AGENTS: &str = "Opens Settings \u{203a} Agents";
+    pub const DOCS: &str = "Opens the agent's docs in your browser";
+    pub const REDETECT: &str = "Looks for installed agents again";
+    pub const SHELL: &str = "Runs in every new terminal session";
+    pub const CHOOSE_PATH: &str = "Picks a shell that isn't in the list";
+    pub const BEHIND: &str = "Moves running terminals to this version when Vorn restarts";
+    pub const RESTART_VORN: &str = "Restarts Vorn and moves your terminals over; they keep running";
+    pub const CHECK: &str = "Asks for a newer version of Vorn now";
+    pub const CHANNEL: &str = "Picks Beta for early updates or Stable for tested ones";
     pub const RESTART_UPDATE: &str =
-        "Install the new version; Vorn reopens in a few seconds and your sessions keep running.";
-    pub const WHATS_NEW: &str = "Opens the release notes for this version.";
-    pub const UPDATE_EXTENSIONS: &str = "Update the listed extensions to their newest versions.";
+        "Installs the update; Vorn reopens and your sessions keep running";
+    pub const WHATS_NEW: &str = "Opens this version's release notes";
+    pub const UPDATE_EXTENSIONS: &str = "Installs the newest version of each listed extension";
+    pub const NOTIFY: &str = "Alerts you when something needs you while you're in another app";
+    pub const SHOW_BACKGROUND: &str = "Notifies only while you're in another app";
+    pub const SHOW_ALWAYS: &str = "Notifies even while you're looking at Vorn";
+    pub const SOUND: &str = "Plays with each notification; None is silent";
+    pub const ON_WAITING: &str = "Notifies when an agent stops to wait for your reply or approval";
+    pub const ON_BELL: &str = "Notifies when a program in a terminal asks for your attention";
+    pub const FROM_EXTENSIONS: &str = "Turns each extension's notifications on or off";
     #[cfg(target_os = "macos")]
-    pub const NOTIFY: &str =
-        "Let Vorn tell you, through macOS, when something needs you while you are in another app.";
+    pub const OPEN_SYSTEM_SETTINGS: &str = "Opens macOS's notification settings for Vorn";
     #[cfg(not(target_os = "macos"))]
-    pub const NOTIFY: &str = "Let Vorn tell you, through the system, when something needs you while you are in another app.";
-    pub const SHOW_BACKGROUND: &str = "Only notify while you are in another app.";
-    pub const SHOW_ALWAYS: &str = "Notify even while you are looking at Vorn.";
-    pub const SOUND: &str = "The sound a notification plays; None for silent.";
-    pub const ON_WAITING: &str = "An agent stopped and is waiting for you to reply or approve.";
-    pub const ON_BELL: &str = "A program in a terminal asked for your attention.";
-    pub const FROM_EXTENSIONS: &str = "Turn notifications from each installed extension on or off; pick which kinds on its own page.";
-    #[cfg(target_os = "macos")]
-    pub const OPEN_SYSTEM_SETTINGS: &str =
-        "macOS is blocking Vorn's notifications; turn them on there.";
-    #[cfg(not(target_os = "macos"))]
-    pub const OPEN_SYSTEM_SETTINGS: &str =
-        "The system is blocking Vorn's notifications; turn them on there.";
-    pub const DRAWING: &str =
-        "Pixels look like the desktop app where the terminal shows images; Text works in any terminal.";
+    pub const OPEN_SYSTEM_SETTINGS: &str = "Opens the system's notification settings for Vorn";
+    pub const DRAWING: &str = "Draws pixels where the terminal shows images; Text works anywhere";
 }
 
 pub(in crate::screen) fn glyph_icon(body: &str, size: f32, color: Rgba) -> El {
@@ -446,7 +428,7 @@ fn look_rows(s: &Screen<'_>) -> Vec<El> {
             reduced,
         ));
     let surfaces_tip = if cfg!(windows) {
-        "How Vorn draws its sidebar, toolbar and panels. The sidebar changes at the next launch."
+        tip::SURFACES_RESTART
     } else {
         tip::SURFACES
     };
@@ -547,14 +529,10 @@ fn surface_tile(
         Materials::Native => tip::GLASS,
         Materials::Themed => tip::TINTED_GLASS,
     };
-    let says = if disabled {
-        format!("{says} {}", tip::NO_GLASS)
-    } else {
-        says.to_owned()
-    };
+    let says = if disabled { tip::NO_GLASS } else { says };
     let act = set(surface_act(m));
     let on = m == chosen && !disabled;
-    tile(s, "surface", act, pic, label, on, disabled, &says)
+    tile(s, "surface", act, pic, label, on, disabled, says)
 }
 
 /// A picture choice: the picture ringed in the accent when chosen, and its
@@ -615,8 +593,8 @@ fn terminal_rows(s: &Screen<'_>) -> Vec<El> {
     let family = s.ui.text.term_family();
     vec![
         terminal_preview(family, size),
-        card_row(s, None, "Font", Some(tip::FONT), font_chip(s, family)),
-        card_row(s, None, "Size", Some(tip::SIZE), size_control(s, size)),
+        card_row(s, None, "Font", None, font_chip(s, family)),
+        card_row(s, None, "Size", None, size_control(s, size)),
     ]
 }
 
@@ -666,18 +644,17 @@ fn font_chip(s: &Screen<'_>, family: &str) -> El {
             .as_ref()
             .is_some_and(|m| m.kind == MenuKind::FontPicker);
     let id = s.acts.on("font-chip", Act::Open(MenuKind::FontPicker));
-    let chip = chip(s, id, family, open)
+    chip(s, id, family, open)
         .child(
             text(family, 13.0, c(look::GRAY_200))
                 .family(family)
                 .line_height(18.0)
                 .silent(),
         )
-        .child(chevron(open));
-    tooltip(s.ui, chip, id, tip::FONT, None)
+        .child(chevron(open))
 }
 
-/// Three Aa steps, then the exact size.
+/// Three Aa steps, then the exact size between a step down and up.
 fn size_control(s: &Screen<'_>, size: i64) -> El {
     let mut steps = div()
         .row()
@@ -714,17 +691,51 @@ fn size_control(s: &Screen<'_>, size: i64) -> El {
                 ),
         );
     }
-    let exact = div().w(44.0).row().justify_end().child(
+    let exact = div().w(40.0).row().justify_center().child(
         text(format!("{size} px"), 12.0, c(look::GRAY_300))
             .line_height(16.0)
             .silent(),
     );
-    div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .child(steps)
-        .child(exact)
+    div().row().items_center().gap(12.0).child(steps).child(
+        div()
+            .row()
+            .items_center()
+            .gap(4.0)
+            .child(stepper(s, size, -1))
+            .child(exact)
+            .child(stepper(s, size, 1)),
+    )
+}
+
+/// A one-px step down or up, off at the end of the range.
+fn stepper(s: &Screen<'_>, size: i64, delta: i32) -> El {
+    let (glyph, label, tip) = if delta < 0 {
+        ("minus", "Smaller", tip::SMALLER)
+    } else {
+        ("plus", "Larger", tip::LARGER)
+    };
+    let id = s.acts.on("font-size", set(SetAct::FontSize(delta)));
+    let off = settings::step_font_size(size, delta) == size;
+    let hot = if off { 0.0 } else { s.ui.hover(id) };
+    let el = div()
+        .id(id)
+        .size(24.0, 24.0)
+        .center()
+        .rounded(4.0)
+        .bg(white(0.06 * hot))
+        .role(Role::Button, label)
+        .child(ico(
+            glyph,
+            14.0,
+            2.0,
+            c(look::GRAY_400).mix(c(look::WHITE), hot),
+        ));
+    let el = if off {
+        el.opacity(0.4).disabled(true)
+    } else {
+        el.on(Action::Click).ring(4.0)
+    };
+    tooltip(s.ui, el, id, tip, None)
 }
 
 /// Layout as three pictures, and the card height.
@@ -759,7 +770,7 @@ fn session_rows(s: &Screen<'_>) -> Vec<El> {
             ),
         );
     vec![
-        card_row(s, None, "Layout", Some(tip::LAYOUT), tiles).py(12.0),
+        card_row(s, None, "Layout", None, tiles).py(12.0),
         card_row(s, None, "Card height", Some(tip::CARD_HEIGHT), height),
     ]
 }
@@ -1146,7 +1157,7 @@ fn drawing_row(s: &Screen<'_>, d: crate::screen::TermDrawing) -> El {
         12.0,
     );
     let now = match (d.supported, d.pixels) {
-        (false, _) => "This terminal does not show images.",
+        (false, _) => "This terminal can't show images.",
         (true, true) => "Drawing pixels now.",
         (true, false) => "Drawing text now.",
     };
@@ -1266,7 +1277,7 @@ pub(crate) fn shell_panel(s: &Screen<'_>) -> El {
     match &s.st.settings.shells {
         None => col = col.child(note("Looking for shells\u{2026}")),
         Some(list) if list.is_empty() => {
-            col = col.child(note("No shells detected. Choose a path instead."));
+            col = col.child(note("No shells found. Choose a path instead."));
         }
         Some(list) => {
             for sh in list {
@@ -1371,9 +1382,7 @@ fn cli_card(s: &Screen<'_>) -> Option<El> {
             .unwrap_or_else(|| match (st.installed, st.on_path) {
                 (true, true) => format!("Installed at {}. Run vorn --help in a terminal.", st.path),
                 (true, false) => format!("{} is not on your PATH.", st.path),
-                (false, _) => {
-                    "The vorn command starts sessions and reads them from a terminal.".to_owned()
-                }
+                (false, _) => "Starts and reads sessions from any terminal.".to_owned(),
             });
     let (label, act) = match (st.installed, st.on_path) {
         (true, true) => ("Remove", SetAct::RemoveCli),
@@ -1703,69 +1712,10 @@ pub(super) fn notifications(s: &Screen<'_>) -> El {
     div()
         .col()
         .child(header("Notifications", "", None))
-        .child(notice_preview(s))
-        .child(card(main).mt(16.0))
+        .child(card(main))
         .child(section("Tell me when"))
         .child(when)
         .child_if(sources_row(s).map(|r| card(vec![r]).mt(16.0)))
-}
-
-/// A drawn notice, as the system shows a real one: the agent, the
-/// session and the question.
-fn notice_preview(s: &Screen<'_>) -> El {
-    let key = default_agent(s);
-    let agent = s.store.agents.get(key).map_or(key, |a| a.name.as_str());
-    let mut mark = div()
-        .size(34.0, 34.0)
-        .shrink0()
-        .center()
-        .rounded(4.0)
-        .bg(c(look::SURFACE_BASE));
-    if let Some(id) = s.logo {
-        mark = mark.child(image(id, 12.0 * look::LOGO_ASPECT, 12.0));
-    }
-    let line = |t: &str, color| text(t, 12.0, color).line_height(16.0).truncate().silent();
-    let notice = div()
-        .row()
-        .gap(10.0)
-        .w(360.0)
-        .px(12.0)
-        .py(10.0)
-        .rounded(4.0)
-        .bg(c(look::SURFACE_OVERLAY))
-        .border(1.0, white(0.08))
-        .child(mark)
-        .child(
-            div()
-                .col()
-                .gap(2.0)
-                .grow()
-                .min_w0()
-                .child(
-                    div()
-                        .row()
-                        .justify_between()
-                        .gap(8.0)
-                        .child(
-                            text(format!("{agent} \u{b7} vorn"), 12.0, c(look::WHITE))
-                                .weight(600)
-                                .line_height(16.0)
-                                .truncate()
-                                .silent(),
-                        )
-                        .child(line("now", c(look::GRAY_500))),
-                )
-                .child(line("Waiting for your answer", c(look::GRAY_200)))
-                .child(line("Allow edit to src/notify.rs?", c(look::GRAY_500))),
-        );
-    div()
-        .row()
-        .p(22.0)
-        .rounded(4.0)
-        .bg(white(0.03))
-        .border(1.0, white(0.06))
-        .role(Role::Image, "A notification as the system shows it")
-        .child(notice)
 }
 
 /// The system refuses Vorn's notifications: say so, with the way to fix it.
