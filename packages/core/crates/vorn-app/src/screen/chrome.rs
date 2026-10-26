@@ -331,6 +331,7 @@ fn dock(s: &Screen<'_>) -> Option<El> {
     let state = DockState {
         collapsed: s.st.dock_collapsed,
         open: s.ui.menu_open(DOCK),
+        glass: glass(s),
     };
     dock(s.ui, ids, state, items)
 }

@@ -632,6 +632,7 @@ fn dock_cases(b: &mut Builder) {
                 let state = DockState {
                     collapsed,
                     open: ctx.clicked.get(),
+                    glass: false,
                 };
                 dock(ui, dock_ids, state, items).unwrap_or_else(div)
             },
