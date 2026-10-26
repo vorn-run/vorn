@@ -1,7 +1,9 @@
 //! What a public event costs the core: nothing built for an event nobody
 //! subscribed to, one queue push for one that has a subscriber.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+
+use criterion::{criterion_group, criterion_main, Criterion};
 use serde_json::json;
 use vorn_extensions::events::{Bus, SESSION_EXITED, SESSION_MARK};
 

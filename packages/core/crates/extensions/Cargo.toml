@@ -69,7 +69,7 @@ vorn-extensions = { path = ".", features = ["wasm-compile"] }
 vorn-guest-build = { path = "../guest-build" }
 # Reads the trees a component draws.
 vorn-tree = { path = "../tree" }
-criterion = { version = "0.5", default-features = false }
+criterion = { version = "0.8", default-features = false }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros", "test-util"] }
 
