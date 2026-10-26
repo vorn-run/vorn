@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use vorn_tree::sdk::*;
 use vorn_tree::{Event, EventKind, Node, Rendered, TextStyle, Tone};
 
-use super::{text as s, CHOICES, CONNECTIONS, FILTERS, FORM, PROJECTS, SETTINGS, TRIGGERS};
+use super::{text as s, CHOICES, CONNECTIONS, FILTERS, FORM, PACKS, PROJECTS, SETTINGS, TRIGGERS};
 
 /// What the page's controls run, by the id before the first `:`; after it is what they act on.
 const DOES: [&str; 17] = [
@@ -58,6 +58,11 @@ fn page(rows: &[(&str, Vec<Value>)], scope: Option<&str>) -> Node {
     let form = of(FORM)
         .first()
         .filter(|f| scope.is_none_or(|id| s(f, "connector") == id));
+    // A built-in or MCP connector adds accounts through the app's own form, drawn beside this.
+    let addable = scope.is_none_or(|id| of(PACKS).iter().any(|p| s(p, "id") == id));
+    if form.is_none() && !addable {
+        return page;
+    }
     page.child(match form {
         Some(f) => adding(f, &of),
         None => {
@@ -262,6 +267,10 @@ mod tests {
         };
         let mut out = vec![
             (
+                PACKS,
+                vec![json!({ "id": "http" }), json!({ "id": "acme" })],
+            ),
+            (
                 CONNECTIONS,
                 vec![conn("a", "Example API"), conn("b", "Status page")],
             ),
@@ -318,6 +327,12 @@ mod tests {
         assert!(!json.contains("Example API"), "{json}");
         assert!(json.contains("add_to:acme"), "{json}");
         assert!(json.contains("Connect an account"), "{json}");
+    }
+
+    #[test]
+    fn a_connector_without_a_pack_draws_no_add_button() {
+        let json = tree(&rows(false), Some("cron"));
+        assert!(!json.contains("add_to:"), "{json}");
     }
 
     #[test]

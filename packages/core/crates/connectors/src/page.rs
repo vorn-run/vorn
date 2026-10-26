@@ -24,6 +24,8 @@ pub const TRIGGERS: &str = "triggers";
 pub const PROJECTS: &str = "projects";
 pub const SETTINGS: &str = "settings";
 pub const FILTERS: &str = "filters";
+/// The installed connector packs, which add accounts through the page's own form.
+pub const PACKS: &str = "packs";
 
 /// Filters left off a connection's chips: its package tie and an MCP server's tools.
 const UNSHOWN: &[&str] = &[
@@ -286,11 +288,13 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
             })
         })
         .collect();
+    let pack_ids: Vec<Value> = packs.iter().map(|p| json!({ "id": p.get("id") })).collect();
     let held = draft(c).clone();
     let Some(d) = held else {
         return vec![
             (CONNECTIONS, connections),
             (FILTERS, filters),
+            (PACKS, pack_ids),
             (FORM, Vec::new()),
             (CHOICES, Vec::new()),
             (TRIGGERS, Vec::new()),
@@ -367,6 +371,7 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
     vec![
         (CONNECTIONS, connections),
         (FILTERS, filters),
+        (PACKS, pack_ids),
         (FORM, form),
         (CHOICES, choices),
         (TRIGGERS, triggers),
