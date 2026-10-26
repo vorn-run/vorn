@@ -48,9 +48,9 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/ws": "^8.18.2",
-    "@vitest/coverage-v8": "5.0.4",
+    "@vitest/coverage-v8": "5.0.5",
     "@vitest/eslint-plugin": "^1.6.27",
-    "eslint": "^10.12.0",
+    "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "libsql": "^0.5.29",
     "lint-staged": "^17.6.0",
@@ -61,7 +61,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.2",
     "vite": "^8.2.2",
-    "vitest": "5.0.4"
+    "vitest": "5.0.5"
   },
   "resolutions": {
     "serialize-javascript": "^7.0.5",
