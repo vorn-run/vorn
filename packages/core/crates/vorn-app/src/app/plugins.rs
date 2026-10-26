@@ -205,6 +205,16 @@ impl App {
                 p.selected = None;
                 p.adding = None;
             }
+            PlugAct::ShowAccounts(id) => {
+                self.run(
+                    ui,
+                    Act::Set(SetAct::Open(Category::Connectors)),
+                    Src::default(),
+                );
+                let p = &mut self.st.plugins;
+                p.adding = None;
+                p.selected = Some(p.page_key(&id).unwrap_or(id));
+            }
             PlugAct::Rollback(id) => {
                 if self.plug_start(Verb::Rollback, &id) {
                     self.call(
@@ -723,6 +733,10 @@ impl App {
         p.loads = p.loads.saturating_sub(1);
         p.loaded = true;
         p.rebuild();
+        // A page opened by connector id before the list came in takes its listing's key.
+        if let Some(key) = p.selected.as_deref().and_then(|k| p.page_key(k)) {
+            p.selected = Some(key);
+        }
         if p.loads == 0 && p.intent.is_some() {
             self.plug_apply_intent();
         }

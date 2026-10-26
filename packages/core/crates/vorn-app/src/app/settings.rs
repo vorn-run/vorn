@@ -102,8 +102,8 @@ impl App {
 
     /// `shot --open NAME`: an Appearance, General or About popover opened from its
     /// control, as a click on it would; `theme-picker` and `theme-info` use the first
-    /// theme row. `extension:ID` selects that extension's page, and fails
-    /// until vornd has listed it.
+    /// theme row. `ext-…` sets Settings › Extensions states
+    /// ([`App::shot_extensions`]), and fails until vornd has listed them.
     pub fn shot_open(&mut self, ui: &mut Ui, name: &str) -> Result<(), String> {
         use crate::state::MenuKind;
         use vorn_theme::Appearance as Look;
@@ -126,21 +126,8 @@ impl App {
             st.confirm_remove = remove.then(|| key.to_owned());
             return Ok(());
         }
-        if let Some(id) = name.strip_prefix("extension:") {
-            if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
-                self.run_plug(ui, crate::plugins::PlugAct::Refresh);
-            }
-            let p = &mut self.st.plugins;
-            let key = p
-                .listings
-                .iter()
-                .find(|l| l.id == id)
-                .map(|l| l.key.clone());
-            let key = key
-                .filter(|_| p.loads == 0)
-                .ok_or(format!("--open {name:?}: {id} is not listed"))?;
-            p.selected = Some(key);
-            return Ok(());
+        if let Some(rest) = name.strip_prefix("ext-") {
+            return self.shot_extensions(ui, name, rest);
         }
         if let Some(states) = name.strip_prefix("net-") {
             return self.shot_net(ui, states);
@@ -165,7 +152,7 @@ impl App {
             "holder-menu" => ("holder-more", MenuKind::Holder("shot".to_owned())),
             _ => {
                 return Err(format!(
-                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu, sound-menu, notice-sources, agent:KEY, agent-advanced:KEY, agent-remove:KEY or extension:ID"
+                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu, sound-menu, notice-sources, agent:KEY, agent-advanced:KEY, agent-remove:KEY or ext-…"
                 ))
             }
         };
@@ -174,6 +161,73 @@ impl App {
             at: None,
         };
         self.open_menu(ui, kind, src);
+        Ok(())
+    }
+
+    /// `shot --open ext-…` on Settings › Extensions, once vornd has listed
+    /// them: `ext-browse[:TAG]`, `ext-updates`, `ext-page:ID` (a listing's or
+    /// a built-in's page) and `ext-menu:ID` (that page with its … menu open).
+    fn shot_extensions(&mut self, ui: &mut Ui, name: &str, rest: &str) -> Result<(), String> {
+        use crate::plugins::{list, PlugAct, Tab};
+        use crate::state::MenuKind;
+        if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+            self.run_plug(ui, PlugAct::Refresh);
+        }
+        let p = &self.st.plugins;
+        if p.loads > 0 || p.listings.is_empty() || self.st.points.builtins.is_empty() {
+            return Err(format!(
+                "--open {name:?}: the extensions are not listed yet"
+            ));
+        }
+        let (what, arg) = rest.split_once(':').unwrap_or((rest, ""));
+        let key = |app: &App, id: &str| {
+            app.st
+                .plugins
+                .listings
+                .iter()
+                .find(|l| l.id == id)
+                .map(|l| l.key.clone())
+                .or_else(|| {
+                    app.st
+                        .points
+                        .builtins
+                        .iter()
+                        .filter_map(|b| crate::runs::s(b, "id"))
+                        .find(|b| *b == id)
+                        .map(|b| format!("{}{b}", list::BUILTIN))
+                })
+                .ok_or(format!("--open {name:?}: {id} is not listed"))
+        };
+        match what {
+            "browse" => {
+                let p = &mut self.st.plugins;
+                p.tab = Tab::Browse;
+                p.tag = list::Tag::parse(arg);
+            }
+            "installed" => self.st.plugins.tab = Tab::Installed,
+            "updates" => self.st.plugins.tab = Tab::Updates,
+            "page" => self.st.plugins.selected = Some(key(self, arg)?),
+            "menu" => {
+                let key = key(self, arg)?;
+                self.st.plugins.selected = Some(key.clone());
+                let kind = MenuKind::ExtMenu(key);
+                let more = crate::act::Acts::id("plug-detail-more", &Act::Open(kind.clone()));
+                // The menu hangs from its button, so wait for a frame that lays it out.
+                if ui.rect_of(more).is_none() {
+                    return Err(format!("--open {name:?}: the page is not drawn yet"));
+                }
+                let src = super::Src {
+                    id: Some(more),
+                    at: None,
+                };
+                self.open_menu(ui, kind, src);
+            }
+            _ => {
+                return Err(format!(
+                    "--open {name:?}: ext-installed, ext-browse[:TAG], ext-updates, ext-page:ID or ext-menu:ID"
+                ))
+            }
+        }
         Ok(())
     }
 

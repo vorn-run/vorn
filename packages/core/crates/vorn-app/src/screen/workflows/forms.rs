@@ -916,24 +916,39 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
             out
         }
         "poll.connection" | "action.connection" => {
-            s.st.wf
-                .connections
-                .iter()
-                .map(|cn| {
-                    let id = sv(cn, "id").unwrap_or("");
-                    let src = crate::library::Sources {
-                        connections: &s.st.wf.connections,
-                        packs: &s.st.wf.lib.packs,
-                        ..crate::library::Sources::default()
-                    };
-                    let look = crate::library::look_for(&src, id);
-                    pick(sv(cn, "name").unwrap_or(""), id, get("connectionId") == id).mark(mark(
-                        look.as_ref(),
-                        14.0,
-                        c(look::GRAY_400),
-                    ))
-                })
-                .collect()
+            let current =
+                s.st.wf
+                    .connections
+                    .iter()
+                    .find(|cn| sv(cn, "id") == Some(get("connectionId").as_str()))
+                    .and_then(|cn| sv(cn, "connectorId"));
+            let mut out: Vec<Item> =
+                s.st.wf
+                    .connections
+                    .iter()
+                    .map(|cn| {
+                        let id = sv(cn, "id").unwrap_or("");
+                        let src = crate::library::Sources {
+                            connections: &s.st.wf.connections,
+                            packs: &s.st.wf.lib.packs,
+                            ..crate::library::Sources::default()
+                        };
+                        let look = crate::library::look_for(&src, id);
+                        pick(sv(cn, "name").unwrap_or(""), id, get("connectionId") == id)
+                            .mark(mark(look.as_ref(), 14.0, c(look::GRAY_400)))
+                    })
+                    .collect();
+            if let Some(connector) = current {
+                out.push(
+                    Item::new(
+                        "settings",
+                        "Manage accounts…",
+                        Act::Plug(crate::plugins::PlugAct::ShowAccounts(connector.to_owned())),
+                    )
+                    .sep(),
+                );
+            }
+            out
         }
         "config.event" => {
             let connector =

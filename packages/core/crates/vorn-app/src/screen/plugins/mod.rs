@@ -129,7 +129,7 @@ fn search(s: &Screen<'_>) -> El {
         .frames(id)
         .child(ico("search", 13.0, 2.0, k::INK_FAINT))
         .child(
-            field(id, &hint, "Search extensions", style, k::INK)
+            field(id, "Search extensions", &hint, style, k::INK)
                 .grow()
                 .min_w0(),
         )

@@ -2528,7 +2528,25 @@
             }
           ]
         },
-        "output": null
+        "output": [
+          {
+            "id": "b",
+            "name": "B",
+            "packageName": "@v/b",
+            "description": "d",
+            "capabilities": [],
+            "triggers": [],
+            "kind": "extension",
+            "permissions": ["git.read"],
+            "sha256": "ab",
+            "verified": {
+              "schema": 1,
+              "version": "1",
+              "checkedAt": "t",
+              "checks": ["a"]
+            }
+          }
+        ]
       },
       {
         "input": {

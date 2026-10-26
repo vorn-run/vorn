@@ -126,7 +126,11 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
         own_icon: None,
         tags: l.tags.clone(),
         maker: row.maker(),
-        version: l.version().map(str::to_owned),
+        // What is on disk, not what the catalog offers; Update shows the newer one.
+        version: pack
+            .and_then(|p| sv(p, "version"))
+            .or(l.version())
+            .map(str::to_owned),
         origin: origin(l),
         description: row.description(),
         status: header_status(s, l),
@@ -337,11 +341,14 @@ pub(in crate::screen) fn menu_items(s: &Screen<'_>, key: &str) -> Vec<Item> {
     if let Some(pack) = l.pack.as_ref() {
         if pack.get("sandboxAvailable") == Some(&Value::Bool(true)) {
             let on = pack.get("sandboxed") == Some(&Value::Bool(true));
-            out.push(Item::pick(
-                "Sandbox",
-                on,
-                act(PlugAct::Sandbox(l.id.clone(), !on)),
-            ));
+            out.push(
+                Item::new(
+                    "shield",
+                    "Sandbox",
+                    act(PlugAct::Sandbox(l.id.clone(), !on)),
+                )
+                .detail(if on { "On" } else { "Off" }),
+            );
         }
         if let Some(path) = sv(pack, "path").filter(|p| !p.is_empty()) {
             out.push(Item::new(
@@ -595,10 +602,17 @@ fn accounts(s: &Screen<'_>, l: &Listing) -> Option<El> {
 
 /// What it adds: where it shows, what starts a workflow, what a step can do.
 fn adds(s: &Screen<'_>, page: &Page<'_>) -> El {
-    let mut terms: Vec<El> = place_groups(page.contributes)
+    // An agent or a theme is a section of its manifest, not a contributed place.
+    let mut terms: Vec<El> = [(Tag::Agent, "Agent"), (Tag::Theme, "Theme")]
         .into_iter()
-        .map(|(group, items)| term(group, &items.join(", ")))
+        .filter(|(t, _)| page.tags.contains(t))
+        .map(|(_, group)| term(group, page.name))
         .collect();
+    terms.extend(
+        place_groups(page.contributes)
+            .into_iter()
+            .map(|(group, items)| term(group, &items.join(", "))),
+    );
     if let Some(l) = page.listing.filter(|l| l.kind == Kind::Connector) {
         let d = details(l, &s.st.plugins.builtins);
         let names = |v: &[(String, Option<String>)]| {

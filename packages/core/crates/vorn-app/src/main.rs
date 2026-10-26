@@ -9,7 +9,8 @@
 //!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
 //!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|
 //!                       channel-menu|holder-menu|agent:KEY|agent-advanced:KEY|
-//!                       agent-remove:KEY|extension:ID|net-STATE+STATE]
+//!                       agent-remove:KEY|ext-installed|ext-browse[:TAG]|ext-updates|
+//!                       ext-page:ID|ext-menu:ID|net-STATE+STATE]
 //!               [--update idle|checking|ready:VER|error:TEXT] [--holder BUILD:N]
 //!               [--outdated ID,ID] [--confirm-end on] [--missing KEY,KEY]
 //!               [--click X,Y]... [--type TEXT] [--hover X,Y]
@@ -37,7 +38,9 @@
 //! `--settings appearance` opens Settings on that page after writing each
 //! `--set colorScheme="dark"` to the defaults (vornd keeps them), and
 //! `--open` opens one of its popovers from its control, or with
-//! `extension:vorn.tasks` that extension's page under `--settings extensions`,
+//! `ext-page:vorn.tasks` that extension's page under `--settings extensions`
+//! (`ext-menu:ID` with its … menu open, `ext-installed`, `ext-browse:TAG` and `ext-updates`
+//! the other tabs),
 //! or with `agent:claude` that agent's page under `--settings agents`;
 //! `net-tailnet+add-device` (also `advanced`, `devices`, `pair-request`, `device-menu`,
 //! `confirm-remove`) sets Remote Access states under `--settings network`.
@@ -257,7 +260,7 @@ fn shot(args: &Args) -> Result<(), String> {
         // An extension's page, or Remote Access, waits for vornd to answer.
         let until = Instant::now() + Duration::from_secs(10);
         while let Err(e) = app.shot_open(&mut ui, name) {
-            let waits = name.starts_with("extension:") || name.starts_with("net-");
+            let waits = name.starts_with("ext-") || name.starts_with("net-");
             if !waits || Instant::now() > until {
                 return Err(e);
             }

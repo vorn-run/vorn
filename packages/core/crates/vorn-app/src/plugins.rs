@@ -42,6 +42,8 @@ pub enum PlugAct {
     ShowFolder(String),
     /// Browse the connectors, to add a connection to one.
     AddConnection,
+    /// Open a connector's page, where its accounts are, by connector id.
+    ShowAccounts(String),
     Rollback(String),
     CatalogRefresh,
     Text(Field),
@@ -2313,6 +2315,13 @@ impl Plugins {
         self.listings.iter().find(|l| l.key == key)
     }
 
+    /// The page key for a listing key or a connector id, once the list knows it.
+    pub fn page_key(&self, key_or_id: &str) -> Option<String> {
+        self.listing(key_or_id)
+            .or_else(|| self.listing_by_id(key_or_id))
+            .map(|l| l.key.clone())
+    }
+
     /// A listing by connector id, preferring the pack-bearing row.
     pub fn listing_by_id(&self, id: &str) -> Option<&Listing> {
         let mut found = self.listings.iter().filter(|l| l.id == id);
@@ -2872,5 +2881,19 @@ mod tests {
         assert!(matches!(p.adding_for(&mcp, None).form, Form::Sdk(_)));
         p.builtins.retain(|b| s(b, "id") != Some("mcp"));
         assert_eq!(p.form_for(&l), Form::NoMcp);
+    }
+
+    #[test]
+    fn a_workflow_opens_its_connectors_page_by_id() {
+        let mut p = Plugins {
+            builtins: builtins(),
+            mcp: vec![json!({"id": "fs", "name": "Files", "command": "npx"})],
+            ..Plugins::default()
+        };
+        p.rebuild();
+        assert_eq!(p.page_key("fs").as_deref(), Some("mcp:fs"));
+        assert_eq!(p.page_key("mcp:fs").as_deref(), Some("mcp:fs"));
+        assert_eq!(p.page_key("http").as_deref(), Some("http"));
+        assert_eq!(p.page_key("gone"), None);
     }
 }

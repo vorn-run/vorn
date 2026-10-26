@@ -274,6 +274,9 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
 }
 
 fn page_with(s: &Screen<'_>, body: El) -> El {
+    // The catalog's three-across tiles need more room than a column of rows.
+    let catalog =
+        s.st.settings.ext_page.is_none() && s.st.settings.category == Category::Connectors;
     div()
         .row()
         .w_full()
@@ -299,7 +302,7 @@ fn page_with(s: &Screen<'_>, body: El) -> El {
                         .col()
                         .shrink0()
                         .w_full()
-                        .max_w(672.0)
+                        .max_w(if catalog { 880.0 } else { 672.0 })
                         .px(32.0)
                         .py(32.0)
                         .child(body),
