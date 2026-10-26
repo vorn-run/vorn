@@ -152,9 +152,9 @@ fn plugins_page_lists_adds_and_connects() {
     shot.save(&mut app, "pl-connected");
 
     // The key lives on the connection's row: its menu tests and rotates it.
-    let more = shot
-        .labelled(&mut app, "Button", "More")
-        .expect("the connection's menu");
+    let more = wait_for("the connection's menu", || {
+        shot.labelled(&mut app, "Button", "More")
+    });
     shot.click(&mut app, more);
     shot.save(&mut app, "pl-key-menu");
     let rotate = shot
