@@ -25,6 +25,9 @@ const ASIDE: f32 = 220.0;
 /// The left column's narrowest, below which the right one wraps under it.
 const LEFT: f32 = 340.0;
 
+/// The name's narrowest beside the logo, below which it wraps under it.
+const TITLE: f32 = 160.0;
+
 /// "‹ Extensions", back to the list.
 fn back(s: &Screen<'_>) -> El {
     let back = s.acts.on("plug-detail-back", act(PlugAct::Select(None)));
@@ -185,15 +188,25 @@ fn header_status(s: &Screen<'_>, l: &Listing) -> El {
         return pill(s, &l.id, &Status::Busy(what));
     }
     let st = list::status(p, l, None);
+    let update = || {
+        button(
+            s,
+            &l.id,
+            "Update",
+            Status::Update.tip(),
+            PlugAct::Install(l.key.clone()),
+        )
+    };
     if list::installed(l) || matches!(st, Some(Status::Attention(_))) {
         return match st {
-            Some(Status::Update) => button(
-                s,
-                &l.id,
-                "Update",
-                Status::Update.tip(),
-                PlugAct::Install(l.key.clone()),
-            ),
+            Some(Status::Update) => update(),
+            // Needing attention must not hide an update that may be the fix.
+            Some(st @ Status::Attention(_)) if list::has_update(p, l) => div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .child(pill(s, &l.id, &st))
+                .child(update()),
             Some(st) => pill(s, &l.id, &st),
             None => div(),
         };
@@ -397,12 +410,19 @@ pub(in crate::screen) fn menu_items(s: &Screen<'_>, key: &str) -> Vec<Item> {
 fn draw(s: &Screen<'_>, mut page: Page<'_>, notes: Option<El>) -> El {
     let status = std::mem::replace(&mut page.status, div());
     let place = format!("plug-detail-{}", page.id);
-    let mut title = div().row().items_center().gap(8.0).min_w0().child(
-        text(page.name, 22.0, k::INK)
-            .weight(600)
-            .line_height(28.0)
-            .role(Role::Heading, page.name),
-    );
+    // Tags flow under the name when the header is narrow.
+    let mut title = div()
+        .row()
+        .wrap_children()
+        .items_center()
+        .gap(8.0)
+        .min_w0()
+        .child(
+            text(page.name, 22.0, k::INK)
+                .weight(600)
+                .line_height(28.0)
+                .role(Role::Heading, page.name),
+        );
     for t in &page.tags {
         title = title.child(tag(s, &place, *t));
     }
@@ -432,8 +452,10 @@ fn draw(s: &Screen<'_>, mut page: Page<'_>, notes: Option<El>) -> El {
                     .silent(),
             );
     }
+    // On a phone's width the name, then the actions, wrap under the logo.
     let head = div()
         .row()
+        .wrap_children()
         .items_center()
         .gap(16.0)
         .child(logo(
@@ -449,12 +471,20 @@ fn draw(s: &Screen<'_>, mut page: Page<'_>, notes: Option<El>) -> El {
                 .col()
                 .gap(4.0)
                 .grow()
+                .basis(TITLE)
                 .min_w0()
                 .child(title)
                 .child(meta),
         )
-        .child(status)
-        .child_if(more(s, &page.key));
+        .child(
+            div()
+                .row()
+                .wrap_children()
+                .items_center()
+                .gap(8.0)
+                .child(status)
+                .child_if(more(s, &page.key)),
+        );
     let mut col = div().col().child(back(s)).child(head);
     if !page.description.is_empty() {
         col = col.child(
@@ -465,17 +495,17 @@ fn draw(s: &Screen<'_>, mut page: Page<'_>, notes: Option<El>) -> El {
         );
     }
     col = col.child_if(notes.map(|n| n.mt(12.0)));
-    col = col.child_if(screenshots(s, &page.showcase.screenshots));
+    col = col.child_if(screenshots(s, page.listing, &page.showcase.screenshots));
     let left = div()
         .col()
         .flex(1.0)
-        .min_w(LEFT)
+        .basis(LEFT)
         .child_if(page.listing.and_then(|l| accounts(s, l)))
         .child(adds(s, &page));
     let right = div()
         .col()
-        .w(ASIDE)
-        .shrink0()
+        .basis(ASIDE)
+        .min_w0()
         .child(may_use(&page))
         .child(about(s, &page));
     // Narrow windows put the right column under the left.
@@ -492,7 +522,7 @@ fn draw(s: &Screen<'_>, mut page: Page<'_>, notes: Option<El>) -> El {
 }
 
 /// The pictures, 16:10, and how many more.
-fn screenshots(s: &Screen<'_>, urls: &[String]) -> Option<El> {
+fn screenshots(s: &Screen<'_>, listing: Option<&Listing>, urls: &[String]) -> Option<El> {
     const SHOWN: usize = 2;
     if urls.is_empty() {
         return None;
@@ -500,7 +530,10 @@ fn screenshots(s: &Screen<'_>, urls: &[String]) -> Option<El> {
     let (w, h) = (236.0, 147.5);
     let mut row = div().row().gap(12.0).mt(20.0);
     for url in urls.iter().take(SHOWN) {
-        let body = match s.shots.get(url) {
+        let shown = listing
+            .and_then(|l| crate::plugins::shots::resolve(l, url))
+            .and_then(|(key, _)| s.shots.get(&key));
+        let body = match shown {
             Some(img) => crate::ui::image(img, w, h),
             None => ico("image", 18.0, 1.75, k::INK_FAINT),
         };
@@ -815,8 +848,10 @@ fn settings(s: &Screen<'_>, page: &Page<'_>) -> Option<El> {
 
 /// A group's term beside what it holds.
 fn term(group: &str, items: &str) -> El {
+    // Too narrow for both, the items go under their term.
     div()
         .row()
+        .wrap_children()
         .items_start()
         .gap(12.0)
         .child(
@@ -830,6 +865,7 @@ fn term(group: &str, items: &str) -> El {
                 .line_height(18.0)
                 .wrapping()
                 .grow()
+                .basis(120.0)
                 .min_w0(),
         )
 }

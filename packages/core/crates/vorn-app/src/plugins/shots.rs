@@ -7,6 +7,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use vornui::{decode_png, Ui};
 
 use crate::client::rpc::Wake;
+use crate::plugins::Listing;
 
 /// The largest picture read, so a bad URL cannot fill memory.
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,7 +21,7 @@ enum Shot {
     Failed,
 }
 
-/// The screenshots asked for so far, by the string the manifest gave.
+/// The screenshots asked for so far, by [`resolve`]'s key.
 pub struct Shots {
     shots: HashMap<String, Shot>,
     tx: Sender<(String, Option<Vec<u8>>)>,
@@ -47,13 +48,13 @@ impl std::fmt::Debug for Shots {
 impl Shots {
     /// Starts reading each `(key, location)` not asked for before: an
     /// `https` URL, or a file; `wake` asks for the frame that shows it.
-    pub fn want<'a>(&mut self, wanted: impl IntoIterator<Item = (&'a str, String)>, wake: &Wake) {
+    pub fn want(&mut self, wanted: impl IntoIterator<Item = (String, String)>, wake: &Wake) {
         for (key, at) in wanted {
-            if self.shots.contains_key(key) {
+            if self.shots.contains_key(&key) {
                 continue;
             }
-            self.shots.insert(key.to_owned(), Shot::Loading);
-            spawn(key.to_owned(), at, self.tx.clone(), wake.clone());
+            self.shots.insert(key.clone(), Shot::Loading);
+            spawn(key, at, self.tx.clone(), wake.clone());
         }
     }
 
@@ -75,6 +76,14 @@ impl Shots {
             Shot::Loading | Shot::Failed => None,
         }
     }
+}
+
+/// Screenshot `shot` of `l` as (cache key, where it is read from); the key
+/// names the extension, so two packs' `shots/a.png` stay apart.
+pub fn resolve(l: &Listing, shot: &str) -> Option<(String, String)> {
+    let root = l.pack.as_ref().and_then(|p| p.get("path")?.as_str());
+    let at = location(shot, root)?;
+    Some((format!("{}\n{at}", l.id), at))
 }
 
 /// Where a manifest's screenshot is read from: a URL as given, or a file
@@ -146,7 +155,9 @@ fn read(at: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::location;
+    use super::{location, resolve};
+    use crate::plugins::Listing;
+    use serde_json::json;
 
     #[test]
     fn a_screenshot_is_a_url_or_a_file_inside_its_pack() {
@@ -162,5 +173,27 @@ mod tests {
         assert_eq!(location("/etc/a.png", Some("/p")), None);
         assert_eq!(location("http://x.dev/a.png", Some("/p")), None);
         assert_eq!(location("a.png", None), None);
+    }
+
+    #[test]
+    fn two_packs_with_the_same_screenshot_path_keep_their_own() {
+        let pack = |id: &str| -> Listing {
+            let mut p = crate::plugins::Plugins {
+                packs: vec![
+                    json!({ "id": id, "name": id, "version": "1.0.0", "path": format!("/packs/{id}") }),
+                ],
+                ..Default::default()
+            };
+            p.rebuild();
+            p.listings.remove(0)
+        };
+        let (a, at_a) = resolve(&pack("a"), "shots/board.png").unwrap();
+        let (b, at_b) = resolve(&pack("b"), "shots/board.png").unwrap();
+        assert_ne!(a, b);
+        assert_eq!(at_a, "/packs/a/shots/board.png");
+        assert_eq!(at_b, "/packs/b/shots/board.png");
+        let (c, _) = resolve(&pack("a"), "https://x.dev/a.png").unwrap();
+        let (d, _) = resolve(&pack("b"), "https://x.dev/a.png").unwrap();
+        assert_ne!(c, d);
     }
 }

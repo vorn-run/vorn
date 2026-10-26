@@ -3502,11 +3502,11 @@ impl App {
             self.shots.poll(ui);
             let p = &self.st.plugins;
             if let Some(l) = p.selected.as_deref().and_then(|k| p.listing(k)) {
-                let root = l.pack.as_ref().and_then(|p| crate::runs::s(p, "path"));
                 self.shots.want(
-                    l.showcase.screenshots.iter().filter_map(|s| {
-                        Some((s.as_str(), crate::plugins::shots::location(s, root)?))
-                    }),
+                    l.showcase
+                        .screenshots
+                        .iter()
+                        .filter_map(|s| crate::plugins::shots::resolve(l, s)),
                     &self.wake,
                 );
             }

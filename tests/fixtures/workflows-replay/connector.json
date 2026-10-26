@@ -35,6 +35,7 @@
         "git": "<work>/tickets",
         "rev": "<rev>"
       },
+      "tags": ["connection"],
       "service": {
         "command": ["node", "index.js"]
       },

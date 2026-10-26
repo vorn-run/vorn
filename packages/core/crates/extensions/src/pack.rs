@@ -136,8 +136,14 @@ impl InstalledPack {
                 std::path::Component::Normal(_) | std::path::Component::CurDir
             )
         });
-        let path = self.path.join(file);
-        if !inside || fs::metadata(&path).ok()?.len() > MAX_LOGO_BYTES {
+        if !inside {
+            return None;
+        }
+        // A link may point anywhere; what it resolves to must still be in the pack.
+        let path = fs::canonicalize(self.path.join(file)).ok()?;
+        if !path.starts_with(fs::canonicalize(&self.path).ok()?)
+            || fs::metadata(&path).ok()?.len() > MAX_LOGO_BYTES
+        {
             return None;
         }
         let text = fs::read_to_string(path).ok()?;
@@ -639,6 +645,28 @@ mod tests {
         assert_eq!(pack.logo_svg(true), None);
         let wire = serde_json::to_value(&pack).unwrap();
         assert_eq!(wire["tags"], json!(["connection"]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_logo_linked_out_of_its_pack_is_not_read() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let body = "name = \"Acme\"\n[icon]\nfile = \"logo.svg\"\ndark = \"art/dark.svg\"\n[service]\ncommand = [\"node\", \"index.js\"]\n[connector]\n";
+        let dir = install(root.path(), "acme", "1.0.0", body);
+        fs::write(outside.path().join("secret.svg"), "<svg id=\"secret\"/>").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret.svg"), dir.join("logo.svg"))
+            .unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.join("art")).unwrap();
+        fs::write(outside.path().join("dark.svg"), "<svg id=\"dark\"/>").unwrap();
+        let pack = PackStore::new(root.path()).inspect("acme").unwrap();
+        assert_eq!(pack.logo_svg(false), None);
+        assert_eq!(pack.logo_svg(true), None);
+        fs::remove_file(dir.join("logo.svg")).unwrap();
+        fs::write(dir.join("real.svg"), "<svg id=\"in\"/>").unwrap();
+        std::os::unix::fs::symlink(dir.join("real.svg"), dir.join("logo.svg")).unwrap();
+        let pack = PackStore::new(root.path()).inspect("acme").unwrap();
+        assert_eq!(pack.logo_svg(false).as_deref(), Some("<svg id=\"in\"/>"));
     }
 
     #[test]

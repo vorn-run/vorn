@@ -916,12 +916,7 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
             out
         }
         "poll.connection" | "action.connection" => {
-            let current =
-                s.st.wf
-                    .connections
-                    .iter()
-                    .find(|cn| sv(cn, "id") == Some(get("connectionId").as_str()))
-                    .and_then(|cn| sv(cn, "connectorId"));
+            let current = accounts_of(&s.st.wf.connections, &get("connectionId"));
             let mut out: Vec<Item> =
                 s.st.wf
                     .connections
@@ -3878,4 +3873,33 @@ pub fn properties(s: &Screen<'_>, d: &Draft) -> El {
                 .scroll_y()
                 .child(body),
         )
+}
+
+/// The extension whose accounts hold connection `id`: an SDK pack's own id,
+/// not the "sdk" it is filed under.
+fn accounts_of<'a>(connections: &'a [Value], id: &str) -> Option<&'a str> {
+    connections
+        .iter()
+        .find(|cn| sv(cn, "id") == Some(id))
+        .map(crate::library::connection_connector)
+        .filter(|c| !c.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accounts_of;
+    use serde_json::json;
+
+    #[test]
+    fn a_connection_manages_its_own_extensions_accounts() {
+        let connections = [
+            json!({ "id": "a", "connectorId": "sdk", "filters": { "sdkConnectorId": "linear" } }),
+            json!({ "id": "b", "connectorId": "http" }),
+            json!({ "id": "c", "connectorId": "" }),
+        ];
+        assert_eq!(accounts_of(&connections, "a"), Some("linear"));
+        assert_eq!(accounts_of(&connections, "b"), Some("http"));
+        assert_eq!(accounts_of(&connections, "c"), None);
+        assert_eq!(accounts_of(&connections, "gone"), None);
+    }
 }

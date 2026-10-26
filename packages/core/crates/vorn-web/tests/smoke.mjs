@@ -4,7 +4,7 @@
 // `templates` opens the example extension's settings page (an element tree
 // from its Wasm component) and works its choice, secret field, Sign in
 // button and more menu, then Settings ›
-// Extensions and the Connectors built-in's Connections page. `adapters`
+// Extensions and the Connectors built-in's page. `adapters`
 // links a test agent's adapter and the example card footer, starts a session
 // of that agent, posts a hook event as the agent would, and waits for the
 // footer to show it. `phone-chromium` and `phone-webkit` do the templates run
@@ -208,7 +208,7 @@ async function templates(page) {
   await extensions(page)
 }
 
-/** Settings › Extensions lists Connectors among the built-ins; Connections is its page. */
+/** Settings › Extensions lists what is installed; a row opens the extension's page. */
 async function extensions(page) {
   await until(
     'the confirm closed',
@@ -218,21 +218,23 @@ async function extensions(page) {
     await press(page, '[role="button"][aria-label="Settings"]', 'the Settings button')
   }
   await press(page, '[role="button"][aria-label="Extensions"]', 'the Extensions page')
-  for (const shown of ['button:Install\u2026', 'button:About Connectors', 'button:About Turns']) {
+  for (const shown of [
+    'button:Add from Git or a folder',
+    'button:Open Connectors',
+    'button:Open Turns'
+  ]) {
     await until(shown, async () => (await mirrored(page)).split('\n').includes(shown))
   }
   if (shots)
     await page
       .waitForTimeout(400)
       .then(() => page.screenshot({ path: join(shots, 'web-extensions.png') }))
-  await press(page, '[role="button"][aria-label="Connections"]', 'the Connections page')
-  await until('button:Add connection', async () =>
-    (await mirrored(page)).split('\n').includes('button:Add connection')
-  )
+  await press(page, '[role="button"][aria-label="Open Connectors"]', "Connectors' row")
+  await until('its page', async () => (await mirrored(page)).split('\n').includes(':What it adds'))
   if (shots)
     await page
       .waitForTimeout(400)
-      .then(() => page.screenshot({ path: join(shots, 'web-connections.png') }))
+      .then(() => page.screenshot({ path: join(shots, 'web-extension-page.png') }))
 }
 
 /** Posts a hook event to the endpoint vornd registered in its HOME, as an agent's hook does. */

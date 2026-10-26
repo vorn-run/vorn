@@ -149,28 +149,61 @@ impl Maker {
         let pack = l.pack.as_ref();
         let local = pack.is_some_and(|p| {
             p.get("linked") == Some(&Value::Bool(true))
-                || p.pointer("/source/path").is_some_and(Value::is_string)
+                || (p.pointer("/source/path").is_some_and(Value::is_string)
+                    && p.pointer("/source/git").is_none())
         });
         if local {
             return Maker::You;
         }
-        match l.publisher.as_deref().filter(|p| !p.is_empty()) {
-            Some("Vorn") => return Maker::Vorn,
-            Some(who) => return Maker::Other(who.to_owned()),
-            None => {}
+        // The mark follows where it was installed from; a manifest can name anyone.
+        let first_party = match pack {
+            Some(p) => from_vorn(p.get("source")),
+            None => matches!(l.source, Source::Builtin | Source::Catalog | Source::Mcp),
+        };
+        if let Some(who) = l
+            .publisher
+            .as_deref()
+            .filter(|p| !p.is_empty() && *p != "Vorn")
+        {
+            return Maker::Other(who.to_owned());
         }
-        // Vorn's own catalog and connectors are Vorn's; a pack from elsewhere is its repository's.
+        if first_party {
+            return Maker::Vorn;
+        }
         match pack
             .and_then(|p| p.pointer("/source/git"))
             .and_then(Value::as_str)
         {
-            Some(git) if l.source == Source::Installed && !git.contains("/vorn-run/") => {
-                Maker::Other(short_repo(git))
-            }
-            _ if l.source == Source::Installed => Maker::You,
-            _ => Maker::Vorn,
+            Some(git) => Maker::Other(short_repo(git)),
+            None => Maker::You,
         }
     }
+}
+
+/// Whether an installed pack came from Vorn: shipped with the app, pinned by
+/// Vorn's catalog, or cloned from Vorn's extensions repository.
+fn from_vorn(source: Option<&Value>) -> bool {
+    let Some(source) = source else {
+        return false;
+    };
+    if source.get("shipped").is_some() || source.get("catalog").is_some() {
+        return true;
+    }
+    source
+        .get("git")
+        .and_then(Value::as_str)
+        .is_some_and(is_vorn_repo)
+}
+
+fn is_vorn_repo(url: &str) -> bool {
+    let bare = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let bare = bare
+        .strip_prefix("git@")
+        .unwrap_or(bare)
+        .replacen(':', "/", 1);
+    let bare = bare.trim_end_matches('/');
+    let bare = bare.strip_suffix(".git").unwrap_or(bare);
+    bare.eq_ignore_ascii_case("github.com/vorn-run/extensions")
 }
 
 /// The one thing a row says on its right.
@@ -315,6 +348,33 @@ pub fn installed(l: &Listing) -> bool {
         || (matches!(l.source, Source::Builtin | Source::Mcp) && (l.connected > 0 || l.implicit))
 }
 
+/// Why one of connector `id`'s accounts is failing: its last sync, or a key
+/// test just now.
+fn failing(p: &Plugins, id: &str) -> Option<&'static str> {
+    let mut mine = accounts(p, id);
+    mine.find_map(|c| {
+        let cid = s(c, "id").unwrap_or("");
+        if p.tested.get(cid).is_some_and(|(ok, _)| !ok) {
+            Some("Key test failed")
+        } else if s(c, "lastSyncError").is_some_and(|e| !e.is_empty()) {
+            Some("Last sync failed")
+        } else {
+            None
+        }
+    })
+}
+
+/// Whether a newer version of `l` waits, whatever else its row says.
+pub fn has_update(p: &Plugins, l: &Listing) -> bool {
+    matches!(
+        p.state(l),
+        PackState::Installed {
+            available: Some(_),
+            ..
+        }
+    )
+}
+
 /// The accounts of connector `id`, implicit ones aside.
 fn accounts<'a>(p: &'a Plugins, id: &'a str) -> impl Iterator<Item = &'a Value> {
     p.connections
@@ -343,13 +403,10 @@ pub fn status(p: &Plugins, l: &Listing, default_agent: Option<&str>) -> Option<S
     if wants_account && l.connected == 0 && !l.implicit {
         return Some(Status::Attention("Connect an account".to_owned()));
     }
-    if matches!(
-        state,
-        PackState::Installed {
-            available: Some(_),
-            ..
-        }
-    ) {
+    if let Some(why) = failing(p, &l.id) {
+        return Some(Status::Attention(why.to_owned()));
+    }
+    if has_update(p, l) {
         return Some(Status::Update);
     }
     let mut mine = accounts(p, &l.id);
@@ -605,6 +662,26 @@ mod tests {
     }
 
     #[test]
+    fn a_failing_account_needs_attention_and_keeps_its_update() {
+        let mut p = plugins(
+            json!([{ "id": "rss", "name": "RSS", "kind": "extension", "tags": ["connection"], "git": GIT, "version": "2.0.0" }]),
+            json!([{ "id": "rss", "name": "RSS", "version": "1.0.0", "tags": ["connection"] }]),
+            json!([{ "id": "c1", "name": "Feeds", "connectorId": "sdk",
+                     "filters": { "sdkConnectorId": "rss" }, "lastSyncError": "timed out" }]),
+        );
+        let l = p.listing_by_id("rss").unwrap().clone();
+        let attention = |why: &str| Some(Status::Attention(why.to_owned()));
+        assert_eq!(status(&p, &l, None), attention("Last sync failed"));
+        assert!(has_update(&p, &l), "the header still offers the update");
+        assert_eq!(names(&sections(&p, &[], "", None)[0].1), ["RSS"]);
+        p.connections[0]["lastSyncError"] = json!("");
+        p.tested.insert("c1".into(), (false, "401".into()));
+        assert_eq!(status(&p, &l, None), attention("Key test failed"));
+        p.tested.insert("c1".into(), (true, "Reachable".into()));
+        assert_eq!(status(&p, &l, None), Some(Status::Update));
+    }
+
+    #[test]
     fn a_connection_with_an_account_names_it() {
         let p = plugins(
             json!([]),
@@ -659,13 +736,20 @@ mod tests {
     #[test]
     fn makers_and_monograms() {
         let p = plugins(
-            json!([]),
+            json!([{ "id": "listed", "name": "Listed", "kind": "extension", "git": GIT, "version": "1.0.0" }]),
             json!([
                 { "id": "mine", "name": "mine", "version": "1.0.0", "linked": true },
                 { "id": "acme", "name": "Acme", "version": "1.0.0", "publisher": "Acme Co" },
-                { "id": "ours", "name": "Ours", "version": "1.0.0", "publisher": "Vorn" },
+                { "id": "ours", "name": "Ours", "version": "1.0.0", "publisher": "Vorn",
+                  "source": { "catalog": "ours", "sha256": "ab" } },
+                { "id": "cloned", "name": "Cloned", "version": "1.0.0",
+                  "source": { "git": "git@github.com:vorn-run/extensions.git", "path": "rss" } },
                 { "id": "theirs", "name": "Theirs", "version": "1.0.0",
                   "source": { "git": "https://github.com/someone/theirs.git" } },
+                { "id": "claims", "name": "Claims", "version": "1.0.0", "publisher": "Vorn",
+                  "source": { "git": "https://example.com/vorn-run/extensions.git" } },
+                { "id": "listed", "name": "Listed", "version": "1.0.0", "publisher": "Vorn",
+                  "source": { "git": "https://github.com/someone/listed.git" } },
             ]),
             json!([]),
         );
@@ -673,7 +757,10 @@ mod tests {
         assert_eq!(maker("mine"), "By you");
         assert_eq!(maker("acme"), "By Acme Co");
         assert_eq!(maker("ours"), "By Vorn");
+        assert_eq!(maker("cloned"), "By Vorn");
         assert_eq!(maker("theirs"), "By someone/theirs");
+        assert_eq!(maker("claims"), "By vorn-run/extensions");
+        assert_eq!(maker("listed"), "By someone/listed");
         assert_eq!(monogram("  rss feeds"), "R");
         assert_eq!(monogram_hue("rss", 4), monogram_hue("rss", 4));
         assert!(monogram_hue("anything", 4) < 4);
