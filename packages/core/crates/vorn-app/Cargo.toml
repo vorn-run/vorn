@@ -93,7 +93,7 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11
 # WebKitGTK runs on GTK's loop, which the window pumps between frames.
 gtk = { version = "0.18", optional = true }
 # The approve and deny keys, grabbed on the X11 root window.
-x11rb = { version = "0.13", default-features = false }
+x11rb = { version = "0.14", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
