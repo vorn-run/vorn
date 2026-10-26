@@ -94,6 +94,12 @@ struct Raw {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    homepage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    whats_new: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    screenshots: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     icon: Option<RawIcon>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     build: Option<RawCommand>,
@@ -142,7 +148,14 @@ struct RawMcp {
 struct RawIcon {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     view_box: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     paths: Vec<String>,
+    /// An SVG logo in the package, drawn in its own colours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    /// The logo drawn on a dark surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dark: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -707,6 +720,25 @@ fn is_relative_path(path: &str) -> bool {
         })
 }
 
+/// The most screenshots a page shows.
+const MAX_SCREENSHOTS: usize = 6;
+/// What's new is one line under the version.
+const MAX_WHATS_NEW: usize = 120;
+
+fn is_https(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .is_some_and(|rest| !rest.is_empty() && !rest.contains(char::is_whitespace))
+}
+
+fn is_svg_file(path: &str) -> bool {
+    is_relative_path(path) && path.ends_with(".svg")
+}
+
+/// A `.png` in the package, or one served over https.
+fn is_screenshot(s: &str) -> bool {
+    s.ends_with(".png") && (is_https(s) || is_relative_path(s))
+}
+
 fn is_word(id: &str) -> bool {
     let b = id.as_bytes();
     !b.is_empty()
@@ -792,6 +824,7 @@ impl Raw {
                 .and_then(|r| r.admit(host))
                 .map_err(|why| at("vorn", why))?;
         }
+        self.check_showcase(at)?;
         if let Some(build) = &self.build {
             check_command(at, "build.command", &build.command)?;
         }
@@ -1014,6 +1047,45 @@ impl Raw {
         Ok(())
     }
 
+    fn check_showcase(&self, at: &At<'_>) -> Result<(), FileError> {
+        if let Some(icon) = &self.icon {
+            if icon.dark.is_some() && icon.file.is_none() {
+                return Err(at("icon.dark", "needs a `file` beside it".into()));
+            }
+            if icon.paths.is_empty() && icon.file.is_none() {
+                return Err(at("icon", "needs `paths` or a `file`".into()));
+            }
+            for (field, f) in [("icon.file", &icon.file), ("icon.dark", &icon.dark)] {
+                if let Some(f) = f.as_deref().filter(|f| !is_svg_file(f)) {
+                    return Err(at(field, format!("`{f}` is not an .svg file in the package")));
+                }
+            }
+        }
+        if let Some(url) = self.homepage.as_deref().filter(|u| !is_https(u)) {
+            return Err(at("homepage", format!("`{url}` is not an https URL")));
+        }
+        if let Some(line) = &self.whats_new {
+            if line.trim().is_empty() || line.contains('\n') || line.chars().count() > MAX_WHATS_NEW {
+                return Err(at(
+                    "whats_new",
+                    format!("is one line of 1 to {MAX_WHATS_NEW} characters"),
+                ));
+            }
+        }
+        if self.screenshots.len() > MAX_SCREENSHOTS {
+            return Err(at("screenshots", format!("lists {MAX_SCREENSHOTS} at most")));
+        }
+        for (i, s) in self.screenshots.iter().enumerate() {
+            if !is_screenshot(s) {
+                return Err(at(
+                    &format!("screenshots[{i}]"),
+                    format!("`{s}` is not a .png in the package or an https URL"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn into_manifest(self, at: &At<'_>) -> Result<Manifest, FileError> {
         let protocol = self.connector.is_some().then_some(CONNECTOR_PROTOCOL);
         let mut payload = Map::new();
@@ -1023,7 +1095,7 @@ impl Raw {
         if let Some(d) = &self.description {
             payload.insert("description".into(), json!(d));
         }
-        if let Some(icon) = &self.icon {
+        if let Some(icon) = self.icon.as_ref().filter(|i| !i.paths.is_empty()) {
             let value = icon.to_json();
             if super::icon(Some(&value)).is_none() {
                 return Err(at("icon", "has a path that is not SVG path data".into()));
@@ -1148,6 +1220,17 @@ impl Raw {
         });
         manifest.agent = self.agent;
         manifest.theme = self.theme;
+        manifest.logo = self.icon.and_then(|i| {
+            Some(super::Logo {
+                file: i.file?,
+                dark: i.dark,
+            })
+        });
+        manifest.showcase = super::Showcase {
+            homepage: self.homepage,
+            whats_new: self.whats_new,
+            screenshots: self.screenshots,
+        };
         manifest.mcp = self
             .mcp
             .into_iter()
@@ -1843,9 +1926,12 @@ fn place_toml(place: super::Place) -> &'static str {
 
 impl From<&Manifest> for Raw {
     fn from(m: &Manifest) -> Raw {
-        let icon = |i: &super::Icon| RawIcon {
-            view_box: Some(i.view_box.clone()),
-            paths: i.paths.clone(),
+        let logo = m.logo.as_ref();
+        let icon = RawIcon {
+            view_box: m.icon.as_ref().map(|i| i.view_box.clone()),
+            paths: m.icon.as_ref().map(|i| i.paths.clone()).unwrap_or_default(),
+            file: logo.map(|l| l.file.clone()),
+            dark: logo.and_then(|l| l.dark.clone()),
         };
         let when = |a: &super::Activation| RawActivation {
             workspace_contains: a.workspace_contains.clone(),
@@ -1973,7 +2059,12 @@ impl From<&Manifest> for Raw {
                             title: (p.base.title != p.base.id).then(|| p.base.title.clone()),
                             description: p.base.description.clone(),
                             when: p.base.when.as_ref().map(when),
-                            icon: p.icon.as_ref().map(icon),
+                            icon: p.icon.as_ref().map(|i| RawIcon {
+                                view_box: Some(i.view_box.clone()),
+                                paths: i.paths.clone(),
+                                file: None,
+                                dark: None,
+                            }),
                             web,
                             command,
                             tree: matches!(p.draws, super::PaneDraws::Tree),
@@ -2134,7 +2225,10 @@ impl From<&Manifest> for Raw {
             vorn: m.vorn.clone(),
             publisher: m.publisher.clone(),
             description: m.description.clone(),
-            icon: m.icon.as_ref().map(icon),
+            homepage: m.showcase.homepage.clone(),
+            whats_new: m.showcase.whats_new.clone(),
+            screenshots: m.showcase.screenshots.clone(),
+            icon: (m.icon.is_some() || logo.is_some()).then_some(icon),
             build: m.build.clone().map(|command| RawCommand { command }),
             service: m.service.as_ref().map(|s| RawService {
                 command: s.command.clone(),
@@ -2295,6 +2389,33 @@ header = "Authorization: Bearer {token}"
 "#;
 
     #[test]
+    fn reads_its_logo_pictures_and_whats_new() {
+        let top = "vorn = \">=0.9\"\nhomepage = \"https://example.com/x\"\nwhats_new = \"Close issues from a step\"\nscreenshots = [\"shots/board.png\", \"https://example.com/a.png\"]\n\n[icon]\npaths = [\"M0 0h24v24H0z\"]\nfile = \"logo.svg\"\ndark = \"logo-dark.svg\"\n";
+        let text = SERVICE.replacen("vorn = \">=0.9\"\n", top, 1);
+        let m = parse(&text).unwrap();
+        assert_eq!(m.showcase.homepage.as_deref(), Some("https://example.com/x"));
+        assert_eq!(m.showcase.screenshots.len(), 2);
+        assert_eq!(m.logo_file(false), Some("logo.svg"));
+        assert_eq!(m.logo_file(true), Some("logo-dark.svg"));
+        assert!(m.icon.is_some());
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let bad = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().field;
+        assert_eq!(bad("https://example.com/x", "http://example.com/x"), "homepage");
+        assert_eq!(bad("shots/board.png", "../board.png"), "screenshots[0]");
+        assert_eq!(bad("shots/board.png", "shots/board.jpg"), "screenshots[0]");
+        assert_eq!(bad("\"logo.svg\"", "\"/logo.svg\""), "icon.file");
+        assert_eq!(bad("Close issues from a step", ""), "whats_new");
+        // A logo file alone is enough; a dark one needs a light one.
+        let only_file = text.replace("paths = [\"M0 0h24v24H0z\"]\n", "");
+        assert!(parse(&only_file).unwrap().icon.is_none());
+        assert_eq!(
+            parse(&only_file.replace("file = \"logo.svg\"\n", "")).unwrap_err().field,
+            "icon.dark"
+        );
+    }
+
+    #[test]
     fn reads_a_program_extension() {
         let m = parse(SERVICE).unwrap();
         assert!(m.speaks_api());
@@ -2371,6 +2492,19 @@ ansi = [
     #[test]
     fn a_theme_alone_is_an_extension() {
         let m = parse(THEME).unwrap();
+        assert_eq!(m.tags(), [super::super::Tag::Theme]);
+        let mut agent = m.clone();
+        agent.theme = None;
+        agent.agent = Some(toml::Value::Table(Default::default()));
+        agent.protocol = Some(1);
+        agent.mcp.push(super::super::McpTool {
+            name: "t".into(),
+            description: "d".into(),
+            input: None,
+        });
+        use super::super::Tag;
+        assert_eq!(agent.tags(), [Tag::Agent, Tag::Connection, Tag::Tools]);
+        assert!(parse(SERVICE).unwrap().tags().is_empty());
         assert_eq!(m.kind, super::super::Kind::Extension);
         let theme = m.theme().unwrap();
         assert_eq!(
@@ -2500,6 +2634,14 @@ tree = true
         assert_eq!(json["commands"][0]["key"], "Mod+Shift+W");
         assert_eq!(json["panes"][0]["tree"], true);
         assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+        assert_eq!(m.tags(), [super::super::Tag::Pane]);
+        let steps = format!(
+            "{text}\n[[contributes.nodes]]\nid = \"createTask\"\ntitle = \"Create task\"\n"
+        );
+        assert_eq!(
+            parse(&steps).unwrap().tags(),
+            [super::super::Tag::Pane, super::super::Tag::Steps]
+        );
 
         let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
         assert_eq!(

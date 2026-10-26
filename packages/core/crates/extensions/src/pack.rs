@@ -111,7 +111,34 @@ impl Serialize for InstalledPack {
         if !m.mcp.is_empty() {
             map.serialize_entry("mcp", &m.mcp)?;
         }
+        let tags = m.tags();
+        if !tags.is_empty() {
+            map.serialize_entry("tags", &tags)?;
+        }
+        if !m.showcase.is_empty() {
+            map.serialize_entry("showcase", &m.showcase)?;
+        }
         map.end()
+    }
+}
+
+/// The most bytes of a logo file sent to the app; a logo is a small drawing.
+const MAX_LOGO_BYTES: u64 = 64 * 1024;
+
+impl InstalledPack {
+    /// Its logo's SVG text, or with `dark` its dark variant's; `None` when it
+    /// has none or the file is missing, too big or not SVG.
+    pub fn logo_svg(&self, dark: bool) -> Option<String> {
+        let file = self.manifest.logo_file(dark)?;
+        let inside = Path::new(file)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir));
+        let path = self.path.join(file);
+        if !inside || fs::metadata(&path).ok()?.len() > MAX_LOGO_BYTES {
+            return None;
+        }
+        let text = fs::read_to_string(path).ok()?;
+        text.contains("<svg").then_some(text)
     }
 }
 
@@ -598,6 +625,20 @@ mod tests {
     }
 
     #[test]
+    fn sends_its_logo_and_tags() {
+        let root = tempfile::tempdir().unwrap();
+        let body = "name = \"Acme\"\n[icon]\nfile = \"logo.svg\"\ndark = \"dark.svg\"\n[service]\ncommand = [\"node\", \"index.js\"]\n[connector]\n";
+        let dir = install(root.path(), "acme", "1.0.0", body);
+        fs::write(dir.join("logo.svg"), "<svg id=\"light\"/>").unwrap();
+        fs::write(dir.join("dark.svg"), "not a drawing").unwrap();
+        let pack = PackStore::new(root.path()).inspect("acme").unwrap();
+        assert_eq!(pack.logo_svg(false).as_deref(), Some("<svg id=\"light\"/>"));
+        assert_eq!(pack.logo_svg(true), None);
+        let wire = serde_json::to_value(&pack).unwrap();
+        assert_eq!(wire["tags"], json!(["connection"]));
+    }
+
+    #[test]
     fn installed_packages_written_for_0_9_are_relabelled_and_read_again() {
         let root = tempfile::tempdir().unwrap();
         let dir = install(root.path(), "old", "1.0.0", &extension("Old"));
@@ -728,7 +769,8 @@ mod tests {
                 "actions",
                 "env",
                 "api",
-                "service"
+                "service",
+                "tags"
             ]
         );
         assert!(out["bytes"].as_u64().unwrap() > 0);

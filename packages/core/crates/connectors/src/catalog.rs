@@ -29,6 +29,12 @@ const MAX_DOCUMENT_BYTES: u64 = 8 * 1024 * 1024;
 const VERIFICATION_SCHEMA: i64 = 1;
 const PORTABLE_FORMAT_VERSION: i64 = 1;
 const AUTH_RUNGS: [&str; 5] = ["none", "cli", "key", "browser", "oauth"];
+/// The tags the extensions manifest derives (`Tag`), as the catalog writes them.
+const TAGS: [&str; 6] = ["agent", "connection", "pane", "steps", "theme", "tools"];
+/// A logo is a small drawing; the extensions manifest caps its file the same.
+const MAX_LOGO_BYTES: usize = 64 * 1024;
+const MAX_WHATS_NEW: usize = 120;
+const MAX_SCREENSHOTS: usize = 6;
 
 /// The bundled list, for a first run with no network.
 pub fn seed() -> Vec<Value> {
@@ -95,15 +101,14 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
     let packed =
         extension && non_empty(entry, "packUrl").is_some() && non_empty(entry, "sha256").is_some();
     let package = non_empty(entry, "packageName");
-    if package.is_none() && !packed {
+    // An extension installs from its archive or its repository, whatever it adds.
+    let from_git = extension && non_empty(entry, "git").is_some_and(|g| usable_git_url(g).is_ok());
+    if package.is_none() && !packed && !from_git {
         return None;
     }
     let adds = extension
         .then(|| manifest::contributes(entry.get("contributes")))
         .flatten();
-    if extension && adds.is_none() && !packed {
-        return None;
-    }
     let dropped = [
         "git",
         "path",
@@ -116,6 +121,12 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
         "contributes",
         "permissions",
         "activates",
+        "tags",
+        "logo",
+        "logoDark",
+        "homepage",
+        "whatsNew",
+        "screenshots",
     ];
     let mut out: Map<String, Value> = entry
         .iter()
@@ -181,7 +192,49 @@ fn normalize_entry(raw: &Value) -> Option<Value> {
     if entry.contains_key("keywords") {
         out.insert("keywords".into(), list(entry.get("keywords")));
     }
+    showcase(entry, &mut out);
     Some(Value::Object(out))
+}
+
+/// What a catalog entry's page shows: its tags, logo, pictures and links,
+/// each kept only when it is what the app can draw.
+fn showcase(entry: &Map<String, Value>, out: &mut Map<String, Value>) {
+    let tags: Vec<&str> = strings_of(entry.get("tags"))
+        .filter(|t| TAGS.contains(t))
+        .collect();
+    if !tags.is_empty() {
+        out.insert("tags".into(), json!(tags));
+    }
+    for key in ["logo", "logoDark"] {
+        if let Some(svg) = text(entry, key).filter(|s| s.len() <= MAX_LOGO_BYTES && s.contains("<svg")) {
+            out.insert(key.into(), json!(svg));
+        }
+    }
+    if let Some(url) = text(entry, "homepage").filter(|u| is_https(u)) {
+        out.insert("homepage".into(), json!(url));
+    }
+    if let Some(line) = text(entry, "whatsNew").filter(|l| l.chars().count() <= MAX_WHATS_NEW) {
+        out.insert("whatsNew".into(), json!(line));
+    }
+    let shots: Vec<&str> = strings_of(entry.get("screenshots"))
+        .filter(|s| s.ends_with(".png") && (is_https(s) || s.starts_with("http://127.0.0.1:")))
+        .take(MAX_SCREENSHOTS)
+        .collect();
+    if !shots.is_empty() {
+        out.insert("screenshots".into(), json!(shots));
+    }
+}
+
+fn strings_of(v: Option<&Value>) -> impl Iterator<Item = &str> {
+    v.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+fn is_https(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .is_some_and(|rest| !rest.is_empty() && !rest.contains(char::is_whitespace))
 }
 
 fn verification(raw: Option<&Value>) -> Option<Value> {
@@ -641,6 +694,26 @@ mod tests {
         );
         assert_eq!(entries[0]["path"], "rss");
         assert!(entries[1].get("git").is_none() && entries[1].get("path").is_none());
+    }
+
+    #[test]
+    fn keeps_an_extension_from_git_and_what_its_page_shows() {
+        let doc = json!({ "version": 1, "connectors": [
+            { "id": "vorn.agents.claude", "name": "Claude Code", "kind": "extension",
+              "git": "https://github.com/vorn-run/extensions.git", "path": "adapters/agents/claude",
+              "tags": ["agent", "made-up"], "logo": "<svg/>", "logoDark": "plain text",
+              "homepage": "http://example.com", "whatsNew": "Reads its hooks",
+              "screenshots": ["https://example.com/a.png", "file:///etc/b.png", "https://example.com/c.jpg"] },
+            { "id": "nowhere", "name": "Nowhere", "kind": "extension" },
+        ] });
+        let entries = parse_catalog(&doc).unwrap();
+        assert_eq!(entries.len(), 1);
+        let e = &entries[0];
+        assert_eq!(e["tags"], json!(["agent"]));
+        assert_eq!(e["logo"], "<svg/>");
+        assert!(e.get("logoDark").is_none() && e.get("homepage").is_none());
+        assert_eq!(e["whatsNew"], "Reads its hooks");
+        assert_eq!(e["screenshots"], json!(["https://example.com/a.png"]));
     }
 
     #[test]

@@ -767,6 +767,12 @@ impl Extensions {
                 value["sandboxed"] = json!(self.router.sandboxed(&pack.id));
                 value["sandboxAvailable"] = json!(vorn_extensions::sandbox::available());
                 value["preferences"] = json!(self.router.listed_preferences(&pack.manifest));
+                if let Some(svg) = pack.logo_svg(false) {
+                    value["logo"] = json!(svg);
+                }
+                if let Some(svg) = pack.logo_svg(true) {
+                    value["logoDark"] = json!(svg);
+                }
                 value
             })
             .collect();
