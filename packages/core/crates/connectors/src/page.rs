@@ -1,8 +1,8 @@
-//! The Connections page, drawn as an element tree (`page/tree.rs`):
-//! every connection with what it triggers, when it last synced and what its
-//! key is; Import now and Sign in when its window is signed out on hover;
-//! Test, Rotate key, Roll back and Remove in its menu; and adding one, from
-//! picking an installed connector to its settings.
+//! A connector's accounts, drawn as an element tree (`page/tree.rs`) inside
+//! its extension's page in Settings: every connection with how it signs in,
+//! how many workflows use it and what its key is; Import now and Sign in when
+//! its window is signed out on hover; Test, Reconnect, Rotate key, Roll back
+//! and Remove in its menu; and adding one, with the connector's settings.
 //! The rows come from the built-in's own calls, so the page says what the
 //! rest of the app says.
 
@@ -199,12 +199,12 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
         .into_iter()
         .filter(|p| text(p, "kind") != "extension")
         .collect();
-    let builtins = list(ask(c, "connector:list", Value::Null).await);
     let held_keys = list(ask(c, "connection:listKeys", Value::Null).await);
     let (rotating, key_error, failing) = {
         let k = keys(c);
         (k.rotating.clone(), k.error.clone(), k.failing.clone())
     };
+    let used = conns::usage_counts(&list(c.core("workflow.list", json!({})).await));
     let listed: Vec<Value> = list(ask(c, "connection:list", json!({})).await)
         .into_iter()
         .filter(|conn| !conns::is_implicit(conn))
@@ -221,59 +221,29 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
         .map(|conn| {
             let id = conns::connector_id_of(conn);
             let pack = packs.iter().find(|p| text(p, "id") == id);
-            let service = pack
-                .map(|p| text(p, "name"))
-                .or_else(|| {
-                    builtins
-                        .iter()
-                        .find(|b| text(b, "id") == id)
-                        .map(|b| text(b, "name"))
-                })
-                .filter(|n| !n.is_empty())
-                .unwrap_or(id.as_str())
-                .to_owned();
-            let trigger = conns::sdk_trigger_of(conn);
-            let triggers = pack
-                .and_then(|p| p.get("triggers").and_then(Value::as_array))
-                .into_iter()
-                .flatten()
-                .find(|t| text(t, "type") == trigger)
-                .map(|t| text(t, "label").to_owned())
-                .unwrap_or_default();
             let browser = pack
                 .and_then(|p| p.pointer("/auth/rung"))
                 .and_then(Value::as_str)
                 == Some("browser");
             let needs_signin = browser && text(conn, "signedInAs").is_empty();
-            let error = text(conn, "lastSyncError");
-            let (state, synced) = if needs_signin {
-                ("signin", "not signed in".to_owned())
-            } else if !error.is_empty() {
-                ("failing", error.to_owned())
-            } else {
-                match ago(text(conn, "lastSyncAt"), now) {
-                    Some(a) => ("ok", format!("synced {a}")),
-                    None => ("idle", "not synced yet".to_owned()),
-                }
-            };
-            let line: Vec<&str> = [service.as_str(), triggers.as_str(), synced.as_str()]
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect();
-            let previous = pack.map_or("", |p| text(p, "previousVersion"));
-            let count = listed
-                .iter()
-                .filter(|o| conns::connector_id_of(o) == id)
-                .count();
-            let mut group = vec![if count == 1 {
-                "1 connection".to_owned()
-            } else {
-                format!("{count} connections")
-            }];
-            if let Some(v) = pack.map(|p| text(p, "version")).filter(|v| !v.is_empty()) {
-                group.push(format!("v{v}"));
-            }
             let conn_id = text(conn, "id");
+            let account_line = account_line(
+                pack,
+                conn,
+                needs_signin,
+                used.get(conn_id).copied().unwrap_or(0),
+            );
+            let error = text(conn, "lastSyncError");
+            let state = if needs_signin {
+                "signin"
+            } else if !error.is_empty() {
+                "failing"
+            } else if ago(text(conn, "lastSyncAt"), now).is_some() {
+                "ok"
+            } else {
+                "idle"
+            };
+            let previous = pack.map_or("", |p| text(p, "previousVersion"));
             let key = held_keys.iter().find(|k| text(k, "connectionId") == conn_id);
             let (key_line, key_state) = key.map_or((String::new(), ""), |k| {
                 key_line(k, failing.contains(conn_id))
@@ -307,12 +277,9 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
                 "rotating_label": rotating_label,
                 "rotate_error": if rotating_field.is_some() { key_error.clone().unwrap_or_default() } else { String::new() },
                 "connector": id,
-                "connector_name": service,
-                "connector_line": group.join(" · "),
-                "can_add": pack.is_some(),
-                "icon": format!("connector:{id}"),
-                "line": line.join(" · "),
+                "account_line": account_line,
                 "state": state,
+                "browser": browser,
                 "needs_signin": needs_signin,
                 "can_roll_back": !previous.is_empty(),
                 "previous": previous,
@@ -391,6 +358,7 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
     let picked = d.manifest.is_some();
     let form = vec![json!({
         "id": "form",
+        "connector": d.connector.clone().unwrap_or_default(),
         "picked": picked,
         "can_save": picked && missing(&d).is_none(),
         "none_installed": packs.is_empty(),
@@ -405,6 +373,43 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
         (PROJECTS, projects),
         (SETTINGS, settings),
     ]
+}
+
+/// "Signed in through gh · used by 2 workflows": how an account signs in,
+/// or what is wrong with it, and how many workflows use it.
+fn account_line(pack: Option<&Value>, conn: &Value, needs_signin: bool, used: u64) -> String {
+    let error = text(conn, "lastSyncError");
+    let as_who = text(conn, "signedInAs");
+    let signin = if needs_signin {
+        "Not signed in".to_owned()
+    } else if !error.is_empty() {
+        error.to_owned()
+    } else {
+        let auth = pack.and_then(|p| p.get("auth"));
+        let probe = auth
+            .and_then(|a| a.pointer("/probe/command"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        match auth.and_then(|a| a.get("rung")).and_then(Value::as_str) {
+            _ if !as_who.is_empty() => format!("Signed in as {as_who}"),
+            Some("cli") if !probe.is_empty() => format!("Signed in through {probe}"),
+            Some("key") => "Uses a key".to_owned(),
+            Some("browser" | "oauth") => "Signed in".to_owned(),
+            _ => String::new(),
+        }
+    };
+    let workflows = match used {
+        0 => "not used by a workflow yet".to_owned(),
+        1 => "used by 1 workflow".to_owned(),
+        n => format!("used by {n} workflows"),
+    };
+    if signin.is_empty() {
+        let mut w = workflows;
+        w[..1].make_ascii_uppercase();
+        w
+    } else {
+        format!("{signin} · {workflows}")
+    }
 }
 
 /// A connection's filters as "key: value" chips in key order, secrets masked and long values cut.
@@ -614,7 +619,8 @@ async fn pick(c: &Arc<Connectors>, id: String) -> Result<Value, String> {
 /// a window opens on.
 pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Value, String> {
     if action == vorn_tree::RENDER {
-        return Ok(tree::render(&rows(c).await));
+        let scope = args.pointer("/surface/scope").and_then(Value::as_str);
+        return Ok(tree::render(&rows(c).await, scope));
     }
     if action == vorn_tree::EVENT {
         let event: vorn_tree::Event = serde_json::from_value(args["event"].clone())

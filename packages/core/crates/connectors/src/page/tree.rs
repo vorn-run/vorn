@@ -1,4 +1,6 @@
-//! The Connections page as an element tree: connections by connector, and the add form.
+//! A connector's accounts as an element tree, drawn inside its extension's
+//! page in Settings: each connection with how it signs in and what uses it,
+//! its key, and the add form.
 
 use serde_json::{json, Value};
 use vorn_tree::sdk::*;
@@ -12,9 +14,9 @@ const DOES: [&str; 17] = [
     "backfill", "signin", "rollback", "remove", "rotate", "unrotate", "newkey",
 ];
 
-/// The page drawn from its rows, by collection.
-pub fn render(rows: &[(&str, Vec<Value>)]) -> Value {
-    json!(Rendered::new(page(rows)))
+/// The accounts of connector `scope` (every connector's without one), from the rows by collection.
+pub fn render(rows: &[(&str, Vec<Value>)], scope: Option<&str>) -> Value {
+    json!(Rendered::new(page(rows, scope)))
 }
 
 /// The action an event on the page runs, and its args.
@@ -37,45 +39,36 @@ fn on(v: &Value, key: &str) -> bool {
     v[key].as_bool() == Some(true)
 }
 
-fn page(rows: &[(&str, Vec<Value>)]) -> Node {
+fn page(rows: &[(&str, Vec<Value>)], scope: Option<&str>) -> Node {
     let of = |coll: &str| {
         rows.iter()
             .find(|(c, _)| *c == coll)
             .map_or(&[][..], |(_, r)| r.as_slice())
     };
-    let form = of(FORM).first();
-    let mut page = col([]).gap(16.0);
-    page = match form {
-        None => page.child(toolbar([button("add", "Add connection")
-            .icon("plus")
-            .primary()])),
-        Some(f) => page.child(adding(f, &of)),
-    };
     let filters = of(FILTERS);
-    let groups = group_by(of(CONNECTIONS), |r| s(r, "connector"))
-        .into_iter()
-        .map(|(id, rs)| {
-            let first = rs[0];
-            let entries = rs.into_iter().map(|r| connection(r, filters));
-            let mut g = group(s(first, "connector_name"), entries)
-                .icon(format!("connector:{id}"))
-                .note(s(first, "connector_line"));
-            if on(first, "can_add") {
-                g = g.actions([button(format!("add_to:{id}"), "Add another").icon("plus")]);
-            }
-            g
-        });
-    page = page.child(
-        list(CONNECTIONS, groups)
-            .empty("No connections yet. Add one to have a workflow watch a service."),
-    );
-    if form.is_none() {
-        page = page.child(
-            text("Connectors for other services are in Extensions › Browse.")
-                .style(TextStyle::Secondary),
-        );
+    let mine: Vec<&Value> = of(CONNECTIONS)
+        .iter()
+        .filter(|r| scope.is_none_or(|id| s(r, "connector") == id))
+        .collect();
+    let mut page = col([]).gap(8.0);
+    if !mine.is_empty() {
+        page = page.child(list(CONNECTIONS, mine.iter().map(|r| connection(r, filters))));
     }
-    page
+    // The form shows under the connector it adds to; any connector's when unscoped.
+    let form = of(FORM)
+        .first()
+        .filter(|f| scope.is_none_or(|id| s(f, "connector") == id));
+    page.child(match form {
+        Some(f) => adding(f, &of),
+        None => {
+            let (id, label) = match scope {
+                Some(id) => (format!("add_to:{id}"), "Connect another account"),
+                None => ("add".to_owned(), "Add connection"),
+            };
+            let label = if mine.is_empty() { "Connect an account" } else { label };
+            row([button(id, label).icon("plus")])
+        }
+    })
 }
 
 /// One connection with its key line: Import now on hover; Test key, Rotate key…,
@@ -93,10 +86,21 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
     if on(r, "needs_signin") {
         actions.push(button(format!("signin:{id}"), "Sign in").icon("log-in"));
     }
-    actions.push(button(format!("backfill:{id}"), "Import now").icon("import"));
-    let mut more = vec![button(format!("test:{id}"), "Test key")
+    actions.push(
+        button(format!("backfill:{id}"), "Import now")
+            .icon("import")
+            .tip("Fetches what's new now instead of at the next check"),
+    );
+    let mut more = vec![button(format!("test:{id}"), "Test")
         .icon("zap")
-        .tip("Checks that the key still works")];
+        .tip("Checks that the account still answers")];
+    if on(r, "browser") && !on(r, "needs_signin") {
+        more.push(
+            button(format!("signin:{id}"), "Reconnect")
+                .icon("log-in")
+                .tip("Signs in again in a window"),
+        );
+    }
     let fields = r["key_fields"].as_array().map_or(&[][..], Vec::as_slice);
     for f in fields {
         let label = if fields.len() > 1 {
@@ -107,7 +111,7 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
         more.push(
             button(format!("rotate:{id}|{}", s(f, "key")), label)
                 .icon("refresh-cw")
-                .tip("Swaps in a new key from the service; the old one stops working"),
+                .tip("Swaps in a new key; the old one stops working"),
         );
     }
     if on(r, "can_roll_back") {
@@ -130,8 +134,7 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
         .filter(|f| s(f, "parent") == id)
         .map(|f| s(f, "text").to_owned());
     let mut e = entry(id, name)
-        .icon(s(r, "icon"))
-        .detail(s(r, "line"))
+        .detail(s(r, "account_line"))
         .chips(chips)
         .actions(actions)
         .more(more);
@@ -250,9 +253,9 @@ mod tests {
 
     fn rows(form: bool) -> Vec<(&'static str, Vec<Value>)> {
         let conn = |id: &str, name: &str| {
-            json!({ "id": id, "name": name, "connector": "http", "connector_name": "HTTP",
-                "connector_line": "2 connections", "can_add": true, "icon": "connector:http",
-                "line": "HTTP · synced just now", "state": "ok", "needs_signin": false,
+            json!({ "id": id, "name": name, "connector": "http",
+                "account_line": "Uses a key · used by 2 workflows", "state": "ok",
+                "browser": false, "needs_signin": false,
                 "can_roll_back": false, "previous": "", "key_line": "Secret · ••••4f2a",
                 "key_state": "ok", "key_fields": [{ "key": "secret", "label": "Secret" }],
                 "rotating": id == "b", "rotating_label": "Secret", "rotate_error": "" })
@@ -272,7 +275,7 @@ mod tests {
         if form {
             out.push((
                 FORM,
-                vec![json!({ "id": "form", "picked": true, "can_save": false,
+                vec![json!({ "id": "form", "connector": "acme", "picked": true, "can_save": false,
                     "none_installed": false, "error": "" })],
             ));
             out.push((
@@ -290,27 +293,44 @@ mod tests {
         out
     }
 
+    fn tree(rows: &[(&str, Vec<Value>)], scope: Option<&str>) -> String {
+        let read = vorn_tree::read(&render(rows, scope)).expect("a valid tree");
+        serde_json::to_string(&read.tree).unwrap()
+    }
+
     #[test]
-    fn groups_connections_by_connector_and_reads_back_clean() {
-        let answer = render(&rows(false));
-        let read = vorn_tree::read(&answer).expect("a valid tree");
-        let json = serde_json::to_string(&read.tree).unwrap();
-        assert_eq!(json.matches("\"heading\":\"HTTP\"").count(), 1, "{json}");
+    fn lists_a_connectors_accounts_and_reads_back_clean() {
+        let json = tree(&rows(false), Some("http"));
+        assert!(json.contains("Uses a key · used by 2 workflows"), "{json}");
         assert!(json.contains("add_to:http"), "{json}");
+        assert!(json.contains("Connect another account"), "{json}");
         assert!(json.contains("baseUrl: https://api.example.com"), "{json}");
-        assert!(json.contains("\"id\":\"add\""), "{json}");
         assert!(json.contains("\"id\":\"key:a\""), "{json}");
         assert!(json.contains("rotate:a|secret"), "{json}");
         assert!(json.contains("\"id\":\"newkey:b\""), "{json}");
         assert!(!json.contains("\"id\":\"newkey:a\""), "{json}");
-        let adding = render(&rows(true));
-        let read = vorn_tree::read(&adding).expect("a valid tree with the form");
-        let json = serde_json::to_string(&read.tree).unwrap();
-        assert!(
-            !json.contains("\"id\":\"add\""),
-            "one primary at a time: {json}"
-        );
+        assert!(!json.contains("\"heading\""), "one unlabeled list: {json}");
+    }
+
+    #[test]
+    fn another_connectors_page_shows_none_of_these_accounts() {
+        let json = tree(&rows(false), Some("acme"));
+        assert!(!json.contains("Example API"), "{json}");
+        assert!(json.contains("add_to:acme"), "{json}");
+        assert!(json.contains("Connect an account"), "{json}");
+    }
+
+    #[test]
+    fn the_add_form_shows_only_under_the_connector_it_adds_to() {
+        let json = tree(&rows(true), Some("acme"));
         assert!(json.contains("\"id\":\"set:TOKEN\""), "{json}");
+        assert!(!json.contains("add_to:acme"), "one primary at a time: {json}");
+        let json = tree(&rows(true), Some("http"));
+        assert!(!json.contains("set:TOKEN"), "{json}");
+        assert!(json.contains("add_to:http"), "{json}");
+        let json = tree(&rows(true), None);
+        assert!(json.contains("set:TOKEN"), "{json}");
+        assert!(json.contains("Example API"), "{json}");
     }
 
     #[test]
