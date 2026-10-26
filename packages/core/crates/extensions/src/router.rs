@@ -25,6 +25,7 @@ use crate::child::{CallError, Child, Inbox, Incoming, Launch, Writer};
 use crate::component::{Bundled, Compiler, Source};
 use crate::events::{self, Bus, Queue, Tally};
 use crate::gate::{self, Caller, StorageCall, World};
+use crate::install::Trust;
 use crate::lifecycle::{Lease, Lifecycle, Running, ServiceKey};
 use crate::manifest::{Manifest, Run};
 use crate::pack::{InstalledPack, PackStore, Stamp};
@@ -42,6 +43,9 @@ pub struct RouterSettings {
     pub call_timeout: Duration,
     /// How long a service may take to answer `guest.init`.
     pub start_timeout: Duration,
+    /// The compute a Wasm component's call (or its start) may use, in
+    /// Wasmtime fuel, about one unit per instruction; past it the call is stopped.
+    pub call_fuel: u64,
     /// Where each extension's own files are kept (`blobs.*`); none keeps none.
     pub blobs: Option<PathBuf>,
     /// Extensions Vorn ships whose files are kept in a folder of their own, outside the quota.
@@ -50,6 +54,8 @@ pub struct RouterSettings {
     pub compiler: Compiler,
     /// The file the extensions' preferences are kept in; none keeps them in memory.
     pub preferences: Option<PathBuf>,
+    /// The packs this build pins: one installed as such owns Vorn's namespace (`vorn.`).
+    pub trust: Trust,
 }
 
 impl RouterSettings {
@@ -59,14 +65,27 @@ impl RouterSettings {
             version: version.into(),
             call_timeout: Duration::from_secs(60),
             start_timeout: Duration::from_secs(15),
+            call_fuel: CALL_FUEL,
             blobs: None,
             placed_blobs: Vec::new(),
             compiler: Compiler::None,
             preferences: None,
+            trust: Trust::default(),
         }
     }
 }
 
+/// When Vorn calls an installed extension's own action ([`crate::manifest::Service`]'s `start` and `stop`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hook {
+    /// Vorn started, or the extension was just installed or updated.
+    Start,
+    /// It is about to be uninstalled.
+    Stop,
+}
+
+/// A Wasm call's fuel: tens of seconds of a busy guest's compute, well past any real call.
+pub const CALL_FUEL: u64 = 50_000_000_000;
 /// The most events one `guest.on-event` carries.
 const MAX_BATCH: usize = 256;
 /// How many of one program's own requests are answered at once.
@@ -455,8 +474,12 @@ impl Router {
         else {
             return Ok(());
         };
-        self.prepare(&Source::File(pack.path.join(component)), pack.name())
+        let folder = pack.path.clone();
+        let bytes = tokio::task::spawn_blocking(move || crate::reach::read_in(&folder, &component))
             .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("{}: {e}", pack.name()))?;
+        self.prepare(&Source::Read(bytes.into()), pack.name()).await
     }
 
     #[cfg(feature = "wasm")]
@@ -471,6 +494,38 @@ impl Router {
         Err(format!(
             "{name} is a Wasm component, and this Vorn runs none"
         ))
+    }
+
+    /// Calls installed extension `id`'s `hook` action, when its manifest
+    /// names one. A failure is logged: nothing a person waits for depends on it.
+    pub async fn call_hook(&self, id: &str, hook: Hook) {
+        let Some(pack) = self.program(id) else {
+            return;
+        };
+        let Some(action) = pack.manifest.service.as_ref().and_then(|s| match hook {
+            Hook::Start => s.start.clone(),
+            Hook::Stop => s.stop.clone(),
+        }) else {
+            return;
+        };
+        let ctx = CallCtx {
+            caller: "client".to_owned(),
+            project: None,
+        };
+        if let Err(e) = self.call(id, &action, Value::Null, ctx).await {
+            warn!("[extensions] {} {action}: {}", pack.name(), e.message);
+        }
+    }
+
+    /// Calls the start action of every installed extension whose manifest names one, one after another.
+    pub async fn start_installed(&self) {
+        let store = self.store.clone();
+        let ids = tokio::task::spawn_blocking(move || store.ids())
+            .await
+            .unwrap_or_default();
+        for id in ids {
+            self.call_hook(&id, Hook::Start).await;
+        }
     }
 
     /// Stops the service of extension `id`, whatever it runs as.
@@ -574,6 +629,11 @@ impl Router {
         self.blobs.as_ref().map(|s| s.path(id, name))
     }
 
+    /// Extension `id`'s own folder of files; `None` when this Vorn keeps none.
+    pub fn files_dir(&self, id: &str) -> Option<PathBuf> {
+        self.blobs.as_ref().map(|s| s.dir(id))
+    }
+
     /// Runs `call` on extension `id`'s own files, off the runtime.
     async fn blobs(&self, id: &str, call: BlobCall) -> Result<Value, ExtError> {
         let store = self
@@ -621,14 +681,15 @@ impl Router {
     }
 
     /// Starts `pack`'s program with an inbox for what it asks, answered on its own tasks.
-    fn spawn_program(&self, pack: &InstalledPack, argv: &[String]) -> Result<Child, String> {
+    fn spawn_program(
+        &self,
+        pack: &InstalledPack,
+        argv: &[String],
+        caller: Caller,
+    ) -> Result<Child, String> {
         let launch = self.launch(pack, argv)?;
         let (tx, rx): (Inbox, _) = mpsc::channel(64);
         let child = Child::start_with(&launch, format!("[extensions] {}", pack.name()), Some(tx))?;
-        let caller = Caller {
-            extension: pack.id.clone(),
-            ..Caller::of(&pack.manifest)
-        };
         tokio::spawn(dispatch(
             self.me.clone(),
             Arc::new(pack.manifest.clone()),
@@ -652,13 +713,17 @@ impl Router {
             api: crate::api::API.to_owned(),
         };
         if let Some(component) = &service.component {
-            let source = Source::File(pack.path.join(component));
-            let caller = Caller::of(&pack.manifest);
+            let (bytes, caller) = self.read_as(pack, component).await?;
             return self
-                .start_component(source, Arc::new(pack.manifest.clone()), caller, ctx)
+                .start_component(
+                    Source::Read(bytes.into()),
+                    Arc::new(pack.manifest.clone()),
+                    caller,
+                    ctx,
+                )
                 .await;
         }
-        let child = self.spawn_program(pack, &service.command)?;
+        let child = self.spawn_program(pack, &service.command, caller(pack, false))?;
         let init = params::GuestInit { ctx };
         let answered = child
             .request(
@@ -673,6 +738,25 @@ impl Router {
         }
         info!("[extensions] {} started", pack.name());
         Ok(Program::Child(child))
+    }
+
+    /// `file` of `pack`, read once off the runtime, and who these bytes are
+    /// from: Vorn's own only when `pack` has a reserved id and they are the
+    /// very bytes its pin holds. Whatever runs or is added is what was checked.
+    pub async fn read_as(
+        &self,
+        pack: &InstalledPack,
+        file: &str,
+    ) -> Result<(Vec<u8>, Caller), String> {
+        let (trust, read, name) = (self.settings.trust.clone(), pack.clone(), file.to_owned());
+        let (bytes, vouched) =
+            tokio::task::spawn_blocking(move || trust.read_vouched(&read, &name))
+                .await
+                .map_err(|e| e.to_string())??;
+        Ok((
+            bytes,
+            caller(pack, crate::pack::is_reserved(&pack.id) && vouched),
+        ))
     }
 
     async fn start_bundled(&self, bundled: &Bundled) -> Result<Program, String> {
@@ -704,6 +788,7 @@ impl Router {
             name,
             init,
             start_timeout: self.settings.start_timeout,
+            call_fuel: self.settings.call_fuel,
             router: self.me.clone(),
             manifest: Arc::clone(&manifest),
             caller,
@@ -742,7 +827,7 @@ impl Router {
         ctx: CallCtx,
     ) -> Result<Value, ExtError> {
         let child = self
-            .spawn_program(pack, &run.command)
+            .spawn_program(pack, &run.command, caller(pack, false))
             .map_err(|e| ExtError::new("start", e))?;
         let params = params::GuestHandle {
             method: action.to_owned(),
@@ -806,6 +891,16 @@ impl Router {
         if !told.is_empty() {
             self.world.published(caller, collection, &told);
         }
+    }
+}
+
+/// Installed `pack` as a caller; Vorn's own only when `builtin`. A program
+/// reads its files as it runs, so one is never Vorn's own.
+fn caller(pack: &InstalledPack, builtin: bool) -> Caller {
+    Caller {
+        extension: pack.id.clone(),
+        builtin,
+        ..Caller::of(&pack.manifest)
     }
 }
 

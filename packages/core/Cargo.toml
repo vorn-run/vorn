@@ -25,7 +25,6 @@ members = [
   "crates/protocol",
   "crates/store",
   "crates/agents",
-  "crates/adapters",
   "crates/mcp",
   "crates/cli",
   "crates/reach",
@@ -45,15 +44,6 @@ members = [
   "crates/extension-sdk",
   "crates/guest-build",
   "crates/extensions/tests/probe",
-  "extensions/worktrees",
-  "extensions/widget",
-  "extensions/tasks",
-  "extensions/workflows",
-  "extensions/blocks",
-  "extensions/files",
-  "extensions/browser",
-  "extensions/device",
-  "extensions/ssh",
   "../../examples/extensions/turns",
   "../../examples/extensions/agent-footer",
   "bench/scale",
@@ -61,13 +51,15 @@ members = [
   "bench/ext-tiers",
   "bench/ext-tiers/crash",
   "bench/ext-tiers/rss",
+  "bench/ext-tiers/widget",
   "bench/ext-tiers/worktrees",
+  "bench/ext-load/templates/rust",
 ]
 exclude = ["vendor"]
 
 # The app's version (scripts/sync-versions.sh); every binary that reports a version inherits it.
 [workspace.package]
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 
 # Terminal snapshots (encode, decode and the parser continuation) are in no published release yet.
 [workspace.dependencies]

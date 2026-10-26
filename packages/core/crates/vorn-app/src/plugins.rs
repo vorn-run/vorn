@@ -382,9 +382,18 @@ pub fn tabs(connectors_on: bool) -> Vec<Tab> {
     }
 }
 
-/// Whether a catalog entry can be installed: it names the repository it installs from.
+/// Whether a catalog entry can be installed: it names the repository it
+/// installs from, or a released pack and its checksum.
 pub fn installable(entry: &Value) -> bool {
-    s(entry, "git").is_some_and(|u| !u.is_empty())
+    released_pack(entry) || s(entry, "git").is_some_and(|u| !u.is_empty())
+}
+
+/// Whether a catalog entry lists a released pack, which vornd fetches and
+/// checks against the listed checksum.
+pub fn released_pack(entry: &Value) -> bool {
+    ["packUrl", "sha256"]
+        .iter()
+        .all(|k| s(entry, k).is_some_and(|v| !v.is_empty()))
 }
 
 /// Where a pack stands, from the pack, its catalog entry and any install in
@@ -969,16 +978,11 @@ pub fn hidden_while_off(builtin: &Value) -> String {
             None => format!("{t} in its menu"),
         });
     }
-    let mut note = match parts.as_slice() {
+    match parts.as_slice() {
         [] => "Hidden while off: everything it adds.".to_owned(),
         [one] => format!("Hidden while off: {one}."),
         [rest @ .., last] => format!("Hidden while off: {}, and {last}.", rest.join(", ")),
-    };
-    // What a built-in leaves of yours, where it is worth saying.
-    if s(builtin, "id") == Some("vorn.worktrees") {
-        note.push_str(" Your worktrees stay.");
     }
-    note
 }
 
 /// One line of what an extension may use: what, how, and whether Vorn holds it to that.
@@ -995,13 +999,21 @@ fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
     let name = name.split_once(':').map_or(name, |(n, _)| n);
     Some(match name {
         "sessions.read" => ("Sessions", "reads your sessions and their status", true),
-        "sessions.launch" => ("Sessions", "starts and closes sessions", true),
-        "terminal.read" => ("Terminal", "reads recent output", true),
-        "terminal.selection" => ("Terminal", "reads the selected text", true),
-        "terminal.send" => ("Terminal", "types into a session", true),
+        "sessions.launch" => (
+            "Sessions",
+            "closes sessions, and starts them when it also runs programs",
+            true,
+        ),
+        "terminal.read" => ("Terminal", "reads recent output of sessions it started", true),
+        "terminal.selection" => ("Terminal", "reads the selected text in sessions it started", true),
+        "terminal.send" => ("Terminal", "types into sessions it started", true),
         "card.rename" => ("Cards", "renames session cards", true),
         "agent.usage" => ("Agents", "reads context and allowance", true),
-        "agent.permissions" => ("Agents", "answers their requests to use a tool", true),
+        "agent.permissions" => (
+            "Agents",
+            "answers their requests to use a tool when you click",
+            true,
+        ),
         "git.read" => ("Git", "reads status, diffs and worktrees", true),
         "git.write" => ("Git", "commits and removes worktrees", true),
         "files.read" => ("Files", "reads files in your projects", true),
@@ -1012,12 +1024,16 @@ fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
         "http.routes" => ("Network", "answers web requests", false),
         "auth.borrow" => ("Sign-in", "borrows a command line tool's sign-in", false),
         "browser.session" => ("Sign-in", "uses a signed-in browser window", false),
-        "process.run" => ("Programs", "runs programs and workflow commands", false),
+        "process.run" => (
+            "Programs",
+            "runs programs and workflow commands, starts sessions, and reaches files outside your projects",
+            false,
+        ),
         "web" => ("Browser", "loads, reads and acts on web pages", true),
         "video" => ("Devices", "starts simulators and acts on their apps", true),
         "remote" => (
             "Remote hosts",
-            "edits your remote hosts and SSH keys, and tests logging in",
+            "edits your remote hosts and SSH keys, imports a key from ~/.ssh or one you choose, and tests logging in",
             true,
         ),
         _ => return None,

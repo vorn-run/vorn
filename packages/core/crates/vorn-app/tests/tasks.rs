@@ -586,6 +586,7 @@ fn long_board(cells: bool) {
             (1400.0, 900.0),
         )
     };
+    support::views_listed_in(&mut app, &mut ui, size);
     app.st.view = MainView::Tasks;
     app.st.project = Some("web".into());
     app.st.tasks.mode = Mode::Board;
@@ -763,13 +764,10 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
     shot.save(&mut app, "task-badge");
     support::every_size(&mut app, "task-badge", &["Badge me"]);
 
-    // Switched off, the board closes back to Sessions, the tasks stay, and writes are refused.
+    // Uninstalled, the board closes back to Sessions, the tasks stay, and writes are refused.
     app.rpc()
-        .call(
-            "extension:setBuiltin",
-            json!({ "id": "vorn.tasks", "on": false }),
-        )
-        .expect("switched off");
+        .call("extension:remove", json!({ "id": "vorn.tasks" }))
+        .expect("uninstalled");
     app.st.view = MainView::Tasks;
     support::wait_for("the board gone", || {
         let mut ui = Ui::cells(&ui_config(1.0));
@@ -787,10 +785,4 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
         .call("task:list", json!({}))
         .expect("the core lists");
     assert_eq!(listed[0]["title"], "Badge me");
-    app.rpc()
-        .call(
-            "extension:setBuiltin",
-            json!({ "id": "vorn.tasks", "on": true }),
-        )
-        .expect("switched on");
 }

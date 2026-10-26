@@ -62,7 +62,7 @@ pub enum Quoting {
     Posix,
     /// Single quotes, `''` for a quote inside.
     PowerShell,
-    /// Double quotes, with `"`, `%` and `^` caret-escaped.
+    /// Double quotes; carries no `"`, `%` or `^` (see [`Quoting::carries`]).
     Cmd,
 }
 
@@ -82,6 +82,14 @@ impl Quoting {
                 }
             }
         }
+    }
+
+    /// Whether [`Quoting::quote`] hands `value` to the program unchanged.
+    /// No shell carries a control character; cmd also expands `%`, ends the
+    /// quoted word at `"` and keeps `^` inside quotes, whatever is before them.
+    pub fn carries(self, value: &str) -> bool {
+        !value.chars().any(char::is_control)
+            && (self != Quoting::Cmd || !value.contains(['"', '%', '^']))
     }
 
     /// `value` as one word for this shell; unquoted when it is only
@@ -542,6 +550,11 @@ mod tests {
         assert_eq!(Quoting::Cmd.quote("50%"), "\"50^%\"");
         assert_eq!(Quoting::Cmd.quote("a\"b^"), "\"a^\"b^^\"");
         assert_eq!(Quoting::PowerShell.quote("it's"), "'it''s'");
+        assert!(Quoting::Cmd.carries(r"C:\k\my key"));
+        for word in ["50%", "a\"b", "a^b", "a\nb"] {
+            assert!(!Quoting::Cmd.carries(word), "{word:?}");
+        }
+        assert!(Quoting::Posix.carries("50%\"^") && !Quoting::Posix.carries("a\u{1b}"));
         assert_eq!(Quoting::Posix.quote("é"), "'é'");
     }
 

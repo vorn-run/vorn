@@ -407,6 +407,9 @@ impl<H: Host> Engine<H> {
         context: Option<Context>,
         options: Options,
     ) -> Result<Started, String> {
+        if let Some(why) = self.inner.host.refuses(workflow) {
+            return Err(why);
+        }
         // A trigger its extension fans out (a connector's poll) is the scheduler's; a click on Run asks it.
         if self.inner.registry.fans_out(workflow.trigger_type())
             && context.as_ref().is_none_or(|c| c.connector_item.is_none())
@@ -579,6 +582,9 @@ impl<H: Host> Engine<H> {
         workflow: &Workflow,
         failed: &WorkflowExecution,
     ) -> Result<Started, String> {
+        if let Some(why) = self.inner.host.refuses(workflow) {
+            return Err(why);
+        }
         let context = self.context_from_run(failed).await;
         let params = format!(
             "{}:retry:{}",

@@ -83,6 +83,9 @@ jobs:
           rustup toolchain install
           rustup target add wasm32-unknown-unknown
 
+      # The extension packs vornd ships, from shipped.toml.
+      - uses: ./.github/actions/shipped
+
       - name: Brotli
         run: sudo apt-get update && sudo apt-get install -y brotli
 
@@ -162,6 +165,9 @@ jobs:
       - name: Rust toolchain
         working-directory: packages/core
         run: rustup toolchain install
+
+      # The extension packs vornd ships, from shipped.toml.
+      - uses: ./.github/actions/shipped
 
       # Its own key, so this build-only cache never takes the Core workflow's
       # slot. target/ holds the Ghostty checkout and Zig's caches as well as

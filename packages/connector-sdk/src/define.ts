@@ -53,15 +53,14 @@ export const HOST_PERMISSIONS: Record<ExtensionHostMethod, ExtensionPermission> 
   usage: 'agent.usage'
 }
 
-/** Session types an extension may name, so a manifest cannot invent one. */
-export const EXTENSION_AGENTS: ExtensionAgent[] = [
-  'claude',
-  'copilot',
-  'codex',
-  'opencode',
-  'gemini',
-  'shell'
-]
+/** An agent id as an adapter may name one, the rule vornd holds them to; `shell` reads as one too. */
+const AGENT_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/
+
+/** Whether `agent` reads as an agent id: which adapters are installed is the host's to know. */
+export function isExtensionAgent(agent: unknown): agent is ExtensionAgent {
+  return typeof agent === 'string' && AGENT_ID_PATTERN.test(agent)
+}
+
 export const EXTENSION_PLATFORMS: ExtensionPlatform[] = ['darwin', 'linux', 'win32']
 
 /** A pane's page lives under `web/` in the package, so a pack carries one named directory. */
@@ -430,10 +429,10 @@ function assertPredicate(id: string, where: string, predicate?: ActivationPredic
     }
   }
   for (const agent of predicate.agent ?? []) {
-    if (!EXTENSION_AGENTS.includes(agent)) {
+    if (!isExtensionAgent(agent)) {
       throw new Error(
         `Extension ${id} ${where} names unknown agent ${JSON.stringify(agent)}; ` +
-          `expected ${EXTENSION_AGENTS.join(', ')}`
+          'expected an agent id: lowercase letters, digits and dashes, starting with a letter'
       )
     }
   }

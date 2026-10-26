@@ -204,11 +204,11 @@ Vorn supports two ways of working. **Interactive**: open a grid of terminals and
 
 ### Multi-Agent Grid
 
-Run Claude, Copilot, Codex, OpenCode, and Gemini in a responsive grid layout. Resize, reorder, minimize, and filter by status. Focus any terminal fullscreen with one click, or switch to a tab view for sequential browsing. Real-time status detection shows whether each agent is running, waiting, idle, or in an error state.
+Run Claude, Copilot, Codex, and Gemini in a responsive grid layout. Resize, reorder, minimize, and filter by status. Focus any terminal fullscreen with one click, or switch to a tab view for sequential browsing. Real-time status detection shows whether each agent is running, waiting, idle, or in an error state.
 
 ### Panes Beside the Terminal
 
-A session holds its own terminals, a browser, an editor and an iOS simulator. Draw on the page and the agent sees it; it reads and drives all of them to check its own work.
+A session holds its own terminals, a browser, an editor and, with the Device extension from the catalog, an iOS simulator. Draw on the page and the agent sees it; it reads and drives all of them to check its own work.
 
 <p align="center">
   <img src="docs/screenshots/panes.png" alt="A session with a terminal and a browser pane side by side" width="700" />
@@ -264,7 +264,7 @@ Agents running inside Vorn can access tasks, projects, workflows, sessions, and 
 
 ### Floating Widget
 
-A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, answer permission requests and agent questions (including the rules an agent offers to keep), jump back into any session with one click, or fold it to a single line of counts. It is a built-in extension, off until you turn it on in Settings › Extensions; Cmd+Alt+W shows or hides it.
+A minimal always-on-top overlay that stays visible while you work in other apps. See agent status at a glance, answer permission requests and agent questions (including the rules an agent offers to keep), jump back into any session with one click, or fold it to a single line of counts. It is an extension: install the Widget from the catalog in Settings › Extensions; Cmd+Alt+W shows or hides it.
 
 <p align="center">
   <img src="docs/screenshots/floating-widget.png" alt="Floating widget" width="400" />
@@ -287,10 +287,10 @@ A minimal always-on-top overlay that stays visible while you work in other apps.
 | Claude Code    | `claude`     |
 | GitHub Copilot | `gh copilot` |
 | OpenAI Codex   | `codex`      |
-| OpenCode       | `opencode`   |
 | Google Gemini  | `gemini`     |
+| Hermes         | `hermes`     |
 
-Any CLI tool that runs in a terminal works with Vorn. These are the agents with built-in status detection and icons.
+Any CLI tool that runs in a terminal works with Vorn. These are the agents Vorn installs by default, with status detection and icons; others, OpenCode among them, install from the catalog in Settings › Extensions.
 
 ## Development
 

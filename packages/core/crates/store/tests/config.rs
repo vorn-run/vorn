@@ -426,7 +426,7 @@ mod headless_args {
         save_config(&mut store, make_config(|_| {}), &[]);
 
         let mut loaded = load_config(&mut store);
-        let (first, last) = (common::agent(0), common::agent(4));
+        let (first, last) = (common::agent(0), common::agent(3));
         let mut changed = default_agent_commands()[last.as_str()].clone();
         changed["headlessArgs"] = json!(["-y", "--no-confirm"]);
         loaded["agentCommands"][last.as_str()] = changed;

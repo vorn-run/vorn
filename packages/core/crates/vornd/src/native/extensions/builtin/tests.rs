@@ -1,12 +1,8 @@
 use std::sync::Mutex;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 use vorn_extensions::api::types::{Request, Response};
 use vorn_extensions::api::ExtError;
-use vorn_extensions::events::{
-    AGENT_PERMISSION, AGENT_PERMISSION_CLOSED, SESSION_EXITED, WORKTREE_IDLE,
-};
 use vorn_extensions::gate::{Answer, Caller, StorageCall, World};
 use vorn_extensions::lifecycle::{Lifecycle, Policy};
 use vorn_extensions::pack::PackStore;
@@ -26,19 +22,6 @@ impl World for Core {
     fn call(&self, caller: &Caller, method: &str, args: Value) -> Answer<Value> {
         guard(&self.calls).push((format!("{} {method}", caller.extension), args));
         let answer = match method {
-            "worktrees.list" => json!([
-                { "projectPath": "/p", "projectName": "p", "path": "/p", "name": "p",
-                  "branch": "main", "main": true, "orphan": false, "dirty": false,
-                  "sizeBytes": 0, "artifactBytes": 0, "sessionIds": [], "verdict": "keep", "reasons": "main" },
-                { "projectPath": "/p", "projectName": "p", "path": "/p/.vorn-worktrees/fix", "name": "fix",
-                  "branch": "fix", "main": false, "orphan": false, "dirty": true, "base": "main", "idleDays": 0,
-                  "sizeBytes": 2048, "artifactBytes": 0, "sessionIds": ["t1"], "verdict": "review", "reasons": "dirty" },
-                { "projectPath": "/p", "projectName": "p", "path": "/p/.vorn-worktrees/old", "name": "old",
-                  "branch": "feat/old", "main": false, "orphan": false, "dirty": false, "base": "main", "idleDays": 20,
-                  "sizeBytes": 4096, "artifactBytes": 1024, "sessionIds": [], "verdict": "remove",
-                  "reasons": "merged; idle 20 days" }
-            ]),
-            "worktrees.remove" => json!({ "removed": true }),
             "sessions.list" => json!([
                 { "id": "t1", "name": "api", "agent": "acme", "status": "waiting" }
             ]),
@@ -58,7 +41,7 @@ impl World for Core {
     fn storage(
         &self,
         caller: &Caller,
-        _: Option<std::path::PathBuf>,
+        _: Option<vorn_extensions::pack::Migrations>,
         call: StorageCall,
     ) -> Answer<Value> {
         let mut kept = guard(&self.kept);
@@ -77,687 +60,60 @@ impl World for Core {
     }
 }
 
-impl Core {
-    fn keep(&self, extension: &str, key: &str, value: Value) {
-        guard(&self.kept).insert((extension.to_owned(), key.to_owned()), value);
-    }
-
-    /// The simulators the Device asked the client to shut down, in order.
-    fn shut_down(&self) -> Vec<String> {
-        self.asked("video.call")
-            .iter()
-            .filter(|a| a["op"] == "shutdown")
-            .filter_map(|a| a["params"]["udid"].as_str().map(str::to_owned))
-            .collect()
-    }
-
-    fn asked(&self, method: &str) -> Vec<Value> {
-        guard(&self.calls)
-            .iter()
-            .filter(|(m, _)| m.ends_with(&format!(" {method}")))
-            .map(|(_, a)| a.clone())
-            .collect()
-    }
-}
-
 struct Setup {
-    dir: tempfile::TempDir,
-    core: Arc<Core>,
-    router: Arc<Router>,
+    _dir: tempfile::TempDir,
     builtins: Builtins,
 }
 
 fn setup() -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let core = Arc::new(Core::default());
-    let mut settings = RouterSettings::new(Vec::new(), "test");
-    // Worktree cleanup is a component; vornd's own build compiles it with the vorn command.
-    settings.compiler = vorn_extensions::component::Compiler::InProcess;
     let router = Router::new(
         PackStore::new(dir.path().join("connectors")),
         Lifecycle::new(Policy::default()),
-        Arc::clone(&core) as Arc<dyn World>,
-        settings,
+        core as Arc<dyn World>,
+        RouterSettings::new(Vec::new(), "test"),
         vorn_extensions::events::Bus::new(),
     );
-    let builtins = Builtins::new(
-        Arc::clone(&router),
-        dir.path().join("builtins.json"),
-        Vec::new(),
-    );
+    let builtins = Builtins::new(router, dir.path().join("builtins.json"), Vec::new());
     Setup {
-        dir,
-        core,
-        router,
+        _dir: dir,
         builtins,
     }
-}
-
-async fn until(mut done: impl FnMut() -> bool) {
-    for _ in 0..200 {
-        if done() {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("never happened");
-}
-
-#[tokio::test]
-async fn every_shipped_contribution_draws_a_tree_or_draws_nothing() {
-    let s = setup();
-    s.builtins.set("vorn.widget", true).unwrap();
-    let listed = s.builtins.contributions();
-    let kinds: Vec<(&str, &str)> = listed
-        .iter()
-        .map(|c| {
-            (
-                c["extension"].as_str().unwrap(),
-                c["kind"].as_str().unwrap(),
-            )
-        })
-        .collect();
-    assert_eq!(
-        kinds,
-        [
-            ("vorn.files", "panes"),
-            ("vorn.files", "cards"),
-            ("vorn.browser", "panes"),
-            ("vorn.device", "panes"),
-            ("vorn.ssh", "settings"),
-            ("vorn.blocks", "shell"),
-            ("vorn.worktrees", "sidebar"),
-            ("vorn.worktrees", "settings"),
-            ("vorn.worktrees", "menus"),
-            ("vorn.worktrees", "dialogs"),
-            ("vorn.widget", "commands"),
-            ("vorn.widget", "windows"),
-            ("vorn.widget", "windows"),
-        ]
-    );
-    for c in &listed {
-        assert_eq!(c["builtin"], true);
-        assert!(c.get("view").is_none() && c.get("errors").is_none(), "{c}");
-        let draws = !matches!(c["kind"].as_str(), Some("menus" | "commands"));
-        assert_eq!(c["tree"] == true, draws, "{c}");
-    }
-}
-
-/// Starts the Widget's component, as a window asking for its tree does.
-async fn widget_drawn(s: &Setup, point: &str) -> String {
-    let answer = s
-        .builtins
-        .call(
-            "vorn.widget",
-            vorn_tree::RENDER,
-            json!({ "point": point, "surface": {} }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let tree = vorn_tree::read(&answer).expect("a tree the client draws");
-    serde_json::to_string(&tree.tree).unwrap()
-}
-
-#[tokio::test]
-async fn offers_an_idle_worktree_and_forgets_it_when_kept() {
-    let s = setup();
-    s.builtins.start();
-    // A worktree with a session still in it is not offered.
-    s.router.bus().emit(WORKTREE_IDLE, || {
-        json!({ "sessionId": "t1", "projectPath": "/p", "worktreePath": "/p/.vorn-worktrees/fix" })
-    });
-    until(|| !s.core.asked("worktrees.list").is_empty()).await;
-    tokio::time::sleep(Duration::from_millis(30)).await;
-    assert!(s.router.rows("vorn.worktrees", "idle").is_empty());
-
-    let asked = s
-        .builtins
-        .call(
-            "vorn.worktrees",
-            "ask",
-            json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p" }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(asked, json!({ "open": "confirm" }));
-    let row = &s.router.rows("vorn.worktrees", "asked")[0];
-    assert_eq!(
-        (row["sessions"].clone(), row["dirty"].clone()),
-        (json!(1), json!(true))
-    );
-
-    let removed = s
-        .builtins
-        .call("vorn.worktrees", "confirm", Value::Null)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(removed["toast"], "Worktree removed");
-    assert_eq!(
-        s.core.asked("sessions.close"),
-        [json!({ "sessionId": "t1" })]
-    );
-    assert_eq!(
-        s.core.asked("worktrees.remove"),
-        [json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p", "force": true })]
-    );
-    assert!(s.router.rows("vorn.worktrees", "asked").is_empty());
-
-    let main = s
-        .builtins
-        .call(
-            "vorn.worktrees",
-            "ask",
-            json!({ "worktree": "/p", "project": "/p" }),
-        )
-        .await
-        .unwrap();
-    assert!(main
-        .unwrap_err()
-        .message
-        .contains("not a worktree Vorn removes"));
-}
-
-#[tokio::test]
-async fn lists_every_worktree_for_settings() {
-    let s = setup();
-    let running = |s: &Setup| {
-        s.builtins
-            .list()
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|b| b["id"] == "vorn.worktrees" && b["running"] == true)
-    };
-    assert!(!running(&s), "nothing has called it yet");
-    s.builtins
-        .call("vorn.worktrees", "scan", Value::Null)
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(running(&s), "its call started its component");
-    // The main checkout is not one to clean up, so only the worktrees are listed, largest first.
-    let rows = s.router.rows("vorn.worktrees", "worktrees");
-    assert_eq!(rows.len(), 2);
-    let (old, fix) = (&rows[0], &rows[1]);
-    assert_eq!(
-        (&fix["name"], &fix["size"], &fix["detail"], &fix["branch"]),
-        (
-            &json!("fix"),
-            &json!("2 KB"),
-            &json!("today · dirty"),
-            &json!("fix")
-        )
-    );
-    assert_eq!(
-        (
-            &fix["project"],
-            &fix["project_path"],
-            &fix["project_size"],
-            &fix["against"]
-        ),
-        (&json!("p"), &json!("/p"), &json!("6 KB"), &json!("vs main"))
-    );
-    assert_eq!(
-        (
-            &fix["remove_clean"],
-            &fix["remove_dirty"],
-            &fix["verdict_label"]
-        ),
-        (&json!(false), &json!(true), &json!("Review"))
-    );
-    // Its age is said once, though the verdict's reasons say it too.
-    assert_eq!(
-        (
-            &old["detail"],
-            &old["verdict_label"],
-            &old["artifact_bytes"]
-        ),
-        (
-            &json!("idle 20 days · merged"),
-            &json!("Removable"),
-            &json!(1024)
-        )
-    );
-    // The totals leave out what a session holds: fix's 2 KB counts on disk only.
-    let sum = &s.router.rows("vorn.worktrees", "summary")[0];
-    assert_eq!(
-        (
-            &sum["total"],
-            &sum["build"],
-            &sum["removable"],
-            &sum["reclaimable"]
-        ),
-        (&json!("6 KB"), &json!("1 KB"), &json!("4 KB"), &json!(true))
-    );
-    assert_eq!(
-        sum["reclaim_confirm"],
-        "Delete the build output in 1 worktree? This frees 1 KB."
-    );
-    let scan = s.router.rows("vorn.worktrees", "scan");
-    assert_eq!(
-        (&scan[0]["busy"], &scan[0]["error"]),
-        (&json!(false), &json!(""))
-    );
 }
 
 #[test]
 fn lists_what_each_adds_and_uses_for_settings() {
     let s = setup();
     let list = s.builtins.list();
-    let widget = list
+    let artifacts = list
         .as_array()
         .unwrap()
         .iter()
-        .find(|b| b["id"] == "vorn.widget")
+        .find(|b| b["id"] == "vorn.artifacts")
         .unwrap();
-    assert_eq!(widget["on"], false);
-    assert!(widget["contributes"]["windows"]
-        .as_array()
-        .is_some_and(|w| !w.is_empty()));
-    let uses = widget["declares"]["uses"].as_array().unwrap();
+    assert_eq!(artifacts["on"], true);
+    let uses = artifacts["declares"]["uses"].as_array().unwrap();
     assert!(uses.iter().any(|u| u == "sessions.read"), "{uses:?}");
 }
 
-#[tokio::test]
-async fn the_widget_is_off_until_switched_on_and_kept_so() {
+#[test]
+fn every_bundled_extension_s_id_is_kept_from_installs() {
+    let ids = bundled_ids().expect("every bundled manifest reads");
     let s = setup();
-    s.builtins.start();
-    let off = s
+    let mut registered: std::collections::BTreeSet<String> = s
         .builtins
-        .call("vorn.widget", "allow", json!({ "id": "r1" }))
-        .await
+        .list()
+        .as_array()
         .unwrap()
-        .unwrap_err();
-    assert_eq!(off.code, "off");
-    assert!(off.message.ends_with("Settings › Extensions"), "{off}");
-    assert!(s
-        .builtins
-        .contributions()
         .iter()
-        .all(|c| c["extension"] != "vorn.widget"));
-
-    s.builtins.set("vorn.widget", true).unwrap();
-    assert!(widget_drawn(&s, "compact").await.contains("waiting"));
-    until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
-    s.router.bus().emit(AGENT_PERMISSION, || {
-        json!({ "requestId": "r1", "terminalId": "t1", "toolName": "Bash",
-                "toolInput": { "command": "cargo test" } })
-    });
-    until(|| s.router.rows("vorn.widget", "permissions").len() == 1).await;
-    let row = &s.router.rows("vorn.widget", "permissions")[0];
-    assert_eq!(
-        (row["agent"].clone(), row["description"].clone()),
-        (json!("api"), json!("cargo test"))
-    );
-    assert!(widget_drawn(&s, "widget").await.contains("allow:r1"));
-    let click = json!({ "point": "widget", "event": { "id": "allow:r1", "kind": "click" } });
-    s.builtins
-        .call("vorn.widget", vorn_tree::EVENT, click)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        s.core.asked("permissions.resolve"),
-        [json!({ "requestId": "r1", "allow": true })]
-    );
-    assert!(s.router.rows("vorn.widget", "permissions").is_empty());
-
-    s.router.bus().emit(
-        AGENT_PERMISSION,
-        || json!({ "requestId": "r2", "toolName": "Edit" }),
-    );
-    until(|| s.router.rows("vorn.widget", "permissions").len() == 1).await;
-    s.router
-        .bus()
-        .emit(AGENT_PERMISSION_CLOSED, || json!({ "requestId": "r2" }));
-    until(|| s.router.rows("vorn.widget", "permissions").is_empty()).await;
-
-    let again = Builtins::new(
-        Arc::clone(&s.router),
-        s.dir.path().join("builtins.json"),
-        Vec::new(),
-    );
-    assert!(again.is_on("vorn.widget"));
-    s.builtins.set("vorn.widget", false).unwrap();
-    assert!(s.router.rows("vorn.widget", "agents").is_empty());
-    s.router
-        .bus()
-        .emit(AGENT_PERMISSION, || json!({ "requestId": "r3" }));
-    tokio::time::sleep(Duration::from_millis(30)).await;
-    assert!(s.router.rows("vorn.widget", "permissions").is_empty());
-}
-
-#[tokio::test]
-async fn the_widget_keeps_an_offered_rule_and_answers_questions() {
-    let s = setup();
-    s.builtins.start();
-    s.builtins.set("vorn.widget", true).unwrap();
-    widget_drawn(&s, "widget").await;
-    until(|| s.router.rows("vorn.widget", "agents").len() == 1).await;
-    let rows = |c: &str| s.router.rows("vorn.widget", c);
-    s.router.bus().emit(AGENT_PERMISSION, || {
-        json!({ "requestId": "r1", "terminalId": "t1", "toolName": "Bash",
-                "toolInput": { "command": "npm test" },
-                "permissionSuggestions": [
-                    { "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "npm test" }] },
-                    { "type": "setMode", "mode": "acceptEdits" }
-                ] })
-    });
-    until(|| rows("suggestions").len() == 2).await;
-    assert_eq!(rows("suggestions")[1]["label"], "Auto-accept edits");
-    s.builtins
-        .call("vorn.widget", "suggest", json!({ "id": "r1:0" }))
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        s.core.asked("permissions.resolve"),
-        [json!({ "requestId": "r1", "allow": true, "suggestion": 0 })]
-    );
-    assert!(rows("permissions").is_empty() && rows("suggestions").is_empty());
-
-    s.router.bus().emit(AGENT_PERMISSION, || {
-        json!({ "requestId": "r2", "terminalId": "t1", "toolName": "AskUserQuestion",
-                "questions": [
-                    { "header": "Theme", "question": "Which?", "options": [{ "label": "Dark" }, { "label": "Light" }] },
-                    { "question": "Tabs?", "options": [{ "label": "Yes" }] }
-                ] })
-    });
-    until(|| rows("options").len() == 3).await;
-    assert_eq!(rows("permissions")[0]["question"], json!(true));
-    assert_eq!(rows("options")[0]["ask"], "THEME: Which?");
-    let call = |action: &'static str, id: &'static str| {
-        s.builtins.call("vorn.widget", action, json!({ "id": id }))
-    };
-    call("pick", "r2:0:0").await.unwrap().unwrap();
-    call("pick", "r2:0:1").await.unwrap().unwrap();
-    assert!(call("submit", "r2").await.unwrap().is_err());
-    assert_eq!(rows("permissions")[0]["ready"], json!(false));
-    call("pick", "r2:1:0").await.unwrap().unwrap();
-    assert_eq!(rows("permissions")[0]["ready"], json!(true));
-    let picked: Vec<Value> = rows("options")
-        .iter()
-        .map(|o| o["picked"].clone())
+        .map(|e| e["id"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(picked, [json!(false), json!(true), json!(true)]);
-    call("submit", "r2").await.unwrap().unwrap();
+    registered.insert(file::parse_builtin(connectors::MANIFEST).unwrap().id);
+    assert_eq!(ids, registered);
+    // Tasks and Workflows are installed from their packs like any extension.
     assert_eq!(
-        s.core.asked("permissions.resolve")[1],
-        json!({ "requestId": "r2", "allow": true, "answers": { "0": "Light", "1": "Yes" } })
+        ids.into_iter().collect::<Vec<_>>(),
+        ["vorn.artifacts", "vorn.connectors"]
     );
-    assert!(rows("permissions").is_empty() && rows("options").is_empty());
-}
-
-#[tokio::test]
-async fn reclaims_and_removes_the_worktrees_settings_checks() {
-    let s = setup();
-    s.builtins
-        .call("vorn.worktrees", "scan", Value::Null)
-        .await
-        .unwrap()
-        .unwrap();
-    let done = s
-        .builtins
-        .call("vorn.worktrees", "reclaim_all", Value::Null)
-        .await
-        .unwrap()
-        .unwrap();
-    // fix has no build output and a session, so only old's goes.
-    assert_eq!(done["reclaimed"], 1);
-    assert_eq!(
-        s.core.asked("worktrees.reclaim"),
-        [json!({ "worktree": "/p/.vorn-worktrees/old" })]
-    );
-    let ids = json!({ "ids": ["/p/.vorn-worktrees/old"] });
-    let done = s
-        .builtins
-        .call("vorn.worktrees", "remove_many", ids)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(done["toast"], "Removed 1 worktree");
-    let removed = s.core.asked("worktrees.remove");
-    assert_eq!(removed[0]["worktree"], "/p/.vorn-worktrees/old");
-    assert_eq!(removed[0]["force"], false);
-    let none = s
-        .builtins
-        .call("vorn.worktrees", "remove_many", json!({ "ids": [] }))
-        .await
-        .unwrap();
-    assert!(none.is_err());
-}
-
-#[tokio::test]
-async fn the_worktrees_page_is_a_tree_whose_bulk_remove_takes_the_checked() {
-    let s = setup();
-    s.builtins
-        .call("vorn.worktrees", "scan", Value::Null)
-        .await
-        .unwrap()
-        .unwrap();
-    let render = json!({ "point": "worktrees", "surface": { "cells": false } });
-    let answer = s
-        .builtins
-        .call("vorn.worktrees", vorn_tree::RENDER, render)
-        .await
-        .unwrap()
-        .unwrap();
-    let page = vorn_tree::read(&answer).expect("a tree the client draws");
-    let text = serde_json::to_string(&page.tree).unwrap();
-    for said in [
-        "Build output, rebuilt by a reinstall",
-        "vs main",
-        "feat/old",
-        "Removable",
-    ] {
-        assert!(text.contains(said), "{said} in {text}");
-    }
-    let event = json!({ "point": "worktrees", "event": {
-        "id": "remove_many", "kind": "click", "selected": ["/p/.vorn-worktrees/old"] } });
-    let done = s
-        .builtins
-        .call("vorn.worktrees", vorn_tree::EVENT, event)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(done["toast"], "Removed 1 worktree");
-    let stray = json!({ "point": "worktrees", "event": { "id": "confirm", "kind": "click" } });
-    let refused = s
-        .builtins
-        .call("vorn.worktrees", vorn_tree::EVENT, stray)
-        .await
-        .unwrap();
-    assert!(refused.is_err(), "a click runs only the page's own buttons");
-}
-
-#[tokio::test]
-async fn the_idle_worktrees_and_the_removal_dialog_are_trees() {
-    let s = setup();
-    s.builtins.start();
-    let drawn = |point: &'static str| {
-        s.builtins.call(
-            "vorn.worktrees",
-            vorn_tree::RENDER,
-            json!({ "point": point, "surface": {} }),
-        )
-    };
-    let tell = |point: &'static str, id: &'static str| {
-        s.builtins.call(
-            "vorn.worktrees",
-            vorn_tree::EVENT,
-            json!({ "point": point, "event": { "id": id, "kind": "click" } }),
-        )
-    };
-    let empty = drawn("idle").await.unwrap().unwrap();
-    assert!(vorn_tree::is_blank(&vorn_tree::read(&empty).unwrap().tree));
-    s.router.bus().emit(WORKTREE_IDLE, || {
-        json!({ "sessionId": "t9", "projectPath": "/p", "worktreePath": "/p/.vorn-worktrees/old" })
-    });
-    until(|| !s.router.rows("vorn.worktrees", "idle").is_empty()).await;
-    let idle = drawn("idle").await.unwrap().unwrap();
-    let text = idle.to_string();
-    assert!(
-        text.contains("keep:/p/.vorn-worktrees/old") && text.contains("old"),
-        "{text}"
-    );
-    assert_eq!(
-        tell("idle", "keep:/p/.vorn-worktrees/old")
-            .await
-            .unwrap()
-            .unwrap(),
-        Value::Null
-    );
-    assert!(s.router.rows("vorn.worktrees", "idle").is_empty());
-
-    s.builtins
-        .call(
-            "vorn.worktrees",
-            "ask",
-            json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p" }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let dialog = drawn("confirm").await.unwrap().unwrap().to_string();
-    for said in [
-        "Remove fix?",
-        "Branch fix",
-        "Its 1 running sessions are closed first.",
-        "uncommitted changes",
-    ] {
-        assert!(dialog.contains(said), "{said} in {dialog}");
-    }
-    let cancelled = tell("confirm", "cancel").await.unwrap().unwrap();
-    assert_eq!(cancelled, json!({ "close": true }));
-    assert!(s.router.rows("vorn.worktrees", "asked").is_empty());
-    s.builtins
-        .call(
-            "vorn.worktrees",
-            "ask",
-            json!({ "worktree": "/p/.vorn-worktrees/fix", "project": "/p" }),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-    let removed = tell("confirm", "confirm").await.unwrap().unwrap();
-    assert_eq!(
-        (removed["close"].clone(), removed["toast"].clone()),
-        (json!(true), json!("Worktree removed"))
-    );
-}
-
-#[tokio::test]
-async fn the_device_lets_go_of_ended_sessions_simulators_and_of_all_once_off() {
-    let s = setup();
-    let device = device::component();
-    // Compiled before the clock starts, as vornd does ahead: `until` times the Device, not the compiler.
-    let bundled = vorn_extensions::component::Bundled {
-        manifest: Arc::new(file::parse_builtin(device.manifest).unwrap()),
-        wasm: device.wasm,
-    };
-    s.router.prepare_bundled(&bundled).await.unwrap();
-    // Only the Device, so no other built-in compiles beside it.
-    let builtins = Builtins::with(
-        Arc::clone(&s.router),
-        s.dir.path().join("device.json"),
-        vec![Arc::new(device)],
-    );
-    let claim = |udid: &str| json!({ "udid": udid, "name": "iPhone", "bootedHere": true });
-    // Kept from before vornd started: `gone` ended meanwhile, `t1` still runs.
-    s.core.keep(
-        device::ID,
-        "claims",
-        json!({ "gone": claim("u1"), "t1": claim("u2") }),
-    );
-    builtins.start();
-    until(|| s.core.shut_down() == ["u1"]).await;
-
-    s.router.bus().emit(
-        SESSION_EXITED,
-        || json!({ "sessionId": "t1", "kind": "terminal" }),
-    );
-    until(|| s.core.shut_down() == ["u1", "u2"]).await;
-    assert_eq!(
-        guard(&s.core.kept)[&(device::ID.to_owned(), "claims".to_owned())],
-        json!({})
-    );
-
-    s.core
-        .keep(device::ID, "claims", json!({ "t1": claim("u3") }));
-    builtins.set(device::ID, false).unwrap();
-    until(|| s.core.shut_down() == ["u1", "u2", "u3"]).await;
-    assert!(s.router.rows(device::ID, "open").is_empty());
-}
-
-#[test]
-fn the_old_workflow_editor_switch_folds_into_workflows_once() {
-    // (Workflows as kept, the old editor as kept, Workflows after.)
-    let cases = [
-        (Some(true), true, true),
-        (Some(false), true, true),
-        (Some(true), false, true),
-        (Some(false), false, false),
-        (None, false, true),
-    ];
-    for (workflows, editor, merged) in cases {
-        let s = setup();
-        let file = s.dir.path().join("builtins.json");
-        let mut kept = serde_json::Map::new();
-        if let Some(on) = workflows {
-            kept.insert(vorn_workflows::ID.into(), json!(on));
-        }
-        kept.insert(OLD_WORKFLOW_EDITOR.into(), json!(editor));
-        std::fs::write(&file, Value::Object(kept).to_string()).unwrap();
-
-        let started: Vec<Arc<dyn Builtin>> = vec![Arc::new(wasm::workflows())];
-        let b = Builtins::new(Arc::clone(&s.router), file.clone(), started);
-        assert_eq!(
-            b.is_on(vorn_workflows::ID),
-            merged,
-            "{workflows:?} {editor}"
-        );
-        let saved: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!(saved.get(OLD_WORKFLOW_EDITOR), None);
-        assert_eq!(saved[vorn_workflows::ID], json!(merged));
-    }
-}
-
-#[test]
-fn tasks_and_workflows_buttons_follow_their_top_bar_setting() {
-    let workflows = vorn_extensions::manifest::file::parse_builtin(wasm::workflows().manifest())
-        .expect("the Workflows manifest");
-    let s = setup();
-    for (m, view) in [(tasks::manifest(), "board"), (workflows, "workflows")] {
-        let listed = |on: bool| {
-            let settings = serde_json::Map::from_iter([("top_bar".to_owned(), json!(on))]);
-            vorn_extensions::points::listed(&m, &settings)
-        };
-        let button = |list: &[Value]| {
-            let v = list
-                .iter()
-                .find(|p| p["kind"] == "views" && p["id"] == view);
-            v.map(|v| v["button"].clone())
-        };
-        assert_eq!(button(&listed(true)), Some(json!(true)), "{view}");
-        assert_eq!(
-            button(&listed(false)),
-            Some(json!(false)),
-            "{view} stays a view"
-        );
-        let defaults = s.router.preferences(&m);
-        assert_eq!(
-            defaults.get("top_bar"),
-            Some(&json!(true)),
-            "{view} on by default"
-        );
-    }
-    // The Tasks pane is in the card menu whatever the top bar shows.
-    let m = tasks::manifest();
-    let off = serde_json::Map::from_iter([("top_bar".to_owned(), json!(false))]);
-    assert!(vorn_extensions::points::listed(&m, &off)
-        .iter()
-        .any(|p| p["kind"] == "panes" && p["id"] == "tasks"));
 }

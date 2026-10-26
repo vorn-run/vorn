@@ -52,6 +52,9 @@ struct Found {
     source: String,
     title: Option<String>,
     path: PathBuf,
+    /// An extension's layout: its folder and the file in it, read without
+    /// following a link below the folder.
+    packed: Option<(PathBuf, String)>,
 }
 
 fn found(native: &Native) -> Vec<Found> {
@@ -74,17 +77,19 @@ fn found(native: &Native) -> Vec<Found> {
             source: "user".into(),
             title: None,
             path,
+            packed: None,
         }));
     }
     if let Some(host) = native.extensions.get() {
         out.extend(
             host.layout_files()
                 .into_iter()
-                .map(|(ext, name, title, path)| Found {
+                .map(|(ext, name, title, folder, file)| Found {
                     name,
                     source: ext,
                     title: Some(title),
-                    path,
+                    path: folder.join(&file),
+                    packed: Some((folder, file)),
                 }),
         );
     }
@@ -118,8 +123,12 @@ fn pick(native: &Native, params: &Value) -> Result<Found, String> {
 }
 
 fn read(native: &Native, found: &Found) -> Result<(String, Layout), String> {
-    let text = std::fs::read_to_string(&found.path)
-        .map_err(|e| format!("could not read {}: {e}", found.path.display()))?;
+    let text = match &found.packed {
+        Some((folder, file)) => vorn_extensions::reach::read_in(folder, file)
+            .and_then(|b| String::from_utf8(b).map_err(std::io::Error::other)),
+        None => std::fs::read_to_string(&found.path),
+    }
+    .map_err(|e| format!("could not read {}: {e}", found.path.display()))?;
     let file = found.path.display().to_string();
     let agents = agents(native);
     let ids: Vec<&str> = agents.iter().map(String::as_str).collect();

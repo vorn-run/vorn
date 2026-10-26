@@ -26,6 +26,8 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "http1"] }
 serde = { version = "1", features = ["derive"] }
+# Hashes a project's workflow file as the user turned it on; already in the tree.
+sha2 = { version = "0.10", default-features = false }
 # Reads a shipped adapter's manifest id; already in the tree.
 toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 # Key order kept, so an answer vornd frames reads as the server's does.
@@ -39,8 +41,6 @@ vorn-sessiond-wire = { path = "../sessiond-wire" }
 vorn-engine = { path = "../engine", optional = true }
 vorn-size = { path = "../size" }
 vorn-agents = { path = "../agents" }
-# The agent adapters Vorn ships, as data.
-vorn-adapters = { path = "../adapters" }
 vorn-git = { path = "../vorn-git" }
 # The Wasm runtime only: a component runs once the vorn command has compiled it.
 vorn-extensions = { path = "../extensions", features = ["wasm"] }
@@ -78,13 +78,12 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
 
-# Builds the extensions Vorn ships as Wasm components, which vornd carries.
 [build-dependencies]
-vorn-guest-build = { path = "../guest-build" }
+# The shipped set's lock is read and each pack checked against its pin; both already in the tree.
+sha2 = { version = "0.10", default-features = false }
+toml = { version = "1.1", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
-# Tasks' triggers, built natively to fire them the way its component does.
-vorn-ext-tasks = { path = "../../extensions/tasks" }
 # The built-ins' tests compile their components in process.
 vorn-extensions = { path = "../extensions", features = ["wasm-compile"] }
 # Reads vorn.db directly to see an extension's tables come and go; already in the tree.

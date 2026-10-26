@@ -1,0 +1,8 @@
+id = "vorn.good"
+name = "Good"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[actions.hello]
+title = "Hello"
+command = ["sh", "hello.sh"]

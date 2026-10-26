@@ -10,11 +10,11 @@
 //! its own endpoint and the clients it serves.
 
 pub mod builtin;
+pub mod hosted;
 pub mod routes;
 pub mod world;
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures_util::future::BoxFuture;
 use serde_json::{json, Map, Value};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, Notify};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_extensions::activation::{self, Subject};
@@ -35,7 +35,8 @@ use vorn_extensions::install::Installs;
 use vorn_extensions::lifecycle::Lease;
 use vorn_extensions::manifest::PaneDraws;
 use vorn_extensions::pack::InstalledPack;
-use vorn_extensions::router::Router;
+use vorn_extensions::reach::Given;
+use vorn_extensions::router::{Hook, Router};
 use vorn_extensions::{points, token};
 use vorn_git::repo::Git;
 use vorn_sessiond_wire::{Io, SpawnSpec};
@@ -215,6 +216,18 @@ struct Bands {
     pollers: HashMap<Key, JoinHandle<()>>,
 }
 
+/// An extension answering a person's click, counted until it drops.
+struct Acting<'a> {
+    given: &'a Mutex<Given>,
+    id: String,
+}
+
+impl Drop for Acting<'_> {
+    fn drop(&mut self) {
+        guard(self.given).end(&self.id);
+    }
+}
+
 /// The extension host: its processes, panes and bands.
 pub struct Extensions {
     hosts: Arc<Hosts>,
@@ -230,6 +243,8 @@ pub struct Extensions {
     ancestors: Vec<String>,
     home: PathBuf,
     grants: Mutex<Grants>,
+    /// What a person handed each extension, the sessions each started, and who answers a click now.
+    given: Mutex<Given>,
     bands: Mutex<Bands>,
     /// Each open pane keeps its extension's host running: a pane's program holds that host's token.
     pane_hosts: Mutex<HashMap<String, Lease<Host>>>,
@@ -238,6 +253,8 @@ pub struct Extensions {
     next_sync: AtomicU64,
     /// A package was linked or installed: the manifest watcher lists the linked ones again.
     relist: AtomicBool,
+    /// A package was removed: its sessions are settled now, not on the next pack check.
+    removed: Arc<Notify>,
     me: Weak<Extensions>,
 }
 
@@ -325,11 +342,13 @@ impl Extensions {
             ancestors,
             home,
             grants: Mutex::default(),
+            given: Mutex::default(),
             bands: Mutex::default(),
             pane_hosts: Mutex::default(),
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
             relist: AtomicBool::new(false),
+            removed: Arc::default(),
             me: me.clone(),
         })
     }
@@ -342,6 +361,20 @@ impl Extensions {
     /// The extension processes running.
     pub fn hosts(&self) -> usize {
         self.hosts.running().len()
+    }
+
+    /// The extensions whose service runs now, as programs or components.
+    pub fn services(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .router
+            .lifecycle()
+            .running()
+            .into_iter()
+            .map(|k| k.extension)
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
     }
 
     /// The router programs are called and woken through.
@@ -360,6 +393,12 @@ impl Extensions {
         self.router.reindex();
         self.sync_adapters();
         self.builtins.start();
+        let (router, installs) = (Arc::clone(&self.router), Arc::clone(&self.installs));
+        tokio::spawn(async move {
+            // A linked folder that gained a link while vornd was stopped does not start.
+            let _ = tokio::task::spawn_blocking(move || installs.recheck_linked()).await;
+            router.start_installed().await;
+        });
         self.around.contributions_changed("");
         let notes = self.around.notes();
         tokio::spawn(watch(Arc::downgrade(self), notes));
@@ -373,51 +412,23 @@ impl Extensions {
 
     /// Tells the agents' registry which installed packages adapt an agent.
     fn sync_adapters(&self) {
-        let Some(adapters) = self.around.adapters() else {
-            return;
-        };
-        let store = self.router.store();
-        let mut installed = Vec::new();
-        for id in store.ids() {
-            let Ok(pack) = store.inspect_unmeasured(&id) else {
-                continue;
-            };
-            let Some(section) = pack.manifest.agent.clone() else {
-                continue;
-            };
-            let agent = match vorn_agents::AgentSpec::from_toml(section)
-                .and_then(vorn_agents::Agent::new)
-            {
-                Ok(agent) => agent,
-                Err(err) => {
-                    warn!("[extensions] the agent adapter in {id} does not read: {err}");
-                    continue;
-                }
-            };
-            let icon = crate::adapters::icon_path(&agent)
-                .filter(|p| !p.contains("..") && !Path::new(p).is_absolute())
-                .and_then(|p| fs::read_to_string(pack.path.join(p)).ok());
-            installed.push(crate::adapters::Installed {
-                extension: id.clone(),
-                agent,
-                icon,
-            });
+        if let Some(adapters) = self.around.adapters() {
+            adapters.set_installed(crate::adapters::read_installed(self.router.store()));
         }
-        adapters.set_installed(installed);
     }
 
     /// Every contribution a client draws or lists, of the installed packages
     /// and the built-ins that are on.
     fn contributions(&self) -> Vec<Value> {
         let store = self.router.store();
+        let mut packs: Vec<_> = (store.ids().iter())
+            .filter_map(|id| store.inspect_unmeasured(id).ok())
+            .filter(|pack| pack.is_extension())
+            .collect();
+        // In the order they were installed: a top-bar button keeps its place.
+        packs.sort_by_key(|p| p.installed_at.as_u64().unwrap_or(u64::MAX));
         let mut out = Vec::new();
-        for id in store.ids() {
-            let Ok(pack) = store.inspect_unmeasured(&id) else {
-                continue;
-            };
-            if !pack.is_extension() {
-                continue;
-            }
+        for pack in packs {
             let settings = self.router.preferences(&pack.manifest);
             for mut c in points::listed(&pack.manifest, &settings) {
                 c["extensionName"] = json!(pack.manifest.name);
@@ -448,8 +459,9 @@ impl Extensions {
         out
     }
 
-    /// The layouts installed extensions offer: `(extension id, layout id, title, file)`.
-    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf)> {
+    /// The layouts installed extensions offer: `(extension id, layout id,
+    /// title, the extension's folder, the file in it)`.
+    pub fn layout_files(&self) -> Vec<(String, String, String, PathBuf, String)> {
         let store = self.router.store();
         let mut out = Vec::new();
         for id in store.ids() {
@@ -464,7 +476,8 @@ impl Extensions {
                     id.clone(),
                     l.base.id.clone(),
                     l.base.title.clone(),
-                    pack.path.join(&l.file),
+                    pack.path.clone(),
+                    l.file.clone(),
                 ));
             }
         }
@@ -548,6 +561,17 @@ impl Extensions {
                 };
                 let args = params.get("args").cloned().unwrap_or(Value::Null);
                 let (id, action) = (text(params, "id"), text(params, "action"));
+                if let Some(picked) = params.get("picked").and_then(Value::as_str) {
+                    self.hand(id, picked).await;
+                }
+                // A tree drawn for a session (a pane, a shell's log) attaches its extension to it.
+                let scope = ["surface", "event"]
+                    .iter()
+                    .find_map(|k| args.get(k)?.get("scope")?.as_str());
+                if let Some(session) = scope.filter(|s| self.session(s).is_some()) {
+                    guard(&self.given).show(id, session);
+                }
+                let _acting = (action != vorn_tree::RENDER).then(|| self.acting(id));
                 let answer = match self.builtins.call(id, action, args.clone()).await {
                     Some(answered) => answered.map_err(|e| e.message),
                     None => self
@@ -599,6 +623,7 @@ impl Extensions {
             }
             "extension:mcpTools" => self.listed_tools().await.map(|tools| {
                 let mut listed = self.builtins.mcp_tools();
+                listed.extend(hosted::mcp_tools(|id| self.router.program(id).is_some()));
                 listed.extend(tools.into_iter().map(|t| t.listed));
                 Value::Array(listed)
             }),
@@ -658,8 +683,8 @@ impl Extensions {
                 let schema = tool
                     .input
                     .as_ref()
-                    .and_then(|p| fs::read_to_string(pack.path.join(p)).ok())
-                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .and_then(|p| vorn_extensions::reach::read_in(&pack.path, p).ok())
+                    .and_then(|t| serde_json::from_slice::<Value>(&t).ok())
                     .filter(Value::is_object)
                     .unwrap_or_else(|| json!({ "type": "object" }));
                 out.push(McpListed {
@@ -690,8 +715,11 @@ impl Extensions {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        if let Some(answered) = self.builtins.mcp_call(name, arguments).await {
+        if let Some(answered) = self.builtins.mcp_call(name, arguments.clone()).await {
             return Ok(answered);
+        }
+        if hosted::tasks::offers(name) && self.router.program(hosted::tasks::ID).is_some() {
+            return Ok(hosted::tasks::mcp_call(self, name, arguments).await);
         }
         let found = self
             .listed_tools()
@@ -754,7 +782,9 @@ impl Extensions {
             return Err(format!("No extension \"{id}\" is installed"));
         }
         let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
+        guard(&self.given).forget(id);
         self.kill_terminals(&closed);
+        self.router.call_hook(id, Hook::Stop).await;
         self.hosts.stop_extension(id).await;
         self.router.forget(id).await;
         self.router.forget_preferences(id);
@@ -769,6 +799,7 @@ impl Extensions {
         self.sync_adapters();
         self.around.pack_removed(id).await;
         self.contributions_changed(id);
+        self.removed.notify_one();
         Ok(json!({ "removed": id }))
     }
 
@@ -781,6 +812,7 @@ impl Extensions {
         if let Err(err) = self.router.prepare_installed(id).await {
             warn!("[extensions] {err}");
         }
+        self.router.call_hook(id, Hook::Start).await;
         self.around.pack_changed(id).await;
         self.relist.store(true, Ordering::Relaxed);
         self.contributions_changed(id);
@@ -796,6 +828,21 @@ impl Extensions {
             && (self.builtins.has(id) || self.router.program(id).is_some())
     }
 
+    /// Extension `id`'s `action`, built in or installed.
+    pub async fn call(
+        &self,
+        id: &str,
+        action: &str,
+        args: Value,
+        ctx: CallCtx,
+    ) -> Result<Value, ExtError> {
+        if self.builtins.has(id) {
+            let answered = self.builtins.call(id, action, args).await;
+            return answered.unwrap_or_else(|| Err(builtin::unknown(id, action)));
+        }
+        self.router.call(id, action, args, ctx).await
+    }
+
     /// A client's call to `<id>:<action>`, routed to the extension.
     pub async fn call_action(&self, method: &str, params: Value) -> Answer {
         let Some((id, action)) = method.split_once(':') else {
@@ -808,14 +855,57 @@ impl Extensions {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         };
-        let answered = match self.builtins.call(id, action, params.clone()).await {
-            Some(answered) => answered,
-            None => self.router.call(id, action, params, ctx).await,
-        };
-        match answered {
+        let _acting = self.acting(id);
+        match self.call(id, action, params, ctx).await {
             Ok(value) => Answer::Result(value),
             Err(ExtError { message, .. }) => Answer::Error(message),
         }
+    }
+
+    /// A person chose `path` for extension `id`, in a file dialog or a form:
+    /// it may read that file from now on.
+    pub async fn hand(&self, id: &str, path: &str) {
+        let path = PathBuf::from(home_path(path));
+        let Ok(Ok(real)) =
+            tokio::task::spawn_blocking(move || vorn_extensions::reach::resolve(&path)).await
+        else {
+            return;
+        };
+        guard(&self.given).hand(id, real);
+    }
+
+    /// Counts extension `id` as answering a person's click until the guard drops.
+    fn acting(&self, id: &str) -> Acting<'_> {
+        guard(&self.given).begin(id);
+        Acting {
+            given: &self.given,
+            id: id.to_owned(),
+        }
+    }
+
+    /// What a person handed each extension and the sessions each started.
+    pub(crate) fn given(&self) -> MutexGuard<'_, Given> {
+        guard(&self.given)
+    }
+
+    /// Whether extension `id` has a pane open on session `session`, or a
+    /// client draws a tree of it there.
+    pub(crate) fn paned(&self, id: &str, session: &str) -> bool {
+        let open = guard(&self.grants).open_on(id, session, now_ms());
+        open || guard(&self.given).attached(id, session)
+    }
+
+    /// `terminal.*` on `session` for `caller`: a session it started, or one it
+    /// has a pane on with `process.run`.
+    pub(crate) fn admit_terminal(
+        &self,
+        caller: &vorn_extensions::gate::Caller,
+        method: &str,
+        session: &str,
+    ) -> Result<(), ExtError> {
+        let started = guard(&self.given).starter_of(&caller.extension, session);
+        let paned = self.paned(&caller.extension, session);
+        vorn_extensions::gate::admit_terminal(caller, method, started, paned)
     }
 
     /// The manifest of built-in or installed extension `id`.
@@ -976,6 +1066,7 @@ impl Extensions {
     /// Everything held for a session that ended, and its project's processes once none is left.
     async fn release(&self, session: &Live) {
         guard(&self.syncs).remove(&session.id);
+        guard(&self.given).ended(&session.id);
         {
             let mut bands = guard(&self.bands);
             for key in bands.footers.stop_session(&session.id) {
@@ -1005,6 +1096,23 @@ impl Extensions {
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
         self.hosts.stop_extension(extension_id).await;
+    }
+
+    /// Runs the start hook of `id` when it is installed and its service is not
+    /// running: an install from the catalog reaches vornd only as a changed pack.
+    fn start_if_stopped(&self, id: &str) {
+        if self.router.program(id).is_none()
+            || self
+                .router
+                .lifecycle()
+                .running()
+                .iter()
+                .any(|k| k.extension == id)
+        {
+            return;
+        }
+        let (router, id) = (Arc::clone(&self.router), id.to_owned());
+        tokio::spawn(async move { router.call_hook(&id, Hook::Start).await });
     }
 
     fn kill_terminals(&self, closed: &[Grant]) {
@@ -1220,13 +1328,17 @@ async fn next_note(notes: &mut Option<broadcast::Receiver<Value>>) {
 /// and settles every session again after a pack changed.
 async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value>>) {
     let mut known: HashMap<String, Live> = HashMap::new();
-    let Some(mut packs) = me.upgrade().map(|e| fingerprint(e.hosts.store().root())) else {
+    let Some((mut packs, removed)) = me
+        .upgrade()
+        .map(|e| (fingerprint(e.hosts.store().root()), Arc::clone(&e.removed)))
+    else {
         return;
     };
     let mut tick = tokio::time::interval(PACK_CHECK);
     loop {
         tokio::select! {
             () = next_note(&mut notes) => {}
+            () = removed.notified() => {}
             _ = tick.tick() => {}
         }
         let Some(extensions) = me.upgrade() else {
@@ -1238,6 +1350,11 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
         for id in &moved {
             debug!("[extensions] pack {id} changed");
             extensions.pack_changed(id).await;
+            extensions.start_if_stopped(id);
+        }
+        // An adapter installed from the catalog reaches vornd only as a changed pack.
+        if !moved.is_empty() {
+            extensions.sync_adapters();
         }
         reconcile(&extensions, &mut known, !moved.is_empty());
     }
@@ -1256,7 +1373,10 @@ fn manifest_stamps(linked: &[(String, PathBuf)]) -> HashMap<PathBuf, (Option<Sys
 }
 
 /// Tells clients when a linked package's manifest is saved, so what it
-/// contributes shows as it is written.
+/// contributes shows as it is written, and checks each linked folder for a
+/// link again as it is relisted and when its manifest changes: one that
+/// gained a link is marked not loaded, which [`watch`] then sees as a
+/// changed pack and stops.
 async fn watch_linked(me: Weak<Extensions>) {
     let mut linked: Vec<(String, PathBuf)> = Vec::new();
     let mut stamps = HashMap::new();
@@ -1269,8 +1389,10 @@ async fn watch_linked(me: Weak<Extensions>) {
             return;
         };
         since_list += LINKED_CHECK;
-        if since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed) {
+        let relist = since_list >= PACK_CHECK || extensions.relist.swap(false, Ordering::Relaxed);
+        if relist {
             since_list = Duration::ZERO;
+            recheck_linked(&extensions).await;
             let store = extensions.router.store().clone();
             linked = store
                 .ids()
@@ -1297,12 +1419,21 @@ async fn watch_linked(me: Weak<Extensions>) {
             })
             .map(|(id, _)| id)
             .collect();
+        if !moved.is_empty() && !relist {
+            recheck_linked(&extensions).await;
+        }
         for id in moved {
             debug!("[extensions] {id}'s manifest changed");
             extensions.contributions_changed(id);
         }
         stamps = now;
     }
+}
+
+/// Runs [`Installs::recheck_linked`] off the runtime.
+async fn recheck_linked(extensions: &Extensions) {
+    let installs = Arc::clone(&extensions.installs);
+    let _ = tokio::task::spawn_blocking(move || installs.recheck_linked()).await;
 }
 
 /// Syncs the sessions that are new or moved (every one when `all`), and releases the ones gone.
@@ -1457,16 +1588,7 @@ impl Around for Wired {
         let Some(native) = self.native.upgrade() else {
             return Vec::new();
         };
-        let mut started: Vec<Arc<dyn builtin::Builtin>> = native
-            .connectors()
-            .map(builtin::connectors::entry)
-            .into_iter()
-            .collect();
-        started.extend(native.tasks().map(builtin::tasks::entry));
-        // Where Workflows' view always was in Settings: after Tasks.
-        started.push(Arc::new(builtin::wasm::workflows()));
-        started.extend(builtin::agents::entries(native.adapters()));
-        started
+        builtin::started(&native).into_iter().collect()
     }
 
     fn adapters(&self) -> Option<Arc<crate::adapters::Adapters>> {

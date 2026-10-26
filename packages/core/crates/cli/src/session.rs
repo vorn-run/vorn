@@ -1,7 +1,7 @@
 //! `vorn session start|list|read|wait|send|kill`: agent sessions in the running
 //! server, terminal and headless alike.
 
-use std::sync::LazyLock;
+use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
@@ -49,7 +49,7 @@ Waiting
   waits instead for the program's status (as the app shows it) and exits 0.
 
 Agents
-  {agents}
+  Those an installed adapter adds (vorn ext list)
 
 Options for start
   --prompt <text>     First thing the agent is told
@@ -62,20 +62,22 @@ Options for start
   --name <label>      Display name for the session
 ";
 
-/// The agents Vorn ships switched on, by id.
-pub fn shipped_agents() -> Vec<&'static str> {
-    vorn_adapters::shipped()
+/// The agents the adapters installed under `data_dir` add, by id, read
+/// from their manifests so a check needs no server.
+pub fn installed_agents(data_dir: &Path) -> Vec<String> {
+    let store = vorn_extensions::pack::PackStore::new(data_dir.join("connectors"));
+    store
+        .ids()
         .iter()
-        .filter(|s| s.on_by_default)
-        .map(|s| s.name)
+        .filter_map(|id| store.inspect_unmeasured(id).ok()?.manifest.agent)
+        .filter_map(|section| vorn_agents::AgentSpec::from_toml(section).ok())
+        .map(|spec| spec.id)
         .collect()
 }
 
-/// The session usage, naming the agents Vorn ships switched on.
+/// The session usage.
 pub fn session_usage() -> &'static str {
-    static TEXT: LazyLock<String> =
-        LazyLock::new(|| USAGE.replace("{agents}", &shipped_agents().join(", ")));
-    &TEXT
+    USAGE
 }
 
 /// A list the server answered with; anything else reads as empty.
@@ -216,7 +218,7 @@ async fn start(ctx: &mut Context<'_>) -> ExitCode {
     };
     if !known.contains(&agent) {
         let names = if known.is_empty() {
-            "none is on; switch one on in Settings".to_owned()
+            "no agent adapter is installed; install one in Settings, Extensions".to_owned()
         } else {
             known.join(", ")
         };

@@ -30,8 +30,15 @@ pub struct InstalledPack {
     /// Where it was installed from, as written: `{ "git": url, "rev": sha }`.
     pub source: Option<Value>,
     pub previous_version: Option<String>,
-    /// As written, so a pointer from another build reads back unchanged.
+    /// When it was first installed, kept by updates; as written, so a
+    /// pointer from another build reads back unchanged.
     pub installed_at: Value,
+    /// The agent a linked folder adapted when it was linked; one it adapts
+    /// since was claimed after every other adapter's.
+    pub linked_agent: Option<String>,
+    /// The sha256 of a linked folder's manifest when it was linked: one
+    /// edited since claimed its agent after every other adapter.
+    pub linked_manifest: Option<String>,
     pub bytes: u64,
 }
 
@@ -144,10 +151,13 @@ impl InstalledPack {
         Some((program, args))
     }
 
-    /// The folder of its tables' migrations, when it keeps tables.
-    pub fn migrations(&self) -> Option<PathBuf> {
+    /// Its tables' migrations, when it keeps tables.
+    pub fn migrations(&self) -> Option<Migrations> {
         let storage = self.manifest.storage.as_ref()?;
-        Some(self.path.join(&storage.migrations))
+        Some(Migrations {
+            folder: self.path.clone(),
+            dir: storage.migrations.clone(),
+        })
     }
 
     /// The service's program, resolved; `None` when it declares none.
@@ -164,28 +174,32 @@ pub struct PackStore {
 }
 
 /// Ids are directory names, so anything that could traverse is not one.
+/// Lowercase only, so no two ids name one folder on a case-insensitive disk.
 pub fn is_safe_id(id: &str) -> bool {
+    let lower = |c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit();
     let b = id.as_bytes();
     !b.is_empty()
         && b.len() <= 64
-        && b[0].is_ascii_alphanumeric()
+        && lower(&b[0])
         && b.iter()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
+            .all(|c| lower(c) || matches!(c, b'-' | b'.' | b'_'))
         && !id.contains("..")
 }
 
 /// Ids Vorn's own workflow ids start with (`import:`, `connector:`,
-/// `system:`): an extension of that id would own them.
-pub const RESERVED_IDS: [&str; 3] = ["import", "connector", "system"];
+/// `system:`, and `file:` for a repository's): an extension of that id would own them.
+pub const RESERVED_IDS: [&str; 4] = ["import", "connector", "system", "file"];
 
 /// The namespace of the extensions Vorn ships: one installed under such an
 /// id would own its workflows (`vorn.connectors:` and the rest).
 pub const SHIPPED_NAMESPACE: &str = "vorn.";
 
-/// Whether `id` is Vorn's: no installed or linked extension may have it.
+/// Whether `id` is Vorn's: only a pack whose checksum Vorn pinned may have
+/// it (see [`crate::install::Installs::inspect_archive`]).
+/// Compared in lowercase, as a case-insensitive file system names its folder.
 pub fn is_reserved(id: &str) -> bool {
-    // The one place to admit a shipped package, by pinned checksum, once built-ins install like any other.
-    RESERVED_IDS.contains(&id) || id.starts_with(SHIPPED_NAMESPACE)
+    let id = id.to_ascii_lowercase();
+    RESERVED_IDS.contains(&id.as_str()) || id.starts_with(SHIPPED_NAMESPACE)
 }
 
 /// Refuses an id an extension may not have: unsafe as a directory, or
@@ -230,7 +244,14 @@ struct Current {
     source: Option<Value>,
     previous_version: Option<String>,
     installed_at: Value,
+    linked_agent: Option<String>,
+    linked_manifest: Option<String>,
+    /// Why a linked folder is not loaded: it gained a link since it was linked.
+    refused: Option<String>,
 }
+
+/// The key in `current.json` saying why a linked folder is not loaded.
+pub const REFUSED_KEY: &str = "refused";
 
 /// Reads the manifest a folder carries, `vorn-extension.toml`.
 pub fn read_dir_manifest(dir: &Path) -> Result<Manifest, String> {
@@ -342,6 +363,18 @@ impl PackStore {
                 .filter(|v| is_safe_version(v))
                 .map(str::to_owned),
             installed_at: parsed.get("installedAt").cloned().unwrap_or(Value::Null),
+            linked_agent: parsed
+                .get("linkedAgent")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            linked_manifest: parsed
+                .get("linkedManifest")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            refused: parsed
+                .get(REFUSED_KEY)
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         })
     }
 
@@ -382,6 +415,12 @@ impl PackStore {
         let current = self
             .current(id)
             .ok_or_else(|| format!("No extension \"{id}\" is installed"))?;
+        if let (Some(folder), Some(why)) = (&current.linked, &current.refused) {
+            return Err(format!(
+                "{id} is not loaded from {}: {why}",
+                folder.display()
+            ));
+        }
         let (path, linked) = match (&current.linked, &current.version) {
             (Some(folder), _) => (folder.clone(), true),
             (None, Some(version)) => (self.root.join(id).join(version), false),
@@ -413,6 +452,8 @@ impl PackStore {
             source: current.source,
             previous_version: current.previous_version,
             installed_at: current.installed_at,
+            linked_agent: current.linked_agent,
+            linked_manifest: current.linked_manifest,
             bytes,
         })
     }
@@ -472,6 +513,50 @@ pub fn directory_bytes(dir: &Path) -> std::io::Result<u64> {
         };
     }
     Ok(total)
+}
+
+/// A package's migrations folder, listed and read without following any
+/// link below the package, so a link put in it after it was checked is
+/// refused rather than run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Migrations {
+    folder: PathBuf,
+    dir: String,
+}
+
+impl Migrations {
+    /// The names of the files in it; none when it is missing or not a folder.
+    pub fn names(&self) -> std::io::Result<Vec<String>> {
+        match crate::reach::list_in(&self.folder, &self.dir) {
+            Ok(entries) => Ok(entries
+                .into_iter()
+                .filter(|(_, is_dir)| !is_dir)
+                .filter_map(|(name, _)| name.into_string().ok())
+                .collect()),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound
+                        | std::io::ErrorKind::NotADirectory
+                        | std::io::ErrorKind::InvalidInput
+                ) =>
+            {
+                Ok(Vec::new())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The text of the migration `name` in it.
+    pub fn read(&self, name: &str) -> std::io::Result<String> {
+        let bytes = crate::reach::read_in(&self.folder, &format!("{}/{name}", self.dir))?;
+        String::from_utf8(bytes).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{name} is not UTF-8"),
+            )
+        })
+    }
 }
 
 /// Packages written straight to disk, for tests here.
@@ -596,6 +681,17 @@ mod tests {
         }
         assert!(check_id("importer").is_ok() && check_id("vornish.x").is_ok());
         assert!(check_id("a/b").is_err());
+    }
+
+    #[test]
+    fn ids_are_lowercase_only() {
+        for id in ["Import", "SYSTEM", "Vorn.Connectors", "Test.Marker", "a.B"] {
+            assert!(!is_safe_id(id), "{id}");
+            assert_eq!(
+                check_id(id).unwrap_err(),
+                format!("\"{id}\" is not an extension id")
+            );
+        }
     }
 
     #[test]
@@ -727,5 +823,35 @@ mod tests {
         );
         assert!(is_safe_version("1.0.0-beta+1"));
         assert!(!is_safe_version("1..0") && !is_safe_version(".1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn migrations_are_listed_and_read_without_following_a_link() {
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("any.sql"), "DROP TABLE tasks;").unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let of = |dir: &str| Migrations {
+            folder: folder.path().to_path_buf(),
+            dir: dir.into(),
+        };
+        assert!(of("migrations").names().unwrap().is_empty(), "none yet");
+        fs::create_dir(folder.path().join("migrations")).unwrap();
+        fs::write(folder.path().join("migrations/001.sql"), "SELECT 1;").unwrap();
+        fs::create_dir(folder.path().join("migrations/old")).unwrap();
+        assert_eq!(of("migrations").names().unwrap(), ["001.sql"]);
+        assert_eq!(of("migrations").read("001.sql").unwrap(), "SELECT 1;");
+        assert!(of("migrations/001.sql").names().unwrap().is_empty());
+
+        std::os::unix::fs::symlink(
+            outside.path().join("any.sql"),
+            folder.path().join("migrations/002.sql"),
+        )
+        .unwrap();
+        let err = of("migrations").read("002.sql").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "{err}");
+        std::os::unix::fs::symlink(outside.path(), folder.path().join("linked")).unwrap();
+        let err = of("linked").names().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData, "{err}");
     }
 }

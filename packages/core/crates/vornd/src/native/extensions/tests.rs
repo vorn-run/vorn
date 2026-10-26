@@ -514,6 +514,13 @@ async fn the_bridge_answers_only_the_extension_its_token_was_minted_for() {
     assert_eq!(gone.0, StatusCode::NOT_FOUND);
 
     let lines = r#"{"sessionId":"s1","lines":2}"#;
+    let send = r#"{"sessionId":"s1","text":"hi"}"#;
+    for (method, body) in [("output", lines), ("selection", body), ("send", send)] {
+        let refused = bridge(&w, to("x", method), Some(&x), body).await;
+        assert_eq!(refused.0, StatusCode::FORBIDDEN, "{method}: {}", refused.1);
+    }
+    assert!(written(&w).is_empty());
+    w.ext.given().started("x", "s1");
     let output = bridge(&w, to("x", "output"), Some(&x), lines).await;
     let expected = json!({ "result": "line 0\nline 1" }).to_string();
     assert_eq!(output, (StatusCode::OK, expected));
@@ -521,7 +528,6 @@ async fn the_bridge_answers_only_the_extension_its_token_was_minted_for() {
         let read = bridge(&w, to("x", method), Some(&x), body).await;
         assert_eq!(read.0, StatusCode::OK, "{method}: {}", read.1);
     }
-    let send = r#"{"sessionId":"s1","text":"hi"}"#;
     let sent = bridge(&w, to("x", "send"), Some(&x), send).await;
     assert_eq!(sent.0, StatusCode::NO_CONTENT);
     assert_eq!(written(&w), [("s1".to_owned(), "hi".to_owned())]);
@@ -576,12 +582,87 @@ async fn a_page_speaks_for_the_session_its_pane_was_opened_on() {
         method: "send".into(),
     };
     let body = r#"{"sessionId":"s2","text":"t"}"#;
+    let refused = bridge(&w, on("p", &nonce), None, body).await;
+    assert_eq!(refused.0, StatusCode::FORBIDDEN, "{}", refused.1);
+    assert!(written(&w).is_empty());
+    w.ext.given().started("x", "s1");
     let sent = bridge(&w, on("p", &nonce), None, body).await;
     assert_eq!(sent.0, StatusCode::NO_CONTENT);
     assert_eq!(written(&w), [("s1".to_owned(), "t".to_owned())]);
     for (pane, nonce) in [("prog", nonce.as_str()), ("p", "forged")] {
         let refused = bridge(&w, on(pane, nonce), None, body).await;
         assert_eq!(refused.0, StatusCode::UNAUTHORIZED);
+    }
+    w.ext.stop().await;
+}
+
+#[tokio::test]
+async fn a_tree_drawn_for_a_live_session_attaches_its_extension_to_it() {
+    let w = world();
+    w.add(w.session("s1"));
+    for (key, session) in [("surface", "s1"), ("event", "s9")] {
+        let args = json!({ key: { "scope": session } });
+        let params = json!({ "id": "x", "action": "render", "args": args });
+        let _ = w.call("extension:call", params).await;
+    }
+    assert!(w.ext.paned("x", "s1"));
+    assert!(!w.ext.paned("x", "s9") && !w.ext.paned("y", "s1"));
+    w.ext.release(&w.session("s1")).await;
+    assert!(!w.ext.paned("x", "s1"), "an ended session lets go");
+    w.ext.stop().await;
+}
+
+#[tokio::test]
+async fn git_and_worktrees_reach_only_the_projects_an_extension_reads_and_writes() {
+    let w = world();
+    let data = tempfile::tempdir().unwrap();
+    let db = data.path().join("vorn.db");
+    let project = json!([{ "name": "p", "path": w.project(), "preferredAgents": [] }]);
+    let mut store = crate::native::work::test_store(&db);
+    store.call("dbInsertProject", project).unwrap();
+    drop(store);
+    let native = crate::native::Native::new();
+    native.set_database(db);
+    native.set_extensions(Arc::clone(&w.ext));
+    let gate = super::world::Wired {
+        native: Arc::downgrade(&native),
+    };
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = elsewhere.path().to_string_lossy().into_owned();
+    let caller = |runs_commands| Caller {
+        extension: "x".into(),
+        project: None,
+        runs_commands,
+        builtin: false,
+    };
+    let denied = |r: &Result<Value, ExtError>| matches!(r, Err(e) if e.code == "denied");
+    let commit = |dir: &str| json!({ "worktree": dir, "message": "m" });
+    for (method, args) in [
+        ("git.diff", json!({ "worktree": outside })),
+        ("git.branches", json!({ "worktree": outside })),
+        ("git.status", json!({ "project": outside })),
+        ("git.commit", commit(&outside)),
+        ("worktrees.reclaim", json!({ "worktree": outside })),
+        ("worktrees.prune", json!({ "worktree": outside })),
+        (
+            "worktrees.remove",
+            json!({ "worktree": outside, "project": w.project() }),
+        ),
+    ] {
+        let refused = gate.call(&caller(false), method, args.clone()).await;
+        assert!(denied(&refused), "{method}: {refused:?}");
+        let anywhere = gate.call(&caller(true), method, args).await;
+        assert!(!denied(&anywhere), "{method}: {anywhere:?}");
+    }
+    for (method, args) in [
+        ("git.diff", json!({ "worktree": w.project() })),
+        ("git.branches", json!({ "worktree": w.project() })),
+        ("git.status", json!({ "project": w.project() })),
+        ("git.commit", commit(&w.project())),
+        ("worktrees.prune", json!({ "worktree": w.project() })),
+    ] {
+        let reached = gate.call(&caller(false), method, args).await;
+        assert!(!denied(&reached), "{method}: {reached:?}");
     }
     w.ext.stop().await;
 }

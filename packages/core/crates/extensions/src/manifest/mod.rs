@@ -104,6 +104,14 @@ impl Manifest {
         let section = self.theme.as_ref()?;
         vorn_theme::Theme::from_section(&self.id, &self.name, section).ok()
     }
+
+    /// The agent id its `[agent]` section adapts, when it has one that reads.
+    pub fn agent_id(&self) -> Option<String> {
+        let section = self.agent.clone()?;
+        vorn_agents::AgentSpec::from_toml(section)
+            .ok()
+            .map(|s| s.id)
+    }
 }
 
 /// Where a package keeps the migrations that make its tables.
@@ -175,6 +183,12 @@ pub struct Service {
     pub component: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<String>,
+    /// The action Vorn calls once it is installed, updated or Vorn starts, to publish what it shows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    /// The action Vorn calls before it is uninstalled, to let go of what it holds outside Vorn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<String>,
 }
 
 /// An action answered by a process of its own.

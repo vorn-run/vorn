@@ -156,10 +156,35 @@ inserts and the prefix `workflow.unseed` removes start with its id and a
 colon (`acme.tickets:`), and `workflow.run` runs only those. Running anyone
 else's workflow, or seeding a step that runs commands or agents (a script, an
 agent, or a type no extension declares, which runs as an agent), also needs
-`process.run`, which the install sheet shows as running programs. Vorn's own
-workflow ids start with `import:`, `connector:` and `system:`, so `import`,
-`connector` and `system` cannot be an extension's id, and ids starting with
-`vorn.` belong to the extensions Vorn ships.
+`process.run`, which the install sheet shows as running programs; a step is
+checked at every depth of the workflow. So do starting a session, reading
+or writing files outside Vorn's projects, and reaching the terminal of a
+session the extension did not start. Vorn's own workflow ids start with
+`import:`, `connector:`, `system:` and `file:`, so `import`, `connector`,
+`system` and `file` cannot be an extension's id, and ids starting with
+`vorn.` belong to the extensions Vorn ships. Extension ids are lowercase, so
+no two name the same folder on a disk that ignores case. A project's workflow
+file whose id is in an extension's namespace is not read, and one read before
+that extension was installed is taken back when it is, unless you turned the
+file on.
+
+An installed pack counts as one Vorn ships only while its files are exactly
+the pinned pack's; Vorn puts back one whose files changed at its next start. A
+service component counts as Vorn's own only when the bytes Vorn read to run it
+are the pinned pack's; a service or command run as a program never does.
+Installing from a folder or a git repository, linking a folder, and packing all
+refuse a tree holding a symlink or special file, a committed one included.
+A linked folder that gains one among the files it would pack, the same one
+still there at the next check (about 2 s later), is not loaded until it is
+gone again. An editor's lock (`.#name`, a link to nothing) is never packed,
+and a manifest never names a path with a `.#` part. `.git`, `node_modules`
+and `target` are never packed; one at the top of the folder that is a link
+is refused like any other when the manifest names a path through it, and
+`storage.migrations` never names a folder inside one. A file the manifest
+names (a component, a tool's input schema, an agent's icon, a layout, a
+migration) is read, and the migrations folder listed, without following a
+link below the extension's folder; a migration that is a link is not run,
+and the extension's storage calls fail naming it until it is gone.
 
 The core is frozen against that API: `packages/core/freeze.toml` lists every
 crate of the core by its area and every feature still left in it, and

@@ -11,7 +11,9 @@ the same API and the same permissions:
   machine: no files, no network, no environment. It asks Vorn for what it
   needs through the API's imports, and Vorn holds each call to what the
   manifest declares. Fit for logic that reacts to events, keeps its own data
-  and draws a UI. Worktree cleanup and the Widget, which Vorn ships, are two.
+  and draws a UI. Worktree cleanup, Files, Shell blocks, the Browser and SSH,
+  which Vorn ships, are such components, as are the Widget and the Device,
+  which you install from the catalog.
 
 Both are written against `wit/extension.wit` in
 `packages/core/crates/extensions`, the only definition of the API. The
@@ -21,7 +23,11 @@ two tiers are measured against each other in
 ## A component's manifest
 
 Only `[service]` differs from a program's: `component` names the `.wasm`
-inside the package, in place of `command`.
+inside the package, in place of `command`. `start` and `stop`, both optional,
+name the actions Vorn calls with no arguments: `start` as Vorn starts and
+after the extension is installed or updated, to publish what it shows from
+the first moment; `stop` before it is uninstalled, to let go of what it holds
+outside Vorn.
 
 ```toml
 id = "acme.hello"
@@ -283,7 +289,7 @@ lists the simulators and reports them. Its `page` events carry:
 | `listed`  | `devices` or `error` | the simulators a `loading` picker asked for            |
 | `saved`   | `path` or `error`    | how the screenshot `save` asked for went               |
 
-A `video` part needs the `video` permission; Vorn's own Device (`packages/core/extensions/device`) draws
+A `video` part needs the `video` permission; Vorn's own Device (`device/` in vorn-run/extensions) draws
 the device pane with one. A Device row with `card` set is drawn over the
 session card's phone button instead of in a pane: its picker, then the
 button waiting while what was picked there starts.
@@ -295,13 +301,11 @@ a page at a time, windows them, drags them between columns and opens them.
 `graph()` places the workflow editor's canvas, which the client draws whole.
 
 `examples/extensions/turns` draws a tree in every place, and
-`examples/extensions/agent-footer` a card footer. Vorn's own Tasks
-(`packages/core/extensions/tasks`) and Workflows
-(`packages/core/extensions/workflows`) draw their main views this way;
-Files (`packages/core/extensions/files`) draws its pane and cards, Shell
-blocks (`packages/core/extensions/blocks`) a shell's commands, the Browser
-(`packages/core/extensions/browser`) a session's tabs over its page, and
-the Device (`packages/core/extensions/device`) a session's simulator.
+`examples/extensions/agent-footer` a card footer. In vorn-run/extensions,
+Tasks (`tasks/`) and Workflows (`workflows/`) draw their main views this
+way, Files (`files/`) its pane and cards, Shell blocks (`blocks/`) a
+shell's commands, the Browser (`browser/`) a session's tabs over its page,
+and the Device (`device/`) a session's simulator.
 
 ## Top bar buttons
 
@@ -393,7 +397,15 @@ record session-start {
 A shell takes only `project` and `name`. A headless session names the
 extension as what started it. `host.call("sessions.launch", ...)` takes the
 same fields, with `project` defaulting to the call's project, and answers
-`{sessionId}`.
+`{sessionId}`. Starting a session needs `process.run` as well as
+`sessions.launch`; closing one needs only `sessions.launch`.
+
+`terminal.read`, `terminal.send` and `terminal.selection` reach the sessions
+the extension started, over the gate and over a page's bridge alike. Any
+other session needs `process.run` and a pane of the extension's on that
+session: one it opened, or a tree a client draws for that session. `permissions.resolve` answers an
+agent's request while the extension handles a person's click; on its own it
+needs `process.run`.
 
 ### `storage.transaction`
 
@@ -418,6 +430,45 @@ extension keeps up to 256 MiB in all. Its files go when it is removed. Over
 stdio, `data` and what `get` answers are base64 strings.
 
 ### Calls and events Files and Shell blocks use
+
+`files.*` take absolute paths, resolved (`..` and symlinks followed) before
+they are checked, and passed on as the extension named them. A `..` after a
+folder that is not there, or a link that leads nowhere, is refused; on
+Windows any `..` is refused. An extension reads and writes the folders of
+Vorn's projects and their worktrees, its own files' folder, and the folder
+(and below) that the shell of a session it started or has a pane on is in;
+it reads a file a person chose for it in a file dialog. The home folder, and
+any folder above it, never counts as a project; a shell in the home folder
+lets the extension read below it but not write, and a shell above it only
+the files directly in that folder. `git.status`, `git.diff` and
+`git.branches` read, and `git.commit` and `worktrees.reclaim`, `.prune` and
+`.remove` write, under the same rule. Writing inside a repository's git
+folder (`.git`, the folder a worktree's `.git` file points to, and the
+repository's common folder) needs `process.run`, since git runs what its
+config names.
+`files.list` and `files.stat` answer names, sizes and times anywhere.
+Reading or writing anywhere else needs `process.run`.
+
+Never reached through `files.*`, even with `process.run`: Vorn's data, and in the home
+folder:
+
+- keys and credentials: `.ssh`, `.gnupg`, `.aws`, `.azure`,
+  `.config/gcloud`, `.kube`, `.docker`, `.netrc`, `.git-credentials`,
+  `.npmrc`, `.pypirc`, `.pgpass`, `.cargo/credentials`,
+  `.cargo/credentials.toml`, `.gem/credentials`, `.config/gh`,
+  `.claude.json`;
+- what runs at login: `Library/LaunchAgents`, `.config/autostart`,
+  `.config/systemd`, `Documents/PowerShell`, `Documents/WindowsPowerShell`,
+  and `AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`;
+- the shell's startup files: `.bashrc`, `.bash_aliases`, `.bash_profile`,
+  `.bash_login`, `.bash_logout`, `.profile`, `.zshrc`, `.zshenv`,
+  `.zprofile`, `.zlogin`, `.zlogout`, `.config/fish`.
+
+A file is opened through the very path that was checked, without following
+a link at any step, so a link put in its place since is refused; `files.stat`
+looks at it from its folder without opening it. `files.write` refuses a file
+with more than one name (a hard link), and `files.read` one whose other name
+is in the list above.
 
 - `files.list` (`{path}`) answers a folder's entries, `{name, path,
 isDirectory}`, folders first, without what git ignores; `files.stat`
@@ -460,6 +511,9 @@ answers what the app does; with no app connected it fails.
 | `console` | `limit`                          | its console messages                         |
 | `network` | `limit`                          | its requests                                 |
 
+vornd refuses any other `op`: no op runs a script of the extension's own in
+the page.
+
 The app refuses a `file:` address outside the session's project, on disk as
 well as by name, and anything it would not load from the address bar.
 
@@ -483,15 +537,14 @@ connected it fails. `udid` names the simulator in all but `list`.
 | `screenshot` | `udid`             | `{data, width, height}`, a PNG in base64                    |
 | `save`       | `udid`, `name`     | `{path}`, a screenshot saved to Downloads                   |
 
-Any other `op`, such as reading the screen or the logs, fails with a message
-saying the native app cannot yet.
+vornd refuses any other `op`.
 
-### `remote.*`: the SSH built-in's hosts and keys
+### `remote.*`: SSH's hosts and keys
 
-Vorn's SSH built-in edits the remote hosts and the stored SSH keys under the
+Vorn's SSH extension edits the remote hosts and the stored SSH keys under the
 `remote` permission. The hosts
 stay in vornd's config (`remoteHosts`) and the keys in its key store, so
-sessions on a remote host keep running with the built-in off.
+sessions on a remote host keep running with SSH uninstalled.
 
 | method             | params                                            | answers                                                     |
 | ------------------ | ------------------------------------------------- | ----------------------------------------------------------- |
@@ -500,9 +553,12 @@ sessions on a remote host keep running with the built-in off.
 | `remote.test`      | `host`, optional `then` and `key`                 | `{success, message, durationMs}`; with `then`, see below    |
 | `remote.keys`      |                                                   | the stored keys, without their private halves               |
 | `remote.storeKey`  | `label`, `privateKey`, `publicKey`, `certificate` | the stored key                                              |
-| `remote.importKey` | `path` (`~` is home)                              | the stored key, read from the file and its `.pub` beside it |
+| `remote.importKey` | `path` (`~` is home), in `~/.ssh` or chosen       | the stored key, read from the file and its `.pub` beside it |
 | `remote.deleteKey` | `id`                                              | `null`, the key and its secret gone                         |
 | `remote.vault`     |                                                   | `{keychain}`: `false` when the OS keychain is missing       |
+
+`remote.importKey` reads a private key in `~/.ssh` or one the person chose
+with a file dialog; for any other path it fails with the same message.
 
 A test logs in for up to ten seconds, and a component answers one call at a
 time, so with `then` `remote.test` answers `{testing: true}` at once and

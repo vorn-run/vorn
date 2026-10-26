@@ -12,10 +12,12 @@
 //!
 //! [`watch`] ends a process with another, so what a test run starts ends with it.
 //! [`attribution`] tells which app macOS counts a process as.
+//! [`tree`] says what a process and everything under it are running.
 
 use std::ffi::OsStr;
 
 pub mod attribution;
+pub mod tree;
 pub mod watch;
 
 /// No console window for a console program (`CREATE_NO_WINDOW`).
