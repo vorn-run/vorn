@@ -42,7 +42,6 @@ mod tip {
     pub const FINGERPRINT: &str = "Compare with the one shown when you pair by hand";
     pub const ADDRESSES: &str = "Lists every address Vorn answers on";
     pub const TOKEN: &str = "Makes a token for connecting by hand; it's shown only once";
-    pub const COPY: &str = "Copy";
 }
 
 pub(super) fn page(s: &Screen<'_>) -> El {
@@ -763,7 +762,8 @@ fn copy_pill(s: &Screen<'_>, n: &Network, value: &str) -> El {
     } else {
         "Copy"
     };
-    let b = div()
+    div()
+        .id(id)
         .on(Action::Click)
         .ring(4.0)
         .shrink0()
@@ -776,6 +776,5 @@ fn copy_pill(s: &Screen<'_>, n: &Network, value: &str) -> El {
             text(label, 12.0, c(look::GRAY_300).mix(c(look::WHITE), hot))
                 .line_height(16.0)
                 .silent(),
-        );
-    tooltip(s.ui, b, id, tip::COPY, None)
+        )
 }

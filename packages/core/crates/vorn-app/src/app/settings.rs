@@ -33,6 +33,11 @@ impl App {
             let value: Value = serde_json::from_str(v).map_err(|e| format!("--set {key}: {e}"))?;
             self.write_defaults(|d| d[*key] = value);
         }
+        if self.st.dialog == Some(crate::state::Dialog::Welcome)
+            && crate::onboarding::seen(&self.store.config)
+        {
+            self.st.dialog = None;
+        }
         self.open_settings(cat);
         Ok(())
     }
