@@ -96,9 +96,99 @@ pub struct Manifest {
     /// a terminal palette. Data, as an agent adapter is.
     #[serde(skip)]
     pub theme: Option<toml::Value>,
+    /// Its logo as SVG files in the package, drawn in their own colours.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo: Option<Logo>,
+    /// What its page shows beyond what it does.
+    #[serde(skip_serializing_if = "Showcase::is_empty")]
+    pub showcase: Showcase,
+}
+
+/// A logo drawn in its own colours, as files inside the package.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Logo {
+    pub file: String,
+    /// Drawn instead on a dark surface.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dark: Option<String>,
+}
+
+/// Pictures, a home page and its latest change, for its page in Settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Showcase {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub homepage: Option<String>,
+    /// One line on what changed in this version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub whats_new: Option<String>,
+    /// 16:10 PNGs on a dark surface: files in the package or `https` URLs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub screenshots: Vec<String>,
+}
+
+impl Showcase {
+    pub fn is_empty(&self) -> bool {
+        self.homepage.is_none() && self.whats_new.is_none() && self.screenshots.is_empty()
+    }
+}
+
+/// What a package adds, as the catalog tags it; derived from the manifest, never declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Tag {
+    /// An `[agent]` section.
+    Agent,
+    /// Triggers or actions: it signs in somewhere and starts or does work there.
+    Connection,
+    /// A pane beside the terminal.
+    Pane,
+    /// Workflow nodes.
+    Steps,
+    /// A `[theme]` section.
+    Theme,
+    /// Tools on Vorn's MCP server.
+    Tools,
 }
 
 impl Manifest {
+    /// What it adds, in [`Tag`] order; a package may carry several.
+    pub fn tags(&self) -> Vec<Tag> {
+        let c = self.contributes.as_ref();
+        let panes = c.is_some_and(|c| {
+            c.panes.as_ref().is_some_and(|p| !p.is_empty())
+                || c.points.get(&Place::Panes).is_some_and(|p| !p.is_empty())
+        });
+        let steps = c
+            .and_then(|c| c.nodes.as_ref())
+            .is_some_and(|n| !n.is_empty());
+        let connection =
+            self.protocol.is_some() || !self.triggers.is_empty() || !self.actions.is_empty();
+        [
+            (Tag::Agent, self.agent.is_some()),
+            (Tag::Connection, connection),
+            (Tag::Pane, panes),
+            (Tag::Steps, steps),
+            (Tag::Theme, self.theme.is_some()),
+            (Tag::Tools, !self.mcp.is_empty()),
+        ]
+        .into_iter()
+        .filter_map(|(t, on)| on.then_some(t))
+        .collect()
+    }
+
+    /// The logo file to draw: `[icon] file`, else the agent's `[agent] icon`;
+    /// with `dark`, only the dark variant, for a client to prefer on dark surfaces.
+    pub fn logo_file(&self, dark: bool) -> Option<&str> {
+        if dark {
+            return self.logo.as_ref()?.dark.as_deref();
+        }
+        if let Some(l) = &self.logo {
+            return Some(l.file.as_str());
+        }
+        self.agent.as_ref()?.get("icon")?.as_str()
+    }
+
     /// The theme its `[theme]` section sets, named by the package.
     pub fn theme(&self) -> Option<vorn_theme::Theme> {
         let section = self.theme.as_ref()?;
@@ -1196,6 +1286,8 @@ pub fn read(payload: &Map<String, Value>) -> Result<Manifest, ManifestError> {
         mcp: Vec::new(),
         agent: None,
         theme: None,
+        logo: None,
+        showcase: Showcase::default(),
     })
 }
 

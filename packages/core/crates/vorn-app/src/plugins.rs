@@ -10,6 +10,10 @@ use crate::library::connection_connector;
 use crate::runs::s;
 use crate::templates::Fix;
 
+pub mod list;
+pub mod logos;
+pub mod shots;
+
 /// Every control the page can fire.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PlugAct {
@@ -38,6 +42,8 @@ pub enum PlugAct {
     ShowFolder(String),
     /// Browse the connectors, to add a connection to one.
     AddConnection,
+    /// Open a connector's page, where its accounts are, by connector id.
+    ShowAccounts(String),
     Rollback(String),
     CatalogRefresh,
     Text(Field),
@@ -72,9 +78,9 @@ pub fn tabs_id() -> crate::ui::Id {
     crate::ui::Id::new("plug-tabs")
 }
 
-/// The All, Connectors and Interface pills over Browse.
-pub fn kinds_id() -> crate::ui::Id {
-    crate::ui::Id::new("plug-kinds")
+/// Browse's All and tag chips; choosing one reports `Event::Select` on this group.
+pub fn tags_id() -> crate::ui::Id {
+    crate::ui::Id::new("plug-tags")
 }
 
 /// A git sheet's "Pane: Turns, Listens to: session.created, …" as a count of
@@ -111,21 +117,31 @@ pub fn field_id(field: &Field) -> crate::ui::Id {
     crate::ui::Id::new("plug-field").child(field)
 }
 
-/// The two views the page offers.
+/// The views the page offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Tab {
     #[default]
     Installed,
     Browse,
+    Updates,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 2] = [Tab::Installed, Tab::Browse];
+    pub const ALL: [Tab; 3] = [Tab::Installed, Tab::Browse, Tab::Updates];
 
     pub fn label(self) -> &'static str {
         match self {
             Tab::Installed => "Installed",
             Tab::Browse => "Browse",
+            Tab::Updates => "Updates",
+        }
+    }
+
+    pub fn tip(self) -> &'static str {
+        match self {
+            Tab::Installed => "Shows what's on this Mac",
+            Tab::Browse => "Finds more in the catalog",
+            Tab::Updates => "Shows extensions with a newer version",
         }
     }
 }
@@ -155,9 +171,6 @@ pub enum Field {
 /// A picker the page binds.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Pick {
-    Category,
-    Kind,
-    Rung,
     Project,
     Trigger,
     /// A built-in's select field.
@@ -599,6 +612,13 @@ pub struct Listing {
     pub contributes: Option<Value>,
     pub permissions: Vec<String>,
     pub activates: Option<Value>,
+    /// What it adds, from its manifest.
+    pub tags: Vec<list::Tag>,
+    /// SVG text, and the variant drawn on a dark surface.
+    pub logo: Option<String>,
+    pub logo_dark: Option<String>,
+    pub publisher: Option<String>,
+    pub showcase: list::Showcase,
 }
 
 impl Listing {
@@ -704,6 +724,26 @@ pub fn build_listings(
             contributes: None,
             permissions: Vec::new(),
             activates: None,
+            tags: Vec::new(),
+            logo: None,
+            logo_dark: None,
+            publisher: None,
+            showcase: list::Showcase::default(),
+        }
+    };
+    // A pack says what it is; a catalog entry stands in until it is installed.
+    let marks = |l: &mut Listing, v: &Value, showcase: Option<&Value>| {
+        let tags = list::tags(v.get("tags"));
+        if !tags.is_empty() {
+            l.tags = tags;
+        }
+        let text = |k| s(v, k).filter(|t| !t.is_empty()).map(str::to_owned);
+        l.logo = text("logo").or(l.logo.take());
+        l.logo_dark = text("logoDark").or(l.logo_dark.take());
+        l.publisher = text("publisher").or(l.publisher.take());
+        let shown = list::Showcase::read(showcase);
+        if !shown.is_empty() {
+            l.showcase = shown;
         }
     };
     let with_pack = |l: &mut Listing, pack: &Value| {
@@ -721,6 +761,7 @@ pub fn build_listings(
         if let Some(a) = pack.get("activates") {
             l.activates = Some(a.clone());
         }
+        marks(l, pack, pack.get("showcase"));
         l.pack = Some(pack.clone());
     };
     let mut out = Vec::new();
@@ -731,6 +772,7 @@ pub fn build_listings(
         let id = s(c, "id").unwrap_or("");
         let mut l = base(id, s(c, "name").unwrap_or(id), "Built in", Source::Builtin);
         l.capabilities = strings(c.get("capabilities"));
+        l.tags = vec![list::Tag::Connection];
         out.push(l);
     }
     for entry in catalog {
@@ -757,6 +799,7 @@ pub fn build_listings(
         l.contributes = entry.get("contributes").cloned();
         l.permissions = strings(entry.get("permissions"));
         l.activates = entry.get("activates").cloned();
+        marks(&mut l, entry, Some(entry));
         l.catalog = Some(entry.clone());
         if let Some(pack) = pack {
             with_pack(&mut l, pack);
@@ -797,7 +840,14 @@ pub fn build_listings(
         l.capabilities = vec!["actions".to_owned()];
         l.keywords = strings(server.get("keywords"));
         l.mcp = Some(server.clone());
+        l.tags = vec![list::Tag::Connection];
         out.push(l);
+    }
+    for l in &mut out {
+        // A pack's tags are derived from its manifest; an untagged connector entry is a connection.
+        if l.tags.is_empty() && l.kind == Kind::Connector && l.pack.is_none() {
+            l.tags = vec![list::Tag::Connection];
+        }
     }
     out.sort_by(|a, b| {
         b.ready()
@@ -1298,6 +1348,8 @@ fn haystack(l: &Listing) -> String {
     ];
     parts.extend(l.capabilities.iter().map(String::as_str));
     parts.extend(l.keywords.iter().map(String::as_str));
+    parts.extend(l.tags.iter().flat_map(|t| [t.label(), t.plural()]));
+    parts.extend(l.publisher.as_deref());
     for (_, key, _) in PLACES {
         if let Some(items) = l.contributes.as_ref().and_then(|c| c.get(key)?.as_array()) {
             parts.extend(items.iter().filter_map(|i| s(i, "title")));
@@ -1334,70 +1386,10 @@ pub fn matches_query(l: &Listing, query: &str) -> bool {
     terms.iter().all(|t| hay.contains(t))
 }
 
-pub const CALLABLE: &str = "Can be called from a step";
-pub const CONNECTED: &str = "Connected";
-
-/// Whether a listing is in `category`; any is, without one.
-pub fn matches_category(l: &Listing, category: Option<&str>) -> bool {
-    match category {
-        None => true,
-        Some(CALLABLE) => l.has_actions(),
-        Some(CONNECTED) => l.connected > 0,
-        Some(c) => l.category == c,
-    }
-}
-
-/// Sorted categories, then the two facets present.
-pub fn categories(listings: &[Listing]) -> Vec<String> {
-    let mut out: Vec<String> = listings.iter().map(|l| l.category.clone()).collect();
-    out.sort();
-    out.dedup();
-    if listings.iter().any(Listing::has_actions) {
-        out.push(CALLABLE.to_owned());
-    }
-    if listings.iter().any(|l| l.connected > 0) {
-        out.push(CONNECTED.to_owned());
-    }
-    out
-}
-
-/// The kinds present among `listings`.
-pub fn kinds(listings: &[Listing]) -> Vec<Kind> {
-    Kind::ALL
-        .into_iter()
-        .filter(|k| listings.iter().any(|l| l.kind == *k))
-        .collect()
-}
-
-/// The auth rungs present among `listings`.
-pub fn rungs(listings: &[Listing]) -> Vec<Rung> {
-    Rung::ALL
-        .into_iter()
-        .filter(|r| listings.iter().any(|l| l.rung == Some(*r)))
-        .collect()
-}
-
-/// First-seen order. The directory by category, every extension under
-/// "Interface".
-pub fn sections(listings: Vec<&Listing>) -> Vec<(String, Vec<&Listing>)> {
-    let mut out: Vec<(String, Vec<&Listing>)> = Vec::new();
-    for l in listings {
-        let category = match l.kind {
-            Kind::Extension => Kind::Extension.label(),
-            Kind::Connector => l.category.as_str(),
-        };
-        match out.iter_mut().find(|(c, _)| c == category) {
-            Some((_, items)) => items.push(l),
-            None => out.push((category.to_owned(), vec![l])),
-        }
-    }
-    out
-}
-
 /// How old the connector catalog is, in words.
 pub fn catalog_age(fetched_at: Option<f64>, now: f64) -> String {
     let Some(at) = fetched_at else {
-        return "Showing the connectors that shipped with Vorn".to_owned();
+        return "Showing the extensions that shipped with Vorn".to_owned();
     };
     let minutes = ((now - at) / 60_000.0).floor().max(0.0) as usize;
     match minutes {
@@ -2282,9 +2274,10 @@ pub struct Plugins {
     pub selected: Option<String>,
     pub adding: Option<Adding>,
     pub query: String,
-    pub category: Option<String>,
-    pub kind: Option<Kind>,
-    pub rung: Option<Rung>,
+    /// Browse's chip: only what adds this.
+    pub tag: Option<list::Tag>,
+    /// Every screenshot on an extension's page, not just the first two.
+    pub all_shots: bool,
     pub progress: HashMap<String, Progress>,
     pub pending: Option<Pending>,
     pub source: Option<SourceDialog>,
@@ -2322,6 +2315,13 @@ impl Plugins {
         self.listings.iter().find(|l| l.key == key)
     }
 
+    /// The page key for a listing key or a connector id, once the list knows it.
+    pub fn page_key(&self, key_or_id: &str) -> Option<String> {
+        self.listing(key_or_id)
+            .or_else(|| self.listing_by_id(key_or_id))
+            .map(|l| l.key.clone())
+    }
+
     /// A listing by connector id, preferring the pack-bearing row.
     pub fn listing_by_id(&self, id: &str) -> Option<&Listing> {
         let mut found = self.listings.iter().filter(|l| l.id == id);
@@ -2335,24 +2335,6 @@ impl Plugins {
 
     pub fn state(&self, l: &Listing) -> PackState {
         l.state(self.progress.get(&l.id))
-    }
-
-    /// The directory after the search box and pickers.
-    pub fn filtered(&self) -> Vec<&Listing> {
-        self.listings
-            .iter()
-            .filter(|l| matches_query(l, &self.query))
-            .filter(|l| matches_category(l, self.category.as_deref()))
-            .filter(|l| self.kind.is_none_or(|k| l.kind == k))
-            .filter(|l| self.rung.is_none_or(|r| l.rung == Some(r)))
-            .collect()
-    }
-
-    pub fn filtering(&self) -> bool {
-        !self.query.trim().is_empty()
-            || self.category.is_some()
-            || self.kind.is_some()
-            || self.rung.is_some()
     }
 
     pub fn status_of(&self, connector: &str) -> Option<&Value> {
@@ -2689,35 +2671,23 @@ mod tests {
     }
 
     #[test]
-    fn filters_and_facets() {
-        let conns = [conn("c1", "http")];
-        let ls = build_listings(&builtins(), &catalog(), &conns, &[], &[]);
-        assert_eq!(
-            categories(&ls),
-            ["Built in", "Other", "Work tracking", CALLABLE, CONNECTED]
-        );
-        let hits: Vec<_> = ls
-            .iter()
-            .filter(|l| matches_query(l, "AZURE boards"))
-            .map(|l| l.id.as_str())
-            .collect();
-        assert_eq!(hits, ["ado"]);
-        let connected: Vec<_> = ls
-            .iter()
-            .filter(|l| matches_category(l, Some(CONNECTED)))
-            .collect();
-        assert_eq!(connected.len(), 1);
-        assert_eq!(rungs(&ls), [Rung::Cli, Rung::Key]);
-        assert_eq!(kinds(&ls), [Kind::Connector]);
-        let secs = sections(ls.iter().collect());
-        assert_eq!(secs[0].0, "Built in");
+    fn search_reads_names_descriptions_and_tags() {
+        let ls = build_listings(&builtins(), &catalog(), &[], &[], &[]);
+        let hits = |q: &str| -> Vec<&str> {
+            ls.iter()
+                .filter(|l| matches_query(l, q))
+                .map(|l| l.id.as_str())
+                .collect()
+        };
+        assert_eq!(hits("AZURE boards"), ["ado"]);
+        assert!(hits("connections").contains(&"http"));
     }
 
     #[test]
     fn catalog_age_reads_like_a_person() {
         assert_eq!(
             catalog_age(None, 0.0),
-            "Showing the connectors that shipped with Vorn"
+            "Showing the extensions that shipped with Vorn"
         );
         assert_eq!(catalog_age(Some(0.0), 30_000.0), "Updated just now");
         assert_eq!(catalog_age(Some(0.0), 60_000.0), "Updated 1 minute ago");
@@ -2911,5 +2881,19 @@ mod tests {
         assert!(matches!(p.adding_for(&mcp, None).form, Form::Sdk(_)));
         p.builtins.retain(|b| s(b, "id") != Some("mcp"));
         assert_eq!(p.form_for(&l), Form::NoMcp);
+    }
+
+    #[test]
+    fn a_workflow_opens_its_connectors_page_by_id() {
+        let mut p = Plugins {
+            builtins: builtins(),
+            mcp: vec![json!({"id": "fs", "name": "Files", "command": "npx"})],
+            ..Plugins::default()
+        };
+        p.rebuild();
+        assert_eq!(p.page_key("fs").as_deref(), Some("mcp:fs"));
+        assert_eq!(p.page_key("mcp:fs").as_deref(), Some("mcp:fs"));
+        assert_eq!(p.page_key("http").as_deref(), Some("http"));
+        assert_eq!(p.page_key("gone"), None);
     }
 }

@@ -554,7 +554,7 @@ impl App {
         }
     }
 
-    /// A settings page's `call` runs each time the page shows.
+    /// A settings page's `call` runs each time the page shows, an extension's accounts too.
     fn show_calls(&mut self) {
         let page = self
             .st
@@ -562,8 +562,11 @@ impl App {
             .open
             .then(|| self.st.settings.ext_page.clone())
             .flatten();
-        let showing: Vec<String> = page.into_iter().collect();
-        let showing: Vec<String> = showing.into_iter().chain(self.open_panes()).collect();
+        let showing: Vec<String> = page
+            .into_iter()
+            .chain(self.accounts_tree())
+            .chain(self.open_panes())
+            .collect();
         self.st.points.shown.retain(|k| showing.contains(k));
         for key in showing {
             if self.st.points.shown.contains(&key) {
@@ -626,6 +629,7 @@ impl App {
             .map(points::Point::key)
             .collect();
         out.extend(page.flatten());
+        out.extend(self.accounts_tree());
         out.extend(self.open_panes());
         out.extend(self.files_trees());
         out.extend(self.browser_trees());
@@ -639,6 +643,19 @@ impl App {
         out.sort();
         out.dedup();
         out
+    }
+
+    /// The accounts of the connector whose page shows in Settings › Extensions.
+    fn accounts_tree(&self) -> Option<String> {
+        let set = &self.st.settings;
+        if !set.open || set.category != crate::settings::Category::Connectors {
+            return None;
+        }
+        let p = &self.st.plugins;
+        let l = p.listing(p.selected.as_deref()?)?;
+        (l.kind == crate::plugins::Kind::Connector
+            || l.tags.contains(&crate::plugins::list::Tag::Connection))
+        .then(|| points::scoped(crate::settings::CONNECTIONS_PAGE, &l.id))
     }
 
     /// The template panes open on cards, by point key.

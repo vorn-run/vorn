@@ -916,24 +916,34 @@ pub fn choice_items(s: &Screen<'_>, t: &str) -> Vec<Item> {
             out
         }
         "poll.connection" | "action.connection" => {
-            s.st.wf
-                .connections
-                .iter()
-                .map(|cn| {
-                    let id = sv(cn, "id").unwrap_or("");
-                    let src = crate::library::Sources {
-                        connections: &s.st.wf.connections,
-                        packs: &s.st.wf.lib.packs,
-                        ..crate::library::Sources::default()
-                    };
-                    let look = crate::library::look_for(&src, id);
-                    pick(sv(cn, "name").unwrap_or(""), id, get("connectionId") == id).mark(mark(
-                        look.as_ref(),
-                        14.0,
-                        c(look::GRAY_400),
-                    ))
-                })
-                .collect()
+            let current = accounts_of(&s.st.wf.connections, &get("connectionId"));
+            let mut out: Vec<Item> =
+                s.st.wf
+                    .connections
+                    .iter()
+                    .map(|cn| {
+                        let id = sv(cn, "id").unwrap_or("");
+                        let src = crate::library::Sources {
+                            connections: &s.st.wf.connections,
+                            packs: &s.st.wf.lib.packs,
+                            ..crate::library::Sources::default()
+                        };
+                        let look = crate::library::look_for(&src, id);
+                        pick(sv(cn, "name").unwrap_or(""), id, get("connectionId") == id)
+                            .mark(mark(look.as_ref(), 14.0, c(look::GRAY_400)))
+                    })
+                    .collect();
+            if let Some(connector) = current {
+                out.push(
+                    Item::new(
+                        "settings",
+                        "Manage accounts…",
+                        Act::Plug(crate::plugins::PlugAct::ShowAccounts(connector.to_owned())),
+                    )
+                    .sep(),
+                );
+            }
+            out
         }
         "config.event" => {
             let connector =
@@ -1807,7 +1817,7 @@ fn trigger_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             ];
             if s.st.wf.connections.is_empty() {
                 b.push(help(
-                    "No connections yet. Add one from Settings \u{203a} Connections.",
+                    "No connections yet. Add one in Settings \u{203a} Extensions.",
                     6.0,
                 ));
             }
@@ -3499,7 +3509,7 @@ fn action_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
         first.push(help(&format!("{a} comes from a connector that is not installed yet \u{2014} the workflow panel offers to install and connect it."), 6.0));
     } else if s.st.wf.connections.is_empty() {
         first.push(help(
-            "No connections yet. Add one from Settings \u{203a} Connections first.",
+            "No connections yet. Add one in Settings \u{203a} Extensions first.",
             6.0,
         ));
     }
@@ -3863,4 +3873,33 @@ pub fn properties(s: &Screen<'_>, d: &Draft) -> El {
                 .scroll_y()
                 .child(body),
         )
+}
+
+/// The extension whose accounts hold connection `id`: an SDK pack's own id,
+/// not the "sdk" it is filed under.
+fn accounts_of<'a>(connections: &'a [Value], id: &str) -> Option<&'a str> {
+    connections
+        .iter()
+        .find(|cn| sv(cn, "id") == Some(id))
+        .map(crate::library::connection_connector)
+        .filter(|c| !c.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::accounts_of;
+    use serde_json::json;
+
+    #[test]
+    fn a_connection_manages_its_own_extensions_accounts() {
+        let connections = [
+            json!({ "id": "a", "connectorId": "sdk", "filters": { "sdkConnectorId": "linear" } }),
+            json!({ "id": "b", "connectorId": "http" }),
+            json!({ "id": "c", "connectorId": "" }),
+        ];
+        assert_eq!(accounts_of(&connections, "a"), Some("linear"));
+        assert_eq!(accounts_of(&connections, "b"), Some("http"));
+        assert_eq!(accounts_of(&connections, "c"), None);
+        assert_eq!(accounts_of(&connections, "gone"), None);
+    }
 }

@@ -183,7 +183,7 @@ fn is_local(hosts: Option<&Value>) -> bool {
     }
 }
 
-/// Extensions and Connections, Install and where from, and each built-in's switch.
+/// Extensions, adding a connection, Install and where from, and each built-in's switch.
 fn extensions(st: &State) -> Vec<Entry> {
     use crate::plugins::{Origin, PlugAct};
     use crate::settings::{Category, SetAct};
@@ -197,11 +197,11 @@ fn extensions(st: &State) -> Vec<Entry> {
         .keys(&["plugins", "connectors", "extensions", "add-ons"]),
         Entry::new(
             Cat::Settings,
-            "Open Connections",
+            "Add a Connection\u{2026}",
             Glyph::Icon("plug"),
-            Act::Set(SetAct::Open(Category::Connections)),
+            Act::Plug(PlugAct::AddConnection),
         )
-        .keys(&["connectors", "accounts", "sign-in", "extensions"]),
+        .keys(&["connectors", "connections", "accounts", "sign-in"]),
         Entry::new(
             Cat::Settings,
             "Install Extension\u{2026}",

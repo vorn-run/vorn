@@ -111,7 +111,43 @@ impl Serialize for InstalledPack {
         if !m.mcp.is_empty() {
             map.serialize_entry("mcp", &m.mcp)?;
         }
+        let tags = m.tags();
+        if !tags.is_empty() {
+            map.serialize_entry("tags", &tags)?;
+        }
+        if !m.showcase.is_empty() {
+            map.serialize_entry("showcase", &m.showcase)?;
+        }
         map.end()
+    }
+}
+
+/// The most bytes of a logo file sent to the app; a logo is a small drawing.
+const MAX_LOGO_BYTES: u64 = 64 * 1024;
+
+impl InstalledPack {
+    /// Its logo's SVG text, or with `dark` its dark variant's; `None` when it
+    /// has none or the file is missing, too big or not SVG.
+    pub fn logo_svg(&self, dark: bool) -> Option<String> {
+        let file = self.manifest.logo_file(dark)?;
+        let inside = Path::new(file).components().all(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        });
+        if !inside {
+            return None;
+        }
+        // A link may point anywhere; what it resolves to must still be in the pack.
+        let path = fs::canonicalize(self.path.join(file)).ok()?;
+        if !path.starts_with(fs::canonicalize(&self.path).ok()?)
+            || fs::metadata(&path).ok()?.len() > MAX_LOGO_BYTES
+        {
+            return None;
+        }
+        let text = fs::read_to_string(path).ok()?;
+        text.contains("<svg").then_some(text)
     }
 }
 
@@ -598,6 +634,42 @@ mod tests {
     }
 
     #[test]
+    fn sends_its_logo_and_tags() {
+        let root = tempfile::tempdir().unwrap();
+        let body = "name = \"Acme\"\n[icon]\nfile = \"logo.svg\"\ndark = \"dark.svg\"\n[service]\ncommand = [\"node\", \"index.js\"]\n[connector]\n";
+        let dir = install(root.path(), "acme", "1.0.0", body);
+        fs::write(dir.join("logo.svg"), "<svg id=\"light\"/>").unwrap();
+        fs::write(dir.join("dark.svg"), "not a drawing").unwrap();
+        let pack = PackStore::new(root.path()).inspect("acme").unwrap();
+        assert_eq!(pack.logo_svg(false).as_deref(), Some("<svg id=\"light\"/>"));
+        assert_eq!(pack.logo_svg(true), None);
+        let wire = serde_json::to_value(&pack).unwrap();
+        assert_eq!(wire["tags"], json!(["connection"]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_logo_linked_out_of_its_pack_is_not_read() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let body = "name = \"Acme\"\n[icon]\nfile = \"logo.svg\"\ndark = \"art/dark.svg\"\n[service]\ncommand = [\"node\", \"index.js\"]\n[connector]\n";
+        let dir = install(root.path(), "acme", "1.0.0", body);
+        fs::write(outside.path().join("secret.svg"), "<svg id=\"secret\"/>").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret.svg"), dir.join("logo.svg"))
+            .unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.join("art")).unwrap();
+        fs::write(outside.path().join("dark.svg"), "<svg id=\"dark\"/>").unwrap();
+        let pack = PackStore::new(root.path()).inspect("acme").unwrap();
+        assert_eq!(pack.logo_svg(false), None);
+        assert_eq!(pack.logo_svg(true), None);
+        fs::remove_file(dir.join("logo.svg")).unwrap();
+        fs::write(dir.join("real.svg"), "<svg id=\"in\"/>").unwrap();
+        std::os::unix::fs::symlink(dir.join("real.svg"), dir.join("logo.svg")).unwrap();
+        let pack = PackStore::new(root.path()).inspect("acme").unwrap();
+        assert_eq!(pack.logo_svg(false).as_deref(), Some("<svg id=\"in\"/>"));
+    }
+
+    #[test]
     fn installed_packages_written_for_0_9_are_relabelled_and_read_again() {
         let root = tempfile::tempdir().unwrap();
         let dir = install(root.path(), "old", "1.0.0", &extension("Old"));
@@ -728,7 +800,8 @@ mod tests {
                 "actions",
                 "env",
                 "api",
-                "service"
+                "service",
+                "tags"
             ]
         );
         assert!(out["bytes"].as_u64().unwrap() > 0);

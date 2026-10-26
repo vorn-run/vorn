@@ -42,6 +42,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::ExtInstall => 240.0,
         MenuKind::AgentPicker => 320.0,
         MenuKind::ExtChoice(..) => 180.0,
+        MenuKind::ExtMenu(_) => 220.0,
         MenuKind::OpenIn(_) => 180.0,
         MenuKind::Branch(_) => 220.0,
         MenuKind::ThemePicker(_) => 430.0,
@@ -139,6 +140,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::Holder(id) => super::settings::holder_items(id),
         MenuKind::Device(id) => super::network::device_items(id),
         MenuKind::ExtChoice(ext, key) => super::plugins::choice_items(s, ext, key),
+        MenuKind::ExtMenu(key) => super::plugins::menu_items(s, key),
     }
 }
 

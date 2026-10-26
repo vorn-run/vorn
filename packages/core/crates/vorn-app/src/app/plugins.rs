@@ -5,8 +5,8 @@ use serde_json::{json, Value};
 use super::{tasks::open_url, Act, App, Call, Src};
 use crate::client::RpcError;
 use crate::plugins::{
-    self as plug, failure, field_id, kinds_id, pick_id, tabs_id, Activity, BuiltinForm, Field,
-    Form, Origin, Pending, Pick, PlugAct, ProfileForm, Progress, Rung, SdkForm, Tab, Verb,
+    self as plug, failure, field_id, pick_id, tabs_id, tags_id, Activity, BuiltinForm, Field, Form,
+    Origin, Pending, Pick, PlugAct, ProfileForm, Progress, Rung, SdkForm, Tab, Verb,
 };
 use crate::runs::s;
 use crate::settings::Category;
@@ -200,9 +200,20 @@ impl App {
                 );
                 let p = &mut self.st.plugins;
                 p.tab = Tab::Browse;
-                p.kind = Some(plug::Kind::Connector);
+                p.tag = Some(plug::list::Tag::Connection);
+                p.query.clear();
                 p.selected = None;
                 p.adding = None;
+            }
+            PlugAct::ShowAccounts(id) => {
+                self.run(
+                    ui,
+                    Act::Set(SetAct::Open(Category::Connectors)),
+                    Src::default(),
+                );
+                let p = &mut self.st.plugins;
+                p.adding = None;
+                p.selected = Some(p.page_key(&id).unwrap_or(id));
             }
             PlugAct::Rollback(id) => {
                 if self.plug_start(Verb::Rollback, &id) {
@@ -595,17 +606,17 @@ impl App {
         self.call(Call::Plug(call), method, params);
     }
 
-    /// A form finished: back to what is installed, re-read; the connection
-    /// shows on Settings › Connections.
+    /// A form finished: back to the extension's page, re-read, where the
+    /// new account shows under Accounts.
     fn plug_done(&mut self) {
         if self.st.plugins.from_editor {
             self.plug_leave();
             return;
         }
         let p = &mut self.st.plugins;
-        p.adding = None;
-        p.selected = None;
-        self.open_settings(Category::Connections);
+        let key = p.adding.take().map(|a| a.key);
+        self.open_settings(Category::Connectors);
+        self.st.plugins.selected = key;
         // The page reads its rows again, with the connection just made.
         self.st.points.shown.clear();
         self.plug_load(false);
@@ -722,6 +733,10 @@ impl App {
         p.loads = p.loads.saturating_sub(1);
         p.loaded = true;
         p.rebuild();
+        // A page opened by connector id before the list came in takes its listing's key.
+        if let Some(key) = p.selected.as_deref().and_then(|k| p.page_key(k)) {
+            p.selected = Some(key);
+        }
         if p.loads == 0 && p.intent.is_some() {
             self.plug_apply_intent();
         }
@@ -1253,13 +1268,11 @@ impl App {
                 }
                 _ => false,
             },
-            UiEvent::Select { group, index } if *group == kinds_id() => {
+            UiEvent::Select { group, index } if *group == tags_id() => {
                 let p = &mut self.st.plugins;
-                p.kind = match index {
-                    1 => Some(plug::Kind::Connector),
-                    2 => Some(plug::Kind::Extension),
-                    _ => None,
-                };
+                p.tag = index
+                    .checked_sub(1)
+                    .and_then(|i| plug::list::browse_tags(p).get(i).copied());
                 true
             }
             UiEvent::Select { group, index } if *group == tabs_id() => {
@@ -1286,13 +1299,7 @@ impl App {
 
     /// Every picker the page could be showing.
     fn plug_picks(&self) -> Vec<Pick> {
-        let mut picks = vec![
-            Pick::Category,
-            Pick::Kind,
-            Pick::Rung,
-            Pick::Project,
-            Pick::Trigger,
-        ];
+        let mut picks = vec![Pick::Project, Pick::Trigger];
         if let Some(Form::Builtin(f)) = self.st.plugins.adding.as_ref().map(|a| &a.form) {
             let manifest = self
                 .st
@@ -1315,21 +1322,6 @@ impl App {
         let projects: Vec<String> = self.store.projects.iter().map(|p| p.name.clone()).collect();
         let p = &mut self.st.plugins;
         match pick {
-            Pick::Category => {
-                p.category = index
-                    .checked_sub(1)
-                    .and_then(|i| plug::categories(&p.listings).get(i).cloned())
-            }
-            Pick::Kind => {
-                p.kind = index
-                    .checked_sub(1)
-                    .and_then(|i| plug::kinds(&p.listings).get(i).copied())
-            }
-            Pick::Rung => {
-                p.rung = index
-                    .checked_sub(1)
-                    .and_then(|i| plug::rungs(&p.listings).get(i).copied())
-            }
             Pick::Project => {
                 let detects = |p: &plug::Plugins, id: &str| {
                     p.builtin(id)

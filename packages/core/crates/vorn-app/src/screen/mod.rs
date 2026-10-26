@@ -122,6 +122,9 @@ pub struct Screen<'a> {
     pub logo: Option<u32>,
     /// The agents' marks, by agent.
     pub agents: &'a crate::components::AgentMarks,
+    /// The extensions' logos, by extension id.
+    pub logos: &'a crate::plugins::logos::Logos,
+    pub shots: &'a crate::plugins::shots::Shots,
     pub size: (f32, f32),
     /// The app draws its own window controls (no system title bar).
     pub chrome: bool,

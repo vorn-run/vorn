@@ -1,57 +1,110 @@
-//! The Installed list: what ships with Vorn, each with its switch, then
-//! what was installed or linked.
+//! The Installed list, one row per extension with what needs you on top,
+//! and the Updates list.
 
 use serde_json::Value;
 
-use super::{
-    act, activity_line, chip_button, detail::BUILTIN, glyph, heading, progress_bar, tone_line,
-    well, R,
-};
+use super::{act, logo, maker, status, tag, tone_line, R};
 use crate::act::Act;
-use crate::plugins::{
-    count, describe, hidden_while_off, is_implicit, pack_line, places, Kind, Listing, PlugAct, Tab,
-    Tone, CONNECTORS,
-};
+use crate::plugins::list::{self, Item, Row, Status};
+use crate::plugins::{hidden_while_off, PlugAct, Tab, Tone};
 use crate::points::PointAct;
 use crate::runs::s as sv;
 use crate::screen::{ico, white, Screen};
-use crate::settings::{Category, SetAct};
 use crate::ui::theme::color as k;
-use crate::ui::{div, text, widgets, Action, El, Role};
+use crate::ui::{div, text, Action, El, Role};
+
+/// The extension the default agent comes in.
+fn default_agent<'a>(s: &Screen<'a>) -> Option<&'a str> {
+    let key = crate::screen::settings::default_agent(s);
+    s.store.agents.get(key).map(|a| a.extension.as_str())
+}
 
 pub(super) fn view(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let mut col = div().col().child(heading("Built in"));
-    // Connectors leads: the one built-in with a page of its own.
-    let mut builtins: Vec<&Value> = s.st.points.builtins.iter().collect();
-    builtins.sort_by_key(|b| sv(b, "id") != Some(CONNECTORS));
-    for b in builtins {
-        col = col.child(builtin(s, b));
+    let sections = list::sections(p, &s.st.points.builtins, &p.query, default_agent(s));
+    if sections.is_empty() {
+        return empty(s, !p.query.trim().is_empty());
     }
-    col = col.child(heading("Installed"));
-    let mut packs: Vec<&Listing> = p.listings.iter().filter(|l| l.pack.is_some()).collect();
-    packs.sort_by_key(|l| (l.kind != Kind::Extension, l.name.to_lowercase()));
-    if packs.is_empty() {
-        return col.child(empty(s));
-    }
-    for l in packs {
-        col = col.child(pack(s, l));
+    let mut col = div().col();
+    for (h, rows) in sections {
+        col = col.child(heading(h.label(), rows.len()));
+        for r in rows {
+            col = col.child(row(s, &r));
+        }
     }
     col
 }
 
-/// "Nothing installed yet", pointing at Browse.
-fn empty(s: &Screen<'_>) -> El {
-    let browse = s.acts.on("plug-installed", act(PlugAct::Tab(Tab::Browse)));
-    let fg = k::GRAY_300.mix(k::WHITE, s.ui.hover(browse));
-    let line = |t: &str| text(t, 13.0, k::GRAY_500).line_height(20.0).silent();
+/// The installed packs with a newer release.
+pub(super) fn updates(s: &Screen<'_>) -> El {
+    let p = &s.st.plugins;
+    let q = p.query.trim().to_lowercase();
+    let items: Vec<_> = list::updates(p)
+        .into_iter()
+        .filter(|l| q.is_empty() || l.name.to_lowercase().contains(&q))
+        .collect();
+    if items.is_empty() {
+        return div().py(24.0).child(
+            text("Everything is up to date.", 13.0, k::INK_SECONDARY)
+                .line_height(20.0)
+                .silent(),
+        );
+    }
+    let mut col = div().col().child(heading("Updates", items.len()));
+    for l in items {
+        col = col.child(row(
+            s,
+            &Row {
+                item: Item::Listing(l),
+                status: Some(Status::Update),
+            },
+        ));
+    }
+    col
+}
+
+/// An uppercase section heading and its count.
+fn heading(label: &str, n: usize) -> El {
     div()
         .row()
         .items_center()
-        .wrap_children()
-        .py(12.0)
-        .border_top(1.0, white(0.06))
-        .child(line("Nothing installed yet.\u{a0}"))
+        .gap(6.0)
+        .px(10.0)
+        .pt(10.0)
+        .pb(2.0)
+        .role(Role::Heading, label)
+        .child(
+            text(label.to_uppercase(), 11.0, k::INK_FAINT)
+                .tracking(0.06)
+                .line_height(16.0)
+                .silent(),
+        )
+        .child(
+            text(n.to_string(), 11.0, k::INK_GHOST)
+                .line_height(16.0)
+                .silent(),
+        )
+}
+
+/// No installed extension matches, or none is installed.
+fn empty(s: &Screen<'_>, searching: bool) -> El {
+    let browse = s.acts.on("plug-installed", act(PlugAct::Tab(Tab::Browse)));
+    let fg = k::INK_SECONDARY.mix(k::INK, s.ui.hover(browse));
+    let said = if searching {
+        "Nothing installed matches.\u{a0}"
+    } else {
+        "Nothing installed yet.\u{a0}"
+    };
+    div()
+        .row()
+        .items_center()
+        .py(16.0)
+        .px(10.0)
+        .child(
+            text(said, 13.0, k::INK_SECONDARY)
+                .line_height(20.0)
+                .silent(),
+        )
         .child(
             div()
                 .id(browse)
@@ -61,134 +114,71 @@ fn empty(s: &Screen<'_>) -> El {
                 .border_bottom(1.0, fg)
                 .child(text("Browse", 13.0, fg).line_height(18.0).silent()),
         )
-        .child(line("\u{a0}for one, or install one from Git."))
 }
 
-/// One row: a well, the name over one line, and what sits on the right.
-fn row(
-    s: &Screen<'_>,
-    place: &str,
-    open: Act,
-    name: &str,
-    mark: El,
-    line: El,
-    right: Option<El>,
-) -> El {
-    let id = s.acts.on(place, open);
+/// One extension: logo, name and tags over what it does and who made it,
+/// its one status, and a chevron; the whole row opens its page.
+pub(super) fn row(s: &Screen<'_>, r: &Row<'_>) -> El {
+    let item = r.item;
+    let key = item.key();
+    let id = s
+        .acts
+        .on("plug-row", act(PlugAct::Select(Some(key.clone()))));
     let hot = s.ui.hover(id);
-    let left = div()
+    let (listing, own) = match item {
+        Item::Listing(l) => (Some(l), None),
+        Item::Builtin(b) => (None, b.get("icon")),
+    };
+    let place = format!("plug-row-{key}");
+    let mut title = div().row().items_center().gap(8.0).min_w0().child(
+        text(item.name(), 14.0, k::INK)
+            .line_height(20.0)
+            .truncate()
+            .shrink0(),
+    );
+    for t in item.tags() {
+        title = title.child(tag(s, &place, t));
+    }
+    let desc = item.description();
+    let mut line = div().row().items_center().min_w0();
+    if !desc.is_empty() {
+        line = line.child(
+            text(format!("{desc} \u{b7}\u{a0}"), 12.0, k::INK_SECONDARY)
+                .line_height(17.0)
+                .truncate()
+                .min_w0(),
+        );
+    }
+    line = line.child(maker(&item.maker(), 12.0));
+    div()
         .id(id)
         .on(Action::Click)
         .ring(R)
         .row()
         .items_center()
         .gap(12.0)
-        .grow()
-        .min_w0()
-        .role(Role::Button, format!("About {name}"))
-        .child(well(32.0, 6.0, white(0.05 + 0.03 * hot), mark))
+        .px(10.0)
+        .py(9.0)
+        .rounded(R)
+        .bg(white(0.04 * hot))
+        .role(Role::Button, format!("Open {}", item.name()))
+        .child(logo(s, item.id(), item.name(), listing, own, 36.0))
         .child(
             div()
                 .col()
+                .gap(2.0)
                 .grow()
                 .min_w0()
-                .child(
-                    text(name, 13.5, k::GRAY_200.mix(k::WHITE, hot))
-                        .weight(500)
-                        .line_height(20.0)
-                        .truncate(),
-                )
+                .child(title)
                 .child(line),
-        );
-    div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .py(10.0)
-        .border_top(1.0, white(0.06))
-        .child(left)
-        .child_if(right)
-}
-
-/// The muted second line, cut to one line.
-fn second(t: &str) -> El {
-    text(t, 12.0, k::GRAY_500)
-        .line_height(17.0)
-        .mt(1.0)
-        .truncate()
-}
-
-/// A built-in: its places while on (Connectors: its connections), "off"
-/// while off, and its switch. Connectors' row opens Settings › Connections while on.
-fn builtin(s: &Screen<'_>, b: &Value) -> El {
-    let pts = &s.st.points;
-    let id = sv(b, "id").unwrap_or_default();
-    let name = sv(b, "name").unwrap_or(id);
-    let on = b.get("on").and_then(Value::as_bool) == Some(true);
-    let connectors = id == CONNECTORS;
-    let desc = if connectors {
-        "Watches services and starts workflows"
-    } else {
-        sv(b, "description").unwrap_or_default()
-    };
-    let tail = if on && connectors {
-        let n =
-            s.st.plugins
-                .connections
-                .iter()
-                .filter(|c| !is_implicit(c))
-                .count();
-        format!(" \u{b7} {}", count(n, "connection"))
-    } else if on {
-        format!(" \u{b7} {}", count(places(b.get("contributes")), "place"))
-    } else {
-        " \u{b7} off".to_owned()
-    };
-    let line = div()
-        .row()
-        .min_w0()
-        .mt(1.0)
-        .child(
-            text(desc, 12.0, k::GRAY_500)
-                .line_height(17.0)
-                .truncate()
-                .min_w0(),
         )
-        .child(text(tail, 12.0, k::GRAY_500).line_height(17.0).shrink0());
-    let busy = pts.switching.is_some();
-    let switch = s.acts.on(
-        "ext-builtin",
-        Act::Point(PointAct::Builtin {
-            id: id.to_owned(),
-            on: !on,
-        }),
-    );
-    let mut switch = widgets::toggle(s.ui, switch, name, on, busy).shrink0();
-    if pts.switching.as_deref() == Some(id) {
-        switch = switch.opacity(0.5);
-    }
-    let mut col = div().col().child(row(
-        s,
-        "plug-builtin-row",
-        if connectors && on {
-            Act::Set(SetAct::Open(Category::Connections))
-        } else {
-            act(PlugAct::Select(Some(format!("{BUILTIN}{id}"))))
-        },
-        name,
-        ico(
-            if connectors { "plug" } else { "puzzle" },
-            17.0,
-            1.75,
-            k::GRAY_200,
-        ),
-        line,
-        Some(switch),
-    ));
-    if let Some(note) = off_note(s, b) {
-        col = col.child(note.ml(44.0).mb(10.0));
-    }
-    col
+        .child_if(r.status.as_ref().map(|st| status(s, &place, st)))
+        .child(ico(
+            "chevron-right",
+            14.0,
+            2.0,
+            k::INK_FAINT.mix(k::INK_SECONDARY, hot),
+        ))
 }
 
 /// What going off hid, with Undo; or why the switch went back.
@@ -208,7 +198,7 @@ pub(super) fn off_note(s: &Screen<'_>, b: &Value) -> Option<El> {
             on: true,
         }),
     );
-    let fg = k::GRAY_300.mix(k::WHITE, s.ui.hover(undo));
+    let fg = k::INK_SECONDARY.mix(k::INK, s.ui.hover(undo));
     Some(
         div()
             .row()
@@ -216,7 +206,7 @@ pub(super) fn off_note(s: &Screen<'_>, b: &Value) -> Option<El> {
             .gap(8.0)
             .min_w0()
             .child(
-                text(hidden_while_off(b), 11.5, k::GRAY_500)
+                text(hidden_while_off(b), 11.5, k::INK_SECONDARY)
                     .line_height(17.0)
                     .wrapping()
                     .min_w0(),
@@ -231,37 +221,5 @@ pub(super) fn off_note(s: &Screen<'_>, b: &Value) -> Option<El> {
                     .border_bottom(1.0, fg)
                     .child(text("Undo", 11.5, fg).line_height(16.0).silent()),
             ),
-    )
-}
-
-/// An installed or linked pack; vornd has no switch for these yet.
-fn pack(s: &Screen<'_>, l: &Listing) -> El {
-    let state = s.st.plugins.state(l);
-    let status = describe(&state);
-    let mut line = div().col().min_w0().child(second(&pack_line(l)));
-    line = line.child_if(progress_bar(&status));
-    if let (false, Some(detail)) = (status.tone == Tone::Settled, status.detail.as_deref()) {
-        line = line.child(tone_line(status.tone, detail, 11.0).mt(4.0));
-    }
-    line = line.child_if(activity_line(s, &l.id).map(|e| e.mt(4.0)));
-    let right = status.action.filter(|_| l.installable()).map(|_| {
-        chip_button(
-            s,
-            "plug-installed-install",
-            PlugAct::Install(l.key.clone()),
-            Some("refresh-cw"),
-            &status.label,
-            k::GRAY_300,
-            !status.busy,
-        )
-    });
-    row(
-        s,
-        "plug-installed-row",
-        act(PlugAct::Select(Some(l.key.clone()))),
-        &l.name,
-        glyph(Some(l), &l.id, 17.0, k::GRAY_200),
-        line,
-        right,
     )
 }

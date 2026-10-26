@@ -1,5 +1,5 @@
-//! Settings › Extensions and Connections on a vornd with its own HOME: the
-//! tabs, a listing's detail, the add forms and a connection made from one.
+//! Settings › Extensions on a vornd with its own HOME: the tabs, a
+//! listing's page, the add forms and an account made from one.
 //! `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
 #![cfg(unix)]
@@ -10,8 +10,7 @@ use serde_json::json;
 use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
-use vorn_app::plugins::{field_id, tabs_id, Field, Form, PlugAct, Tab};
-use vorn_app::points::PointAct;
+use vorn_app::plugins::{field_id, list, tabs_id, Field, Form, PlugAct, Tab};
 use vorn_app::settings::{Category, SetAct, CONNECTIONS_PAGE};
 use vorn_app::templates::{self, Fix};
 use vorn_app::ui::mods;
@@ -70,46 +69,29 @@ fn plugins_page_lists_adds_and_connects() {
     shot.click(&mut app, field_id(&Field::Query));
     shot.type_text(&mut app, "zzzz-none");
     shot.frame(&mut app);
-    assert!(app.st.plugins.filtered().is_empty());
+    let p = &app.st.plugins;
+    assert!(list::browse(p, &p.query, p.tag).is_empty());
     shot.save(&mut app, "pl-browse-empty");
     for _ in 0.."zzzz-none".len() {
         shot.send(&mut app, key("Backspace", 0, None));
     }
     shot.frame(&mut app);
-    assert!(!app.st.plugins.filtered().is_empty());
+    let p = &app.st.plugins;
+    assert!(!list::browse(p, &p.query, p.tag).is_empty());
 
-    // Connections is the Connectors built-in's page, listed under Extensions.
+    // A listing's page, from Browse.
     shot.click(
         &mut app,
-        App::control(
-            "settings-nav-ext",
-            &Act::Point(PointAct::Settings(CONNECTIONS_PAGE.into())),
-        ),
-    );
-    assert_eq!(app.st.settings.ext_page.as_deref(), Some(CONNECTIONS_PAGE));
-    shot.save(&mut app, "pl-connections");
-    shot.click(
-        &mut app,
-        App::control(
-            "settings-nav",
-            &Act::Set(SetAct::Open(Category::Connectors)),
-        ),
-    );
-    shot.until(&mut app, "the page reloaded", |app, _| {
-        loaded(app).then_some(())
-    });
-
-    // A listing's detail, from Browse.
-    shot.click(&mut app, tab(Tab::Browse));
-    shot.click(
-        &mut app,
-        plug("plug-browse-row", PlugAct::Select(Some("http".into()))),
+        plug("plug-tile", PlugAct::Select(Some("http".into()))),
     );
     assert_eq!(app.st.plugins.selected.as_deref(), Some("http"));
     shot.save(&mut app, "pl-detail");
 
-    // The add form for a built-in, and the connection it makes.
-    shot.click(&mut app, plug("plug-detail", PlugAct::Add("http".into())));
+    // The add form for a built-in, and the account it makes on its page.
+    shot.click(
+        &mut app,
+        plug("plug-detail-connect", PlugAct::Add("http".into())),
+    );
     let form = app.st.plugins.adding.as_ref().map(|a| a.form.clone());
     assert!(matches!(form, Some(Form::Builtin(_))), "{form:?}");
     shot.save(&mut app, "pl-add-http");
@@ -142,7 +124,7 @@ fn plugins_page_lists_adds_and_connects() {
     shot.click(&mut app, plug("plug-save", PlugAct::Save));
     shot.until(&mut app, "the connection made", |app, _| {
         (app.st.plugins.adding.is_none()
-            && app.st.settings.ext_page.as_deref() == Some(CONNECTIONS_PAGE)
+            && app.st.plugins.selected.as_deref() == Some("http")
             && !app.st.plugins.connections.is_empty())
         .then_some(())
     });
@@ -151,8 +133,9 @@ fn plugins_page_lists_adds_and_connects() {
     });
     shot.save(&mut app, "pl-connected");
 
-    // The key lives on the connection's row: its menu tests and rotates it.
-    let more = wait_for("the connection's menu", || {
+    // The key lives on the account's row: its menu tests and rotates it.
+    let more = wait_for("the account's menu", || {
+        shot.frame(&mut app);
         shot.labelled(&mut app, "Button", "More")
     });
     shot.click(&mut app, more);
@@ -301,7 +284,7 @@ fn the_sign_in_sheet_opens_checks_and_closes() {
 }
 
 #[test]
-fn connectors_switch_off_and_on_from_the_built_ins_list() {
+fn connectors_switch_off_and_on_from_its_page() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -322,14 +305,15 @@ fn connectors_switch_off_and_on_from_the_built_ins_list() {
     assert!(on(&app));
     let switch = |on: bool| {
         App::control(
-            "ext-builtin",
+            &format!("ext-switch-{}", vorn_app::plugins::CONNECTORS),
             &Act::Point(vorn_app::points::PointAct::Builtin {
                 id: vorn_app::plugins::CONNECTORS.into(),
                 on,
             }),
         )
     };
-    shot.click(&mut app, tab(Tab::Installed));
+    let page = format!("{}{}", list::BUILTIN, vorn_app::plugins::CONNECTORS);
+    shot.click(&mut app, plug("plug-row", PlugAct::Select(Some(page))));
     shot.until(&mut app, "Connections listed", |app, _| {
         app.st.points.get(CONNECTIONS_PAGE).map(|_| ())
     });

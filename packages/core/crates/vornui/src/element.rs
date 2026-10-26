@@ -557,6 +557,11 @@ impl El {
         };
         self
     }
+    /// Starts from width `w` before growing or shrinking, so a wrapping row breaks there.
+    pub fn basis(mut self, w: f32) -> El {
+        self.style.flex_basis = length(w);
+        self
+    }
     pub fn shrink0(mut self) -> El {
         self.style.flex_shrink = 0.0;
         self

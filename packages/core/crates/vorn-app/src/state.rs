@@ -223,6 +223,8 @@ pub enum MenuKind {
     AgentPicker,
     /// An extension page's choice of many options: extension id, preference id.
     ExtChoice(String, String),
+    /// An extension page's … menu, by the key `Plugins::selected` holds.
+    ExtMenu(String),
     /// Settings › Appearance's theme picker, for a theme row of that scheme.
     ThemePicker(vorn_theme::Appearance),
     /// A theme's terminal palette, publisher and version, by theme id.

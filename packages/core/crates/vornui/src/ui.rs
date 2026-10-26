@@ -2171,10 +2171,23 @@ fn custom_node(custom: u64) -> NodeId {
     NodeId((1 << 63) | (custom << 1) | 1)
 }
 
+/// Options for an SVG someone else wrote: an `<image>` may be inline `data:`,
+/// never a file or address it names.
+fn svg_options() -> resvg::usvg::Options<'static> {
+    use resvg::usvg::{ImageHrefResolver, Options};
+    Options {
+        image_href_resolver: ImageHrefResolver {
+            resolve_data: ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..Options::default()
+    }
+}
+
 /// An SVG rendered to a `px`×`px` coverage mask.
 pub fn rasterize_svg(svg: &str, px: u32) -> Option<Vec<u8>> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let tree = usvg::Tree::from_str(svg, &svg_options()).ok()?;
     let mut pm = tiny_skia::Pixmap::new(px, px)?;
     let s = tree.size();
     let tf = tiny_skia::Transform::from_scale(px as f32 / s.width(), px as f32 / s.height());
@@ -2185,7 +2198,7 @@ pub fn rasterize_svg(svg: &str, px: u32) -> Option<Vec<u8>> {
 /// An SVG stretched over `w`×`h` pixels, as a coverage mask.
 pub fn rasterize_svg_to(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let tree = usvg::Tree::from_str(svg, &svg_options()).ok()?;
     let mut pm = tiny_skia::Pixmap::new(w, h)?;
     let s = tree.size();
     let tf = tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
@@ -2196,7 +2209,7 @@ pub fn rasterize_svg_to(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
 /// An SVG in its own colours at `w`×`h` pixels, as straight-alpha RGBA.
 pub fn rasterize_svg_rgba(svg: &str, w: u32, h: u32) -> Option<Vec<u8>> {
     use resvg::{tiny_skia, usvg};
-    let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).ok()?;
+    let tree = usvg::Tree::from_str(svg, &svg_options()).ok()?;
     let mut pm = tiny_skia::Pixmap::new(w, h)?;
     let s = tree.size();
     let tf = tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height());
@@ -2251,6 +2264,25 @@ pub fn write_png(path: &str, size: (u32, u32), rgba: &[u8]) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_svg_draws_no_file_it_names() {
+        let path = std::env::temp_dir().join(format!("vornui-href-{}.png", std::process::id()));
+        let red = [255u8, 0, 0, 255].repeat(16);
+        write_png(path.to_str().unwrap(), (4, 4), &red).unwrap();
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><image href="{}" width="4" height="4"/></svg>"#,
+            path.display()
+        );
+        let drawn = rasterize_svg_rgba(&svg, 4, 4).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(drawn.chunks(4).all(|p| p[3] == 0), "drew the file it named");
+        let shape = r#"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="red"/></svg>"#;
+        assert!(rasterize_svg_rgba(shape, 4, 4)
+            .unwrap()
+            .chunks(4)
+            .all(|p| p[3] == 255));
+    }
 
     #[test]
     fn svg_masks_cover_their_strokes() {
