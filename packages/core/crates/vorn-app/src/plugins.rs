@@ -10,6 +10,8 @@ use crate::library::connection_connector;
 use crate::runs::s;
 use crate::templates::Fix;
 
+pub mod list;
+
 /// Every control the page can fire.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PlugAct {
@@ -599,6 +601,13 @@ pub struct Listing {
     pub contributes: Option<Value>,
     pub permissions: Vec<String>,
     pub activates: Option<Value>,
+    /// What it adds, from its manifest.
+    pub tags: Vec<list::Tag>,
+    /// SVG text, and the variant drawn on a dark surface.
+    pub logo: Option<String>,
+    pub logo_dark: Option<String>,
+    pub publisher: Option<String>,
+    pub showcase: list::Showcase,
 }
 
 impl Listing {
@@ -704,6 +713,26 @@ pub fn build_listings(
             contributes: None,
             permissions: Vec::new(),
             activates: None,
+            tags: Vec::new(),
+            logo: None,
+            logo_dark: None,
+            publisher: None,
+            showcase: list::Showcase::default(),
+        }
+    };
+    // A pack says what it is; a catalog entry stands in until it is installed.
+    let marks = |l: &mut Listing, v: &Value, showcase: Option<&Value>| {
+        let tags = list::tags(v.get("tags"));
+        if !tags.is_empty() {
+            l.tags = tags;
+        }
+        let text = |k| s(v, k).filter(|t| !t.is_empty()).map(str::to_owned);
+        l.logo = text("logo").or(l.logo.take());
+        l.logo_dark = text("logoDark").or(l.logo_dark.take());
+        l.publisher = text("publisher").or(l.publisher.take());
+        let shown = list::Showcase::read(showcase);
+        if !shown.is_empty() {
+            l.showcase = shown;
         }
     };
     let with_pack = |l: &mut Listing, pack: &Value| {
@@ -721,6 +750,7 @@ pub fn build_listings(
         if let Some(a) = pack.get("activates") {
             l.activates = Some(a.clone());
         }
+        marks(l, pack, pack.get("showcase"));
         l.pack = Some(pack.clone());
     };
     let mut out = Vec::new();
@@ -731,6 +761,7 @@ pub fn build_listings(
         let id = s(c, "id").unwrap_or("");
         let mut l = base(id, s(c, "name").unwrap_or(id), "Built in", Source::Builtin);
         l.capabilities = strings(c.get("capabilities"));
+        l.tags = vec![list::Tag::Connection];
         out.push(l);
     }
     for entry in catalog {
@@ -757,6 +788,7 @@ pub fn build_listings(
         l.contributes = entry.get("contributes").cloned();
         l.permissions = strings(entry.get("permissions"));
         l.activates = entry.get("activates").cloned();
+        marks(&mut l, entry, Some(entry));
         l.catalog = Some(entry.clone());
         if let Some(pack) = pack {
             with_pack(&mut l, pack);
@@ -797,7 +829,14 @@ pub fn build_listings(
         l.capabilities = vec!["actions".to_owned()];
         l.keywords = strings(server.get("keywords"));
         l.mcp = Some(server.clone());
+        l.tags = vec![list::Tag::Connection];
         out.push(l);
+    }
+    for l in &mut out {
+        // A pack's tags are derived from its manifest; an untagged connector entry is a connection.
+        if l.tags.is_empty() && l.kind == Kind::Connector && l.pack.is_none() {
+            l.tags = vec![list::Tag::Connection];
+        }
     }
     out.sort_by(|a, b| {
         b.ready()
@@ -1298,6 +1337,8 @@ fn haystack(l: &Listing) -> String {
     ];
     parts.extend(l.capabilities.iter().map(String::as_str));
     parts.extend(l.keywords.iter().map(String::as_str));
+    parts.extend(l.tags.iter().flat_map(|t| [t.label(), t.plural()]));
+    parts.extend(l.publisher.as_deref());
     for (_, key, _) in PLACES {
         if let Some(items) = l.contributes.as_ref().and_then(|c| c.get(key)?.as_array()) {
             parts.extend(items.iter().filter_map(|i| s(i, "title")));
