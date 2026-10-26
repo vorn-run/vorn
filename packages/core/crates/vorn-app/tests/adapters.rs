@@ -1,7 +1,7 @@
 //! Agents from their adapters, end to end against a real vornd: the example
 //! card footer (examples/extensions/agent-footer) shows an adapter's agent's
 //! model and tool calls, from the agent's hooks, on the window (Pixels) and
-//! the terminal (Cells); and with every adapter switched off the launcher
+//! the terminal (Cells); and with every adapter uninstalled the launcher
 //! opens a plain shell.
 //! `VORN_APP_SHOT=<prefix>` saves each state.
 
@@ -9,7 +9,7 @@
 
 mod support;
 
-use serde_json::{json, Value};
+use serde_json::json;
 use support::{add_project, connect, example, post_hook, tree_says, wait_for, Shot, TestVornd};
 use vorn_app::ui::backend::{Backend, Cells};
 use vorn_app::ui::{cells::units, Ui};
@@ -109,35 +109,26 @@ fn a_card_footer_draws_an_adapters_agents_tool_calls_on_every_surface() {
 }
 
 #[test]
-fn with_every_adapter_off_the_launcher_opens_a_plain_shell() {
+fn with_every_adapter_uninstalled_the_launcher_opens_a_plain_shell() {
     let Some(v) = TestVornd::start() else {
         return;
     };
     let mut app = connect(&v);
     add_project(&mut app, &v, "web", json!({}));
-    // The linked test agent goes, then every shipped adapter is switched off.
-    app.rpc()
-        .call("extension:remove", json!({ "id": "test.acme" }))
-        .expect("removed");
-    let builtins = app
-        .rpc()
-        .call("extension:builtins", Value::Null)
-        .expect("builtins");
-    let adapters: Vec<String> = app
+    // Every adapter goes: the linked test agent and each one Vorn shipped.
+    let mut adapters: Vec<String> = app
         .store
         .agents
         .iter()
-        .filter(|a| a.builtin)
         .map(|a| a.extension.clone())
         .collect();
+    adapters.sort();
+    adapters.dedup();
     assert!(!adapters.is_empty());
-    for b in builtins.as_array().into_iter().flatten() {
-        let id = b["id"].as_str().unwrap_or_default();
-        if adapters.iter().any(|a| a == id) {
-            app.rpc()
-                .call("extension:setBuiltin", json!({ "id": id, "on": false }))
-                .expect("switched off");
-        }
+    for id in &adapters {
+        app.rpc()
+            .call("extension:remove", json!({ "id": id }))
+            .expect("removed");
     }
     let mut shot = Shot::new();
     shot.until(&mut app, "no agent on", |a, _| {
@@ -155,14 +146,4 @@ fn with_every_adapter_off_the_launcher_opens_a_plain_shell() {
     });
     let session = app.store.session(&id).expect("its card");
     assert!(session.is_shell(), "{:?}", session.info.agent_type);
-    // Switched on again, its agents come back.
-    app.rpc()
-        .call(
-            "extension:setBuiltin",
-            json!({ "id": adapters[0], "on": true }),
-        )
-        .expect("switched on");
-    shot.until(&mut app, "an agent on", |a, _| {
-        (!a.store.agents.is_empty()).then_some(())
-    });
 }

@@ -181,6 +181,8 @@ pub struct Emulator {
     holds: Rc<Cell<u64>>,
     /// Whether kitty images are on (see [`Emulator::set_images`]).
     pub(crate) images: bool,
+    /// Whether kitty images may load from files (see [`Emulator::set_image_files`]).
+    pub(crate) image_files: bool,
 }
 
 impl Drop for Emulator {
@@ -317,6 +319,7 @@ impl Emulator {
             parsed: 0,
             holds,
             images: false,
+            image_files: false,
         })
     }
 

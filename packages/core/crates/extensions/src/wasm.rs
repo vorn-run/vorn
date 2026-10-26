@@ -74,6 +74,8 @@ const GRACE: Duration = Duration::from_secs(2);
 fn config() -> Config {
     let mut c = Config::new();
     c.epoch_interruption(true);
+    // Fuel bounds a call's compute however busy the machine is; the epoch bounds its wall time.
+    c.consume_fuel(true);
     c
 }
 
@@ -321,20 +323,11 @@ fn deserialize(rt: &Runtime, code: &Path) -> Result<Component, String> {
     unsafe { Component::deserialize(&rt.engine, bytes) }.map_err(|e| format!("{e:#}"))
 }
 
-/// The bytes of `source`: borrowed when they are compiled into the host.
-async fn read(source: &Source) -> Result<std::borrow::Cow<'static, [u8]>, String> {
+/// The bytes of `source`.
+fn read(source: &Source) -> &[u8] {
     match source {
-        Source::Bundled(bytes) => Ok(std::borrow::Cow::Borrowed(*bytes)),
-        Source::File(path) => {
-            let path = path.clone();
-            tokio::task::spawn_blocking(move || {
-                std::fs::read(&path)
-                    .map(std::borrow::Cow::Owned)
-                    .map_err(|e| format!("{}: {e}", path.display()))
-            })
-            .await
-            .map_err(|e| e.to_string())?
-        }
+        Source::Bundled(bytes) => bytes,
+        Source::Read(bytes) => bytes,
     }
 }
 
@@ -346,8 +339,8 @@ async fn load(
     compiler: &Compiler,
 ) -> Result<Component, String> {
     let rt = runtime()?;
-    let bytes = read(source).await?;
-    let d = digest(&bytes);
+    let bytes = read(source);
+    let d = digest(bytes);
     if let Some(c) = rt.loaded(&d) {
         return Ok(c);
     }
@@ -371,7 +364,7 @@ async fn load(
             if let Some(Err(why)) = stale {
                 warn!("[extensions] {name}: the compiled copy no longer loads ({why})");
             }
-            compile(compiler, name, &bytes, cache).await?;
+            compile(compiler, name, bytes, cache).await?;
             let code = code.clone();
             tokio::task::spawn_blocking(move || deserialize(rt, &code))
                 .await
@@ -821,6 +814,9 @@ fn stopped(name: &str, trap: &wasmtime::Error, stderr: &Stderr) -> CallError {
         Some(wasmtime::Trap::Interrupt) => {
             CallError::Timeout(format!("{name} ran past its deadline and was stopped"))
         }
+        Some(wasmtime::Trap::OutOfFuel) => CallError::Timeout(format!(
+            "{name} used all the compute one call may and was stopped"
+        )),
         // The trap alone: its wasm backtrace names nothing a reader can use.
         Some(t) => CallError::Transport(format!("{name} stopped: {t}{said}")),
         None => CallError::Transport(format!("{name} stopped: {trap:#}{said}")),
@@ -836,6 +832,8 @@ pub(crate) struct Start {
     pub name: String,
     pub init: InitCtx,
     pub start_timeout: Duration,
+    /// The fuel each call, and the start, may burn.
+    pub call_fuel: u64,
     pub router: Weak<Router>,
     pub manifest: Arc<Manifest>,
     pub caller: Caller,
@@ -866,7 +864,11 @@ impl Service {
             tokio: tokio::runtime::Handle::current(),
         };
         let thread_name = format!("ext-wasm {}", s.init.id);
-        let (name, init, start_deadline) = (s.name.clone(), s.init, s.start_timeout);
+        let (name, init) = (s.name.clone(), s.init);
+        let budget = Budget {
+            start: s.start_timeout,
+            fuel: s.call_fuel,
+        };
         let flag = Arc::clone(&ended);
         thread::Builder::new()
             .name(thread_name)
@@ -876,7 +878,7 @@ impl Service {
                     component,
                     state,
                     &init,
-                    start_deadline,
+                    budget,
                     Ends {
                         ready: ready_tx,
                         jobs: &rx,
@@ -973,6 +975,12 @@ impl crate::lifecycle::Running for Service {
     }
 }
 
+/// Gives the next call its whole fuel, whatever the last one left.
+fn refuel(store: &mut Store<State>, fuel: u64) {
+    // Fails only on an engine without fuel, which `config` rules out.
+    let _ = store.set_fuel(fuel);
+}
+
 /// What the component's thread talks to: who waits for it to start, its
 /// jobs, the flag that tells the lifecycle it ended, and its stderr.
 struct Ends<'a> {
@@ -993,13 +1001,20 @@ fn speaks(component: &Component, engine: &Engine) -> Result<(), String> {
     })
 }
 
+/// What the start may take, and the fuel each call gets afresh.
+#[derive(Debug, Clone, Copy)]
+struct Budget {
+    start: Duration,
+    fuel: u64,
+}
+
 /// The component's thread: instantiate, init, then calls and events until the queue goes or it traps.
 fn run(
     name: &str,
     component: Component,
     state: State,
     init: &InitCtx,
-    start_deadline: Duration,
+    budget: Budget,
     ends: Ends<'_>,
 ) {
     let Ends {
@@ -1032,7 +1047,8 @@ fn run(
     }
     let mut store = Store::new(&rt.engine, state);
     store.limiter(|s| &mut s.limits);
-    store.set_epoch_deadline(ticks(start_deadline));
+    store.set_epoch_deadline(ticks(budget.start));
+    refuel(&mut store, budget.fuel);
     let started = {
         let _busy = rt.enter();
         bindings::Extension::instantiate(&mut store, &component, &linker).and_then(|api| {
@@ -1076,6 +1092,7 @@ fn run(
                 reply,
             } => {
                 store.set_epoch_deadline(ticks(deadline));
+                refuel(&mut store, budget.fuel);
                 let wctx = wit::CallCtx {
                     caller: ctx.caller,
                     project: ctx.project,
@@ -1114,6 +1131,7 @@ fn run(
                 done,
             } => {
                 store.set_epoch_deadline(ticks(deadline));
+                refuel(&mut store, budget.fuel);
                 let batch: Vec<wit::Event> = batch
                     .into_iter()
                     .map(|e| wit::Event {

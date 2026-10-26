@@ -384,14 +384,16 @@ impl ExtensionTables {
         done
     }
 
-    /// Runs the `.sql` files in `dir` not yet run, in name order, each in a
-    /// transaction of its own; answers the ones it ran.
-    pub fn migrate(&self, dir: &Path) -> Result<Vec<String>> {
-        let mut files: Vec<String> = std::fs::read_dir(dir)?
-            .filter_map(|e| e.ok())
-            .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| n.ends_with(".sql"))
-            .collect();
+    /// Runs the `.sql` files among `names` not yet run, in name order, each
+    /// in a transaction of its own, reading each with `read`; answers the
+    /// ones it ran. The caller lists and reads them, so it decides how the
+    /// files are reached.
+    pub fn migrate(
+        &self,
+        names: impl IntoIterator<Item = String>,
+        read: impl Fn(&str) -> std::io::Result<String>,
+    ) -> Result<Vec<String>> {
+        let mut files: Vec<String> = names.into_iter().filter(|n| n.ends_with(".sql")).collect();
         files.sort();
         let table = migrations_table(&self.prefix);
         let mut ran = Vec::new();
@@ -408,7 +410,7 @@ impl ExtensionTables {
             if done.is_some() {
                 continue;
             }
-            let sql = std::fs::read_to_string(dir.join(&name))?;
+            let sql = read(&name)?;
             self.conn.execute_batch("BEGIN IMMEDIATE")?;
             let applied = self
                 .guard(true)
@@ -725,28 +727,34 @@ mod tests {
 
     #[test]
     fn keeps_values_runs_each_migration_once_and_forgets_everything() {
-        let (dir, path) = db();
+        let (_dir, path) = db();
         let t = ExtensionTables::open(&path, "test.x").unwrap();
         t.set("cursor", &json!({ "at": 3 })).unwrap();
         assert_eq!(t.get("cursor").unwrap(), Some(json!({ "at": 3 })));
         t.set("cursor", &Value::Null).unwrap();
         assert_eq!(t.get("cursor").unwrap(), None);
 
-        let migrations = dir.path().join("migrations");
-        std::fs::create_dir(&migrations).unwrap();
-        std::fs::write(
-            migrations.join("001_rows.sql"),
-            "CREATE TABLE x_test_0x_rows (a); INSERT INTO x_test_0x_rows VALUES (1);",
-        )
-        .unwrap();
-        assert_eq!(t.migrate(&migrations).unwrap(), ["001_rows.sql"]);
-        assert!(t.migrate(&migrations).unwrap().is_empty());
-        std::fs::write(
-            migrations.join("002_bad.sql"),
+        let mut files = std::collections::BTreeMap::from([
+            (
+                "001_rows.sql",
+                "CREATE TABLE x_test_0x_rows (a); INSERT INTO x_test_0x_rows VALUES (1);",
+            ),
+            ("notes.md", "not a migration"),
+        ]);
+        let run = |files: &std::collections::BTreeMap<&str, &str>| {
+            let names = files.keys().rev().map(|n| n.to_string());
+            t.migrate(names, |name| {
+                assert!(name.ends_with(".sql"), "{name} is read");
+                Ok(files[name].to_string())
+            })
+        };
+        assert_eq!(run(&files).unwrap(), ["001_rows.sql"]);
+        assert!(run(&files).unwrap().is_empty());
+        files.insert(
+            "002_bad.sql",
             "CREATE TABLE x_test_0x_more (a); DELETE FROM tasks;",
-        )
-        .unwrap();
-        let err = t.migrate(&migrations).unwrap_err().to_string();
+        );
+        let err = run(&files).unwrap_err().to_string();
         assert_eq!(
             err,
             "002_bad.sql: test.x may not write the table tasks: its tables are named x_test_0x_…"

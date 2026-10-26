@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 use tracing::warn;
@@ -167,19 +167,10 @@ impl Names {
             .iter()
             .map(|(h, n)| (h.clone(), Value::String(n.clone())))
             .collect();
-        if let Err(e) = write_atomically(path, Value::Object(map).to_string().as_bytes()) {
+        if let Err(e) = crate::atomic::replace(path, Value::Object(map).to_string().as_bytes()) {
             warn!(file = %path.display(), %e, "could not keep session names");
         }
     }
-}
-
-fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
 }
 
 #[cfg(test)]

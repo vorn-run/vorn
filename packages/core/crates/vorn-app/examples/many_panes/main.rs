@@ -38,9 +38,12 @@
 //! at the end of the run.
 //!
 //! **Extensions**: with `--extensions N` (up to 20) each case first links N
-//! test extensions (`extensions.rs`): Node, Python and Bash programs and
-//! Rust Wasm components, services and one-shots. While the panes stream, a
-//! connection of its own calls each one every `--ext-period` seconds, and
+//! test extensions (`extensions.rs`, from `bench/ext-load/templates`): Node,
+//! Python, Bash and Rust programs and Rust Wasm components, services and
+//! one-shots, beside the shipped set vornd installs on its first start. The
+//! Rust program is `tier-load` (`vorn-bench-ext-tiers`), needed from the
+//! fifth extension on. While the panes stream, a connection of its own calls
+//! each one every `--ext-period` seconds, and
 //! the report adds the calls' round trips, the most services seen running,
 //! service restarts and cap stops from vornd's log, and the extension
 //! programs' memory. `--idle-wait S` then stops calling and waits up to S
@@ -361,7 +364,7 @@ mod bench {
 
     use super::extensions;
     use super::flag;
-    use super::support::{connect, wait_for, TestVornd};
+    use super::support::{connect, wait_for, TestVornd, PATIENCE};
 
     /// The frame clock: a 60 Hz display.
     const FRAME: Duration = Duration::from_micros(16_667);
@@ -494,6 +497,7 @@ mod bench {
 
     pub fn run(args: &[String]) -> Result<(), String> {
         let opts = Opts::parse(args)?;
+        extensions::prepare(opts.extensions.iter().copied().max().unwrap_or(0))?;
         // The bench's own HOME is a temporary one too, so nothing it starts
         // reads or writes the user's.
         let home = std::env::temp_dir().join(format!("vorn-many-panes-{}", std::process::id()));
@@ -589,10 +593,23 @@ mod bench {
         for id in &ids {
             grid.attach(id, 80, 24, (0, 0), 0);
         }
-        wait_for("every pane's first screen", || {
+        let t = Instant::now();
+        loop {
             draw(&mut app, &mut ui, &target, opts.size);
-            ids.iter().all(|id| app.pane(id).is_some()).then_some(())
-        });
+            if ids.iter().all(|id| app.pane(id).is_some()) {
+                break;
+            }
+            if t.elapsed() > PATIENCE {
+                let log = v.log();
+                let tail: Vec<&str> = log.lines().rev().take(60).collect();
+                let tail: Vec<&str> = tail.into_iter().rev().collect();
+                return Err(format!(
+                    "timed out waiting for every pane's first screen; vornd's log ends:\n{}",
+                    tail.join("\n")
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
         let on_screen = |ui: &Ui, id: &String| ui.rect_of(term_id(id)).is_some();
         // The probe is a pane on screen; it goes first so it gets the echo feed.
         let mut ids = ids;
@@ -643,6 +660,7 @@ mod bench {
 
         let mut frames: Vec<f64> = Vec::new();
         let mut latencies: Vec<f64> = Vec::new();
+        let mut presses: Vec<(Instant, Instant)> = Vec::new();
         let mut timeouts = 0usize;
         let mut seq = 0usize;
         let mut pending: Option<(char, Instant)> = None;
@@ -693,6 +711,7 @@ mod bench {
             };
             if shows(&app, probe, c) {
                 latencies.push(ms(t1 - sent));
+                presses.push((sent, t1));
             } else if t1 - sent < PROBE_TIMEOUT {
                 continue;
             } else {
@@ -705,6 +724,17 @@ mod bench {
         }
         let wall = started.elapsed().as_secs_f64();
         let calls = driver.finish();
+        // Each press's latency under the kind of extension a call was in flight to.
+        let mut during: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        for &(sent, shown) in &presses {
+            let kind = calls
+                .during(sent, shown)
+                .unwrap_or_else(|| "none".to_owned());
+            during
+                .entry(kind)
+                .or_default()
+                .push(round(ms(shown - sent)));
+        }
         let app_cpu = (self_cpu() - cpu_app) / wall * 100.0;
         let daemon_cpu = (procs_cpu(&pids) - cpu_daemons) / wall * 100.0;
         let streaming = revs(&app)
@@ -744,6 +774,7 @@ mod bench {
                 "p99": pct(&latencies, 99.0),
                 "samples": latencies.len(),
                 "timeouts": timeouts,
+                "during": during,
             },
             "cpu_pct": {
                 "app": round(app_cpu),
@@ -763,7 +794,7 @@ mod bench {
                 "errors": calls.errors.len(),
                 "first_error": calls.errors.first(),
             },
-            "running_peak": { "bench": calls.peak_bench, "builtin": calls.peak_builtin },
+            "running_peak": { "bench": calls.peak_bench, "vorn": calls.peak_vorn },
             "lifecycle": lifecycle_json(&busy_log),
             "idle": idle,
         }))
@@ -820,7 +851,7 @@ mod bench {
         Ok(json!({
             "seconds": round(waited),
             "all_stopped": left == (0, 0),
-            "running": { "bench": left.0, "builtin": left.1 },
+            "running": { "bench": left.0, "vorn": left.1 },
             "rss_mb": {
                 "daemons": round(daemons),
                 "programs": round(programs.values().map(|p| p.1).sum()),
@@ -851,6 +882,7 @@ mod bench {
             "cap_stops": l.evictions,
             "crashes": l.crashes,
             "idle_stops": l.idle_stops,
+            "restarted": l.restarted,
         })
     }
 
@@ -938,7 +970,7 @@ mod bench {
             .map(u32::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        let Ok(out) = std::process::Command::new("ps")
+        let Ok(out) = vorn_spawn::command("ps")
             .args(["-o", "time=", "-p", &list])
             .output()
         else {
@@ -962,7 +994,7 @@ mod bench {
             .map(u32::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        let Ok(out) = std::process::Command::new("ps")
+        let Ok(out) = vorn_spawn::command("ps")
             .args(["-o", "rss=", "-p", &list])
             .output()
         else {
@@ -977,7 +1009,7 @@ mod bench {
 
     fn machine() -> Value {
         let sysctl = |k: &str| {
-            std::process::Command::new("sysctl")
+            vorn_spawn::command("sysctl")
                 .args(["-n", k])
                 .output()
                 .ok()
@@ -1030,7 +1062,7 @@ mod bench {
     }
 
     /// The measures the summary gives, as JSON pointers into a result.
-    const MEASURES: [(&str, &str); 13] = [
+    const MEASURES: [(&str, &str); 18] = [
         ("Frame p50 ms", "/frame_ms/p50"),
         ("Frame p99 ms", "/frame_ms/p99"),
         ("Input p50 ms", "/input_to_pixel_ms/p50"),
@@ -1039,9 +1071,14 @@ mod bench {
         ("Call errors", "/ext_calls/errors"),
         ("RSS vornd MB", "/rss_mb/daemons"),
         ("RSS programs MB", "/rss_mb/programs"),
-        ("Running peak", "/running_peak/bench"),
+        ("Running peak bench", "/running_peak/bench"),
+        ("Running peak Vorn's", "/running_peak/vorn"),
         ("Restarts", "/lifecycle/restarts"),
+        ("Crashes", "/lifecycle/crashes"),
         ("Cap stops", "/lifecycle/cap_stops"),
+        ("Idle s", "/idle/seconds"),
+        ("Idle running", "/idle/running/bench"),
+        ("Idle stops", "/idle/lifecycle/idle_stops"),
         ("Idle RSS vornd MB", "/idle/rss_mb/daemons"),
         ("Idle RSS programs MB", "/idle/rss_mb/programs"),
     ];

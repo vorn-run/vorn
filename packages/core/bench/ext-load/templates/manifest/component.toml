@@ -1,0 +1,11 @@
+id = "{id}"
+name = "{id}"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[declares]
+uses = ["sessions.read"]
+
+[service]
+component = "load.wasm"
+events = {events}

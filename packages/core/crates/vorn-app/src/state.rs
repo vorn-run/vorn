@@ -274,6 +274,8 @@ pub enum Dialog {
     Welcome,
     /// A connection's sign-in page, in its own profile.
     SignIn,
+    /// What a workflow from a project's file runs, before it is turned on.
+    TurnOn(String),
 }
 
 /// A toast in the bottom right.

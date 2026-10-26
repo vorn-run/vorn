@@ -1,4 +1,4 @@
-import { EXTENSION_AGENTS, resolveConfig } from './define'
+import { isExtensionAgent, resolveConfig } from './define'
 import { UnknownNameError, messageOf, protocolError } from './errors'
 import { createExtensionHost } from './host'
 import { lineReader } from './lines'
@@ -14,13 +14,7 @@ import {
 } from './protocol'
 import { runAction, runOptions, runPoll } from './runtime'
 import { connectorManifest } from './setup'
-import type {
-  Connector,
-  ConnectorConfig,
-  ExtensionAgent,
-  ExtensionContext,
-  ExtensionHost
-} from './types'
+import type { Connector, ConnectorConfig, ExtensionContext, ExtensionHost } from './types'
 
 declare const __VORN_SDK_VERSION__: string | undefined
 
@@ -99,14 +93,14 @@ export function createConnectorServer(
 
   const sessionContext = (params: Params): ExtensionContext => {
     const agent = text(params, 'agent')
-    if (!(EXTENSION_AGENTS as string[]).includes(agent)) {
-      throw new InvalidParams(`"agent" must be one of ${EXTENSION_AGENTS.join(', ')}`)
+    if (!isExtensionAgent(agent)) {
+      throw new InvalidParams('"agent" must be an agent id, or shell')
     }
     const sessionId = text(params, 'sessionId')
     return {
       sessionId,
       worktreePath: text(params, 'worktreePath'),
-      agent: agent as ExtensionAgent,
+      agent,
       host: hostFor(sessionId),
       now: now ?? (() => new Date().toISOString())
     }

@@ -1,7 +1,8 @@
 //! The extensions a load run installs, the calls that keep them busy and
-//! what they cost: Node, Python and Bash programs and Rust Wasm components,
-//! services and one-shots, written into the run's temporary HOME and linked
-//! into its vornd. Their ids start `bench.`, never `vorn.`.
+//! what they cost: Node, Python and Bash programs, a Rust program and Rust
+//! Wasm components, services and one-shots, written into the run's
+//! temporary HOME from the templates in `bench/ext-load/templates` and
+//! linked into its vornd. Their ids start `bench.`, never `vorn.`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,48 +14,55 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use vorn_app::client::{Endpoint, Rpc};
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Lang {
     Node,
     Python,
     Bash,
+    /// A Rust program on stdio (`tier-load`).
     Rust,
+    /// The same Rust source as a Wasm component, run inside vornd.
+    Wasm,
 }
 
 impl Lang {
+    pub const ALL: [Lang; 5] = [Lang::Node, Lang::Python, Lang::Bash, Lang::Rust, Lang::Wasm];
+
     pub fn name(self) -> &'static str {
         match self {
             Lang::Node => "node",
             Lang::Python => "python",
             Lang::Bash => "bash",
             Lang::Rust => "rust",
+            Lang::Wasm => "wasm",
         }
     }
 }
 
-/// The twenty, 16 services and 4 one-shots. The first four are one service
-/// of each language, so a short run still has every kind of service.
+/// The twenty: 15 services and 5 one-shots. The first four are a service in
+/// Node, Python, Bash and Wasm, so a short run has the common kinds without
+/// building the Rust program; the first nine have every kind.
 const MIX: [(Lang, bool); 20] = [
     (Lang::Node, true),
     (Lang::Python, true),
     (Lang::Bash, true),
+    (Lang::Wasm, true),
     (Lang::Rust, true),
     (Lang::Node, false),
     (Lang::Python, false),
     (Lang::Bash, false),
+    (Lang::Rust, false),
     (Lang::Node, true),
     (Lang::Python, true),
-    (Lang::Rust, true),
+    (Lang::Wasm, true),
     (Lang::Bash, true),
+    (Lang::Node, true),
+    (Lang::Wasm, true),
+    (Lang::Python, true),
+    (Lang::Rust, true),
+    (Lang::Node, true),
+    (Lang::Wasm, true),
     (Lang::Bash, false),
-    (Lang::Node, true),
-    (Lang::Python, true),
-    (Lang::Rust, true),
-    (Lang::Node, true),
-    (Lang::Python, true),
-    (Lang::Rust, true),
-    (Lang::Node, true),
-    (Lang::Rust, true),
 ];
 
 pub const MAX: usize = MIX.len();
@@ -68,17 +76,8 @@ pub struct Ext {
     pub dir: PathBuf,
 }
 
-impl Ext {
-    /// The action the bench calls: the Rust component's cheapest one, the
-    /// programs' `work`, which for a service asks Vorn for its sessions.
-    pub fn action(&self) -> &'static str {
-        if self.lang == Lang::Rust {
-            "key"
-        } else {
-            "work"
-        }
-    }
-}
+/// The action every bench extension answers; a service's asks Vorn for its sessions.
+pub const ACTION: &str = "work";
 
 /// Writes the first `n` of the mix into `dir`.
 pub fn generate(dir: &Path, n: usize) -> Result<Vec<Ext>, String> {
@@ -102,176 +101,112 @@ pub fn generate(dir: &Path, n: usize) -> Result<Vec<Ext>, String> {
         .collect()
 }
 
+macro_rules! template {
+    ($path:literal) => {
+        include_str!(concat!("../../../../bench/ext-load/templates/", $path))
+    };
+}
+
+const SERVICE_MANIFEST: &str = template!("manifest/service.toml");
+const ONCE_MANIFEST: &str = template!("manifest/once.toml");
+const COMPONENT_MANIFEST: &str = template!("manifest/component.toml");
+const EVENTS: &str = r#"["session.created", "session.status", "session.exited"]"#;
+
 fn write(ext: &Ext) -> Result<(), String> {
     let put = |name: &str, text: &[u8]| {
         std::fs::write(ext.dir.join(name), text).map_err(|e| format!("{name}: {e}"))
     };
+    let copy = |from: &Path, name: &str| {
+        std::fs::copy(from, ext.dir.join(name))
+            .map(drop)
+            .map_err(|e| format!("{}: {e}", from.display()))
+    };
     std::fs::create_dir_all(&ext.dir).map_err(|e| e.to_string())?;
-    let id = &ext.id;
-    let mut manifest = format!(
-        "id = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n"
-    );
+    let id = ext.id.as_str();
     // The id rides along as an argument, so `ps` tells whose process it is.
-    let (runner, file, program): (&str, &str, &str) = match (ext.lang, ext.service) {
-        (Lang::Node, true) => ("node", "service.mjs", NODE_SERVICE),
-        (Lang::Node, false) => ("node", "once.mjs", NODE_ONCE),
-        (Lang::Python, true) => ("python3", "service.py", PYTHON_SERVICE),
-        (Lang::Python, false) => ("python3", "once.py", PYTHON_ONCE),
-        (Lang::Bash, true) => ("bash", "service.sh", BASH_SERVICE),
-        (Lang::Bash, false) => ("bash", "once.sh", BASH_ONCE),
-        (Lang::Rust, _) => {
-            std::fs::copy(component()?, ext.dir.join("turns.wasm")).map_err(|e| e.to_string())?;
-            manifest += RUST_MANIFEST;
+    let (runner, file): (Option<&str>, &str) = match (ext.lang, ext.service) {
+        (Lang::Node, true) => (Some("node"), "service.mjs"),
+        (Lang::Node, false) => (Some("node"), "once.mjs"),
+        (Lang::Python, true) => (Some("python3"), "service.py"),
+        (Lang::Python, false) => (Some("python3"), "once.py"),
+        (Lang::Bash, true) => (Some("bash"), "service.sh"),
+        (Lang::Bash, false) => (Some("bash"), "once.sh"),
+        (Lang::Rust, _) => (None, "./load"),
+        (Lang::Wasm, _) => {
+            copy(&component()?, "load.wasm")?;
+            let manifest = COMPONENT_MANIFEST
+                .replace("{id}", id)
+                .replace("{events}", EVENTS);
             return put("vorn-extension.toml", manifest.as_bytes());
         }
     };
-    put(file, program.as_bytes())?;
-    let command = format!("command = [\"{runner}\", \"{file}\", \"{id}\"]\n");
-    if ext.service {
-        let events = if ext.lang == Lang::Bash { "[]" } else { EVENTS };
-        manifest += &format!(
-            "\n[declares]\nuses = [\"sessions.read\"]\n\n[service]\n{command}events = {events}\n"
-        );
-    } else {
-        manifest += &format!("\n[actions.work]\ntitle = \"Work\"\n{command}");
+    match ext.lang {
+        Lang::Rust => copy(&program()?, "load")?,
+        lang => put(file, script(lang, ext.service).as_bytes())?,
     }
+    let mut argv: Vec<&str> = runner.into_iter().chain([file]).collect();
+    if ext.lang == Lang::Rust && !ext.service {
+        argv.push("--once");
+    }
+    argv.push(id);
+    let command = serde_json::to_string(&argv).map_err(|e| e.to_string())?;
+    let manifest = if ext.service {
+        // The Bash service answers calls only; it is woken for no events.
+        let events = if ext.lang == Lang::Bash { "[]" } else { EVENTS };
+        SERVICE_MANIFEST.replace("{events}", events)
+    } else {
+        ONCE_MANIFEST.to_owned()
+    };
+    let manifest = manifest.replace("{id}", id).replace("{command}", &command);
     put("vorn-extension.toml", manifest.as_bytes())
 }
 
-/// The example `turns` component, built once a run.
+/// The script template of a Node, Python or Bash extension.
+fn script(lang: Lang, service: bool) -> &'static str {
+    match (lang, service) {
+        (Lang::Node, true) => template!("node/service.mjs"),
+        (Lang::Node, false) => template!("node/once.mjs"),
+        (Lang::Python, true) => template!("python/service.py"),
+        (Lang::Python, false) => template!("python/once.py"),
+        (Lang::Bash, true) => template!("bash/service.sh"),
+        _ => template!("bash/once.sh"),
+    }
+}
+
+/// Builds what the first `n` of the mix need from the workspace, before the
+/// bench moves HOME (cargo and rustup find their caches under the real one).
+pub fn prepare(n: usize) -> Result<(), String> {
+    let langs: HashSet<Lang> = MIX.iter().take(n).map(|&(lang, _)| lang).collect();
+    if langs.contains(&Lang::Wasm) {
+        component()?;
+    }
+    if langs.contains(&Lang::Rust) {
+        program()?;
+    }
+    Ok(())
+}
+
+/// The Rust template built as a component, once a run.
 fn component() -> Result<PathBuf, String> {
     static BUILT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     BUILT
-        .get_or_init(|| vorn_guest_build::component("vorn-example-turns"))
+        .get_or_init(|| vorn_guest_build::component("vorn-bench-load"))
         .clone()
 }
 
-const EVENTS: &str = r#"["session.created", "session.status", "session.exited"]"#;
-
-const RUST_MANIFEST: &str = r#"
-[declares]
-uses = ["sessions.read"]
-
-[service]
-component = "turns.wasm"
-events = ["session.created", "session.status", "session.exited"]
-
-[[contributes.badges]]
-id = "count"
-tree = true
-"#;
-
-const NODE_SERVICE: &str = r#"// A bench service: each call asks Vorn for its sessions, as a sidebar would.
-import process from 'node:process'
-import readline from 'node:readline'
-
-const send = (m) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', ...m })}\n`)
-const waiting = new Map()
-let asked = 0
-let heard = 0
-readline.createInterface({ input: process.stdin }).on('line', (line) => {
-  const m = JSON.parse(line)
-  if (m.method === undefined) {
-    const reply = waiting.get(m.id)
-    waiting.delete(m.id)
-    return reply?.(m)
-  }
-  if (m.method === 'guest.init') return send({ id: m.id, result: null })
-  if (m.method === 'guest.on-event') {
-    heard += m.params.batch.length
-    return
-  }
-  if (m.method === 'guest.handle') {
-    const rid = `r${++asked}`
-    waiting.set(rid, (r) =>
-      send(r.error ? { id: m.id, error: r.error } : { id: m.id, result: { bytes: JSON.stringify(r.result ?? null).length, heard } })
-    )
-    return send({ id: rid, method: 'host.call', params: { method: 'sessions.list', args: {} } })
-  }
-  if (m.id !== undefined) send({ id: m.id, error: { code: -32601, message: `no ${m.method}` } })
-})
-"#;
-
-const NODE_ONCE: &str = r#"// A bench one-shot: one request in, one answer out.
-import process from 'node:process'
-import readline from 'node:readline'
-
-const input = readline.createInterface({ input: process.stdin })
-input.once('line', (line) => {
-  const { params } = JSON.parse(line)
-  process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, result: { method: params.method } })}\n`)
-  input.close()
-})
-"#;
-
-const PYTHON_SERVICE: &str = r#"# A bench service: each call asks Vorn for its sessions, as a sidebar would.
-import json
-import sys
-
-
-def send(message):
-    message["jsonrpc"] = "2.0"
-    sys.stdout.write(json.dumps(message) + "\n")
-    sys.stdout.flush()
-
-
-waiting = {}
-asked = heard = 0
-while True:
-    line = sys.stdin.readline()
-    if not line:
-        break
-    m = json.loads(line)
-    method = m.get("method")
-    if method is None:
-        caller = waiting.pop(m.get("id"), None)
-        if caller is None:
-            continue
-        if "error" in m:
-            send({"id": caller, "error": m["error"]})
-        else:
-            size = len(json.dumps(m.get("result")))
-            send({"id": caller, "result": {"bytes": size, "heard": heard}})
-    elif method == "guest.init":
-        send({"id": m["id"], "result": None})
-    elif method == "guest.on-event":
-        heard += len(m["params"]["batch"])
-    elif method == "guest.handle":
-        asked += 1
-        rid = f"r{asked}"
-        waiting[rid] = m["id"]
-        send({"id": rid, "method": "host.call", "params": {"method": "sessions.list", "args": {}}})
-    elif "id" in m:
-        send({"id": m["id"], "error": {"code": -32601, "message": f"no {method}"}})
-"#;
-
-const PYTHON_ONCE: &str = r#"# A bench one-shot: one request in, one answer out.
-import json
-import sys
-
-request = json.loads(sys.stdin.readline())
-answer = {"jsonrpc": "2.0", "id": 1, "result": {"method": request["params"]["method"]}}
-sys.stdout.write(json.dumps(answer) + "\n")
-"#;
-
-const BASH_SERVICE: &str = r#"#!/usr/bin/env bash
-# A bench service: answers each request at once, with no process per line.
-request='^\{"jsonrpc":"2\.0","id":([0-9]+),"method":"([a-z.-]+)"'
-while IFS= read -r line; do
-  [[ $line =~ $request ]] || continue
-  if [[ ${BASH_REMATCH[2]} == guest.init ]]; then
-    printf '{"jsonrpc":"2.0","id":%s,"result":null}\n' "${BASH_REMATCH[1]}"
-  else
-    printf '{"jsonrpc":"2.0","id":%s,"result":{"ok":true}}\n' "${BASH_REMATCH[1]}"
-  fi
-done
-"#;
-
-const BASH_ONCE: &str = r#"#!/usr/bin/env bash
-# A bench one-shot: one request in, one answer out; it is always asked with id 1.
-read -r request
-printf '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'
-"#;
+/// The Rust template built as a program: `tier-load`, beside this example's
+/// folder in the same profile's target directory.
+fn program() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let name = format!("tier-load{}", std::env::consts::EXE_SUFFIX);
+    exe.parent()
+        .and_then(Path::parent)
+        .map(|profile| profile.join(&name))
+        .filter(|p| p.is_file())
+        .ok_or_else(|| {
+            format!("build {name} first: cargo build --profile <this one> -p vorn-bench-ext-tiers --bin tier-load")
+        })
+}
 
 /// Links `exts` into the vornd `rpc` talks to.
 pub fn link(rpc: &Rpc, exts: &[Ext]) -> Result<(), String> {
@@ -287,23 +222,33 @@ pub fn call(rpc: &Rpc, ext: &Ext) -> Result<f64, String> {
     let t = Instant::now();
     rpc.call(
         "extension:call",
-        json!({ "id": ext.id, "action": ext.action(), "args": {} }),
+        json!({ "id": ext.id, "action": ACTION, "args": {} }),
     )
     .map_err(|e| format!("{}: {e:?}", ext.id))?;
     Ok(t.elapsed().as_secs_f64() * 1000.0)
 }
 
-/// The services running now: the bench's and Vorn's own built-ins.
+/// The services running now: the bench's, and Vorn's own (the shipped set
+/// it installs on first start and the built-ins compiled into vornd).
 pub fn running(rpc: &Rpc) -> Result<(usize, usize), String> {
-    let count = |method: &str| -> Result<usize, String> {
+    let running = |method: &str| -> Result<Vec<bool>, String> {
         let list = rpc
             .call(method, Value::Null)
             .map_err(|e| format!("{method}: {e:?}"))?;
         Ok(list
             .as_array()
-            .map_or(0, |l| l.iter().filter(|p| p["running"] == true).count()))
+            .into_iter()
+            .flatten()
+            .filter(|p| p["running"] == true)
+            .map(|p| p["id"].as_str().is_some_and(|id| id.starts_with("bench.")))
+            .collect())
     };
-    Ok((count("extension:installed")?, count("extension:builtins")?))
+    let installed = running("extension:installed")?;
+    let bench = installed.iter().filter(|&&b| b).count();
+    Ok((
+        bench,
+        installed.len() - bench + running("extension:builtins")?.len(),
+    ))
 }
 
 /// What a driver's calls took, and the most services it saw running.
@@ -312,7 +257,33 @@ pub struct Calls {
     pub ms: Vec<f64>,
     pub errors: Vec<String>,
     pub peak_bench: usize,
-    pub peak_builtin: usize,
+    pub peak_vorn: usize,
+    /// When each call was in flight, and to what kind of extension.
+    pub spans: Vec<Span>,
+}
+
+/// One call in flight, so a slow key press can be laid against it.
+pub struct Span {
+    pub start: Instant,
+    pub end: Instant,
+    pub lang: Lang,
+    pub service: bool,
+}
+
+impl Calls {
+    /// The kind of extension a call was in flight to over `from..to`, if any.
+    pub fn during(&self, from: Instant, to: Instant) -> Option<String> {
+        self.spans
+            .iter()
+            .find(|s| s.start < to && from < s.end)
+            .map(|s| kind(s.lang, s.service))
+    }
+}
+
+/// A kind's name in the report, as `node service` or `rust one-shot`.
+pub fn kind(lang: Lang, service: bool) -> String {
+    let what = if service { "service" } else { "one-shot" };
+    format!("{} {what}", lang.name())
 }
 
 /// Calls every extension in turn, each once per period, on a connection of
@@ -339,14 +310,23 @@ impl Driver {
                     break;
                 }
                 match exts.get(tick % (exts.len() + 1)) {
-                    Some(ext) => match call(&rpc, ext) {
-                        Ok(ms) => calls.ms.push(ms),
-                        Err(e) => calls.errors.push(e),
-                    },
+                    Some(ext) => {
+                        let start = Instant::now();
+                        match call(&rpc, ext) {
+                            Ok(ms) => calls.ms.push(ms),
+                            Err(e) => calls.errors.push(e),
+                        }
+                        calls.spans.push(Span {
+                            start,
+                            end: Instant::now(),
+                            lang: ext.lang,
+                            service: ext.service,
+                        });
+                    }
                     None => {
-                        if let Ok((bench, builtin)) = running(&rpc) {
+                        if let Ok((bench, vorn)) = running(&rpc) {
                             calls.peak_bench = calls.peak_bench.max(bench);
-                            calls.peak_builtin = calls.peak_builtin.max(builtin);
+                            calls.peak_vorn = calls.peak_vorn.max(vorn);
                         }
                     }
                 }
@@ -373,7 +353,7 @@ impl Driver {
 /// MB, by language: everything under vornd outside its session holders.
 /// Wasm components run inside vornd and count there.
 pub fn programs_rss(vornd: u32, holders: &[u32]) -> BTreeMap<&'static str, (usize, f64)> {
-    let Ok(out) = std::process::Command::new("ps")
+    let Ok(out) = vorn_spawn::command("ps")
         .args(["-A", "-o", "pid=,ppid=,rss=,command="])
         .output()
     else {
@@ -410,7 +390,7 @@ pub fn programs_rss(vornd: u32, holders: &[u32]) -> BTreeMap<&'static str, (usiz
         if pid == vornd || !under.contains(&pid) {
             continue;
         }
-        let lang = [Lang::Node, Lang::Python, Lang::Bash, Lang::Rust]
+        let lang = Lang::ALL
             .into_iter()
             .find(|l| bench.starts_with(l.name()))
             .map_or("other", Lang::name);
@@ -424,7 +404,7 @@ pub fn programs_rss(vornd: u32, holders: &[u32]) -> BTreeMap<&'static str, (usiz
 /// What vornd's log says the services did.
 #[derive(Default, Debug, PartialEq)]
 pub struct Lifecycle {
-    /// Bench services started.
+    /// Services started, Vorn's own included.
     pub starts: usize,
     /// Starts past the first for a service: after the cap, idle or a crash stopped it.
     pub restarts: usize,
@@ -432,6 +412,8 @@ pub struct Lifecycle {
     pub evictions: usize,
     pub crashes: usize,
     pub idle_stops: usize,
+    /// The services started more than once, in id order.
+    pub restarted: Vec<String>,
 }
 
 pub fn read_log(log: &str) -> Lifecycle {
@@ -450,19 +432,50 @@ pub fn read_log(log: &str) -> Lifecycle {
         } else if let Some(id) = said
             .strip_suffix(" started")
             .or_else(|| said.strip_suffix(" started as a component"))
-            .filter(|id| id.starts_with("bench."))
         {
             *starts.entry(id).or_default() += 1;
         }
     }
     seen.starts = starts.values().sum();
     seen.restarts = starts.values().map(|n| n - 1).sum();
+    seen.restarted = starts
+        .into_iter()
+        .filter(|&(_, n)| n > 1)
+        .map(|(id, _)| id.to_owned())
+        .collect();
+    seen.restarted.sort_unstable();
     seen
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_press_is_put_down_to_the_call_it_overlaps() {
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let span = |from, to, lang, service| Span {
+            start: at(from),
+            end: at(to),
+            lang,
+            service,
+        };
+        let calls = Calls {
+            spans: vec![
+                span(0, 10, Lang::Wasm, true),
+                span(20, 150, Lang::Node, false),
+            ],
+            ..Calls::default()
+        };
+        assert_eq!(calls.during(at(5), at(25)).as_deref(), Some("wasm service"));
+        assert_eq!(
+            calls.during(at(140), at(170)).as_deref(),
+            Some("node one-shot")
+        );
+        assert_eq!(calls.during(at(10), at(20)), None);
+        assert_eq!(calls.during(at(150), at(200)), None);
+    }
 
     #[test]
     fn the_log_counts_restarts_past_each_services_first_start() {
@@ -478,11 +491,12 @@ INFO [extensions] bench.rust-svc-1 stops after sitting idle
         assert_eq!(
             read_log(log),
             Lifecycle {
-                starts: 3,
+                starts: 4,
                 restarts: 1,
                 evictions: 1,
                 crashes: 1,
                 idle_stops: 1,
+                restarted: vec!["bench.node-svc-1".to_owned()],
             }
         );
     }

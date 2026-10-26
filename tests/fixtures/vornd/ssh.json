@@ -60,8 +60,22 @@
     "resumed": "ARGV:"
   },
   "sshArgv": [
-    ["-t", "-i", "/keys/id_test", "you@keys.example", "echo __VORN_READY_<id>__ && exec $SHELL -l"],
-    ["-t", "-i", "/keys/id_test", "you@keys.example", "echo __VORN_READY_<id>__ && exec $SHELL -l"],
+    [
+      "-t",
+      "-i",
+      "/keys/id_test",
+      "--",
+      "you@keys.example",
+      "echo __VORN_READY_<id>__ && exec $SHELL -l"
+    ],
+    [
+      "-t",
+      "-i",
+      "/keys/id_test",
+      "--",
+      "you@keys.example",
+      "echo __VORN_READY_<id>__ && exec $SHELL -l"
+    ],
     [
       "-t",
       "-p",
@@ -72,6 +86,7 @@
       "PubkeyAuthentication=no",
       "-o",
       "StrictHostKeyChecking=no",
+      "--",
       "me@box.example",
       "echo __VORN_READY_<id>__ && exec $SHELL -l"
     ]

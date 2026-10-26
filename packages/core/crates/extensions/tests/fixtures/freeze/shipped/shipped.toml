@@ -1,0 +1,11 @@
+[[extension]]
+id = "vorn.good"
+path = "good"
+version = "1.0.0"
+sha256 = "0"
+
+[[extension]]
+id = "vorn.bad"
+path = "bad"
+version = "2.0.0"
+sha256 = "0"

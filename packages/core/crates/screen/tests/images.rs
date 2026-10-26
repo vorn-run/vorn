@@ -1,6 +1,7 @@
 //! Kitty graphics through an emulator: what a program transmits, places and deletes is what a
-//! renderer reads back, placements follow the text through scrolls and resizes, PNG and files
-//! load only with images on, and size reports carry the cell pixels a card was given.
+//! renderer reads back, placements follow the text through scrolls and resizes, PNG loads only
+//! with images on and files only with image files on, every refused file reads the same, and
+//! size reports carry the cell pixels a card was given.
 
 use vorn_screen::{Effect, Emulator, Placed};
 
@@ -210,18 +211,30 @@ fn png_decodes_only_with_images_on() {
     assert_eq!(pic.rgba, [255, 0, 0, 255].repeat(4));
 }
 
+/// A refusal's reply with its image id taken out, so refusals compare whole.
+fn refusal(reply: &[String]) -> String {
+    let [reply] = reply else {
+        panic!("one reply: {reply:?}");
+    };
+    let (_, rest) = reply.split_once(';').unwrap();
+    rest.to_owned()
+}
+
 #[test]
-fn files_load_only_with_images_on() {
+fn files_load_only_with_image_files_on() {
     let dir = std::env::temp_dir().join(format!("vorn-kitty-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("img.rgba");
     std::fs::write(&file, rgba(4, 4, [5, 6, 7, 255])).unwrap();
     let path = b64(file.to_str().unwrap().as_bytes());
     let mut em = card();
-    em.set_images(false);
+    assert!(!em.image_files(), "files start off");
     let refused = feed(&mut em, &apc("a=t,t=f,f=32,s=4,v=4,i=1", &path));
-    assert!(refused[0].starts_with("\x1b_Gi=1;E"), "{refused:?}");
-    em.set_images(true);
+    assert_eq!(refused, ["\x1b_Gi=1;EINVAL: unsupported medium\x1b\\"]);
+    // Sent in the stream, an image loads either way.
+    transmit(&mut em, 9, "");
+    assert_eq!(placed(&em).len(), 1);
+    em.set_image_files(true);
     let ok = feed(&mut em, &apc("a=t,t=f,f=32,s=4,v=4,i=2", &path));
     assert_eq!(ok, ["\x1b_Gi=2;OK\x1b\\"]);
     // A temporary file must be named as one, and is deleted once read.
@@ -236,15 +249,55 @@ fn files_load_only_with_images_on() {
     );
     assert_eq!(ok, ["\x1b_Gi=3;OK\x1b\\"]);
     assert!(!tmp.exists());
-    // Not a regular file.
-    let bad = feed(
-        &mut em,
-        &apc(
-            "a=t,t=f,f=32,s=4,v=4,i=4",
-            &b64(dir.to_str().unwrap().as_bytes()),
+    em.set_image_files(false);
+    let off = refusal(&feed(&mut em, &apc("a=t,t=f,f=32,s=4,v=4,i=4", &path)));
+    assert_eq!(off, "EINVAL: unsupported medium\x1b\\");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn every_refused_file_reads_the_same_whatever_the_reason() {
+    let dir = std::env::temp_dir().join(format!("vorn-kitty-same-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let misnamed = dir.join("plain.rgba");
+    std::fs::write(&misnamed, rgba(4, 4, [5, 6, 7, 255])).unwrap();
+    let path = |p: &std::path::Path| b64(p.to_str().unwrap().as_bytes());
+    let mut em = card();
+    em.set_image_files(true);
+    let mut refusals = Vec::new();
+    for (id, keys, data) in [
+        // Not a regular file.
+        (1, "t=f", path(&dir)),
+        // Not there.
+        (2, "t=f", path(&dir.join("missing.rgba"))),
+        // A temporary file not named as one.
+        (3, "t=t", path(&misnamed)),
+        // A temporary file outside the temp dir.
+        (
+            4,
+            "t=t",
+            path(std::path::Path::new("/etc/tty-graphics-protocol")),
         ),
+        // A shared memory object that is not there.
+        (5, "t=s", b64(b"/vorn-no-such-shm")),
+        // A device.
+        (6, "t=f", path(std::path::Path::new("/dev/zero"))),
+    ] {
+        let reply = feed(
+            &mut em,
+            &apc(&format!("a=t,{keys},f=32,s=4,v=4,i={id}"), &data),
+        );
+        assert!(reply[0].starts_with(&format!("\x1b_Gi={id};")), "{reply:?}");
+        refusals.push(refusal(&reply));
+    }
+    assert!(misnamed.exists(), "a refused temporary file is left alone");
+    assert!(
+        refusals
+            .iter()
+            .all(|r| r == "EINVAL: unsupported medium\x1b\\"),
+        "{refusals:?}"
     );
-    assert!(bad[0].starts_with("\x1b_Gi=4;E"), "{bad:?}");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -257,8 +310,10 @@ fn a_checkpoint_keeps_a_terminal_holding_images_live() {
     assert!(em.images());
     feed(&mut em, &apc("a=d,d=A,q=2", ""));
     assert_eq!(em.image_bytes(), 0);
+    em.set_image_files(true);
     em.checkpoint().unwrap();
     assert!(em.images(), "the switch carries across a rebuild");
+    assert!(em.image_files(), "so does the one for files");
 }
 
 #[test]

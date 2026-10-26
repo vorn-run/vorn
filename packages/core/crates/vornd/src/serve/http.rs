@@ -13,7 +13,7 @@ use hyper::{Response, StatusCode};
 use serde_json::{json, Value};
 
 use crate::endpoint::{full, Body};
-use crate::native::extensions::builtin::tasks::{ID as TASKS, IMAGES};
+use crate::native::extensions::hosted::tasks::{ID as TASKS, IMAGES};
 
 /// The prefix the web client is served under.
 pub const APP_PREFIX: &str = "/app";
