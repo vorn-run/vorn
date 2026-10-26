@@ -195,12 +195,17 @@ fn from_vorn(source: Option<&Value>) -> bool {
         .is_some_and(is_vorn_repo)
 }
 
+// Only network remotes: git reads `file://` and bare paths from local disk.
 fn is_vorn_repo(url: &str) -> bool {
-    let bare = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let bare = bare
-        .strip_prefix("git@")
-        .unwrap_or(bare)
-        .replacen(':', "/", 1);
+    let bare = if let Some(rest) = url.strip_prefix("https://") {
+        rest.to_owned()
+    } else if let Some(rest) = url.strip_prefix("ssh://git@") {
+        rest.to_owned()
+    } else if let Some(rest) = url.strip_prefix("git@") {
+        rest.replacen(':', "/", 1)
+    } else {
+        return false;
+    };
     let bare = bare.trim_end_matches('/');
     let bare = bare.strip_suffix(".git").unwrap_or(bare);
     bare.eq_ignore_ascii_case("github.com/vorn-run/extensions")
@@ -750,6 +755,10 @@ mod tests {
                   "source": { "git": "https://example.com/vorn-run/extensions.git" } },
                 { "id": "listed", "name": "Listed", "version": "1.0.0", "publisher": "Vorn",
                   "source": { "git": "https://github.com/someone/listed.git" } },
+                { "id": "local", "name": "Local", "version": "1.0.0",
+                  "source": { "git": "file://github.com/vorn-run/extensions" } },
+                { "id": "bare", "name": "Bare", "version": "1.0.0",
+                  "source": { "git": "github.com/vorn-run/extensions" } },
             ]),
             json!([]),
         );
@@ -761,6 +770,8 @@ mod tests {
         assert_eq!(maker("theirs"), "By someone/theirs");
         assert_eq!(maker("claims"), "By vorn-run/extensions");
         assert_eq!(maker("listed"), "By someone/listed");
+        assert_ne!(maker("local"), "By Vorn");
+        assert_ne!(maker("bare"), "By Vorn");
         assert_eq!(monogram("  rss feeds"), "R");
         assert_eq!(monogram_hue("rss", 4), monogram_hue("rss", 4));
         assert!(monogram_hue("anything", 4) < 4);
