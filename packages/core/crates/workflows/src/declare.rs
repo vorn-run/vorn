@@ -1,8 +1,8 @@
 //! How an extension's manifest fills the workflow registry: each
 //! `[[contributes.nodes]]` becomes a node type and each
 //! `[[contributes.triggers]]` a trigger type, under the extension's id.
-//! vornd declares every extension that is on this way, the built-ins and
-//! those installed from git alike.
+//! vornd declares every extension this way, those Vorn ships and those
+//! installed from git alike.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -104,25 +104,4 @@ pub fn declare<H: Host>(
         }
     }
     taken
-}
-
-/// The built-in's manifest, read.
-pub fn manifest() -> Manifest {
-    vorn_extensions::manifest::file::parse_builtin(crate::MANIFEST)
-        .expect("the built-in's manifest is checked by its tests")
-}
-
-/// Declares the built-in itself: its steps run in vornd, and steps of types
-/// no extension declares run as its agent step.
-pub fn declare_builtin<H: Host>(registry: &Registry<H>) {
-    let steps: HashMap<&str, Arc<dyn Step<H>>> = crate::steps().into_iter().collect();
-    declare(
-        registry,
-        &manifest(),
-        &crate::node_docs(),
-        &steps,
-        &|_| None,
-        true,
-    );
-    registry.set_fallback(Some(crate::FALLBACK));
 }

@@ -316,10 +316,10 @@ impl Host for Fake {
         };
         let answered = match provider {
             "vorn.tasks" if node_type == "createTaskFromItem" => {
-                Some(match vorn_ext_tasks::nodes::upsert_params(&request) {
+                Some(match upsert_params(&request) {
                     Ok(params) => {
                         let result = call("connection.upsertFromItem", params.clone()).await;
-                        vorn_ext_tasks::nodes::answered(&params, result)
+                        upserted(&params, result)
                     }
                     Err(skipped) => skipped,
                 })
@@ -427,13 +427,21 @@ impl Fake {
     }
 }
 
+/// Workflows' manifest, as its released pack carries it.
+pub const WORKFLOWS_MANIFEST: &str = include_str!("../fixtures/workflows.toml");
+
+/// Tasks' manifest, as its released pack carries it.
+pub const TASKS_MANIFEST: &str = include_str!("../fixtures/tasks.toml");
+
 /// The engine on `fake`, with Vorn's node types and trigger types declared
-/// as vornd declares them while the built-ins are on.
+/// as vornd declares them while Workflows, Tasks and Connectors are there.
 pub fn engine(fake: Fake) -> Engine<Fake> {
     let engine = Engine::new(fake);
-    vorn_workflows::declare::declare_builtin(engine.registry());
+    let steps: HashMap<&str, Arc<dyn vorn_workflow::Step<Fake>>> =
+        vorn_workflows::steps().into_iter().collect();
     for (manifest, docs) in [
-        (vorn_ext_tasks::MANIFEST, vorn_ext_tasks::NODE_DOCS),
+        (WORKFLOWS_MANIFEST, vorn_workflows::NODE_DOCS),
+        (TASKS_MANIFEST, vorn_workflows::TASKS_NODE_DOCS),
         (
             vorn_connectors::builtin::MANIFEST,
             vorn_connectors::builtin::NODE_DOCS,
@@ -441,16 +449,116 @@ pub fn engine(fake: Fake) -> Engine<Fake> {
     ] {
         let manifest = vorn_extensions::manifest::file::parse_builtin(manifest).unwrap();
         let docs = serde_json::from_str(docs).unwrap();
+        let none = HashMap::new();
+        let local = if manifest.id == vorn_workflows::ID {
+            &steps
+        } else {
+            &none
+        };
         vorn_workflows::declare::declare(
             engine.registry(),
             &manifest,
             &docs,
-            &std::collections::HashMap::new(),
+            local,
             &|_| None,
             true,
         );
     }
     engine
+        .registry()
+        .set_fallback(Some(vorn_workflows::FALLBACK));
+    engine
+}
+
+/// What Tasks' `createTaskFromItem` step asks `connection:upsertFromItem`
+/// for, or the step's answer when the run has no connector item.
+fn upsert_params(request: &Value) -> Result<Value, Value> {
+    let Some(item) = request
+        .pointer("/context/connectorItem")
+        .filter(|i| i.is_object())
+    else {
+        return Err(json!({
+            "status": "skipped",
+            "error": "No connector item in context — this node only runs from a connectorPoll trigger.",
+        }));
+    };
+    let config = &request["raw"];
+    let mut params = json!({
+        "connectionId": item["connectionId"],
+        "item": item,
+        "initialStatus": config["initialStatus"],
+    });
+    if let Some(p) = config["project"]
+        .as_str()
+        .filter(|p| !p.is_empty() && *p != "fromConnection")
+    {
+        params["project"] = json!(p);
+    }
+    Ok(params)
+}
+
+/// Tasks' step answer to what putting `params`' item on the board answered.
+fn upserted(params: &Value, result: Result<Value, String>) -> Value {
+    let result = match result {
+        Ok(result) => result,
+        Err(message) => return json!({ "status": "error", "error": message }),
+    };
+    let item = &params["item"];
+    let shown = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+    let task_id = shown(&result["taskId"]);
+    let title = shown(&item["title"]);
+    let snippet = if title.chars().count() > 60 {
+        format!("{}...", title.chars().take(57).collect::<String>())
+    } else {
+        title
+    };
+    let verb = if result["created"].as_bool() == Some(true) {
+        "Imported"
+    } else {
+        "Updated"
+    };
+    let summary = format!("{verb} #{} \"{snippet}\"", shown(&item["externalId"]));
+    let url = item["externalUrl"]
+        .as_str()
+        .map_or("(no url)".to_owned(), str::to_owned);
+    json!({
+        "status": "success",
+        "taskId": task_id,
+        "logs": format!("{summary}\nSource: {url}\nTaskId: {task_id}"),
+        "output": summary,
+    })
+}
+
+/// The arguments Tasks fires `trigger` with through `workflow.fire`; none
+/// for a status change to the status it had.
+pub fn task_fire_args(trigger: &Value) -> Option<Value> {
+    let kind = trigger["kind"].as_str()?;
+    let task = trigger.get("task").filter(|t| t.is_object())?;
+    let project = task["projectName"].as_str().filter(|p| !p.is_empty());
+    let effect = trigger.get("effectId").cloned().unwrap_or(Value::Null);
+    match kind {
+        "taskCreated" => Some(json!({
+            "trigger": kind,
+            "effectId": effect,
+            "fields": { "projectFilter": project },
+            "context": { "task": task, "trigger": { "type": kind } },
+        })),
+        "taskStatusChanged" => {
+            let (from, to) = (trigger["from"].as_str()?, trigger["to"].as_str()?);
+            (from != to).then(|| {
+                json!({
+                    "trigger": kind,
+                    "effectId": effect,
+                    "fields": { "projectFilter": project, "fromStatus": from, "toStatus": to },
+                    "context": {
+                        "task": task,
+                        "trigger": { "type": kind, "fromStatus": from, "toStatus": to },
+                    },
+                })
+            })
+        }
+        _ => None,
+    }
 }
 
 /// A temporary directory of its own.

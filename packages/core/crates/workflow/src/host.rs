@@ -13,6 +13,7 @@ use std::future::Future;
 use serde_json::Value;
 use tokio::sync::broadcast;
 use vorn_protocol::WorkflowExecution;
+use vorn_work::model::Workflow;
 
 /// What a session or script says while a step waits on it.
 #[derive(Clone, Debug, PartialEq)]
@@ -124,6 +125,13 @@ pub trait Host: Send + Sync + 'static {
 
     /// What sessions and scripts say from now on.
     fn notes(&self) -> broadcast::Receiver<Note>;
+
+    /// Why `workflow` may not start a run, when it may not: no run of it
+    /// starts, by a trigger, a click or a retry, while this says so.
+    fn refuses(&self, workflow: &Workflow) -> Option<String> {
+        let _ = workflow;
+        None
+    }
 
     /// The agent a step runs when it names none and nothing assigns one:
     /// the first whose adapter is on; `None` runs a shell.

@@ -1,0 +1,61 @@
+id = "vorn.tasks"
+name = "Tasks"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "The task board: each project's tasks moved across statuses by you, your agents and your workflows, their images, the task a session works on shown on its card, a pane beside a card listing its project's tasks, and the MCP task tools."
+
+[icon]
+view_box = "0 0 24 24"
+paths = ["M3 4h5v5H3z", "M10 5.5h11v2H10z", "M3 15h5v5H3z", "M10 16.5h11v2H10z"]
+
+[declares]
+uses = ["tasks.read", "tasks.write", "sessions.read", "workflows.write", "storage", "files.read"]
+
+[service]
+component = "tasks.wasm"
+# Publishes the card badges as Vorn starts, so a card shows its task from the first frame.
+start = "badges"
+events = ["agent.conversation"]
+
+[[contributes.views]]
+id = "board"
+title = "Tasks"
+description = "The board of each project's tasks: a queue of todos for you and your agents."
+icon = "list-todo"
+key = "Mod+T"
+tree = true
+button = { setting = ["top_bar"] }
+
+[[contributes.panes]]
+id = "tasks"
+title = "Tasks"
+tree = true
+
+[[contributes.preferences]]
+id = "top_bar"
+title = "Show in the top bar"
+description = "Shows the Tasks button in the top bar. Off, Tasks still opens from its key, the command palette and a card's pane menu."
+type = "bool"
+default = true
+
+[[contributes.badges]]
+id = "task"
+title = "Task in progress"
+tree = true
+
+[[contributes.nodes]]
+id = "createTaskFromItem"
+title = "Create task"
+icon = "list-plus"
+category = "connectors"
+
+[[contributes.triggers]]
+id = "taskCreated"
+title = "Task created"
+icon = "list-plus"
+
+[[contributes.triggers]]
+id = "taskStatusChanged"
+title = "Task moved"
+icon = "arrow-right-left"

@@ -2,5 +2,5 @@
 //! from, served on stdio.
 
 fn main() {
-    vorn_bench_ext_tiers::program::serve::<vorn_ext_widget::Widget>();
+    vorn_bench_ext_tiers::program::serve::<vorn_bench_widget::Widget>();
 }

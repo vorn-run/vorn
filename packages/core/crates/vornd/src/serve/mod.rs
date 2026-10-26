@@ -93,8 +93,8 @@ pub struct Serving {
 /// The database `dir` keeps, created, migrated and seeded as the app does.
 pub fn open_database(dir: &Path) -> Result<PathBuf, StartError> {
     let db = dir.join("vorn.db");
-    let mut options =
-        crate::native::config::options(&crate::adapters::Adapters::standard().agents());
+    let installed = crate::adapters::Adapters::installed_in(&dir.join("connectors"));
+    let mut options = crate::native::config::options(&installed.agents());
     options.owner_name = owner_name();
     options.seed_workflows = seed_workflows();
     match vorn_store::Store::open(&db, options) {
@@ -115,8 +115,8 @@ fn owner_name() -> String {
         .unwrap_or_else(|| "owner".to_owned())
 }
 
-/// The workflows every install is given once: those the Workflows built-in
-/// ships as files.
+/// The workflows every install is given once, kept as files beside the
+/// workflow steps (`vorn_workflows::SEEDS`).
 fn seed_workflows() -> Vec<vorn_store::SeedWorkflow> {
     vorn_workflows::SEEDS
         .iter()

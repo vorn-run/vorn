@@ -2,20 +2,23 @@
 //! call, the network `net.fetch` reaches, and the vault its credentials come
 //! from. The gate has already checked every call against the manifest.
 
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use serde_json::{json, Value};
 use tracing::info;
 use vorn_connectors::fetch::{Http, Request as HttpRequest};
-use vorn_extensions::api::types::{Header, Request, Response, SessionStart};
+use vorn_extensions::api::types::{CallCtx, Header, Request, Response, SessionStart};
 use vorn_extensions::api::ExtError;
 use vorn_extensions::gate::{self, Answer, Caller, StorageCall, World};
+use vorn_extensions::pack::Migrations;
+use vorn_extensions::reach::{self, Access, Opened, Places};
 use vorn_store::extension::{ExtensionTables, Grant};
 
 use crate::native::config::Viewer;
-use crate::native::{secrets::Known, Answer as NativeAnswer, Native};
+use crate::native::{file, secrets::Known, Answer as NativeAnswer, Native};
 
 /// How long one `net.fetch` may take.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -66,20 +69,11 @@ impl Tables {
 
 /// The core's tables extension `id` is lent: Tasks keeps the board's own.
 fn lent(id: &str) -> &'static [Grant] {
-    if id == super::builtin::tasks::ID {
+    if id == super::hosted::tasks::ID {
         vorn_store::extension::TASKS
     } else {
         &[]
     }
-}
-
-/// `files.read` with `encoding: base64`: the file's bytes, `{base64}`.
-async fn read_bytes(path: String) -> Result<Value, ExtError> {
-    tokio::task::spawn_blocking(move || std::fs::read(path))
-        .await
-        .map_err(|e| ExtError::new("failed", e.to_string()))?
-        .map(|bytes| json!({ "base64": vorn_extensions::api::base64::encode(&bytes) }))
-        .map_err(|e| ExtError::new("failed", e.to_string()))
 }
 
 /// `task.changed`: the events a task's write fires, emitted as the core's,
@@ -183,6 +177,117 @@ async fn on_store(
     answered.map_err(|e| ExtError::new("failed", format!("{method}: {e}")))
 }
 
+/// The extension host, or the error for a vornd that runs none.
+fn host_of(native: &Native) -> Result<Arc<super::Extensions>, ExtError> {
+    native
+        .extensions()
+        .cloned()
+        .ok_or_else(|| ExtError::new("unsupported", "vornd is not hosting extensions"))
+}
+
+/// `path` as the caller named it, once `caller` may `access` it as resolved:
+/// within its projects' folders, its own, the folders its sessions' shells
+/// are in, what a person handed it, or anywhere with `process.run`; never
+/// Vorn's data, credentials or the shell's startup files.
+async fn reached(
+    native: &Arc<Native>,
+    caller: &Caller,
+    path: &str,
+    access: Access,
+) -> Result<PathBuf, ExtError> {
+    let path = PathBuf::from(path);
+    on_places(native, caller, move |places, extension, runs| {
+        places.reach(extension, &path, access, runs)
+    })
+    .await?
+}
+
+/// `path` opened for `access` once `caller` may reach it ([`reached`]), the
+/// handle then given to `then` off the runtime: what it reads or writes is
+/// the file checked, not whatever the name points at by then.
+async fn opened<T: Send + 'static>(
+    native: &Arc<Native>,
+    caller: &Caller,
+    path: &str,
+    access: Access,
+    then: impl FnOnce(std::io::Result<Opened>) -> T + Send + 'static,
+) -> Result<T, ExtError> {
+    let path = PathBuf::from(path);
+    on_places(native, caller, move |places, extension, runs| {
+        places.open(extension, &path, access, runs).map(then)
+    })
+    .await?
+}
+
+/// `path` as git prints one: on Windows without the `\\?\` prefix and with `/`.
+fn file_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if cfg!(windows) {
+        path.strip_prefix(r"\\?\")
+            .unwrap_or(&path)
+            .replace('\\', "/")
+    } else {
+        path.into_owned()
+    }
+}
+
+/// Runs `check` off the runtime on the places `caller` may reach.
+async fn on_places<T: Send + 'static>(
+    native: &Arc<Native>,
+    caller: &Caller,
+    check: impl FnOnce(Places, &str, bool) -> T + Send + 'static,
+) -> Result<T, ExtError> {
+    let host = host_of(native)?;
+    let projects = on_store(native, "files", |s| s.call("dbListProjects", json!([]))).await?;
+    let mut roots: Vec<String> = Vec::new();
+    for p in projects.as_array().into_iter().flatten() {
+        if let Some(path) = p.get("path").and_then(Value::as_str) {
+            roots.push(path.to_owned());
+            roots.push(vorn_git::repo::worktree_base_dir(path));
+        }
+    }
+    let mut here: Vec<String> = Vec::new();
+    if let Some(registry) = native.registry.get() {
+        registry.read(|r| {
+            for t in r.live_terminals() {
+                roots.push(t.project_path.clone());
+                roots.extend(t.worktree_path.clone());
+                if host.paned(&caller.extension, &t.id) {
+                    let folder = t.shell_cwd.as_ref().or(t.worktree_path.as_ref());
+                    here.push(folder.unwrap_or(&t.project_path).clone());
+                }
+            }
+        });
+    }
+    let own = host.router().files_dir(&caller.extension);
+    let handed = host.given().handed(&caller.extension);
+    let home = PathBuf::from(crate::native::shell::home_dir());
+    let data = native
+        .database()
+        .and_then(std::path::Path::parent)
+        .map(std::path::Path::to_path_buf);
+    let (extension, runs) = (caller.extension.clone(), caller.runs_commands);
+    tokio::task::spawn_blocking(move || {
+        let resolved = |list: Vec<String>| -> Vec<PathBuf> {
+            list.iter()
+                .filter_map(|p| reach::resolve(std::path::Path::new(p)).ok())
+                .collect()
+        };
+        let data: Vec<&std::path::Path> = data.as_deref().into_iter().collect();
+        let places = Places {
+            roots: resolved(roots),
+            here: resolved(here),
+            home: reach::resolve(&home).ok(),
+            own: own.and_then(|o| reach::resolve(&o).ok()),
+            handed,
+            closed: reach::closed(&home, &data),
+        };
+        check(places, &extension, runs)
+    })
+    .await
+    .map_err(|e| ExtError::new("failed", e.to_string()))
+}
+
 /// Starts `req` for extension `extension` the way the app and the MCP tools
 /// do: a shell through `shell:create`, an agent through `terminal:create`, or
 /// `headless:create` naming the extension as what started it.
@@ -246,11 +351,15 @@ async fn start_session(
             }
         }
     };
-    started
+    let id = started
         .get("id")
         .and_then(Value::as_str)
         .map(str::to_owned)
-        .ok_or_else(|| ExtError::new("failed", "Vorn started no session"))
+        .ok_or_else(|| ExtError::new("failed", "Vorn started no session"))?;
+    if let Some(host) = native.extensions() {
+        host.given().started(extension, &id);
+    }
+    Ok(id)
 }
 
 /// `sessions.launch`'s args as the session to start, its project the call's when it names none.
@@ -343,7 +452,11 @@ async fn remote_test(native: &Arc<Native>, caller: &str, args: &Value) -> Result
             Err(e) => json!({ "success": false, "message": e, "durationMs": 0 }),
         };
         let told = json!({ "key": key, "result": result });
-        if let Some(Err(e)) = ext.builtins().call(&caller, &then, told).await {
+        let ctx = CallCtx {
+            caller: "client".to_owned(),
+            project: None,
+        };
+        if let Err(e) = ext.call(&caller, &then, told, ctx).await {
             info!(
                 "[extensions] {caller} did not take its test's result: {}",
                 e.message
@@ -353,30 +466,42 @@ async fn remote_test(native: &Arc<Native>, caller: &str, args: &Value) -> Result
     Ok(json!({ "testing": true }))
 }
 
+/// What `remote.importKey` answers for any path it does not import.
+const NOT_A_KEY: &str =
+    "That file is not an SSH key Vorn can import. Choose one in ~/.ssh or with Browse.";
+
 /// `remote.importKey`: the private key at `path` (`~` is the home folder)
 /// and the public key beside it (`.pub`), labelled with the file's name, as
-/// `credential:storeKey` takes them.
-fn read_key(path: &str) -> Result<Value, String> {
-    let full = match path.strip_prefix("~/") {
-        Some(rest) => std::path::Path::new(&crate::native::shell::home_dir()).join(rest),
-        None => PathBuf::from(path),
+/// `credential:storeKey` takes them. Only a key in `home`'s `.ssh` folder
+/// or one a person chose (`handed`) is read, and only one that reads as a
+/// private key; `None` for anything else, whatever the reason.
+fn read_key(home: &std::path::Path, handed: &[PathBuf], path: &str) -> Option<Value> {
+    let full = match path.trim().strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(path.trim()),
     };
-    let private = std::fs::read_to_string(&full).map_err(|e| format!("{path}: {e}"))?;
-    let label = full
-        .file_name()
-        .map_or_else(|| path.to_owned(), |n| n.to_string_lossy().into_owned());
+    let real = reach::resolve(&full).ok()?;
+    let ssh = reach::resolve(&home.join(".ssh")).ok()?;
+    if !real.starts_with(&ssh) && !handed.contains(&real) {
+        return None;
+    }
+    let private = std::fs::read_to_string(&real).ok()?;
+    if !private.trim_start().starts_with("-----BEGIN ") || !private.contains("PRIVATE KEY-----") {
+        return None;
+    }
+    let label = real.file_name()?.to_string_lossy().into_owned();
     let mut key = json!({ "label": label, "privateKey": private });
-    let mut public = full.into_os_string();
+    let mut public = real.into_os_string();
     public.push(".pub");
     if let Ok(p) = std::fs::read_to_string(public) {
         key["publicKey"] = json!(p.trim());
     }
-    Ok(key)
+    Some(key)
 }
 
 /// Whether a step of `node_type` runs commands or agents: one the Workflows
 /// built-in runs, or one no extension declares, which runs as its agent.
-fn runs_commands(native: &Native, node_type: &str) -> bool {
+pub(crate) fn runs_commands(native: &Native, node_type: &str) -> bool {
     let Some(step) = vorn_work::model::NodeKind::parse(node_type)
         .step()
         .map(str::to_owned)
@@ -439,22 +564,24 @@ impl World for Wired {
                 }
                 "terminal.read" | "terminal.send" | "terminal.selection" | "card.rename"
                 | "agent.usage" => {
-                    let host = native.extensions().cloned().ok_or_else(|| {
-                        ExtError::new("unsupported", "vornd is not hosting extensions")
-                    })?;
+                    let host = host_of(&native)?;
+                    if m.starts_with("terminal.") {
+                        let id = text(&args, "sessionId").unwrap_or_default();
+                        host.admit_terminal(&caller, m, &id)?;
+                    }
                     super::routes::session_call(&host, &extension, m, &args)
                         .await
                         .map_err(|e| ExtError::new("failed", e))
                 }
                 "git.status" => {
                     let project = project.ok_or_else(|| needs(m, "the project to read"))?;
+                    let dir = reached(&native, &caller, &project, Access::Read).await?;
                     let git = vorn_git::repo::Git {
                         bin: native.env.git_bin(),
                         env: native.env.get(),
                         ssh: None,
                     };
                     tokio::task::spawn_blocking(move || {
-                        let dir = PathBuf::from(&project);
                         json!({ "branch": git.branch(&dir), "dirty": git.is_worktree_dirty(&dir) })
                     })
                     .await
@@ -472,6 +599,7 @@ impl World for Wired {
                 "worktrees.reclaim" | "worktrees.prune" => {
                     let path =
                         text(&args, "worktree").ok_or_else(|| needs(m, "the worktree to clean"))?;
+                    let path = reached(&native, &caller, &path, Access::Write).await?;
                     let method = if m == "worktrees.reclaim" {
                         "worktree:reclaimArtifacts"
                     } else {
@@ -483,6 +611,8 @@ impl World for Wired {
                     let worktree = text(&args, "worktree")
                         .ok_or_else(|| needs(m, "the worktree to remove"))?;
                     let project = project.ok_or_else(|| needs(m, "the project it belongs to"))?;
+                    let worktree = reached(&native, &caller, &worktree, Access::Write).await?;
+                    let project = reached(&native, &caller, &project, Access::Write).await?;
                     let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
                     let params =
                         json!({ "projectPath": project, "worktreePath": worktree, "force": force });
@@ -490,6 +620,8 @@ impl World for Wired {
                     Ok(json!({ "removed": removed.as_bool() == Some(true) }))
                 }
                 "permissions.resolve" => {
+                    let by_person = host_of(&native)?.given().acting(&extension);
+                    gate::admit_resolve(&caller, by_person)?;
                     let id = text(&args, "requestId")
                         .ok_or_else(|| needs(m, "the requestId to answer"))?;
                     let allow = args.get("allow").and_then(Value::as_bool).unwrap_or(false);
@@ -507,12 +639,14 @@ impl World for Wired {
                     let dir = text(&args, "worktree")
                         .or(project)
                         .ok_or_else(|| needs(m, "the worktree to read"))?;
+                    let dir = reached(&native, &caller, &dir, Access::Read).await?;
                     ask(&native, "git:diffFull", json!(dir)).await
                 }
                 "git.commit" => {
                     let dir = text(&args, "worktree")
                         .or(project)
                         .ok_or_else(|| needs(m, "the worktree to commit in"))?;
+                    let dir = reached(&native, &caller, &dir, Access::Write).await?;
                     let message =
                         text(&args, "message").ok_or_else(|| needs(m, "the commit message"))?;
                     let unstaged = args
@@ -527,29 +661,62 @@ impl World for Wired {
                     let path =
                         text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
                     if text(&args, "encoding").as_deref() == Some("base64") {
-                        return read_bytes(path).await;
+                        let read = |o: std::io::Result<Opened>| -> std::io::Result<Vec<u8>> {
+                            let mut bytes = Vec::new();
+                            o?.file().read_to_end(&mut bytes)?;
+                            Ok(bytes)
+                        };
+                        return opened(&native, &caller, &path, Access::Read, read)
+                            .await?
+                            .map(|b| json!({ "base64": vorn_extensions::api::base64::encode(&b) }))
+                            .map_err(|e| ExtError::new("failed", e.to_string()));
                     }
-                    let mut params = json!({ "filePath": path });
-                    if let Some(max) = args.get("maxBytes").filter(|v| v.is_u64()) {
-                        params["maxBytes"] = max.clone();
-                    }
-                    ask(&native, "file:readContent", params).await
+                    let max = args
+                        .get("maxBytes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(file::MAX_READ_BYTES);
+                    let text = opened(&native, &caller, &path, Access::Read, move |o| {
+                        o.ok()
+                            .and_then(|o| file::read_text(o.file(), o.metadata(), max))
+                    })
+                    .await?;
+                    Ok(json!(text))
                 }
                 "files.list" => {
                     let dir = text(&args, "path")
                         .ok_or_else(|| needs(m, "the absolute folder to list"))?;
-                    ask(&native, "file:listDir", json!({ "dirPath": dir })).await
+                    let (lister, named) = (Arc::clone(&native), dir.clone());
+                    let list = move |o: std::io::Result<Opened>| {
+                        let Ok(o) = o else { return Vec::new() };
+                        let entries = o.entries().unwrap_or_default();
+                        let real = file_path(o.real());
+                        file::listing(&named, &real, entries, &lister.env, &lister.ignored)
+                    };
+                    let entries = opened(&native, &caller, &dir, Access::Look, list).await?;
+                    Ok(Value::Array(
+                        entries.iter().map(file::FileEntry::to_json).collect(),
+                    ))
                 }
                 "files.stat" => {
-                    let path =
-                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?;
-                    ask(&native, "file:stamp", json!({ "filePath": path })).await
+                    let path = PathBuf::from(
+                        text(&args, "path").ok_or_else(|| needs(m, "the absolute path to read"))?,
+                    );
+                    let looked = on_places(&native, &caller, move |places, extension, runs| {
+                        places.stat(extension, &path, runs)
+                    })
+                    .await??;
+                    let stamp = looked
+                        .ok()
+                        .filter(|l| l.is_file)
+                        .and_then(|l| file::stamp_of(l.len, l.modified?));
+                    Ok(stamp.unwrap_or(Value::Null))
                 }
                 "shell.executables" => ask(&native, "shell:listExecutables", Value::Null).await,
                 "git.branches" => {
                     let dir = text(&args, "worktree")
                         .or(project)
                         .ok_or_else(|| needs(m, "the repository to read"))?;
+                    let dir = reached(&native, &caller, &dir, Access::Read).await?;
                     ask(&native, "git:listBranches", json!(dir)).await
                 }
                 "files.write" => {
@@ -558,12 +725,13 @@ impl World for Wired {
                     let content = args
                         .get("content")
                         .and_then(Value::as_str)
-                        .ok_or_else(|| needs(m, "the content to write"))?;
-                    ask(
-                        &native,
-                        "file:writeContent",
-                        json!({ "filePath": path, "content": content }),
-                    )
+                        .ok_or_else(|| needs(m, "the content to write"))?
+                        .to_owned();
+                    let named = path.clone();
+                    opened(&native, &caller, &path, Access::Write, move |o| match o {
+                        Ok(o) => file::write_to(o.file(), &named, &content),
+                        Err(e) => file::written(&named, Err(e)),
+                    })
                     .await
                 }
                 "secrets.get" => {
@@ -574,12 +742,8 @@ impl World for Wired {
                     let value = secret_of(weak.upgrade(), extension, connection, field).await?;
                     Ok(json!({ "value": value }))
                 }
-                "task.take" | "task.handBack" => {
-                    let tasks = native
-                        .tasks()
-                        .cloned()
-                        .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
-                    tasks.api(m, args).await
+                "task.take" | "task.handBack" | "task.importItems" | "task.sourceLink" => {
+                    super::hosted::tasks::api(&native, m, args).await
                 }
                 "task.changed" => {
                     task_changed(&native, &args).await;
@@ -598,13 +762,6 @@ impl World for Wired {
                     work.fire_api(&extension, &args)
                         .await
                         .map_err(|e| ExtError::new("failed", e))
-                }
-                "task.importItems" | "task.sourceLink" => {
-                    let tasks = native
-                        .tasks()
-                        .cloned()
-                        .ok_or_else(|| ExtError::new("unsupported", "this vornd keeps no tasks"))?;
-                    tasks.api(m, args).await
                 }
                 "task.list" => {
                     on_store(&native, m, move |s| {
@@ -751,6 +908,7 @@ impl World for Wired {
                 "web.call" => {
                     let view = text(&args, "view").ok_or_else(|| needs(m, "the view"))?;
                     let op = text(&args, "op").ok_or_else(|| needs(m, "the op"))?;
+                    gate::admit_op(m, &op)?;
                     let mut params = match args.get("params") {
                         Some(Value::Object(p)) => p.clone(),
                         _ => serde_json::Map::new(),
@@ -769,6 +927,7 @@ impl World for Wired {
                 // takes as long as it takes, up to just under a call's own limit.
                 "video.call" => {
                     let op = text(&args, "op").ok_or_else(|| needs(m, "the op"))?;
+                    gate::admit_op(m, &op)?;
                     let mut params = match args.get("params") {
                         Some(Value::Object(p)) => p.clone(),
                         _ => serde_json::Map::new(),
@@ -811,10 +970,12 @@ impl World for Wired {
                 "remote.storeKey" => ask(&native, "credential:storeKey", args).await,
                 "remote.importKey" => {
                     let path = text(&args, "path").ok_or_else(|| needs(m, "the key's path"))?;
-                    let key = tokio::task::spawn_blocking(move || read_key(&path))
+                    let handed = host_of(&native)?.given().handed(&extension);
+                    let home = PathBuf::from(crate::native::shell::home_dir());
+                    let key = tokio::task::spawn_blocking(move || read_key(&home, &handed, &path))
                         .await
                         .map_err(|e| ExtError::new("failed", e.to_string()))?
-                        .map_err(|e| ExtError::new("failed", e))?;
+                        .ok_or_else(|| ExtError::new("failed", NOT_A_KEY))?;
                     ask(&native, "credential:storeKey", key).await
                 }
                 "remote.deleteKey" => {
@@ -872,7 +1033,7 @@ impl World for Wired {
     fn storage(
         &self,
         caller: &Caller,
-        migrations: Option<PathBuf>,
+        migrations: Option<Migrations>,
         call: StorageCall,
     ) -> Answer<Value> {
         let (native, id) = (self.native.upgrade(), caller.extension.clone());
@@ -894,8 +1055,8 @@ impl World for Wired {
                     .as_ref()
                     .ok_or_else(|| vorn_store::Error::Refused("its tables did not open".into()))?;
                 // Checked each call: a linked package gains files, and a reinstall starts with none run.
-                if let Some(dir) = migrations.filter(|d| d.is_dir()) {
-                    let ran = tables.migrate(&dir)?;
+                if let Some(migrations) = migrations {
+                    let ran = tables.migrate(migrations.names()?, |name| migrations.read(name))?;
                     if !ran.is_empty() {
                         info!("[extensions] {id} ran its migrations {}", ran.join(", "));
                     }
@@ -940,6 +1101,47 @@ impl World for Wired {
                 json!({ "extensionId": caller.extension, "collection": collection, "ops": ops }),
                 None,
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: &str =
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    #[test]
+    fn a_key_is_imported_only_from_ssh_or_where_a_person_chose() {
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        std::fs::create_dir(&ssh).unwrap();
+        std::fs::write(ssh.join("id_ed25519"), KEY).unwrap();
+        std::fs::write(ssh.join("id_ed25519.pub"), "ssh-ed25519 AAAA me\n").unwrap();
+        std::fs::write(ssh.join("config"), "Host *\n").unwrap();
+        let elsewhere = home.path().join("keys");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("deploy"), KEY).unwrap();
+        std::fs::write(home.path().join(".zshrc"), "export A=1\n").unwrap();
+
+        let key = read_key(home.path(), &[], "~/.ssh/id_ed25519").unwrap();
+        assert_eq!(key["label"], "id_ed25519");
+        assert_eq!(key["privateKey"], KEY);
+        assert_eq!(key["publicKey"], "ssh-ed25519 AAAA me");
+
+        let deploy = elsewhere.join("deploy");
+        assert!(read_key(home.path(), &[], deploy.to_str().unwrap()).is_none());
+        let chosen = vec![reach::resolve(&deploy).unwrap()];
+        assert!(read_key(home.path(), &chosen, deploy.to_str().unwrap()).is_some());
+
+        for refused in [
+            "~/.zshrc",
+            "~/.ssh/config",
+            "~/.ssh/../keys/deploy",
+            "~/.ssh/none",
+        ] {
+            assert!(read_key(home.path(), &[], refused).is_none(), "{refused}");
         }
     }
 }

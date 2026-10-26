@@ -1,0 +1,15 @@
+[package]
+name = "vorn-bench-widget"
+# Never published and never versioned on its own; the workspace carries the app version.
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "The Widget as Vorn shipped it, kept for the extension-tiers bench: one source built as a Wasm component and as a program"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+vorn-extension-sdk = { path = "../../../crates/extension-sdk" }

@@ -8,6 +8,33 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+pub mod options;
+
+pub use options::Refused;
+
+/// Programs that log in to another machine from a terminal, or attach it to
+/// a terminal multiplexer whose panes may be anywhere. A session running one
+/// of them, at any depth, is not treated as local.
+pub const CLIENTS: &[&str] = &[
+    "ssh",
+    "mosh",
+    "mosh-client",
+    "et",
+    "autossh",
+    "telnet",
+    "rsh",
+    "rlogin",
+    "dbclient",
+    "tmux",
+    "tmate",
+    "screen",
+    "zellij",
+    "dtach",
+    "abduco",
+    "dvtm",
+    "byobu",
+];
+
 /// A remote host as the configuration keeps it (`RemoteHost`).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +54,14 @@ fn default_port() -> f64 {
 }
 
 /// The arguments before the remote command: options, port, key, the
-/// person's options and `user@host`.
-pub fn args(host: &Host, connect_timeout: u32, multiplex_dir: Option<&str>) -> Vec<String> {
+/// person's options, `--` and `user@host`; refused when the person's options
+/// or the destination are not ones [`options`] allows.
+pub fn args(
+    host: &Host,
+    connect_timeout: u32,
+    multiplex_dir: Option<&str>,
+) -> Result<Vec<String>, Refused> {
+    options::check_destination(&host.user, &host.hostname)?;
     let mut args = vec![
         "-o".to_owned(),
         format!("ConnectTimeout={connect_timeout}"),
@@ -48,16 +81,27 @@ pub fn args(host: &Host, connect_timeout: u32, multiplex_dir: Option<&str>) -> V
         ]);
     }
     if host.port != 22.0 {
-        args.extend(["-p".to_owned(), format!("{}", host.port)]);
+        args.extend(["-p".to_owned(), options::port(host.port)?.to_string()]);
     }
     if let Some(key) = host.ssh_key_path.as_deref().filter(|k| !k.is_empty()) {
+        options::check_key_path(key)?;
         args.extend(["-i".to_owned(), key.to_owned()]);
     }
-    if let Some(options) = &host.ssh_options {
-        args.extend(options.split_whitespace().map(str::to_owned));
+    if let Some(text) = &host.ssh_options {
+        args.extend(options::parse(text)?);
     }
-    args.push(format!("{}@{}", host.user, host.hostname));
-    args
+    args.push("--".to_owned());
+    args.push(destination(host));
+    Ok(args)
+}
+
+/// `user@host`, or the bare host when no user is set.
+fn destination(host: &Host) -> String {
+    if host.user.is_empty() {
+        host.hostname.clone()
+    } else {
+        format!("{}@{}", host.user, host.hostname)
+    }
 }
 
 /// Where connections are shared: `$TMPDIR` or `/tmp`; none on Windows.
@@ -181,12 +225,12 @@ pub struct Login {
 }
 
 impl Login {
-    /// The login for `host`, with a ten-second connect timeout.
-    pub fn new(host: &Host, env: Vec<(String, String)>) -> Login {
-        Login {
-            args: args(host, 10, multiplex_dir().as_deref()),
+    /// The login for `host`, with a ten-second connect timeout; refused as [`args`] is.
+    pub fn new(host: &Host, env: Vec<(String, String)>) -> Result<Login, Refused> {
+        Ok(Login {
+            args: args(host, 10, multiplex_dir().as_deref())?,
             env,
-        }
+        })
     }
 
     /// Runs `command` in a shell on the host: its output, or why it failed
@@ -231,7 +275,16 @@ const OK_MARKER: &str = "__VORN_OK__";
 /// Logs in to `host` and runs `echo __VORN_OK__`.
 pub fn test(host: &Host, env: &[(String, String)]) -> Tested {
     let started = Instant::now();
-    let mut argv = args(host, 5, multiplex_dir().as_deref());
+    let mut argv = match args(host, 5, multiplex_dir().as_deref()) {
+        Ok(argv) => argv,
+        Err(refused) => {
+            return Tested {
+                success: false,
+                message: refused.to_string(),
+                duration_ms: 0,
+            }
+        }
+    };
     argv.extend(["echo".to_owned(), OK_MARKER.to_owned()]);
     let ran = run("ssh", &argv, env, Duration::from_secs(10));
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -289,24 +342,47 @@ mod tests {
             user: "me".into(),
             port: 2222.0,
             ssh_key_path: Some("/k".into()),
-            ssh_options: Some(" -o  Foo=bar ".into()),
+            ssh_options: Some(" -o  ServerAliveInterval=30 ".into()),
         }
     }
 
     #[test]
     fn builds_the_ssh_arguments() {
         assert_eq!(
-            args(&host(), 5, Some("/t")).join(" "),
+            args(&host(), 5, Some("/t")).unwrap().join(" "),
             "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
              -o ControlMaster=auto -o ControlPath=/t/vorn-ssh-%h-%p -o ControlPersist=60 \
-             -p 2222 -i /k -o Foo=bar me@box"
+             -p 2222 -i /k -o ServerAliveInterval=30 -- me@box"
         );
         let plain: Host = serde_json::from_value(serde_json::json!({
             "id": "h", "label": "H", "hostname": "box", "user": "me", "port": 22
         }))
         .unwrap();
-        assert_eq!(args(&plain, 10, None).last().unwrap(), "me@box");
-        assert!(!args(&plain, 10, None).contains(&"-p".to_owned()));
+        let argv = args(&plain, 10, None).unwrap();
+        assert_eq!(argv[argv.len() - 2..], ["--", "me@box"]);
+        assert!(!argv.contains(&"-p".to_owned()));
+    }
+
+    #[test]
+    fn refuses_a_host_whose_options_or_names_are_not_allowed() {
+        let with = |options: &str| Host {
+            ssh_options: Some(options.into()),
+            ..host()
+        };
+        assert_eq!(
+            args(&with("-o ProxyCommand=nc"), 5, None)
+                .unwrap_err()
+                .to_string(),
+            "ssh option ProxyCommand is not allowed"
+        );
+        let dashed = Host {
+            hostname: "-oProxyCommand=x".into(),
+            ..host()
+        };
+        assert!(Login::new(&dashed, Vec::new()).is_err());
+        let refused = test(&with("-o LocalCommand=x"), &[]);
+        assert!(!refused.success);
+        assert_eq!(refused.message, "ssh option LocalCommand is not allowed");
     }
 
     #[test]

@@ -169,6 +169,18 @@ where
     let Some(session) = session else {
         return refuse(404, "That session is not running");
     };
+    let terminal = match method {
+        "output" => Some("terminal.read"),
+        "send" => Some("terminal.send"),
+        "selection" => Some("terminal.selection"),
+        _ => None,
+    };
+    if let (Some(terminal), Some(pack)) = (terminal, &pack) {
+        let gate_caller = vorn_extensions::gate::Caller::of(&pack.manifest);
+        if let Err(e) = extensions.admit_terminal(&gate_caller, terminal, &session.id) {
+            return refuse(403, e.message);
+        }
+    }
     match run(extensions, asked, &session).await {
         Ok(Some(result)) => {
             let mut res = Response::new(full(json!({ "result": result }).to_string()));

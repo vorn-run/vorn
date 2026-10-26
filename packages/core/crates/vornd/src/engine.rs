@@ -44,8 +44,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vorn_engine::{
-    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Open, Out, Peer,
-    Pool, Summary, Viewed,
+    Agents, Brief, Config, Effect, EffectId, Fidelity, GridIn, HubOut, Input, Local, Open, Out,
+    Peer, Pool, Summary, Viewed,
 };
 use vorn_sessiond_wire::{
     Ack, Attach, AttachFrom, Io, Nonce, Resize, SessionRef, Sig, Signal, Spawn, SpawnSpec,
@@ -57,7 +57,7 @@ use vorn_term_proto::{Cursor, Entry, Record};
 use crate::holder::{Conn, Writer};
 use crate::journal::{Journal, Kind};
 use crate::names::Names;
-use crate::registry::{SessionRegistry, Stamp};
+use crate::registry::{Placed, SessionRegistry, Stamp};
 use crate::size::{Sizes, Who};
 use crate::streams::{Action, Snap, Streams};
 
@@ -283,6 +283,10 @@ impl Engine {
                 .agent_type(id)
                 .map(|t| rules_of.get(&t).and_then(|a| a.screen_rules()))
         }));
+        // Only a session whose program runs here, with no remote login
+        // anywhere under it, may load images from files.
+        let placed = Arc::clone(&registry);
+        let local = Local(Arc::new(move |id: &str| local_session(placed.placed(id))));
         Arc::new(Engine {
             names: Mutex::new(Names::load(names_file)),
             journal: Mutex::new(Journal::default()),
@@ -295,6 +299,7 @@ impl Engine {
                 idle: cfg.idle.or(Some(IDLE)),
                 viewed: Some(viewed),
                 agents: cfg.agents.or(Some(agents)),
+                local: cfg.local.or(Some(local)),
                 ..cfg
             },
             write_timeout,
@@ -925,6 +930,17 @@ async fn until(at: Option<std::time::Instant>) {
     match at {
         Some(at) => tokio::time::sleep_until(tokio::time::Instant::from_std(at)).await,
         None => std::future::pending().await,
+    }
+}
+
+/// Whether a session placed so may load kitty images from files: one
+/// running here whose process tree has no remote login program in it.
+/// `None`, refused for now, while that cannot be told.
+fn local_session(placed: Option<Placed>) -> Option<bool> {
+    match placed? {
+        Placed::Remote => Some(false),
+        Placed::Here(0) => None,
+        Placed::Here(pid) => vorn_spawn::tree::runs_any(pid, vorn_remote::CLIENTS).map(|r| !r),
     }
 }
 
@@ -1920,6 +1936,63 @@ mod tests {
 
     use super::*;
     use crate::registry::{AgentStatus, HookStatus};
+
+    /// What the renamed copy of this binary runs, below.
+    #[test]
+    #[ignore = "run only as a stand-in program"]
+    fn waits_a_while() {
+        std::thread::sleep(Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_with_a_remote_login_or_multiplexer_anywhere_under_it_is_not_local() {
+        let dir = std::env::temp_dir().join(format!("vd-tree-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sh = |script: String| {
+            vorn_spawn::command("/bin/sh")
+                .args(["-c", &script])
+                .spawn()
+                .unwrap()
+        };
+        let settled = |pid: u32, want: bool| {
+            (0..100).any(|_| {
+                std::thread::sleep(Duration::from_millis(20));
+                local_session(Some(Placed::Here(pid))) == Some(want)
+            })
+        };
+        let mut plain = sh("sleep 5; true".into());
+        assert!(settled(plain.id(), true));
+        let exe = std::env::current_exe().unwrap();
+        let mut nested = Vec::new();
+        for name in ["ssh", "tmux", "screen", "zellij", "dtach", "abduco"] {
+            // A program by a client's name that only waits: this test binary, renamed.
+            let stand_in = dir.join(name);
+            std::fs::hard_link(&exe, &stand_in)
+                .or_else(|_| std::fs::copy(&exe, &stand_in).map(drop))
+                .unwrap();
+            let child = sh(format!(
+                "/bin/sh -c '{} --ignored --exact engine::tests::waits_a_while >/dev/null; true'; true",
+                stand_in.display()
+            ));
+            assert!(settled(child.id(), false), "{name}");
+            nested.push(child);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(
+            local_session(Some(Placed::Here(nested[0].id()))),
+            Some(false)
+        );
+        assert_eq!(local_session(Some(Placed::Remote)), Some(false));
+        // Not started, or not known: refused for now.
+        assert_eq!(local_session(Some(Placed::Here(0))), None);
+        assert_eq!(local_session(None), None);
+        for child in std::iter::once(&mut plain).chain(&mut nested) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     fn agent(id: &str) -> Value {
         json!({

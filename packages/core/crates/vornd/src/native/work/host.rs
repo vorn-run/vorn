@@ -49,6 +49,8 @@ pub struct VorndHost {
     pub(crate) notes: broadcast::Sender<Note>,
     /// Woken when an inbox row is settled, so the next one is delivered.
     pub(crate) drain: Arc<Notify>,
+    /// The workflows that are files in a project, and which are turned on.
+    pub(crate) files: Arc<super::files::Files>,
 }
 
 impl VorndHost {
@@ -58,6 +60,7 @@ impl VorndHost {
         native: Weak<Native>,
         loopback: Arc<Loopback>,
         drain: Arc<Notify>,
+        files: Arc<super::files::Files>,
     ) -> VorndHost {
         VorndHost {
             db,
@@ -66,6 +69,7 @@ impl VorndHost {
             loopback,
             notes: broadcast::channel(NOTES_KEPT).0,
             drain,
+            files,
         }
     }
 
@@ -247,6 +251,10 @@ impl Host for VorndHost {
             .map_err(|e| e.0)
     }
 
+    fn refuses(&self, workflow: &vorn_work::model::Workflow) -> Option<String> {
+        self.files.refuses(&workflow.id)
+    }
+
     fn first_agent(&self) -> Option<String> {
         let native = self.native.upgrade()?;
         let agents = native.agents();
@@ -257,10 +265,11 @@ impl Host for VorndHost {
         self.notes.subscribe()
     }
 
-    /// A public method as the Workflows built-in, held to what its manifest declares.
+    /// A public method as the installed Workflows extension, held to what its manifest declares.
     async fn api(&self, method: &str, args: Value) -> Result<Value, String> {
         use vorn_extensions::gate::{self, Caller, World};
-        let manifest = super::types::workflows_manifest();
+        let native = self.native.upgrade().ok_or("vornd is stopping")?;
+        let manifest = super::types::workflows_manifest(&native)?;
         gate::admit_call(&manifest, method).map_err(|e| e.message)?;
         let world = crate::native::extensions::world::Wired {
             native: self.native.clone(),

@@ -147,6 +147,38 @@ fn bar(s: &Screen<'_>, d: &Draft) -> El {
                     .child(tooltip(s.ui, stop, id, "Stop run", None)),
             );
         }
+        None if s.st.wf.held_off(d.id()).is_some() => {
+            let id = s
+                .acts
+                .on("wf-editor", act(WfAct::TurnOn(d.id().to_owned())));
+            let hot = s.ui.hover(id);
+            let b = div()
+                .id(id)
+                .on(Action::Click)
+                .row()
+                .items_center()
+                .gap(6.0)
+                .px(10.0)
+                .py(6.0)
+                .rounded(4.0)
+                .bg(white(0.0).mix(white(0.06), hot))
+                .role(Role::Button, "Turn on")
+                .child(ico(
+                    "power",
+                    13.0,
+                    2.0,
+                    c(look::GRAY_400).mix(c(look::WHITE), hot),
+                ))
+                .child(
+                    text("Turn on", 12.0, c(look::GRAY_300).mix(c(look::WHITE), hot))
+                        .weight(500)
+                        .line_height(16.0)
+                        .silent(),
+                );
+            let tip =
+                "This workflow comes from a project file and runs nothing until you turn it on";
+            right = right.child(tooltip(s.ui, b, id, tip, None));
+        }
         None => {
             let ready = wf::trigger(d.nodes()).is_some();
             let b = bar_button(s, WfAct::RunDraft, "play", "Run workflow", false, !ready);

@@ -267,7 +267,9 @@ describe.runIf(runnable)('connections and connectors in vornd', () => {
       pack: { version: '1.0.0', previousVersion: '2.0.0' }
     })
     const packs = await client.result<Array<{ id: string }>>('connector:listPacks')
-    expect(packs.map((p) => p.id)).toEqual(['tickets'])
+    // Beside the shipped set, which is installed on first launch.
+    const mine = packs.map((p) => p.id).filter((id) => !id.startsWith('vorn.'))
+    expect(mine).toEqual(['tickets'])
 
     const conn = await create({
       connectorId: 'sdk',

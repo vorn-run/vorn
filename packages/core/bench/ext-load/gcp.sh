@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs the extension load test (run.sh) on a throwaway GCP Spot VM: creates
-# the VM, copies HEAD, builds there, runs, and copies the results into
-# OUT_DIR. The VM and its disks are deleted on the way out, however the run ends.
+# the VM, copies HEAD and the shipped extension packs, builds there, runs,
+# and copies the results into OUT_DIR. The VM and its disks are deleted on
+# the way out, however the run ends, and the script then checks that the
+# project lists no VM of this run.
 #
 #   packages/core/bench/ext-load/gcp.sh OUT_DIR
 #
@@ -22,6 +24,8 @@ if ! git diff --quiet HEAD -- packages/core examples; then
   echo "packages/core or examples has uncommitted changes; the VM builds HEAD" >&2
   exit 1
 fi
+# The packs vornd embeds are fetched here (needs gh), not on the VM.
+[ -n "$(ls packages/core/shipped/*.vorn.tgz 2>/dev/null)" ] || node packages/core/scripts/shipped.mjs
 
 cleanup() {
   local code=$?
@@ -44,6 +48,11 @@ cleanup() {
   if [ -n "$left" ]; then
     echo "could not delete $vm or its disks; delete them by hand: $left" >&2
     [ "$code" -ne 0 ] || code=1
+  fi
+  local listed
+  listed=$("${gc[@]}" compute instances list --format='value(name)' 2>&1) || listed="(listing failed) $listed"
+  if [ -n "$listed" ]; then
+    echo "the project still lists instances: $listed" >&2
   fi
   exit "$code"
 }
@@ -72,6 +81,7 @@ echo "copying HEAD ($(git rev-parse --short HEAD))"
 # The workspace builds the example extensions, and vornd compiles packages/mcp/package.json in.
 git archive --format=tar --prefix=vorn/ HEAD packages/core packages/mcp/package.json examples/extensions |
   ssh_vm 'tar -x -C "$HOME"'
+tar -c -C packages/core shipped | ssh_vm 'tar -x -C "$HOME/vorn/packages/core"'
 echo "setting up"
 ssh_vm 'bash "$HOME/vorn/packages/core/bench/scale/setup-vm.sh" &&
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs python3 libwebkit2gtk-4.1-dev libgtk-3-dev >/dev/null'

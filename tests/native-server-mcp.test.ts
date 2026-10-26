@@ -28,7 +28,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { AppConfig } from '../packages/shared/src/types'
 import { comparable, randomArgs, refusedArgs, seeded, uuidsIn } from './helpers/mcp-parity'
-import { startServed, type Served } from './helpers/served'
+import { inCatalog, offerInCatalog } from './helpers/real-server'
+import { servedDir, startServed, type Served } from './helpers/served'
 
 const TEST_CREDENTIAL = 'native-server-mcp-test-credential'
 const EXE = process.platform === 'win32' ? '.exe' : ''
@@ -409,17 +410,32 @@ async function both(name: string, args: Record<string, unknown> | undefined) {
   }
 }
 
-describe.skipIf(!vornd)("vornd's MCP server answers as the TypeScript one does", () => {
+// The Device's tools are listed while it is installed, from the catalog.
+const runs = !!vornd && inCatalog('vorn.device')
+
+describe.runIf(runs)("vornd's MCP server answers as the TypeScript one does", () => {
   beforeAll(async () => {
     delete process.env.VORN_SESSION_ID
     store.dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vorn-native-mcp-')))
     process.env.VORN_DATA_DIR = store.dir
-    native = await startServed({ dataDir: store.dir, credential: TEST_CREDENTIAL })
+    const home = servedDir('vorn-served-home-')
+    await offerInCatalog(home, ['vorn.device'])
+    native = await startServed({
+      dataDir: store.dir,
+      home,
+      credential: TEST_CREDENTIAL,
+      env: { NO_PROXY: '127.0.0.1,localhost' }
+    })
     start = fixture(process.cwd())
     fixtureIds = uuidsIn(start)
     await reset()
-    // Settle the connector catalog first, so a background fetch cannot land between two sides.
     const { rpcCall } = await import('../packages/mcp/src/rpc-client')
+    const installed = await rpcCall<{ ok?: boolean }>('connector:installPack', {
+      kind: 'catalog',
+      id: 'vorn.device'
+    })
+    expect(installed.ok).toBe(true)
+    // Settle the connector catalog first, so a background fetch cannot land between two sides.
     await rpcCall('connector:catalogRefresh')
 
     version = (

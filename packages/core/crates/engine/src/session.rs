@@ -110,6 +110,12 @@ pub struct Config {
     /// by id. Where none of them holds, or a session has none, the
     /// analyzer's patterns decide.
     pub agents: Option<Agents>,
+    /// Whether a session's program runs on this machine with no remote
+    /// login under it, asked of it by id when a kitty image command that
+    /// names a file arrives (again after [`RESOLVE_EVERY`]). Only such a
+    /// session's programs may load kitty images from files; with none, or
+    /// while it says it does not know, none may.
+    pub local: Option<Local>,
 }
 
 /// Asked of a session by id: see [`Config::agents`]. `None` while the host
@@ -122,6 +128,18 @@ pub struct Agents(pub Arc<dyn Fn(&str) -> Option<Option<&'static Rules>> + Send 
 impl std::fmt::Debug for Agents {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Agents")
+    }
+}
+
+/// Asked of a session by id: see [`Config::local`]. `None` while the host
+/// does not know where the session runs.
+#[derive(Clone)]
+#[allow(clippy::type_complexity)]
+pub struct Local(pub Arc<dyn Fn(&str) -> Option<bool> + Send + Sync>);
+
+impl std::fmt::Debug for Local {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Local")
     }
 }
 
@@ -150,6 +168,7 @@ impl Default for Config {
             idle: None,
             viewed: None,
             agents: None,
+            local: None,
         }
     }
 }
@@ -535,6 +554,70 @@ pub struct Session {
     /// The agent's screen rules once [`Config::agents`] knows them, else
     /// when it was last asked.
     rules: Resolve,
+    /// What [`Config::local`] last answered, and when.
+    local: Where,
+}
+
+/// Where a session's program stands: see [`Config::local`].
+#[derive(Debug, Clone, Copy)]
+enum Where {
+    /// The answer, kept for [`RESOLVE_EVERY`] after it was given.
+    Asked {
+        local: bool,
+        at: Instant,
+    },
+    Never,
+}
+
+/// Whether the session's program may load kitty images from files now.
+/// [`Config::local`] is asked only when `wanted` (output names a file) and
+/// its last answer is older than [`RESOLVE_EVERY`]; a session that does not
+/// know, or an answer gone stale, is refused.
+fn locate(state: &mut Where, cfg: &Config, id: &str, now: Instant, wanted: bool) -> bool {
+    if let Where::Asked { local, at } = *state {
+        if now.duration_since(at) < RESOLVE_EVERY {
+            return local;
+        }
+    }
+    if !wanted {
+        *state = Where::Never;
+        return false;
+    }
+    let local = cfg
+        .local
+        .as_ref()
+        .and_then(|Local(ask)| ask(id))
+        .unwrap_or(false);
+    *state = Where::Asked { local, at: now };
+    local
+}
+
+/// Whether `bytes` may hold a kitty image command that loads from a file,
+/// temporary file or shared memory (`t=` other than `d`), counting one cut
+/// off at the end of the record.
+fn names_a_file(bytes: &[u8]) -> bool {
+    if bytes.ends_with(b"\x1b") || bytes.ends_with(b"\x1b_") {
+        return true;
+    }
+    let mut rest = bytes;
+    while let Some(at) = rest.iter().position(|&b| b == 0x1b) {
+        rest = &rest[at + 1..];
+        let Some(control) = rest.strip_prefix(b"_G") else {
+            continue;
+        };
+        let Some(end) = control
+            .iter()
+            .position(|&b| matches!(b, b';' | 0x1b | 0x07 | 0x9c))
+        else {
+            return true;
+        };
+        let medium = |kv: &[u8]| kv.starts_with(b"t=") && kv != b"t=d";
+        if control[..end].split(|&b| b == b',').any(medium) {
+            return true;
+        }
+        rest = &control[end..];
+    }
+    false
 }
 
 /// Where a session's screen rules stand.
@@ -650,6 +733,7 @@ impl Session {
             waiting: Vec::new(),
             snapshots: Vec::new(),
             rules: Resolve::Never,
+            local: Where::Never,
         }
     }
 
@@ -913,6 +997,11 @@ impl Session {
             return;
         };
         let rules = resolve(&mut self.rules, &self.cfg, &self.id, now);
+        let wanted = entries
+            .iter()
+            .any(|e| matches!(&e.rec, Record::Data { bytes, .. } if names_a_file(bytes)));
+        let local = locate(&mut self.local, &self.cfg, &self.id, now, wanted);
+        run.term.set_local(local);
         let first = out.len();
         let mut applied = false;
         for e in entries {

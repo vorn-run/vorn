@@ -1,15 +1,15 @@
-//! Workflow steps and triggers, the built-in: the node types and trigger
-//! types Vorn ships, declared on the public extension API (`[[contributes.
-//! nodes]]` and `[[contributes.triggers]]` in its manifest) and filled into
-//! the core engine's registry by vornd while the built-in is on.
+//! Workflow steps and triggers: the node types and trigger types the
+//! Workflows extension declares on the public extension API (`[[contributes.
+//! nodes]]` and `[[contributes.triggers]]` in its manifest), run here and
+//! filled into the core engine's registry by vornd while it is installed.
 //!
 //! Its steps run in vornd with the run at hand ([`vorn_workflow::Step`]):
 //! an agent ([`agent`]), a script ([`script`]) and an HTTP request
 //! ([`http`]). Of its triggers, the core times `recurring`, `once` and
-//! `webhook`, a person starts `manual`, and the built-in fires
-//! `sessionRestored` itself ([`triggers`]). Node types other extensions
-//! declare (Tasks', Connectors', one installed from git) sit beside these
-//! in the same registry.
+//! `webhook`, a person starts `manual`, and vornd fires `sessionRestored`
+//! itself ([`triggers`]). Node types other extensions declare (Tasks',
+//! Connectors', one installed from git) sit beside these in the same
+//! registry.
 
 pub mod agent;
 pub mod declare;
@@ -22,27 +22,30 @@ use std::sync::Arc;
 use serde_json::{Map, Value};
 use vorn_workflow::{Host, Step};
 
-/// The id the built-in goes by.
+/// The id the Workflows extension goes by.
 pub const ID: &str = "vorn.workflows";
 
-/// Its manifest: the node types and trigger types it declares.
-pub const MANIFEST: &str = include_str!("../../../extensions/workflows/vorn-extension.toml");
+/// The id Tasks goes by, whose `createTaskFromItem` step's doc is kept here.
+pub const TASKS_ID: &str = "vorn.tasks";
 
 /// What `describe_workflow_nodes` tells of its node types, by id.
 pub const NODE_DOCS: &str = include_str!("../generated/nodes.json");
 
-/// The workflows it ships (`[[contributes.workflows]]`), each with the flag
-/// that records an install was given it once: `(file, flag, text)`.
+/// What `describe_workflow_nodes` tells of the node types Tasks declares, by id.
+pub const TASKS_NODE_DOCS: &str = include_str!("../generated/tasks-nodes.json");
+
+/// The workflows a new database is given, each with the flag that records
+/// it was given them once: `(file, flag, text)`.
 pub const SEEDS: &[(&str, &str, &str)] = &[
     (
-        "workflows/default-task.toml",
+        "seeds/default-task.toml",
         "hasSeededDefaultTaskWorkflow",
-        include_str!("../../../extensions/workflows/workflows/default-task.toml"),
+        include_str!("../seeds/default-task.toml"),
     ),
     (
-        "workflows/dev-server.toml",
+        "seeds/dev-server.toml",
         "hasSeededDevServerWorkflow",
-        include_str!("../../../extensions/workflows/workflows/dev-server.toml"),
+        include_str!("../seeds/dev-server.toml"),
     ),
 ];
 
@@ -62,6 +65,17 @@ pub fn steps<H: Host>() -> Vec<(&'static str, Arc<dyn Step<H>>)> {
 /// Its node types' docs, by id.
 pub fn node_docs() -> Map<String, Value> {
     serde_json::from_str(NODE_DOCS).unwrap_or_default()
+}
+
+/// The docs of the node types Vorn's own extension `id` declares, by id;
+/// empty for any other, whose docs are built from its manifest.
+pub fn docs_of(id: &str) -> Map<String, Value> {
+    let text = match id {
+        ID => NODE_DOCS,
+        TASKS_ID => TASKS_NODE_DOCS,
+        _ => return Map::new(),
+    };
+    serde_json::from_str(text).unwrap_or_default()
 }
 
 pub(crate) fn text_of(v: Option<&Value>) -> Option<String> {

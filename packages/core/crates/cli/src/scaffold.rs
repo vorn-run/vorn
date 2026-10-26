@@ -244,7 +244,7 @@ pub fn write(
 ) -> Result<Vec<PathBuf>, String> {
     if !vorn_extensions::pack::is_safe_id(id) {
         return Err(format!(
-            "\"{id}\" is not an extension id: letters, digits, '.', '-' and '_', as acme.hello"
+            "\"{id}\" is not an extension id: lowercase letters, digits, '.', '-' and '_', as acme.hello"
         ));
     }
     let occupied = std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some());
@@ -338,5 +338,13 @@ mod tests {
         assert_eq!(m.service.unwrap().command, ["node", "program.mjs"]);
         assert!(sdk_dependency(None, "0.8.0").contains("tag = \"v0.8.0\""));
         assert!(write(dir.path(), "../x", false, None, "0.8.0").is_err());
+    }
+
+    #[test]
+    fn refuses_an_id_with_capitals_and_says_ids_are_lowercase() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = write(dir.path(), "Acme.Hello", false, None, "0.8.0").unwrap_err();
+        assert!(err.contains("lowercase letters, digits"), "{err}");
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 }

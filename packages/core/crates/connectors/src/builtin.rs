@@ -20,6 +20,7 @@ use serde_json::{json, Map, Value};
 use tracing::{info, warn};
 use vorn_extensions::child::Launch;
 use vorn_extensions::connector::{self as sdk, SdkClient, SdkLaunch, Source as LaunchSource};
+use vorn_extensions::install::{Installs, Pinned, Sheet};
 use vorn_extensions::lifecycle::{Lease, ServiceKey};
 use vorn_extensions::netproxy::{hosts_in, ProxyGrant};
 use vorn_extensions::pack::PackStore;
@@ -30,7 +31,7 @@ use vorn_vault::Secret;
 use crate::auth::{self, Runner};
 use crate::catalog::Catalog;
 use crate::connections::{self as conns, filter, Item, IN_VAULT, MCP, SDK};
-use crate::fetch::Http;
+use crate::fetch::{Fetch, Http};
 use crate::host::{Fields, Host, Services};
 use crate::mcp;
 use crate::poll::{self, McpPoll, Page};
@@ -1849,16 +1850,16 @@ impl Connectors {
         snapshot
     }
 
-    /// `connector:inspectPack`: clones a connector's repository and
-    /// describes it, its declared hosts and borrowed sign-in included, running
-    /// nothing of it.
+    /// `connector:inspectPack`: clones a connector's repository, or fetches
+    /// the pack the catalog lists, and describes it, its declared hosts and
+    /// borrowed sign-in included, running nothing of it.
     async fn inspect_pack(self: &Arc<Self>, params: &Value) -> Value {
-        let source = match GitSource::parse(params) {
+        let source = match PackSource::parse(params) {
             Ok(s) => s,
             Err(error) => return json!({ "ok": false, "error": error }),
         };
         let me = Arc::clone(self);
-        let inspected = tokio::task::spawn_blocking(move || me.inspect_git(&source))
+        let inspected = tokio::task::spawn_blocking(move || me.inspect_source(&source, &me.http))
             .await
             .unwrap_or_else(|e| Err(e.to_string()));
         match inspected {
@@ -1871,13 +1872,14 @@ impl Connectors {
     }
 
     /// The preview the confirm sheet shows: the manifest's fields and the install sheet's.
-    fn inspect_git(&self, source: &GitSource) -> Result<Value, String> {
+    fn inspect_source(&self, source: &PackSource, fetch: &dyn Fetch) -> Result<Value, String> {
         let installs = &self.services.installs;
-        let sheet = installs.inspect_git_at(
-            &source.url,
-            source.branch.as_deref(),
-            source.path.as_deref(),
-        )?;
+        let sheet = match source {
+            PackSource::Git(git) => {
+                installs.inspect_git_at(&git.url, git.branch.as_deref(), git.path.as_deref())?
+            }
+            PackSource::Catalog(id) => self.inspect_catalog(id, fetch)?,
+        };
         let manifest = installs
             .staged_manifest(&sheet.token)
             .ok_or("That install sheet expired before it was read")?;
@@ -1898,6 +1900,15 @@ impl Connectors {
             preview.insert("installedVersion".into(), json!(installed.version));
         }
         Ok(Value::Object(preview))
+    }
+
+    /// Fetches the pack the catalog lists for `id` and stages it.
+    fn inspect_catalog(&self, id: &str, fetch: &dyn Fetch) -> Result<Sheet, String> {
+        let entry = self
+            .catalog
+            .entry(id)
+            .ok_or_else(|| format!("The catalog lists no \"{id}\""))?;
+        stage_listed(&self.services.installs, &entry, fetch)
     }
 
     /// `connector:installPack`: puts in place what a sheet described, or
@@ -2253,6 +2264,14 @@ impl Connectors {
     }
 }
 
+/// Where a client asks a pack to be installed from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackSource {
+    Git(GitSource),
+    /// The pack the official catalog lists under this id.
+    Catalog(String),
+}
+
 /// A connector's repository, as a client names it to install from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitSource {
@@ -2262,9 +2281,10 @@ pub struct GitSource {
     pub path: Option<String>,
 }
 
-impl GitSource {
-    /// Reads `{kind: "git", url, branch?, path?}`; any other kind is refused.
-    pub fn parse(raw: &Value) -> Result<GitSource, String> {
+impl PackSource {
+    /// Reads `{kind: "git", url, branch?, path?}` or `{kind: "catalog", id}`;
+    /// any other kind is refused.
+    pub fn parse(raw: &Value) -> Result<PackSource, String> {
         let text = |k: &str| {
             raw.get(k)
                 .and_then(Value::as_str)
@@ -2273,15 +2293,51 @@ impl GitSource {
                 .map(str::to_owned)
         };
         match raw.get("kind").and_then(Value::as_str) {
-            Some("git") => Ok(GitSource {
+            Some("git") => Ok(PackSource::Git(GitSource {
                 url: text("url").ok_or("A git URL is required")?,
                 branch: text("branch"),
                 path: text("path"),
-            }),
+            })),
+            Some("catalog") => Ok(PackSource::Catalog(
+                text("id").ok_or("A catalog id is required")?,
+            )),
             _ => Err("That is not a connector to install".to_owned()),
         }
     }
 }
+
+/// Fetches the pack a catalog `entry` lists and stages it, pinned to the
+/// version and checksum the entry gives: bytes that are not those are refused.
+/// The catalog is not signed, so an entry in Vorn's own namespace installs
+/// only when it is exactly a pack this build pins.
+fn stage_listed(installs: &Installs, entry: &Value, fetch: &dyn Fetch) -> Result<Sheet, String> {
+    let field = |key: &str| {
+        entry
+            .get(key)
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| format!("That catalog entry gives no {key}"))
+    };
+    let (id, url, sha256, version) = (
+        field("id")?,
+        field("packUrl")?,
+        field("sha256")?,
+        field("version")?,
+    );
+    let pin = Pinned {
+        id: id.to_owned(),
+        version: version.to_owned(),
+        sha256: sha256.to_owned(),
+    };
+    installs.vouch(&pin)?;
+    let bytes = fetch.get(url, PACK_TIMEOUT, PACK_MAX_BYTES, &|_, _| {})?;
+    installs.inspect_archive(&bytes, json!({ "catalog": id }), Some(&pin))
+}
+
+/// How long a pack's download may take.
+const PACK_TIMEOUT: Duration = Duration::from_secs(120);
+/// The most a pack may weigh.
+const PACK_MAX_BYTES: u64 = 64 << 20;
 
 /// Where a connection's child sits in the lifecycle's keys.
 const CONNECTION_SCOPE: &str = "connection:";
@@ -2345,6 +2401,116 @@ mod tests {
             def["outputSchema"]["properties"]["id"],
             json!({ "type": "string" })
         );
+    }
+
+    struct Served(Vec<u8>);
+
+    impl Fetch for Served {
+        fn get(
+            &self,
+            _: &str,
+            _: Duration,
+            _: u64,
+            _: &dyn Fn(u64, u64),
+        ) -> Result<Vec<u8>, String> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn sample_pack(id: &str) -> Vec<u8> {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join(vorn_extensions::manifest::file::FILE),
+            format!("id = \"{id}\"\nname = \"Sample\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\npublisher = \"Vorn\"\n\n[actions.hello]\ntitle = \"Hello\"\ncommand = [\"sh\", \"hello.sh\"]\n"),
+        )
+        .unwrap();
+        std::fs::write(folder.path().join("hello.sh"), "true\n").unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let tgz = out.path().join("sample.tgz");
+        vorn_extensions::install::pack(folder.path(), &[], Some(&tgz), &[]).unwrap();
+        std::fs::read(&tgz).unwrap()
+    }
+
+    fn listed(id: &str, sha256: &str) -> Value {
+        json!({ "id": id, "version": "1.0.0", "packUrl": "https://example.com/s", "sha256": sha256 })
+    }
+
+    #[test]
+    fn installs_a_listed_pack_only_with_the_checksum_listed() {
+        let bytes = sample_pack("acme.sample");
+        let root = tempfile::tempdir().unwrap();
+        let installs = Installs::new(
+            PackStore::new(root.path()),
+            PathBuf::from("git"),
+            Vec::new(),
+        );
+        let other = stage_listed(
+            &installs,
+            &listed("acme.sample", &"00".repeat(32)),
+            &Served(bytes.clone()),
+        );
+        assert!(other.unwrap_err().contains("not the one Vorn pinned"));
+        let sha = vorn_extensions::install::sha256_hex(&bytes);
+        let sheet = stage_listed(&installs, &listed("acme.sample", &sha), &Served(bytes)).unwrap();
+        let pack = installs.confirm(&sheet.token, "acme.sample").unwrap();
+        let source = pack.source.unwrap();
+        assert_eq!(source["catalog"], "acme.sample");
+        assert_eq!(source["sha256"], sha.as_str());
+    }
+
+    #[test]
+    fn a_listed_pack_in_vorns_namespace_installs_only_as_this_build_pins_it() {
+        let bytes = sample_pack("vorn.sample");
+        let sha = vorn_extensions::install::sha256_hex(&bytes);
+        let root = tempfile::tempdir().unwrap();
+        let shipped = Pinned {
+            id: "vorn.sample".into(),
+            version: "1.0.0".into(),
+            sha256: sha.clone(),
+        };
+        let installs = Installs::new(
+            PackStore::new(root.path()),
+            PathBuf::from("git"),
+            Vec::new(),
+        )
+        .trusting(vorn_extensions::install::Trust {
+            pins: vec![shipped],
+            ..Default::default()
+        });
+        // An attacker's pack listed under Vorn's id, its checksum matching itself.
+        let theirs = sample_pack("vorn.sample")
+            .into_iter()
+            .chain(*b"x")
+            .collect::<Vec<u8>>();
+        let their_sha = vorn_extensions::install::sha256_hex(&theirs);
+        let refused = stage_listed(
+            &installs,
+            &listed("vorn.sample", &their_sha),
+            &Served(theirs.clone()),
+        );
+        assert!(refused.unwrap_err().contains("not a pack this Vorn ships"));
+        let mut newer = listed("vorn.sample", &sha);
+        newer["version"] = json!("9.0.0");
+        let refused = stage_listed(&installs, &newer, &Served(bytes.clone()));
+        assert!(refused.unwrap_err().contains("not a pack this Vorn ships"));
+        assert!(installs.store().ids().is_empty());
+
+        let sheet = stage_listed(&installs, &listed("vorn.sample", &sha), &Served(bytes)).unwrap();
+        installs.confirm(&sheet.token, "vorn.sample").unwrap();
+    }
+
+    #[test]
+    fn reads_a_git_or_catalog_source_and_refuses_another() {
+        assert_eq!(
+            PackSource::parse(&json!({ "kind": "catalog", "id": "vorn.worktrees" })),
+            Ok(PackSource::Catalog("vorn.worktrees".into()))
+        );
+        assert!(matches!(
+            PackSource::parse(&json!({ "kind": "git", "url": "https://x/y.git" })),
+            Ok(PackSource::Git(_))
+        ));
+        assert!(PackSource::parse(&json!({ "kind": "catalog" })).is_err());
+        assert!(PackSource::parse(&json!({ "kind": "file" })).is_err());
     }
 
     #[test]

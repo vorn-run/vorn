@@ -16,6 +16,7 @@ pub fn dialog(s: &Screen<'_>) -> Option<El> {
     Some(match s.st.dialog.as_ref()? {
         Dialog::RunPrompt => prompt(s, s.st.wf.prompt.as_ref()?),
         Dialog::Missed => missed(s)?,
+        Dialog::TurnOn(id) => turn_on(s, id)?,
         _ => return None,
     })
 }
@@ -559,5 +560,142 @@ fn missed(s: &Screen<'_>) -> Option<El> {
             .child(rule())
             .child(foot),
         false,
+    ))
+}
+
+/// What a workflow from a project's file runs, read before it is turned on.
+fn turn_on(s: &Screen<'_>, id: &str) -> Option<El> {
+    let file = s.st.wf.files.get(id)?;
+    let name = super::workflow(s, id)
+        .and_then(|w| sv(w, "name"))
+        .unwrap_or(id);
+    let title = format!("Turn on \u{201c}{name}\u{201d}?");
+    let head = div()
+        .col()
+        .gap(4.0)
+        .px(20.0)
+        .py(16.0)
+        .child(
+            text(title.clone(), 16.0, c(look::WHITE))
+                .weight(500)
+                .line_height(24.0)
+                .role(Role::Heading, &title),
+        )
+        .child(
+            text(
+                format!(
+                    "It comes from {}. Once on, it runs what is listed below. If the file changes outside Vorn, it turns off again.",
+                    file.path
+                ),
+                13.0,
+                c(look::GRAY_400),
+            )
+            .line_height(18.0)
+            .wrapping()
+            .min_w0(),
+        );
+    // Every line, wrapped and scrolled: what turns on is exactly what is read here.
+    let mut list = div()
+        .id(Id::new("wf-turn-on-runs"))
+        .col()
+        .gap(2.0)
+        .p(12.0)
+        .max_h(s.size.1 * 0.5)
+        .scroll_y()
+        .rounded(4.0)
+        .border(1.0, white(0.08))
+        .bg(c(look::SURFACE_SUNKEN));
+    let line = |t: &str, ink| {
+        text(if t.is_empty() { " " } else { t }, 12.0, c(ink))
+            .mono()
+            .line_height(16.0)
+            .wrapping()
+            .min_w0()
+    };
+    if file.hash.is_none() {
+        list = list.child(line(
+            "The file changed. Vorn is reading it again.",
+            look::GRAY_500,
+        ));
+    }
+    for run in &file.runs {
+        match run.strip_prefix("  ") {
+            Some(setting) => {
+                let mut setting = setting.split('\n');
+                let mut rows = div().col().pl(12.0).min_w0();
+                if let Some(first) = setting.next() {
+                    rows = rows.child(line(first, look::GRAY_400));
+                }
+                for more in setting {
+                    rows = rows.child(div().pl(12.0).min_w0().child(line(more, look::GRAY_400)));
+                }
+                list = list.child(rows);
+            }
+            None => list = list.child(line(run, look::GRAY_200)),
+        }
+    }
+    let button = |place: &str, a: Act, label: &str, strong: bool| {
+        let bid = s.acts.on(place, a);
+        let hot = s.ui.hover(bid);
+        div()
+            .id(bid)
+            .on(Action::Click)
+            .px(16.0)
+            .py(8.0)
+            .rounded(4.0)
+            .bg(if strong {
+                white(0.10).mix(white(0.15), hot)
+            } else {
+                white(0.04).mix(white(0.08), hot)
+            })
+            .role(Role::Button, label)
+            .child(
+                text(
+                    label,
+                    14.0,
+                    if strong {
+                        c(look::WHITE)
+                    } else {
+                        c(look::GRAY_400).mix(c(look::GRAY_200), hot)
+                    },
+                )
+                .weight(500)
+                .line_height(20.0)
+                .silent(),
+            )
+    };
+    let mut foot = div()
+        .row()
+        .justify_end()
+        .gap(12.0)
+        .px(20.0)
+        .py(12.0)
+        .child(button(
+            "wf-turn-on-cancel",
+            Act::CloseDialog,
+            "Cancel",
+            false,
+        ));
+    // Turning on approves the content listed, by its hash.
+    if let Some(hash) = &file.hash {
+        foot = foot.child(button(
+            "wf-turn-on-ok",
+            act(WfAct::ConfirmTurnOn(id.to_owned(), hash.clone())),
+            "Turn on",
+            true,
+        ));
+    }
+    Some(frame(
+        s,
+        480.0,
+        &title,
+        div()
+            .col()
+            .child(head)
+            .child(rule())
+            .child(div().p(16.0).child(list))
+            .child(rule())
+            .child(foot),
+        true,
     ))
 }

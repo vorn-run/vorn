@@ -49,7 +49,8 @@ impl Place {
 }
 
 impl Native {
-    /// How remote host `id` is logged in to; `None` when there is no such host.
+    /// How remote host `id` is logged in to; `None` when there is no such host
+    /// or its saved options are refused.
     pub(crate) fn login(&self, id: &str) -> Option<vorn_remote::Login> {
         let db = self.db.get()?;
         let host = vorn_store::remote_host(db, id).ok()??;
@@ -60,7 +61,9 @@ impl Native {
             ssh_key_path: host.ssh_key_path,
             ssh_options: host.ssh_options,
         };
-        Some(vorn_remote::Login::new(&host, self.env.get()))
+        vorn_remote::Login::new(&host, self.env.get())
+            .inspect_err(|refused| tracing::warn!(host = id, "not logging in: {refused}"))
+            .ok()
     }
 
     fn place_of(&self, placement: Option<Placement>) -> Place {

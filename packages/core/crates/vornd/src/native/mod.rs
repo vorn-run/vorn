@@ -166,10 +166,10 @@ pub enum Route {
 /// Each module's methods and where they go, in the order they are matched.
 const ROUTES: &[(&[&str], Route)] = &[
     (config::METHODS, Route::Config),
-    (extensions::builtin::tasks::METHODS, Route::Tasks),
-    (extensions::builtin::browser::METHODS, Route::Browser),
-    (extensions::builtin::device::METHODS, Route::Device),
-    (extensions::builtin::ssh::METHODS, Route::Ssh),
+    (extensions::hosted::tasks::METHODS, Route::Tasks),
+    (extensions::hosted::browser::METHODS, Route::Browser),
+    (extensions::hosted::device::METHODS, Route::Device),
+    (extensions::hosted::ssh::METHODS, Route::Ssh),
     (task_list::METHODS, Route::TaskList),
     (projects::METHODS, Route::Projects),
     (session_log::METHODS, Route::SessionLog),
@@ -302,8 +302,6 @@ pub struct Native {
     work: OnceLock<Arc<work::Work>>,
     /// The Connectors built-in, once vornd has a database and its own address.
     connectors: OnceLock<Arc<extensions::builtin::connectors::ConnectorsBuiltin>>,
-    /// The Tasks built-in, once vornd has a database.
-    tasks: OnceLock<Arc<extensions::builtin::tasks::TasksBuiltin>>,
     /// The approval gates told waiting, by run.
     waiting: work::waiting::Waiting,
     /// Each extension's own tables, on a connection kept open between its storage calls.
@@ -372,7 +370,6 @@ impl Native {
             sizes: vorn_worktrees::Sizes::default(),
             work: OnceLock::new(),
             connectors: OnceLock::new(),
-            tasks: OnceLock::new(),
             waiting: work::waiting::Waiting::default(),
             ext_tables: extensions::world::Tables::default(),
             installs: OnceLock::new(),
@@ -523,15 +520,6 @@ impl Native {
         self.connectors.get()
     }
 
-    /// Keeps the Tasks built-in, once vornd has a database.
-    pub fn set_tasks(&self, tasks: Arc<extensions::builtin::tasks::TasksBuiltin>) {
-        let _ = self.tasks.set(tasks);
-    }
-
-    pub fn tasks(&self) -> Option<&Arc<extensions::builtin::tasks::TasksBuiltin>> {
-        self.tasks.get()
-    }
-
     /// Each extension's tables, kept open between its storage calls.
     pub(crate) fn ext_tables(&self) -> &extensions::world::Tables {
         &self.ext_tables
@@ -546,14 +534,23 @@ impl Native {
     pub fn installs(self: &Arc<Self>, data_dir: &Path) -> Arc<vorn_extensions::install::Installs> {
         Arc::clone(self.installs.get_or_init(|| {
             let me = Arc::downgrade(self);
-            Arc::new(vorn_extensions::install::Installs::reading(
-                vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
-                Box::new(move || {
-                    me.upgrade()
-                        .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
-                        .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+            Arc::new(
+                vorn_extensions::install::Installs::reading(
+                    vorn_extensions::pack::PackStore::new(data_dir.join("connectors")),
+                    Box::new(move || {
+                        me.upgrade()
+                            .map(|n| (PathBuf::from(n.git_bin()), n.child_env()))
+                            .unwrap_or_else(|| (PathBuf::from("git"), Vec::new()))
+                    }),
+                )
+                .trusting(vorn_extensions::install::Trust {
+                    pins: crate::shipped::pins(),
+                    bundled: extensions::builtin::bundled_ids().unwrap_or_else(|err| {
+                        tracing::error!("[extensions] a bundled manifest does not read: {err}");
+                        Default::default()
+                    }),
                 }),
-            ))
+            )
         }))
     }
 
@@ -645,8 +642,8 @@ impl Native {
     pub fn set_database(&self, db: PathBuf) {
         if let Some(dir) = db.parent() {
             self.secrets.settle(dir);
-            // The shipped adapters' switches, kept beside the database by the extension host.
-            self.adapters().load_switches(&dir.join("builtins.json"));
+            // The installed adapters, before the extension host has started.
+            self.adapters().load_installed(&dir.join("connectors"));
         }
         let _ = self.db.set(db);
     }
@@ -709,25 +706,16 @@ impl Native {
         match route(&method) {
             Some(Route::Config) => return config::answer(self, &method, params, viewer).await,
             Some(Route::Tasks) => {
-                let Some(tasks) = self.tasks.get().cloned() else {
-                    // Only a test starts vornd without a database.
-                    return Answer::Unanswered;
-                };
-                let m = method.clone();
-                let running = tokio::spawn(async move { tasks.answer(&m, params).await });
-                return running.await.unwrap_or_else(|err| {
-                    warn!(%method, %err, "a task call failed");
-                    Answer::Error(format!("{method} failed in vornd"))
-                });
+                return extensions::hosted::tasks::answer(self, &method, params).await;
             }
             Some(Route::Browser) => {
-                return extensions::builtin::browser::answer(self, &method, params).await;
+                return extensions::hosted::browser::answer(self, &method, params).await;
             }
             Some(Route::Device) => {
-                return extensions::builtin::device::answer(self, &method, params).await;
+                return extensions::hosted::device::answer(self, &method, params).await;
             }
             Some(Route::Ssh) => {
-                return extensions::builtin::ssh::answer(self, &method, params).await;
+                return extensions::hosted::ssh::answer(self, &method, params).await;
             }
             Some(Route::TaskList) => return task_list::answer(self, &method, params).await,
             Some(Route::Projects) => return projects::answer(self, &method, params).await,
@@ -744,31 +732,18 @@ impl Native {
                 let Some(host) = self.extensions.get().cloned() else {
                     // The built-ins' tools need no extension host.
                     return match method.as_str() {
-                        "extension:mcpTools" => {
-                            let mut tools = extensions::builtin::connectors::mcp_tools(self);
-                            if let Some(tasks) = self.tasks.get() {
-                                tools.extend(tasks.mcp_tools());
-                            }
-                            Answer::Result(Value::Array(tools))
-                        }
+                        "extension:mcpTools" => Answer::Result(Value::Array(
+                            extensions::builtin::connectors::mcp_tools(self),
+                        )),
                         "extension:mcpCall" => {
                             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
                             let arguments = params
                                 .get("arguments")
                                 .cloned()
                                 .unwrap_or_else(|| json!({}));
-                            let tasks = self.tasks.get().cloned();
-                            let answered = match tasks {
-                                Some(t) => t.mcp_call(name, arguments.clone()).await,
-                                None => None,
-                            };
-                            let answered = match answered {
-                                Some(a) => Some(a),
-                                None => {
-                                    extensions::builtin::connectors::mcp_call(self, name, arguments)
-                                        .await
-                                }
-                            };
+                            let answered =
+                                extensions::builtin::connectors::mcp_call(self, name, arguments)
+                                    .await;
                             match answered {
                                 Some(answered) => Answer::Result(answered),
                                 None => Answer::Error(format!(
