@@ -1057,7 +1057,10 @@ impl Raw {
             }
             for (field, f) in [("icon.file", &icon.file), ("icon.dark", &icon.dark)] {
                 if let Some(f) = f.as_deref().filter(|f| !is_svg_file(f)) {
-                    return Err(at(field, format!("`{f}` is not an .svg file in the package")));
+                    return Err(at(
+                        field,
+                        format!("`{f}` is not an .svg file in the package"),
+                    ));
                 }
             }
         }
@@ -1065,7 +1068,8 @@ impl Raw {
             return Err(at("homepage", format!("`{url}` is not an https URL")));
         }
         if let Some(line) = &self.whats_new {
-            if line.trim().is_empty() || line.contains('\n') || line.chars().count() > MAX_WHATS_NEW {
+            if line.trim().is_empty() || line.contains('\n') || line.chars().count() > MAX_WHATS_NEW
+            {
                 return Err(at(
                     "whats_new",
                     format!("is one line of 1 to {MAX_WHATS_NEW} characters"),
@@ -1073,7 +1077,10 @@ impl Raw {
             }
         }
         if self.screenshots.len() > MAX_SCREENSHOTS {
-            return Err(at("screenshots", format!("lists {MAX_SCREENSHOTS} at most")));
+            return Err(at(
+                "screenshots",
+                format!("lists {MAX_SCREENSHOTS} at most"),
+            ));
         }
         for (i, s) in self.screenshots.iter().enumerate() {
             if !is_screenshot(s) {
@@ -2393,7 +2400,10 @@ header = "Authorization: Bearer {token}"
         let top = "vorn = \">=0.9\"\nhomepage = \"https://example.com/x\"\nwhats_new = \"Close issues from a step\"\nscreenshots = [\"shots/board.png\", \"https://example.com/a.png\"]\n\n[icon]\npaths = [\"M0 0h24v24H0z\"]\nfile = \"logo.svg\"\ndark = \"logo-dark.svg\"\n";
         let text = SERVICE.replacen("vorn = \">=0.9\"\n", top, 1);
         let m = parse(&text).unwrap();
-        assert_eq!(m.showcase.homepage.as_deref(), Some("https://example.com/x"));
+        assert_eq!(
+            m.showcase.homepage.as_deref(),
+            Some("https://example.com/x")
+        );
         assert_eq!(m.showcase.screenshots.len(), 2);
         assert_eq!(m.logo_file(false), Some("logo.svg"));
         assert_eq!(m.logo_file(true), Some("logo-dark.svg"));
@@ -2401,7 +2411,10 @@ header = "Authorization: Bearer {token}"
         assert_eq!(parse(&to_toml(&m)).unwrap(), m);
 
         let bad = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().field;
-        assert_eq!(bad("https://example.com/x", "http://example.com/x"), "homepage");
+        assert_eq!(
+            bad("https://example.com/x", "http://example.com/x"),
+            "homepage"
+        );
         assert_eq!(bad("shots/board.png", "../board.png"), "screenshots[0]");
         assert_eq!(bad("shots/board.png", "shots/board.jpg"), "screenshots[0]");
         assert_eq!(bad("\"logo.svg\"", "\"/logo.svg\""), "icon.file");
@@ -2410,7 +2423,9 @@ header = "Authorization: Bearer {token}"
         let only_file = text.replace("paths = [\"M0 0h24v24H0z\"]\n", "");
         assert!(parse(&only_file).unwrap().icon.is_none());
         assert_eq!(
-            parse(&only_file.replace("file = \"logo.svg\"\n", "")).unwrap_err().field,
+            parse(&only_file.replace("file = \"logo.svg\"\n", ""))
+                .unwrap_err()
+                .field,
             "icon.dark"
         );
     }

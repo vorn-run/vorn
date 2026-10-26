@@ -206,7 +206,9 @@ fn showcase(entry: &Map<String, Value>, out: &mut Map<String, Value>) {
         out.insert("tags".into(), json!(tags));
     }
     for key in ["logo", "logoDark"] {
-        if let Some(svg) = text(entry, key).filter(|s| s.len() <= MAX_LOGO_BYTES && s.contains("<svg")) {
+        if let Some(svg) =
+            text(entry, key).filter(|s| s.len() <= MAX_LOGO_BYTES && s.contains("<svg"))
+        {
             out.insert(key.into(), json!(svg));
         }
     }

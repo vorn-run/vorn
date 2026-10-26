@@ -52,7 +52,10 @@ fn page(rows: &[(&str, Vec<Value>)], scope: Option<&str>) -> Node {
         .collect();
     let mut page = col([]).gap(8.0);
     if !mine.is_empty() {
-        page = page.child(list(CONNECTIONS, mine.iter().map(|r| connection(r, filters))));
+        page = page.child(list(
+            CONNECTIONS,
+            mine.iter().map(|r| connection(r, filters)),
+        ));
     }
     // The form shows under the connector it adds to; any connector's when unscoped.
     let form = of(FORM)
@@ -70,7 +73,11 @@ fn page(rows: &[(&str, Vec<Value>)], scope: Option<&str>) -> Node {
                 Some(id) => (format!("add_to:{id}"), "Connect another account"),
                 None => ("add".to_owned(), "Add connection"),
             };
-            let label = if mine.is_empty() { "Connect an account" } else { label };
+            let label = if mine.is_empty() {
+                "Connect an account"
+            } else {
+                label
+            };
             row([button(id, label).icon("plus")])
         }
     })
@@ -284,8 +291,10 @@ mod tests {
         if form {
             out.push((
                 FORM,
-                vec![json!({ "id": "form", "connector": "acme", "picked": true, "can_save": false,
-                    "none_installed": false, "error": "" })],
+                vec![
+                    json!({ "id": "form", "connector": "acme", "picked": true, "can_save": false,
+                    "none_installed": false, "error": "" }),
+                ],
             ));
             out.push((
                 CHOICES,
@@ -339,7 +348,10 @@ mod tests {
     fn the_add_form_shows_only_under_the_connector_it_adds_to() {
         let json = tree(&rows(true), Some("acme"));
         assert!(json.contains("\"id\":\"set:TOKEN\""), "{json}");
-        assert!(!json.contains("add_to:acme"), "one primary at a time: {json}");
+        assert!(
+            !json.contains("add_to:acme"),
+            "one primary at a time: {json}"
+        );
         let json = tree(&rows(true), Some("http"));
         assert!(!json.contains("set:TOKEN"), "{json}");
         assert!(json.contains("add_to:http"), "{json}");

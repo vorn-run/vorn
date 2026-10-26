@@ -160,7 +160,10 @@ impl Maker {
             None => {}
         }
         // Vorn's own catalog and connectors are Vorn's; a pack from elsewhere is its repository's.
-        match pack.and_then(|p| p.pointer("/source/git")).and_then(Value::as_str) {
+        match pack
+            .and_then(|p| p.pointer("/source/git"))
+            .and_then(Value::as_str)
+        {
             Some(git) if l.source == Source::Installed && !git.contains("/vorn-run/") => {
                 Maker::Other(short_repo(git))
             }
@@ -185,6 +188,15 @@ pub enum Status {
 }
 
 impl Status {
+    /// The words the row shows.
+    pub fn label(&self) -> &str {
+        match self {
+            Status::Attention(s) | Status::Account(s) | Status::Busy(s) => s,
+            Status::Update => "Update",
+            Status::Note(s) => s,
+        }
+    }
+
     pub fn tip(&self) -> &'static str {
         match self {
             Status::Attention(_) => "Opens it to fix what's missing",
@@ -261,8 +273,8 @@ impl<'a> Item<'a> {
         match self {
             Item::Listing(l) => matches_query(l, query),
             Item::Builtin(_) => {
-                let hay = format!("{} {} {}", self.name(), self.description(), self.id())
-                    .to_lowercase();
+                let hay =
+                    format!("{} {} {}", self.name(), self.description(), self.id()).to_lowercase();
                 query
                     .to_lowercase()
                     .split_whitespace()
@@ -433,6 +445,14 @@ pub fn installed_count(p: &Plugins, builtins: &[Value]) -> usize {
         .sum()
 }
 
+/// How many extensions Vorn knows of, installed or not, each once.
+pub fn total(p: &Plugins, builtins: &[Value]) -> usize {
+    let mut ids: std::collections::HashSet<&str> =
+        builtins.iter().filter_map(|b| s(b, "id")).collect();
+    ids.extend(p.listings.iter().map(|l| l.id.as_str()));
+    ids.len()
+}
+
 /// What a Browse tile's button says and does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verb {
@@ -558,7 +578,8 @@ mod tests {
             ]),
             json!([]),
         );
-        let builtins = [json!({ "id": "vorn.tasks", "name": "Tasks", "on": false, "tags": ["pane"] })];
+        let builtins =
+            [json!({ "id": "vorn.tasks", "name": "Tasks", "on": false, "tags": ["pane"] })];
         let got = sections(&p, &builtins, "", Some("codex"));
         let heads: Vec<Heading> = got.iter().map(|(h, _)| *h).collect();
         assert_eq!(

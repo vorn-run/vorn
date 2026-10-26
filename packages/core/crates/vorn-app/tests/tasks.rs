@@ -92,7 +92,7 @@ fn the_default_view_is_chosen_on_the_tasks_extension_page() {
         if p.selected.as_ref() == Some(&key) {
             return Some(());
         }
-        let row = App::control("plug-installed-row", &Act::Plug(PlugAct::Select(Some(key))));
+        let row = App::control("plug-row", &Act::Plug(PlugAct::Select(Some(key))));
         if p.loads == 0 {
             shot.try_click(&mut app, row);
         }

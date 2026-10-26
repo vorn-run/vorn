@@ -22,7 +22,7 @@ use vorn_app::plugins::PlugAct;
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::settings::CONTENT;
 use vorn_app::screen::term_id;
-use vorn_app::settings::{Category, SetAct, CONNECTIONS_PAGE};
+use vorn_app::settings::{Category, SetAct};
 use vorn_app::state::{Dialog, MenuKind};
 use vorn_app::ui::backend::{Backend, Cells};
 use vorn_app::ui::{cells::units, item_id, mods, Id, Ui};
@@ -323,66 +323,61 @@ fn every_template_kind_draws_on_every_surface() {
         &mut shot,
         &mut app,
         "t-extensions",
-        &["BUILT IN", "Connectors", "connections"],
-        &["BUILT IN", "Connectors", "Turns"],
+        &["Installed 15", "PANES 4", "Connectors", "Turns"],
+        &["Installed 15", "PANES 4", "Turns"],
     );
     every_surface_at(
         &mut shot,
         &mut app,
         "t-extensions-installed",
         Some(CONTENT),
-        &["Turns", "Linked from"],
-        &["Turns", "Linked from"],
+        &["Worktree cleanup", "By you"],
+        &["Worktree cleanup", "By you"],
     );
 
-    // Connectors is one built-in; its row opens Settings › Connections, its own page.
+    // Connectors is one built-in; its row opens its own page, with its switch.
+    let connectors = format!("{}vorn.connectors", vorn_app::plugins::list::BUILTIN);
     shot.click(
         &mut app,
         App::control(
-            "plug-builtin-row",
-            &Act::Set(SetAct::Open(Category::Connections)),
+            "plug-row",
+            &Act::Plug(PlugAct::Select(Some(connectors.clone()))),
         ),
     );
-    assert_eq!(app.st.settings.ext_page.as_deref(), Some(CONNECTIONS_PAGE));
-    shot.until(&mut app, "the connections read", |a, _| {
-        let tree = a.st.points.trees.get(CONNECTIONS_PAGE)?;
-        tree.as_ref().ok().map(|_| ())
-    });
+    assert_eq!(
+        app.st.plugins.selected.as_deref(),
+        Some(connectors.as_str())
+    );
     every_surface(
         &mut shot,
         &mut app,
-        "t-connections",
-        &["Connections", "Add connection", "No connections yet"],
-        &["Connections", "Add connection"],
+        "t-connectors",
+        &["Connectors", "Built in"],
+        &["Connectors"],
     );
     shot.click(
         &mut app,
-        App::control(
-            "settings-nav",
-            &Act::Set(SetAct::Open(Category::Connectors)),
-        ),
+        App::control("plug-detail-back", &Act::Plug(PlugAct::Select(None))),
     );
-    shot.until(&mut app, "the extensions again", |a, _| {
-        let p = &a.st.plugins;
-        (p.loaded && p.loads == 0 && p.listing_by_id(ID).is_some()).then_some(())
-    });
 
     // Its page: where it shows, what it may use, what it runs.
     let turns = app.st.plugins.listing_by_id(ID).expect("turns").key.clone();
     shot.click(
         &mut app,
-        App::control(
-            "plug-installed-row",
-            &Act::Plug(PlugAct::Select(Some(turns.clone()))),
-        ),
+        App::control("plug-row", &Act::Plug(PlugAct::Select(Some(turns.clone())))),
     );
     assert_eq!(app.st.plugins.selected.as_deref(), Some(turns.as_str()));
     every_surface(
         &mut shot,
         &mut app,
         "t-extension",
-        &["Turns", "13 PLACES", "Sessions"],
-        &["Turns", "13 PLACES"],
+        &[
+            "Turns",
+            "Linked, edits are live",
+            "What it adds",
+            "Sessions",
+        ],
+        &["Turns", "What it adds"],
     );
 
     shot.click(
@@ -572,7 +567,7 @@ fn every_template_kind_draws_on_every_surface() {
 }
 
 /// Install… › Link a folder… on the folder the picker answers, confirmed by its id;
-/// its page then offers Unlink.
+/// its page's … menu then offers Unlink.
 fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
     shot.send(app, key("Comma", MOD(), None));
     shot.click(
@@ -604,12 +599,23 @@ fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
     shot.click(
         app,
         App::control(
-            "plug-installed-row",
+            "plug-row",
             &Act::Plug(PlugAct::Select(Some(turns.to_owned()))),
         ),
     );
     let [wide, _] = cells(app, "t-linked", None);
-    assert!(wide.contains("Unlink"), "{wide}");
+    assert!(wide.contains("Linked, edits are live"), "{wide}");
+    shot.click(
+        app,
+        App::control(
+            "plug-detail-more",
+            &Act::Open(MenuKind::ExtMenu(turns.to_owned())),
+        ),
+    );
+    let labels = app.menu_labels(&shot.ui);
+    assert!(labels.iter().any(|l| l == "Unlink"), "{labels:?}");
+    shot.send(app, key("Escape", 0, None));
+    shot.frame(app);
     shot.click(
         app,
         App::control("plug-detail-back", &Act::Plug(PlugAct::Select(None))),

@@ -950,9 +950,10 @@ pub(crate) fn theme_picker(s: &Screen<'_>, side: Look) -> El {
     for t in list {
         grid = grid.child(picker_tile(s, t, t.id == chosen));
     }
-    let more_id = s
-        .acts
-        .on("more-themes", set(SetAct::Browse("theme".into(), None)));
+    let more_id = s.acts.on(
+        "more-themes",
+        set(SetAct::Browse(Some(crate::plugins::list::Tag::Theme), None)),
+    );
     let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
     let more = div()
         .id(more_id)
@@ -1438,7 +1439,7 @@ pub(super) fn general(s: &Screen<'_>) -> El {
 }
 
 /// The agent new sessions start with: the stored one, else the first.
-pub(super) fn default_agent<'a>(s: &Screen<'a>) -> &'a str {
+pub(in crate::screen) fn default_agent<'a>(s: &Screen<'a>) -> &'a str {
     defaults(s)
         .and_then(|d| d.get("defaultAgent"))
         .and_then(Value::as_str)
@@ -1563,9 +1564,10 @@ pub(crate) fn agent_picker(s: &Screen<'_>) -> El {
                 .line_height(16.0)
                 .silent(),
         );
-    let more_id = s
-        .acts
-        .on("more-agents", set(SetAct::Browse("agent".into(), None)));
+    let more_id = s.acts.on(
+        "more-agents",
+        set(SetAct::Browse(Some(crate::plugins::list::Tag::Agent), None)),
+    );
     let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
     let more = div()
         .id(more_id)

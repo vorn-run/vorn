@@ -9,9 +9,7 @@ use super::{list, App, Call, MOD};
 use crate::act::Act;
 use crate::client::RpcError;
 use crate::screen::settings::{ROW_SLIDER, SHELL_PATH};
-use crate::settings::{
-    self, split_args, AgentField, Category, SetAct, Shell, UpdateStatus, CONNECTIONS_PAGE,
-};
+use crate::settings::{self, split_args, AgentField, Category, SetAct, Shell, UpdateStatus};
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 
 /// A settings call whose answer changes the page.
@@ -444,7 +442,7 @@ impl App {
         let s = &mut self.st.settings;
         s.open = true;
         s.category = cat;
-        s.ext_page = (cat == Category::Connections).then(|| CONNECTIONS_PAGE.to_owned());
+        s.ext_page = None;
         match cat {
             Category::Agents => {
                 s.agent = None;
@@ -626,13 +624,13 @@ impl App {
                 let on = &mut self.st.settings.theme_filter;
                 *on = (*on != Some(f)).then_some(f);
             }
-            SetAct::Browse(query, listing) => {
+            SetAct::Browse(tag, listing) => {
                 self.open_settings(Category::Connectors);
                 ui.set_focus(None);
                 let p = &mut self.st.plugins;
                 p.tab = crate::plugins::Tab::Browse;
-                p.kind = Some(crate::plugins::Kind::Extension);
-                p.query = query;
+                p.tag = tag;
+                p.query.clear();
                 p.selected = listing;
                 p.adding = None;
             }

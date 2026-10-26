@@ -16,11 +16,9 @@ pub enum Category {
     Notifications,
     /// The agents on this machine and their setup, Vorn's tools included.
     Agents,
-    /// The Extensions manager (its route keeps the old `connectors`).
+    /// The Extensions manager (its route keeps the old `connectors`), where
+    /// each connection is an account on its extension's page.
     Connectors,
-    /// Settings › Connections: opens the Connectors built-in's own page,
-    /// [`CONNECTIONS_PAGE`].
-    Connections,
     Network,
     About,
 }
@@ -33,8 +31,7 @@ impl Category {
             "general" => Category::General,
             "notifications" => Category::Notifications,
             "agents" => Category::Agents,
-            "connectors" | "extensions" | "plugins" => Category::Connectors,
-            "connections" => Category::Connections,
+            "connectors" | "extensions" | "plugins" | "connections" => Category::Connectors,
             "network" => Category::Network,
             "about" => Category::About,
             _ => return None,
@@ -48,7 +45,6 @@ impl Category {
             Category::Notifications => "Notifications",
             Category::Agents => "Agents",
             Category::Connectors => "Extensions",
-            Category::Connections => "Connections",
             Category::Network => "Remote Access",
             Category::About => "About",
         }
@@ -76,8 +72,8 @@ pub const SECTIONS: [(&str, &[Category]); 2] = [
 /// The EXTENSIONS group's own pages, before each extension's settings.
 pub const EXTENSIONS: [Category; 1] = [Category::Connectors];
 
-/// The Connectors built-in's settings page, which every "Settings ›
-/// Connections" opens; first of the extensions' pages in the nav.
+/// The Connectors built-in's accounts tree, drawn scoped to one connector
+/// on that connector's page in Settings › Extensions; never in the nav.
 pub const CONNECTIONS_PAGE: &str = "vorn.connectors/settings/connections";
 
 /// The SSH built-in's page, the remote hosts and keys: in the nav, the
@@ -100,9 +96,9 @@ pub enum SetAct {
     PickTheme(String),
     /// A theme picker chip, on or off.
     ThemeFilter(crate::appearance::ThemeFilter),
-    /// The catalog's extensions matching a query, with one listing's page
-    /// open when given: Get more themes…, Get more agents… and Install.
-    Browse(String, Option<String>),
+    /// Browse, filtered to what adds `tag`, with one listing's page open
+    /// when given: Get more themes… and Get more agents….
+    Browse(Option<crate::plugins::list::Tag>, Option<String>),
     /// Opens the system's notification settings for Vorn.
     OpenNotifSettings,
     ShellMenu,

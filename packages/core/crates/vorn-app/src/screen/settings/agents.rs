@@ -62,9 +62,10 @@ fn list(s: &Screen<'_>) -> El {
                 .py(8.0),
         );
     }
-    let more_id = s
-        .acts
-        .on("agents-more", set(SetAct::Browse("agent".into(), None)));
+    let more_id = s.acts.on(
+        "agents-more",
+        set(SetAct::Browse(Some(crate::plugins::list::Tag::Agent), None)),
+    );
     let more_ink = c(look::BRONZO).mix(c(look::WHITE), s.ui.hover(more_id) * 0.3);
     let more = div()
         .id(more_id)

@@ -1,5 +1,6 @@
-//! The Extensions page: what is installed and what can be, an extension's page,
-//! the add forms and the install sheet. Everything here reads the model in
+//! The Extensions page: one list of what is installed with what needs you
+//! on top, Browse by what an extension adds, Updates, and one extension's
+//! page with its accounts inside. Everything here reads the model in
 //! `crate::plugins` and fires its `PlugAct`s; the RPC glue is `app::plugins`.
 
 mod browse;
@@ -10,22 +11,23 @@ mod sheet;
 
 use serde_json::Value;
 
-pub(in crate::screen) use detail::choice_items;
+pub(in crate::screen) use detail::{choice_items, menu_items};
 pub(in crate::screen) use sheet::dialog;
 
 use super::settings::header;
 use super::{ico, white, Screen};
 use crate::act::Act;
 use crate::library::{mark_svg, parse_icon, Look};
+use crate::plugins::list::{self, Maker, Status, Tag};
 use crate::plugins::{
-    count, describe_contributions, details, places, tabs_id, Activity, Listing, Origin, PackStatus,
-    Pending, PlugAct, Source, Tab, Tone,
+    count, field_id, tabs_id, Activity, Field, Listing, Origin, PackStatus, Pending, PlugAct,
+    Source, Tab, Tone,
 };
 use crate::runs::s as sv;
 use crate::state::MenuKind;
 use crate::ui::theme::color as k;
 use crate::ui::widgets::{pills, Pill};
-use crate::ui::{div, icon, text, Action, El, Rgba, Role};
+use crate::ui::{div, field, icon, image, text, tooltip, Action, El, Rgba, Role, TextStyle};
 
 /// The small corner radius.
 const R: f32 = 4.0;
@@ -34,7 +36,7 @@ pub(super) fn page(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
     // Nothing to say until the first answers land; an empty list would read as "none".
     if !p.loaded {
-        return div().col().child(page_header());
+        return div().col().child(header("Extensions", "", None));
     }
     if let Some(a) = &p.adding {
         return div().col().child(forms::view(s, a));
@@ -43,29 +45,29 @@ pub(super) fn page(s: &Screen<'_>) -> El {
         if let Some(l) = p.listing(key) {
             return detail::view(s, l);
         }
-        if let Some(b) = key.strip_prefix(detail::BUILTIN).and_then(|id| {
-            s.st.points
-                .builtins
-                .iter()
-                .find(|b| sv(b, "id") == Some(id))
-        }) {
+        if let Some(b) = builtin(s, key) {
             return detail::builtin(s, b);
         }
     }
     let tab = shown_tab(s);
-    let col = div().col().child(page_header()).child(bar(s, tab));
+    let col = div()
+        .col()
+        .child(header("Extensions", "", Some(search(s))))
+        .child(bar(s, tab));
     match tab {
         Tab::Installed => col.child(installed::view(s)),
         Tab::Browse => col.child(browse::view(s)),
+        Tab::Updates => col.child(installed::updates(s)),
     }
 }
 
-fn page_header() -> El {
-    header(
-        "Extensions",
-        "Each adds to Vorn: sidebar sections, card lines, commands, windows or connections. Each runs as you, with only what it declares.",
-        None,
-    )
+/// The built-in extension a `builtin:` key names.
+fn builtin<'a>(s: &'a Screen<'_>, key: &str) -> Option<&'a Value> {
+    let id = key.strip_prefix(list::BUILTIN)?;
+    s.st.points
+        .builtins
+        .iter()
+        .find(|b| sv(b, "id") == Some(id))
 }
 
 pub(super) fn act(a: PlugAct) -> Act {
@@ -98,39 +100,231 @@ pub(in crate::screen) fn install_items() -> Vec<crate::screen::menus::Item> {
         .collect()
 }
 
-/// Installed and Browse, and Install… beside them.
-fn bar(s: &Screen<'_>, current: Tab) -> El {
-    let shown = tabs(s);
-    let items: Vec<Pill<'_>> = shown.iter().map(|t| Pill::new(t.label(), None)).collect();
-    let on = shown.iter().position(|t| *t == current).unwrap_or(0);
+/// "Search N extensions", in the header beside the title; it searches the tab shown.
+fn search(s: &Screen<'_>) -> El {
+    let p = &s.st.plugins;
+    let id = field_id(&Field::Query);
+    s.acts
+        .text(id, act(PlugAct::Text(Field::Query)), p.query.as_str());
+    let focus = if s.ui.focused(id) { 1.0 } else { 0.0 };
+    let style = TextStyle {
+        line_height: 18.0,
+        ..TextStyle::ui(13.0)
+    };
+    let hint = format!(
+        "Search {}",
+        count(list::total(p, &s.st.points.builtins), "extension")
+    );
     div()
         .row()
         .items_center()
-        .wrap_children()
-        .gap(12.0)
-        .mb(16.0)
-        .child(pills(s.ui, tabs_id(), "Extensions", &items, on))
-        .child(div().grow())
-        .child(install_button(s))
+        .gap(8.0)
+        .w(260.0)
+        .shrink0()
+        .px(10.0)
+        .py(6.0)
+        .rounded(R)
+        .bg(white(0.04))
+        .border(1.0, white(0.06).mix(white(0.2), focus))
+        .frames(id)
+        .child(ico("search", 13.0, 2.0, k::INK_FAINT))
+        .child(
+            field(id, &hint, "Search extensions", style, k::INK)
+                .grow()
+                .min_w0(),
+        )
 }
 
-/// Install…, which opens the menu of where from.
-fn install_button(s: &Screen<'_>) -> El {
+/// Installed, Browse and Updates with their counts; Browse's tag chips, or
+/// Add from Git or a folder, beside them.
+fn bar(s: &Screen<'_>, current: Tab) -> El {
+    let p = &s.st.plugins;
+    let shown = tabs(s);
+    let installed = list::installed_count(p, &s.st.points.builtins);
+    let updates = list::updates(p).len();
+    let labels: Vec<String> = shown
+        .iter()
+        .map(|t| match t {
+            Tab::Installed => format!("{} {installed}", t.label()),
+            Tab::Updates if updates > 0 => format!("{} {updates}", t.label()),
+            _ => t.label().to_owned(),
+        })
+        .collect();
+    let items: Vec<Pill<'_>> = labels
+        .iter()
+        .zip(&shown)
+        .map(|(l, t)| Pill::new(l, None).hint(t.tip()))
+        .collect();
+    let on = shown.iter().position(|t| *t == current).unwrap_or(0);
+    let mut row = div()
+        .row()
+        .items_center()
+        .wrap_children()
+        .gap(4.0)
+        .mb(8.0)
+        .child(pills(s.ui, tabs_id(), "Extensions", &items, on));
+    if current == Tab::Browse {
+        row = row
+            .child(div().w(1.0).h(16.0).mx(6.0).bg(white(0.1)))
+            .child(browse::tags(s));
+    } else {
+        row = row.child(div().grow()).child(add_button(s));
+    }
+    row
+}
+
+/// "Add from Git or a folder", which opens the menu of where from.
+fn add_button(s: &Screen<'_>) -> El {
     let kind = MenuKind::ExtInstall;
     let open = s.st.menu.as_ref().is_some_and(|m| m.kind == kind);
-    let label = "Install\u{2026}";
+    let label = "Add from Git or a folder";
     let id = s.acts.on("plug-install", Act::Open(kind));
     let hot = if open { 1.0 } else { s.ui.hover(id) };
-    let fg = k::GRAY_300.mix(k::WHITE, hot);
-    chip(hot)
+    let fg = k::INK_SECONDARY.mix(k::INK, hot);
+    let b = div()
         .id(id)
         .on(Action::Click)
         .ring(R)
+        .row()
+        .items_center()
+        .gap(4.0)
+        .px(8.0)
+        .py(4.0)
+        .rounded(R)
+        .bg(white(0.06 * hot))
         .role(Role::Button, label)
         .has_popup()
         .expanded(open)
-        .child(ico("plus", 11.0, 2.0, fg))
-        .child(text(label, 11.5, fg).line_height(16.0).silent())
+        .child(ico("plus", 12.0, 2.0, fg))
+        .child(text(label, 12.0, fg).line_height(16.0).silent());
+    tooltip(
+        s.ui,
+        b,
+        id,
+        "Installs from a repository or links a folder you're building",
+        None,
+    )
+}
+
+/// An extension's logo in a square well: its own picture, else its
+/// manifest's glyph, else a monogram on a colour from its id.
+pub(super) fn logo(
+    s: &Screen<'_>,
+    id: &str,
+    name: &str,
+    l: Option<&Listing>,
+    own: Option<&Value>,
+    size: f32,
+) -> El {
+    if let Some(img) = s.logos.get(id) {
+        let inner = (size * 0.64).round();
+        return well(size, R, white(0.06), image(img, inner, inner));
+    }
+    let paths = own.and_then(parse_icon).or_else(|| {
+        l.and_then(|l| {
+            l.catalog
+                .as_ref()
+                .and_then(|c| c.get("icon"))
+                .or(l.icon.as_ref())
+                .and_then(parse_icon)
+        })
+    });
+    // Connectors Vorn draws a mark for, from before logos were files.
+    let known = matches!(id, "github" | "linear" | "http");
+    if paths.is_some() || known {
+        let look = Look {
+            connector: id.to_owned(),
+            packaged: false,
+            icon: paths,
+        };
+        if let Some(svg) = mark_svg(&look) {
+            let inner = (size * 0.55).round();
+            return well(size, R, white(0.06), icon(svg, inner, k::INK));
+        }
+    }
+    monogram(id, name, size)
+}
+
+/// A letter on a quiet colour picked from the id, for an extension with no logo.
+fn monogram(id: &str, name: &str, size: f32) -> El {
+    const HUES: [crate::ui::palette::Color; 4] = [
+        k::STATUS_SLATE,
+        k::STATUS_BLUE,
+        k::STATUS_SAGE,
+        k::BRONZO_DARK,
+    ];
+    let hue = HUES[list::monogram_hue(id, HUES.len())];
+    let size_t = (size * 0.45).round();
+    well(
+        size,
+        R,
+        hue.alpha(0.32),
+        text(list::monogram(name), size_t, k::INK)
+            .weight(600)
+            .line_height(size_t * 1.2)
+            .silent(),
+    )
+}
+
+/// A tag on a row or tile, with what it means as its tooltip.
+pub(super) fn tag(s: &Screen<'_>, place: &str, t: Tag) -> El {
+    let id = crate::ui::Id::new(place).child(t.label());
+    let chip = div()
+        .id(id)
+        .px(6.0)
+        .py(1.0)
+        .shrink0()
+        .rounded(R)
+        .border(1.0, white(0.1))
+        .role(Role::Label, t.label())
+        .child(
+            text(t.label(), 10.5, k::INK_SECONDARY)
+                .line_height(14.0)
+                .silent(),
+        );
+    tooltip(s.ui, chip, id, t.tip(), None)
+}
+
+/// "By Vorn" with the shield for first-party, else who made it.
+pub(super) fn maker(m: &Maker, size: f32) -> El {
+    let mut row = div().row().items_center().gap(4.0).shrink0();
+    if *m == Maker::Vorn {
+        row = row.child(ico("shield", size, 2.0, k::INK_FAINT));
+    }
+    row.child(
+        text(m.label(), size, k::INK_FAINT)
+            .line_height((size * 1.4).round())
+            .silent(),
+    )
+}
+
+/// A row's one status: a dot and words for what needs you or an account,
+/// a pill for Update, quiet words otherwise.
+pub(super) fn status(s: &Screen<'_>, place: &str, st: &Status) -> El {
+    let id = crate::ui::Id::new(place).child("status");
+    let dotted = |c: Rgba, label: &str, fg: Rgba| {
+        div()
+            .row()
+            .items_center()
+            .gap(6.0)
+            .child(dot(c))
+            .child(text(label, 12.0, fg).line_height(16.0).silent())
+    };
+    let quiet = |t: &str| div().child(text(t, 12.0, k::INK_SECONDARY).line_height(16.0).silent());
+    let el = match st {
+        Status::Attention(what) => dotted(k::AMBER_400.rgba(), what, k::AMBER_400.rgba()),
+        Status::Account(who) => dotted(k::STATUS_SAGE.rgba(), who, k::INK_SECONDARY.rgba()),
+        Status::Update => div()
+            .px(10.0)
+            .py(3.0)
+            .rounded(R)
+            .bg(white(0.08))
+            .child(text("Update", 12.0, k::INK).line_height(16.0).silent()),
+        Status::Busy(what) => quiet(what),
+        Status::Note(word) => quiet(word),
+    };
+    let el = el.id(id).shrink0().role(Role::Label, st.label());
+    tooltip(s.ui, el, id, st.tip(), None)
 }
 
 /// The bordered row button's box, washed by `hot`.
@@ -278,33 +472,6 @@ pub(super) fn chip_button(
     b.child(text(label, 11.5, fg).line_height(16.0).silent())
 }
 
-/// The filled `bg-white/10` action: "Use in a workflow", "Add a connection".
-pub(super) fn filled_button(
-    s: &Screen<'_>,
-    place: &str,
-    a: PlugAct,
-    glyph: &str,
-    label: &str,
-) -> El {
-    let id = s.acts.on(place, act(a));
-    let hot = s.ui.hover(id);
-    div()
-        .id(id)
-        .on(Action::Click)
-        .ring(R)
-        .row()
-        .items_center()
-        .gap(6.0)
-        .px(12.0)
-        .py(6.0)
-        .shrink0()
-        .rounded(R)
-        .bg(white(0.1 + 0.05 * hot))
-        .role(Role::Button, label)
-        .child(ico(glyph, 12.0, 2.0, k::GRAY_100))
-        .child(text(label, 12.0, k::GRAY_100).line_height(16.0).silent())
-}
-
 /// A bare text button in `rest`, `hot` on hover.
 pub(super) fn text_button(
     s: &Screen<'_>,
@@ -325,37 +492,6 @@ pub(super) fn text_button(
         .shrink0()
         .role(Role::Button, label)
         .child(text(label, size, fg).line_height(size * 1.5).silent())
-}
-
-/// A connector's triggers and actions, or an extension's surfaces, in words.
-pub(super) fn offers(s: &Screen<'_>, l: &Listing) -> Vec<String> {
-    if l.kind == crate::plugins::Kind::Extension {
-        let n = places(l.contributes.as_ref());
-        if n > 0 {
-            return vec![count(n, "place")];
-        }
-        let d = describe_contributions(l.contributes.as_ref());
-        return if d.is_empty() { vec![] } else { vec![d] };
-    }
-    let d = details(l, &s.st.plugins.builtins);
-    let mut out = Vec::new();
-    if !d.triggers.is_empty() {
-        out.push(count(d.triggers.len(), "trigger"));
-    }
-    if !d.actions.is_empty() {
-        out.push(count(d.actions.len(), "action"));
-    }
-    out
-}
-
-/// The `uppercase tracking-[0.08em]` group heading.
-pub(super) fn heading(label: &str) -> El {
-    text(label.to_uppercase(), 10.0, k::GRAY_600)
-        .tracking(0.08)
-        .line_height(14.0)
-        .pt(16.0)
-        .pb(4.0)
-        .role(Role::Heading, label)
 }
 
 fn strs<'a>(v: &'a Value, key: &str) -> Vec<&'a str> {

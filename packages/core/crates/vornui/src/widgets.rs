@@ -117,6 +117,8 @@ pub struct Pill<'a> {
     pub tip: Option<&'a str>,
     /// A count over the pill's corner; the tooltip then reads `hint`.
     pub badge: Option<(&'a str, &'a str)>,
+    /// A tooltip for a labelled pill, saying what choosing it shows.
+    pub hint: Option<&'a str>,
 }
 
 impl<'a> Pill<'a> {
@@ -127,6 +129,7 @@ impl<'a> Pill<'a> {
             icon,
             tip: None,
             badge: None,
+            hint: None,
         }
     }
 
@@ -137,6 +140,7 @@ impl<'a> Pill<'a> {
             icon: Some(icon),
             tip: Some(shortcut),
             badge: None,
+            hint: None,
         }
     }
 
@@ -144,6 +148,12 @@ impl<'a> Pill<'a> {
     /// as the tooltip's text in place of the label.
     pub fn badge(mut self, count: &'a str, hint: &'a str) -> Self {
         self.badge = Some((count, hint));
+        self
+    }
+
+    /// Adds a tooltip to a labelled pill.
+    pub fn hint(mut self, hint: &'a str) -> Self {
+        self.hint = Some(hint);
         self
     }
 }
@@ -199,7 +209,13 @@ pub fn pills(ui: &Ui, group: Id, name: &str, items: &[Pill<'_>], selected: usize
         let tip = p.badge.map_or(p.label, |(_, hint)| hint);
         match p.tip {
             Some(keys) => tooltip_at(ui, pill, id, tip, Some(keys), Place::Below),
-            None => pill.child(label(p.label, crate::theme::text::XS, fg)),
+            None => {
+                let pill = pill.child(label(p.label, crate::theme::text::XS, fg));
+                match p.hint {
+                    Some(hint) => tooltip_at(ui, pill, id, hint, None, Place::Below),
+                    None => pill,
+                }
+            }
         }
     };
     div()

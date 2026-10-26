@@ -385,6 +385,10 @@ pub struct App {
     logo: Option<u32>,
     /// The agents' marks, registered as images.
     agents: crate::components::AgentMarks,
+    /// The extensions' logos, registered as images.
+    logos: crate::plugins::logos::Logos,
+    /// The open extension's screenshots, registered as images.
+    shots: crate::plugins::shots::Shots,
     /// vornd hung up.
     pub closed: bool,
     notifier: crate::notify::Notifier,
@@ -570,6 +574,8 @@ impl App {
             config_stale: false,
             logo: None,
             agents: Default::default(),
+            logos: Default::default(),
+            shots: Default::default(),
             closed: false,
             notifier: Default::default(),
             seen_asked: None,
@@ -1604,6 +1610,7 @@ impl App {
                         | MenuKind::Device(_)
                         | MenuKind::SetShell
                         | MenuKind::ExtChoice(..)
+                        | MenuKind::ExtMenu(_)
                 ) =>
             {
                 (r.x + r.w - w, r.y + r.h + 4.0)
@@ -3377,6 +3384,8 @@ impl App {
             panes: &self.views,
             logo: self.logo,
             agents: &self.agents,
+            logos: &self.logos,
+            shots: &self.shots,
             size: self.size,
             chrome: self.chrome,
             traffic: self.traffic,
@@ -3477,6 +3486,31 @@ impl App {
                 .iter()
                 .filter_map(|a| Some((a.key.as_str(), a.icon.as_deref()?, a.mark.as_deref()))),
         );
+        if self.st.settings.open {
+            let dark = vornui::palette::dark();
+            let agents = &self.store.agents;
+            self.logos.load(
+                ui,
+                self.st.plugins.listings.iter().filter_map(|l| {
+                    let mark = agents
+                        .iter()
+                        .find(|a| a.extension == l.id)
+                        .and_then(|a| a.icon.as_deref());
+                    Some((l.id.as_str(), crate::plugins::logos::svg(l, dark, mark)?))
+                }),
+            );
+            self.shots.poll(ui);
+            let p = &self.st.plugins;
+            if let Some(l) = p.selected.as_deref().and_then(|k| p.listing(k)) {
+                let root = l.pack.as_ref().and_then(|p| crate::runs::s(p, "path"));
+                self.shots.want(
+                    l.showcase.screenshots.iter().filter_map(|s| {
+                        Some((s.as_str(), crate::plugins::shots::location(s, root)?))
+                    }),
+                    &self.wake,
+                );
+            }
+        }
         if self.logo.is_none() {
             // A logo that does not decode costs only the logo.
             self.logo = decode_png(look::LOGO_PNG)

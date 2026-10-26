@@ -11,7 +11,7 @@ pub(crate) use pages::{
     agent_picker, channel_items, font_picker, holder_items, notice_sources, shell_panel,
     sound_items, theme_info, theme_picker,
 };
-pub(in crate::screen) use pages::{glyph, glyph_icon, icon_button};
+pub(in crate::screen) use pages::{default_agent, glyph, glyph_icon, icon_button};
 pub use pages::{AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH};
 
 use super::{c, white, Screen};
@@ -44,9 +44,6 @@ fn nav_svg(cat: Category) -> String {
         }
         Category::Connectors => {
             r#"<path d="M15.39 4.39a1 1 0 001.68-.474 2.5 2.5 0 113.014 3.015 1 1 0 00-.474 1.68l1.683 1.682a2.414 2.414 0 010 3.414L19.61 15.39a1 1 0 01-1.68-.474 2.5 2.5 0 10-3.014 3.015 1 1 0 01.474 1.68l-1.683 1.682a2.414 2.414 0 01-3.414 0L8.61 19.61a1 1 0 00-1.68.474 2.5 2.5 0 11-3.014-3.015 1 1 0 00.474-1.68l-1.683-1.682a2.414 2.414 0 010-3.414L4.39 8.61a1 1 0 011.68.474 2.5 2.5 0 103.014-3.015 1 1 0 01-.474-1.68l1.683-1.682a2.414 2.414 0 013.414 0z"/>"#
-        }
-        Category::Connections => {
-            r#"<path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 010 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>"#
         }
         Category::Network => {
             r#"<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>"#
@@ -208,12 +205,11 @@ fn sidebar(s: &Screen<'_>) -> El {
         }
         list = list.child(items);
     }
-    // Connections, the Connectors built-in's page, leads the extensions' pages.
-    let mut pages: Vec<_> = pages
+    // Connections live on each connector's page in Extensions, not in the nav.
+    let pages: Vec<_> = pages
         .into_iter()
-        .filter(|p| p.placed_after().is_none())
+        .filter(|p| p.placed_after().is_none() && p.key() != CONNECTIONS_PAGE)
         .collect();
-    pages.sort_by_key(|p| p.key() != CONNECTIONS_PAGE);
     let pages = pages.into_iter().map(|p| ext_item(s, p));
     list = list
         .child(
@@ -273,7 +269,6 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
         Category::Agents => agents::page(s),
         Category::About => pages::about(s),
         Category::Connectors => super::plugins::page(s),
-        Category::Connections => super::points::settings_page(s, CONNECTIONS_PAGE),
         Category::Network => super::network::page(s),
     }
 }

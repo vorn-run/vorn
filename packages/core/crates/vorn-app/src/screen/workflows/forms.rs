@@ -1807,7 +1807,7 @@ fn trigger_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             ];
             if s.st.wf.connections.is_empty() {
                 b.push(help(
-                    "No connections yet. Add one from Settings \u{203a} Connections.",
+                    "No connections yet. Add one in Settings \u{203a} Extensions.",
                     6.0,
                 ));
             }
@@ -3499,7 +3499,7 @@ fn action_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
         first.push(help(&format!("{a} comes from a connector that is not installed yet \u{2014} the workflow panel offers to install and connect it."), 6.0));
     } else if s.st.wf.connections.is_empty() {
         first.push(help(
-            "No connections yet. Add one from Settings \u{203a} Connections first.",
+            "No connections yet. Add one in Settings \u{203a} Extensions first.",
             6.0,
         ));
     }

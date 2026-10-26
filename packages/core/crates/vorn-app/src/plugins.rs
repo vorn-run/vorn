@@ -11,6 +11,8 @@ use crate::runs::s;
 use crate::templates::Fix;
 
 pub mod list;
+pub mod logos;
+pub mod shots;
 
 /// Every control the page can fire.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -74,9 +76,9 @@ pub fn tabs_id() -> crate::ui::Id {
     crate::ui::Id::new("plug-tabs")
 }
 
-/// The All, Connectors and Interface pills over Browse.
-pub fn kinds_id() -> crate::ui::Id {
-    crate::ui::Id::new("plug-kinds")
+/// Browse's All and tag chips; choosing one reports `Event::Select` on this group.
+pub fn tags_id() -> crate::ui::Id {
+    crate::ui::Id::new("plug-tags")
 }
 
 /// A git sheet's "Pane: Turns, Listens to: session.created, …" as a count of
@@ -113,21 +115,31 @@ pub fn field_id(field: &Field) -> crate::ui::Id {
     crate::ui::Id::new("plug-field").child(field)
 }
 
-/// The two views the page offers.
+/// The views the page offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Tab {
     #[default]
     Installed,
     Browse,
+    Updates,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 2] = [Tab::Installed, Tab::Browse];
+    pub const ALL: [Tab; 3] = [Tab::Installed, Tab::Browse, Tab::Updates];
 
     pub fn label(self) -> &'static str {
         match self {
             Tab::Installed => "Installed",
             Tab::Browse => "Browse",
+            Tab::Updates => "Updates",
+        }
+    }
+
+    pub fn tip(self) -> &'static str {
+        match self {
+            Tab::Installed => "Shows what's on this Mac",
+            Tab::Browse => "Finds more in the catalog",
+            Tab::Updates => "Shows extensions with a newer version",
         }
     }
 }
@@ -157,9 +169,6 @@ pub enum Field {
 /// A picker the page binds.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Pick {
-    Category,
-    Kind,
-    Rung,
     Project,
     Trigger,
     /// A built-in's select field.
@@ -1375,70 +1384,10 @@ pub fn matches_query(l: &Listing, query: &str) -> bool {
     terms.iter().all(|t| hay.contains(t))
 }
 
-pub const CALLABLE: &str = "Can be called from a step";
-pub const CONNECTED: &str = "Connected";
-
-/// Whether a listing is in `category`; any is, without one.
-pub fn matches_category(l: &Listing, category: Option<&str>) -> bool {
-    match category {
-        None => true,
-        Some(CALLABLE) => l.has_actions(),
-        Some(CONNECTED) => l.connected > 0,
-        Some(c) => l.category == c,
-    }
-}
-
-/// Sorted categories, then the two facets present.
-pub fn categories(listings: &[Listing]) -> Vec<String> {
-    let mut out: Vec<String> = listings.iter().map(|l| l.category.clone()).collect();
-    out.sort();
-    out.dedup();
-    if listings.iter().any(Listing::has_actions) {
-        out.push(CALLABLE.to_owned());
-    }
-    if listings.iter().any(|l| l.connected > 0) {
-        out.push(CONNECTED.to_owned());
-    }
-    out
-}
-
-/// The kinds present among `listings`.
-pub fn kinds(listings: &[Listing]) -> Vec<Kind> {
-    Kind::ALL
-        .into_iter()
-        .filter(|k| listings.iter().any(|l| l.kind == *k))
-        .collect()
-}
-
-/// The auth rungs present among `listings`.
-pub fn rungs(listings: &[Listing]) -> Vec<Rung> {
-    Rung::ALL
-        .into_iter()
-        .filter(|r| listings.iter().any(|l| l.rung == Some(*r)))
-        .collect()
-}
-
-/// First-seen order. The directory by category, every extension under
-/// "Interface".
-pub fn sections(listings: Vec<&Listing>) -> Vec<(String, Vec<&Listing>)> {
-    let mut out: Vec<(String, Vec<&Listing>)> = Vec::new();
-    for l in listings {
-        let category = match l.kind {
-            Kind::Extension => Kind::Extension.label(),
-            Kind::Connector => l.category.as_str(),
-        };
-        match out.iter_mut().find(|(c, _)| c == category) {
-            Some((_, items)) => items.push(l),
-            None => out.push((category.to_owned(), vec![l])),
-        }
-    }
-    out
-}
-
 /// How old the connector catalog is, in words.
 pub fn catalog_age(fetched_at: Option<f64>, now: f64) -> String {
     let Some(at) = fetched_at else {
-        return "Showing the connectors that shipped with Vorn".to_owned();
+        return "Showing the extensions that shipped with Vorn".to_owned();
     };
     let minutes = ((now - at) / 60_000.0).floor().max(0.0) as usize;
     match minutes {
@@ -2323,9 +2272,10 @@ pub struct Plugins {
     pub selected: Option<String>,
     pub adding: Option<Adding>,
     pub query: String,
-    pub category: Option<String>,
-    pub kind: Option<Kind>,
-    pub rung: Option<Rung>,
+    /// Browse's chip: only what adds this.
+    pub tag: Option<list::Tag>,
+    /// Every screenshot on an extension's page, not just the first two.
+    pub all_shots: bool,
     pub progress: HashMap<String, Progress>,
     pub pending: Option<Pending>,
     pub source: Option<SourceDialog>,
@@ -2376,24 +2326,6 @@ impl Plugins {
 
     pub fn state(&self, l: &Listing) -> PackState {
         l.state(self.progress.get(&l.id))
-    }
-
-    /// The directory after the search box and pickers.
-    pub fn filtered(&self) -> Vec<&Listing> {
-        self.listings
-            .iter()
-            .filter(|l| matches_query(l, &self.query))
-            .filter(|l| matches_category(l, self.category.as_deref()))
-            .filter(|l| self.kind.is_none_or(|k| l.kind == k))
-            .filter(|l| self.rung.is_none_or(|r| l.rung == Some(r)))
-            .collect()
-    }
-
-    pub fn filtering(&self) -> bool {
-        !self.query.trim().is_empty()
-            || self.category.is_some()
-            || self.kind.is_some()
-            || self.rung.is_some()
     }
 
     pub fn status_of(&self, connector: &str) -> Option<&Value> {
@@ -2730,35 +2662,23 @@ mod tests {
     }
 
     #[test]
-    fn filters_and_facets() {
-        let conns = [conn("c1", "http")];
-        let ls = build_listings(&builtins(), &catalog(), &conns, &[], &[]);
-        assert_eq!(
-            categories(&ls),
-            ["Built in", "Other", "Work tracking", CALLABLE, CONNECTED]
-        );
-        let hits: Vec<_> = ls
-            .iter()
-            .filter(|l| matches_query(l, "AZURE boards"))
-            .map(|l| l.id.as_str())
-            .collect();
-        assert_eq!(hits, ["ado"]);
-        let connected: Vec<_> = ls
-            .iter()
-            .filter(|l| matches_category(l, Some(CONNECTED)))
-            .collect();
-        assert_eq!(connected.len(), 1);
-        assert_eq!(rungs(&ls), [Rung::Cli, Rung::Key]);
-        assert_eq!(kinds(&ls), [Kind::Connector]);
-        let secs = sections(ls.iter().collect());
-        assert_eq!(secs[0].0, "Built in");
+    fn search_reads_names_descriptions_and_tags() {
+        let ls = build_listings(&builtins(), &catalog(), &[], &[], &[]);
+        let hits = |q: &str| -> Vec<&str> {
+            ls.iter()
+                .filter(|l| matches_query(l, q))
+                .map(|l| l.id.as_str())
+                .collect()
+        };
+        assert_eq!(hits("AZURE boards"), ["ado"]);
+        assert!(hits("connections").contains(&"http"));
     }
 
     #[test]
     fn catalog_age_reads_like_a_person() {
         assert_eq!(
             catalog_age(None, 0.0),
-            "Showing the connectors that shipped with Vorn"
+            "Showing the extensions that shipped with Vorn"
         );
         assert_eq!(catalog_age(Some(0.0), 30_000.0), "Updated just now");
         assert_eq!(catalog_age(Some(0.0), 60_000.0), "Updated 1 minute ago");

@@ -1,133 +1,266 @@
-//! Browse: search, the kind pills and the sign-in picker, the listings by
-//! category, and how fresh the catalog is.
+//! Browse: the tag chips, two feature cards, a grid of tiles each with the
+//! one verb its kind takes, and how fresh the catalog is.
 
-use serde_json::Value;
-
-use super::{act, glyph, heading, offers, progress_bar, tone_line, well, R};
-use crate::plugins::{
-    catalog_age, describe, field_id, kinds_id, pick_id, rungs, sections, Field, Kind, Listing,
-    PackAction, PackState, Pick, PlugAct, Source, Tone,
-};
-use crate::runs::s as sv;
+use super::{act, logo, maker, tag, tone_line, R};
+use crate::act::Act;
+use crate::plugins::list::{self, Tag, Verb};
+use crate::plugins::{catalog_age, tags_id, Listing, PlugAct, Tone};
 use crate::screen::{ico, white, Screen};
+use crate::settings::SetAct;
 use crate::state::now_ms;
 use crate::ui::theme::color as k;
-use crate::ui::widgets::{picker, pills, Choice, PickerLook, Pill};
-use crate::ui::{div, field, text, Action, El, Role, TextStyle};
+use crate::ui::widgets::{pills, Pill};
+use crate::ui::{div, text, tooltip, Action, El, Role};
+
+/// Tiles across.
+const COLUMNS: usize = 3;
 
 pub(super) fn view(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let visible = p.filtered();
-    let mut col = div().col().child(search(s)).child(filters(s));
+    let items = list::browse(p, &p.query, p.tag);
+    let mut col = div().col();
     if let Some(report) = p.report.as_ref().filter(|_| p.pending.is_none()) {
-        col = col.child(tone_line(Tone::Broken, report, 11.0).mt(8.0));
+        col = col.child(tone_line(Tone::Broken, report, 11.0).mb(8.0));
     }
-    let empty = visible.is_empty();
-    for (category, items) in sections(visible) {
-        col = col.child(heading(&category));
-        for l in items {
-            col = col.child(row(s, l));
-        }
+    let narrowed = p.tag.is_some() || !p.query.trim().is_empty();
+    if !narrowed {
+        col = col.child(features(s));
     }
-    if empty {
-        let line = if p.filtering() {
+    if items.is_empty() {
+        let line = if narrowed {
             "Nothing matches that."
         } else {
             "Nothing to show. Check your connection and try again."
         };
-        col = col.child(text(line, 14.0, k::GRAY_500).line_height(20.0).py(16.0));
+        col = col.child(
+            text(line, 13.0, k::INK_SECONDARY)
+                .line_height(20.0)
+                .py(16.0),
+        );
+    } else {
+        col = col.child(grid(s, &items));
     }
     col.child(footer(s))
 }
 
-/// The search box, its glyph inside on the left.
-fn search(s: &Screen<'_>) -> El {
+/// All, then a chip for each tag some listing carries.
+pub(super) fn tags(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let id = field_id(&Field::Query);
-    s.acts
-        .text(id, act(PlugAct::Text(Field::Query)), p.query.as_str());
-    let focus = if s.ui.focused(id) { 1.0 } else { 0.0 };
-    let style = TextStyle {
-        line_height: 16.0,
-        ..TextStyle::ui(12.0)
-    };
-    div()
-        .row()
-        .items_center()
-        .gap(8.0)
-        .mb(12.0)
-        .pl(10.0)
-        .pr(8.0)
-        .py(6.0)
-        .rounded(R)
-        .bg(white(0.05))
-        .border(1.0, white(0.1).mix(white(0.2), focus))
-        .frames(id)
-        .child(ico("search", 12.0, 2.0, k::GRAY_600))
-        .child(
-            field(
-                id,
-                "Search extensions",
-                "Search extensions",
-                style,
-                k::GRAY_200,
-            )
-            .grow()
-            .min_w0(),
-        )
+    let shown = list::browse_tags(p);
+    let mut items = vec![Pill::new("All", None).hint("Shows everything you can add")];
+    items.extend(
+        shown
+            .iter()
+            .map(|t| Pill::new(t.plural(), None).hint(t.tip())),
+    );
+    let on = p
+        .tag
+        .and_then(|t| shown.iter().position(|x| *x == t))
+        .map_or(0, |i| i + 1);
+    pills(s.ui, tags_id(), "Show", &items, on)
 }
 
-/// All, Connectors and Interface, and the sign-in picker when it offers a choice.
-fn filters(s: &Screen<'_>) -> El {
+/// Agents and Connections, the two kinds most people come for.
+fn features(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let items = [
-        Pill::new("All", None),
-        Pill::new(Kind::Connector.label(), None),
-        Pill::new(Kind::Extension.label(), None),
-    ];
-    let on = match p.kind {
-        None => 0,
-        Some(Kind::Connector) => 1,
-        Some(Kind::Extension) => 2,
-    };
-    let rs = rungs(&p.listings);
-    let rung = (rs.len() > 1).then(|| {
-        let labels: Vec<String> = rs.iter().map(|r| r.label().to_owned()).collect();
-        let mut choices = vec![Choice {
-            label: "Any sign-in",
-            hint: None,
-        }];
-        choices.extend(labels.iter().map(|l| Choice {
-            label: l,
-            hint: None,
-        }));
-        let chosen = p
-            .rung
-            .and_then(|x| rs.iter().position(|y| *y == x))
-            .map_or(0, |i| i + 1);
-        picker(
-            s.ui,
-            pick_id(&Pick::Rung),
-            "Filter by sign-in",
-            PickerLook::Select,
-            &choices,
-            chosen,
-        )
-    });
-    div()
+    let agents = list::browse(p, "", Some(Tag::Agent));
+    let connections = list::browse(p, "", Some(Tag::Connection));
+    let mut row = div().row().gap(12.0).mb(16.0);
+    if let Some(first) = agents.first() {
+        let names: Vec<&str> = agents.iter().map(|l| l.name.as_str()).collect();
+        row = row.child(feature(
+            s,
+            Tag::Agent,
+            "Bring the agents you already pay for",
+            &names.join(", "),
+            first,
+        ));
+    }
+    if let Some(first) = connections.first() {
+        row = row.child(feature(
+            s,
+            Tag::Connection,
+            "Start work from where it lands",
+            "Issues, posts, feeds and queries",
+            first,
+        ));
+    }
+    row
+}
+
+/// One feature card; it filters Browse to its tag.
+fn feature(s: &Screen<'_>, t: Tag, title: &str, line: &str, first: &Listing) -> El {
+    let id = s.acts.on(
+        &format!("plug-feature-{}", t.label()),
+        Act::Set(SetAct::Browse(Some(t), None)),
+    );
+    let hot = s.ui.hover(id);
+    let card = div()
+        .id(id)
+        .on(Action::Click)
+        .ring(R)
+        .flex(1.0)
         .row()
-        .wrap_children()
         .items_center()
-        .gap(8.0)
-        .mb(4.0)
-        .child(pills(s.ui, kinds_id(), "Kind", &items, on))
-        .child_if(rung)
+        .gap(16.0)
+        .h(120.0)
+        .px(18.0)
+        .rounded(R)
+        .bg(white(0.03 + 0.02 * hot))
+        .border(1.0, white(0.07))
+        .role(Role::Button, t.plural())
+        .child(logo(s, &first.id, &first.name, Some(first), None, 56.0))
+        .child(
+            div()
+                .col()
+                .gap(2.0)
+                .min_w0()
+                .grow()
+                .child(
+                    text(t.plural().to_uppercase(), 11.0, k::INK_FAINT)
+                        .tracking(0.06)
+                        .line_height(16.0)
+                        .silent(),
+                )
+                .child(
+                    text(title, 16.0, k::INK)
+                        .weight(600)
+                        .line_height(22.0)
+                        .wrapping()
+                        .silent(),
+                )
+                .child(
+                    text(line, 12.0, k::INK_SECONDARY)
+                        .line_height(17.0)
+                        .truncate()
+                        .silent(),
+                ),
+        );
+    tooltip(s.ui, card, id, t.tip(), None)
+}
+
+/// The tiles, three across.
+fn grid(s: &Screen<'_>, items: &[&Listing]) -> El {
+    let mut col = div().col().gap(12.0);
+    for chunk in items.chunks(COLUMNS) {
+        let mut row = div().row().gap(12.0);
+        for l in chunk {
+            row = row.child(tile(s, l));
+        }
+        for _ in chunk.len()..COLUMNS {
+            row = row.child(div().flex(1.0));
+        }
+        col = col.child(row);
+    }
+    col
+}
+
+/// One listing: logo, name over maker and its verb; what it does; its tags.
+fn tile(s: &Screen<'_>, l: &Listing) -> El {
+    let open = s
+        .acts
+        .on("plug-tile", act(PlugAct::Select(Some(l.key.clone()))));
+    let hot = s.ui.hover(open);
+    let place = format!("plug-tile-{}", l.key);
+    let item = list::Item::Listing(l);
+    let mut tags = div().row().wrap_children().gap(4.0);
+    for t in &l.tags {
+        tags = tags.child(tag(s, &place, *t));
+    }
+    div()
+        .id(open)
+        .on(Action::Click)
+        .ring(R)
+        .flex(1.0)
+        .col()
+        .gap(10.0)
+        .p(14.0)
+        .rounded(R)
+        .bg(white(0.02 + 0.02 * hot))
+        .border(1.0, white(0.07))
+        .role(Role::Button, format!("Open {}", l.name))
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(10.0)
+                .child(logo(s, &l.id, &l.name, Some(l), None, 40.0))
+                .child(
+                    div()
+                        .col()
+                        .grow()
+                        .min_w0()
+                        .child(
+                            text(&l.name, 14.0, k::INK)
+                                .weight(500)
+                                .line_height(20.0)
+                                .truncate(),
+                        )
+                        .child(maker(&item.maker(), 11.5)),
+                )
+                .child_if(verb(s, l)),
+        )
+        .child(
+            text(item.description(), 12.0, k::INK_SECONDARY)
+                .line_height(17.0)
+                .wrapping()
+                .silent(),
+        )
+        .child(tags)
+}
+
+/// Install or Connect as the kind takes, or what it is doing.
+fn verb(s: &Screen<'_>, l: &Listing) -> Option<El> {
+    let (label, a, tip) = match Verb::of(&s.st.plugins, l) {
+        Verb::Install => (
+            "Install".to_owned(),
+            Some(PlugAct::Install(l.key.clone())),
+            "Shows what it adds and asks for, then installs it",
+        ),
+        Verb::Connect => (
+            "Connect".to_owned(),
+            Some(PlugAct::Add(l.key.clone())),
+            "Signs in to an account it can watch",
+        ),
+        Verb::Installed => ("Installed".to_owned(), None, "Already on this computer"),
+        Verb::Busy(what) => (what, None, "Working on it now"),
+        Verb::None => return None,
+    };
+    let pill = div()
+        .row()
+        .items_center()
+        .px(12.0)
+        .py(4.0)
+        .shrink0()
+        .rounded(R);
+    Some(match a {
+        Some(a) => {
+            let id = s.acts.on(&format!("plug-verb-{}", l.key), act(a));
+            let hot = s.ui.hover(id);
+            let b = pill
+                .id(id)
+                .on(Action::Click)
+                .ring(R)
+                .bg(white(0.08 + 0.06 * hot))
+                .role(Role::Button, format!("{label} {}", l.name))
+                .child(text(&label, 12.0, k::INK).line_height(16.0).silent());
+            tooltip(s.ui, b, id, tip, None)
+        }
+        None => {
+            let id = crate::ui::Id::new("plug-verb").child(&l.key);
+            let b = pill
+                .id(id)
+                .role(Role::Label, label.as_str())
+                .child(text(&label, 12.0, k::INK_FAINT).line_height(16.0).silent());
+            tooltip(s.ui, b, id, tip, None)
+        }
+    })
 }
 
 /// The catalog's age and "Check now".
 fn footer(s: &Screen<'_>) -> El {
     let p = &s.st.plugins;
-    let line = |t: &str| text(t, 11.0, k::GRAY_600).line_height(16.0).silent();
+    let line = |t: &str| text(t, 11.0, k::INK_FAINT).line_height(16.0).silent();
     let mut check = div().row().items_center().gap(4.0);
     let label = if p.refreshing {
         "Checking"
@@ -136,7 +269,7 @@ fn footer(s: &Screen<'_>) -> El {
     };
     let fg = if p.refreshing {
         check = check.opacity(0.5).role(Role::Button, label);
-        k::GRAY_500.rgba()
+        k::INK_FAINT.rgba()
     } else {
         let id = s.acts.on("plug-catalog", act(PlugAct::CatalogRefresh));
         check = check
@@ -144,7 +277,7 @@ fn footer(s: &Screen<'_>) -> El {
             .on(Action::Click)
             .ring(R)
             .role(Role::Button, label);
-        k::GRAY_500.mix(k::GRAY_300, s.ui.hover(id))
+        k::INK_FAINT.mix(k::INK_SECONDARY, s.ui.hover(id))
     };
     check = check
         .child(ico("refresh-cw", 9.0, 2.0, fg))
@@ -154,161 +287,9 @@ fn footer(s: &Screen<'_>) -> El {
         .items_center()
         .gap(6.0)
         .pt(12.0)
+        .mt(16.0)
         .border_top(1.0, white(0.06))
         .child(line(&catalog_age(p.fetched_at, now_ms())))
         .child(line("·"))
         .child(check)
-}
-
-/// The muted line: a summary, then what it offers and how it signs in or reaches out.
-fn facts(s: &Screen<'_>, l: &Listing) -> String {
-    let said = offers(s, l).join(", ");
-    let mut parts: Vec<String> = (!said.is_empty()).then_some(said).into_iter().collect();
-    if l.kind == Kind::Extension {
-        let source = l.pack.as_ref().or(l.catalog.as_ref());
-        let hosts = source
-            .and_then(|m| m.pointer("/declares/network"))
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len);
-        parts.push(if hosts == 0 {
-            "no network".to_owned()
-        } else {
-            crate::plugins::count(hosts, "host")
-        });
-    } else if let Some(r) = l.rung {
-        parts.push(r.badge().to_owned());
-    }
-    parts.join(" \u{b7} ")
-}
-
-/// The row's one move: Install, Update, Installed, or Add connection.
-fn chip(s: &Screen<'_>, l: &Listing) -> Option<El> {
-    let state = s.st.plugins.state(l);
-    let status = describe(&state);
-    let (label, a, on) = if l.installable() {
-        match (status.action, &state) {
-            (Some(PackAction::Install), _) => ("Install\u{2026}".to_owned(), true, !status.busy),
-            (Some(PackAction::Update), _) => ("Update\u{2026}".to_owned(), true, !status.busy),
-            (Some(_), _) => (format!("{}\u{2026}", status.label), true, !status.busy),
-            (None, PackState::Installed { .. }) => ("Installed".to_owned(), false, false),
-            (None, _) if status.busy => (status.label.clone(), false, false),
-            (None, _) => return None,
-        }
-    } else if !l.implicit && l.can_add(&state) && matches!(l.source, Source::Mcp | Source::Builtin)
-    {
-        let id = s
-            .acts
-            .on("plug-browse-add", act(PlugAct::Add(l.key.clone())));
-        return Some(small_chip(s, Some(id), "Add connection"));
-    } else {
-        return None;
-    };
-    let id = (a && on).then(|| {
-        s.acts
-            .on("plug-browse-install", act(PlugAct::Install(l.key.clone())))
-    });
-    Some(small_chip(s, id, &label))
-}
-
-/// A bordered chip; without an id it is quiet and does nothing.
-fn small_chip(s: &Screen<'_>, id: Option<crate::ui::Id>, label: &str) -> El {
-    let b = div()
-        .row()
-        .items_center()
-        .px(10.0)
-        .py(4.0)
-        .shrink0()
-        .rounded(R)
-        .border(1.0, white(0.1));
-    match id {
-        Some(id) => {
-            let hot = s.ui.hover(id);
-            let fg = k::GRAY_300.mix(k::WHITE, hot);
-            b.id(id)
-                .on(Action::Click)
-                .ring(R)
-                .bg(white(0.06 * hot))
-                .role(Role::Button, label)
-                .child(text(label, 11.5, fg).line_height(16.0).silent())
-        }
-        None => b
-            .border(1.0, white(0.05))
-            .role(Role::Label, label)
-            .child(text(label, 11.5, k::GRAY_500).line_height(16.0).silent()),
-    }
-}
-
-/// The name over one line, and its one move.
-fn row(s: &Screen<'_>, l: &Listing) -> El {
-    let status = describe(&s.st.plugins.state(l));
-    let open = s
-        .acts
-        .on("plug-browse-row", act(PlugAct::Select(Some(l.key.clone()))));
-    let hot = s.ui.hover(open);
-    let mut name = div().row().items_center().gap(6.0).min_w0().child(
-        text(&l.name, 13.5, k::GRAY_200.mix(k::WHITE, hot))
-            .weight(500)
-            .line_height(20.0)
-            .truncate(),
-    );
-    if l.verified.is_some() {
-        name = name.child(ico("badge-check", 12.0, 2.0, k::GRAY_500).role(Role::Image, "Verified"));
-    }
-    let tail = facts(s, l);
-    let summary = l
-        .description
-        .as_deref()
-        .or_else(|| l.catalog.as_ref().and_then(|c| sv(c, "summary")))
-        .unwrap_or("");
-    let line = div()
-        .row()
-        .min_w0()
-        .mt(1.0)
-        .child(
-            text(summary, 12.0, k::GRAY_500)
-                .line_height(17.0)
-                .truncate()
-                .min_w0(),
-        )
-        .child_if((!tail.is_empty()).then(|| {
-            let lead = if summary.is_empty() { "" } else { " \u{b7} " };
-            text(format!("{lead}{tail}"), 12.0, k::GRAY_500)
-                .line_height(17.0)
-                .shrink0()
-        }));
-    let mut body = div()
-        .col()
-        .min_w0()
-        .grow()
-        .child(name)
-        .child(line)
-        .child_if(progress_bar(&status));
-    if let (Tone::Broken, Some(d)) = (status.tone, status.detail.as_deref()) {
-        body = body.child(tone_line(Tone::Broken, d, 11.0).mt(4.0));
-    }
-    let left = div()
-        .id(open)
-        .on(Action::Click)
-        .ring(R)
-        .row()
-        .items_center()
-        .gap(12.0)
-        .grow()
-        .min_w0()
-        .role(Role::Button, format!("About {}", l.name))
-        .child(well(
-            32.0,
-            6.0,
-            white(0.05 + 0.03 * hot),
-            glyph(Some(l), &l.id, 17.0, k::GRAY_200),
-        ))
-        .child(body);
-    div()
-        .row()
-        .items_center()
-        .gap(12.0)
-        .py(10.0)
-        .border_top(1.0, white(0.06))
-        .child(left)
-        .child_if(chip(s, l))
 }

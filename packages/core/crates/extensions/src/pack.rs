@@ -130,9 +130,12 @@ impl InstalledPack {
     /// has none or the file is missing, too big or not SVG.
     pub fn logo_svg(&self, dark: bool) -> Option<String> {
         let file = self.manifest.logo_file(dark)?;
-        let inside = Path::new(file)
-            .components()
-            .all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir));
+        let inside = Path::new(file).components().all(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        });
         let path = self.path.join(file);
         if !inside || fs::metadata(&path).ok()?.len() > MAX_LOGO_BYTES {
             return None;
