@@ -1,6 +1,6 @@
 ---
 name: vorn-extension-author
-description: Write, change or review a Vorn extension (a program, a Wasm component or one-shot commands), including the ones Vorn ships in packages/core/extensions. Use for anything touching a vorn-extension.toml, the extension API's version, or what an extension may call.
+description: Write, change or review a Vorn extension (a program, a Wasm component or one-shot commands), including the ones Vorn ships from vorn-run/extensions. Use for anything touching a vorn-extension.toml, the extension API's version, or what an extension may call.
 ---
 
 # Writing a Vorn extension

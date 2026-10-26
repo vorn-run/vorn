@@ -63,6 +63,13 @@ impl TestVornd {
     /// A started vornd with its holder connected, or `None` (said on
     /// stderr) when the binaries are not built.
     pub fn start() -> Option<TestVornd> {
+        TestVornd::start_with(&[])
+    }
+
+    /// [`TestVornd::start`] with these of Vorn's own catalog extensions also
+    /// installed from a catalog served on loopback, as a person installs one;
+    /// `None` when scripts/shipped.mjs has not fetched their packs.
+    pub fn start_with(installed: &[&str]) -> Option<TestVornd> {
         let dir = bin_dir()?;
         let (vornd, sessiond) = (exe(&dir, "vornd"), exe(&dir, "vorn-sessiond"));
         if !vornd.is_file() || !sessiond.is_file() {
@@ -70,7 +77,35 @@ impl TestVornd {
             return None;
         }
         let home = temp_home().expect("temp dir");
-        Some(TestVornd::spawn(home))
+        if !installed.is_empty() {
+            let mut packs = Vec::new();
+            for id in installed {
+                let Some(pack) = catalog_pack(id) else {
+                    eprintln!(
+                        "skipped: {id} was not fetched (run packages/core/scripts/shipped.mjs)"
+                    );
+                    return None;
+                };
+                packs.push(pack);
+            }
+            offer_in_catalog(&home, packs);
+        }
+        let v = TestVornd::spawn(home);
+        if !installed.is_empty() {
+            let ep = Endpoint::find(&v.home).expect("vornd wrote ws-port and local-token");
+            let (rpc, _events) =
+                vorn_app::client::Rpc::connect(&ep, std::sync::Arc::new(|| {})).expect("rpc");
+            for id in installed {
+                let done = rpc
+                    .call(
+                        "connector:installPack",
+                        json!({ "kind": "catalog", "id": id }),
+                    )
+                    .expect("installPack");
+                assert_eq!(done["ok"], true, "{id}: {done}\n{}", v.log());
+            }
+        }
+        Some(v)
     }
 
     fn spawn(home: PathBuf) -> TestVornd {
@@ -98,6 +133,7 @@ impl TestVornd {
             .env_remove("XDG_DATA_HOME")
             .env_remove("HERMES_HOME")
             .env_remove("VORN_ALLOW_DEFAULT_DATA_DIR")
+            .env("NO_PROXY", "127.0.0.1,localhost")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -256,9 +292,15 @@ impl Drop for TestVornd {
     }
 }
 
-/// Waits for the built-ins' top-bar views, whose keys come with them.
+/// Waits for the built-ins' views, which come once their extensions start; their keys, pills and palette entries come with them.
 pub fn views_listed(shot: &mut Shot, app: &mut App) {
-    shot.until(app, "the built-ins' views", |app, _| {
+    views_listed_in(app, &mut shot.ui, shot.size);
+}
+
+/// [`views_listed`] laying out frames on a test's own `ui`.
+pub fn views_listed_in(app: &mut App, ui: &mut Ui, size: (f32, f32)) {
+    wait_for("the built-ins' views", || {
+        app.frame(ui, size);
         let p = &app.st.points;
         (p.find("vorn.tasks", "views", "board").is_some()
             && p.find("vorn.workflows", "views", "workflows").is_some())
@@ -285,6 +327,65 @@ pub fn key(code: &str, m: u16, text: Option<&str>) -> Input {
         mods: m,
         text: text.map(Into::into),
     }
+}
+
+/// The pack of `id` scripts/shipped.mjs fetched into `shipped/catalog/`:
+/// its id, version, sha256 and bytes.
+fn catalog_pack(id: &str) -> Option<(String, String, String, Vec<u8>)> {
+    use sha2::Digest;
+    let dir = std::env::var_os("VORN_SHIPPED_DIR").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../shipped"),
+        PathBuf::from,
+    );
+    let prefix = format!("{id}-");
+    let entry = std::fs::read_dir(dir.join("catalog"))
+        .ok()?
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with(&prefix))?;
+    let name = entry.file_name().to_string_lossy().into_owned();
+    let version = name
+        .strip_prefix(&prefix)?
+        .strip_suffix(".vorn.tgz")?
+        .to_owned();
+    let bytes = std::fs::read(entry.path()).ok()?;
+    let sha256 = format!("{:x}", sha2::Sha256::digest(&bytes));
+    Some((id.to_owned(), version, sha256, bytes))
+}
+
+/// Lists `packs` in the catalog vornd at `home` reads, each served from a
+/// loopback port of its own as the release would be.
+fn offer_in_catalog(home: &Path, packs: Vec<(String, String, String, Vec<u8>)>) {
+    let mut entries = Vec::new();
+    for (id, version, sha256, bytes) in packs {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("a port");
+        let port = listener.local_addr().expect("its address").port();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut req = Vec::new();
+                let mut byte = [0u8; 1];
+                while !req.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap_or(0) == 1 {
+                    req.push(byte[0]);
+                }
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    bytes.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&bytes);
+            }
+        });
+        entries.push(json!({
+            "id": id, "name": id, "kind": "extension", "version": version, "sha256": sha256,
+            "packUrl": format!("http://127.0.0.1:{port}/{id}-{version}.vorn.tgz"),
+        }));
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let cache = json!({ "connectors": entries, "fetchedAt": now as f64 });
+    std::fs::create_dir_all(home.join(".vorn")).expect("~/.vorn");
+    std::fs::write(home.join(".vorn/connector-catalog.json"), cache.to_string())
+        .expect("the catalog");
 }
 
 /// The app over `v`, past the welcome guide: it is marked seen first, so

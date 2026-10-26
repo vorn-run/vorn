@@ -81,6 +81,13 @@ impl Grants {
         nonces.iter().filter_map(|n| self.open.remove(n)).collect()
     }
 
+    /// Whether extension `extension` has a pane open on session `session` that has not gone stale by `now`.
+    pub fn open_on(&self, extension: &str, session: &str, now: u64) -> bool {
+        self.open
+            .values()
+            .any(|g| g.extension_id == extension && g.session_id == session && g.expires > now)
+    }
+
     pub fn len(&self) -> usize {
         self.open.len()
     }
@@ -121,6 +128,18 @@ mod tests {
         ));
         assert_eq!(g.touch("n", 0), Lookup::Unknown);
         assert!(g.is_empty());
+    }
+
+    #[test]
+    fn says_whether_an_extension_has_a_live_pane_on_a_session() {
+        let mut g = Grants::default();
+        g.insert(grant("a", "s", "e"));
+        assert!(g.open_on("e", "s", 10));
+        assert!(!g.open_on("f", "s", 10) && !g.open_on("e", "t", 10));
+        assert!(
+            !g.open_on("e", "s", 1000),
+            "a stale pane counts for nothing"
+        );
     }
 
     #[test]

@@ -1,8 +1,8 @@
 /**
  * The desktop bridge on a real server and its vornd: main claims its socket
  * with `bridge:identify`, once; an agent's `browser:*` and `device:*` calls
- * are answered by the Browser and Device built-ins, which refuse them while
- * switched off, and none of them reaches the server or is relayed to main.
+ * are answered by the installed Browser and Device extensions, and refused
+ * once those are uninstalled, and none of them reaches the server or is relayed to main.
  *
  * Runs where vornd and vorn-sessiond have been built (`yarn build:core`), on
  * a Unix.
@@ -15,6 +15,7 @@ import {
   Watcher,
   realServers,
   removeRealServerDirs,
+  inCatalog,
   runnable,
   startRealServer,
   stopRealServer,
@@ -67,14 +68,14 @@ function identify(ws: WebSocket): Promise<Frame> {
   })
 }
 
-describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
+describe.skipIf(!runnable || !inCatalog('vorn.device'))('the desktop bridge through vornd', () => {
   let server: RealServer
   let agent: Watcher
   let main: { ws: WebSocket; asked: Frame[] }
 
   beforeAll(async () => {
     try {
-      server = await startRealServer()
+      server = await startRealServer(undefined, { installed: ['vorn.device'] })
       main = await openMain(server.vornd)
       agent = await Watcher.open(server.vornd)
     } catch (err) {
@@ -97,7 +98,7 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
     other.ws.close()
   })
 
-  it("answers an agent's browser and device calls in the built-ins, not in main", async () => {
+  it("answers an agent's browser and device calls in the extensions, not in main", async () => {
     for (const method of ['browser:tabs', 'device:list']) {
       const frame = await agent.call(method, { sessionId: 's' })
       expect(frame.error).toMatchObject({ message: 'No session s in this app.' })
@@ -106,17 +107,16 @@ describe.skipIf(!runnable)('the desktop bridge through vornd', () => {
     expect(main.asked.map((f) => f.method)).not.toContain('device:list')
   })
 
-  it('refuses them while the built-ins are off', async () => {
+  it('refuses them once the extensions are uninstalled', async () => {
     for (const [id, method, name] of [
       ['vorn.browser', 'browser:tabs', 'Browser'],
       ['vorn.device', 'device:claim', 'Device']
     ]) {
-      await agent.result('extension:setBuiltin', { id, on: false })
+      await agent.result('extension:remove', { id })
       const frame = await agent.call(method, { sessionId: 's' })
       expect(frame.error).toMatchObject({
-        message: `${name} is off. Turn it on in Settings \u2192 Extensions.`
+        message: `${name} is not installed. Install it in Settings \u2192 Extensions.`
       })
-      await agent.result('extension:setBuiltin', { id, on: true })
     }
   })
 

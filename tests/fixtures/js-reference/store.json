@@ -22,10 +22,6 @@
           "args": [],
           "command": "gemini",
           "headlessArgs": ["-y"]
-        },
-        "opencode": {
-          "args": [],
-          "command": "opencode"
         }
       },
       "defaults": {
@@ -79,10 +75,6 @@
           "args": [],
           "command": "gemini",
           "headlessArgs": ["-y"]
-        },
-        "opencode": {
-          "args": [],
-          "command": "opencode"
         }
       },
       "defaults": {
@@ -1141,10 +1133,6 @@
           "args": [],
           "command": "gemini",
           "headlessArgs": ["-y"]
-        },
-        "opencode": {
-          "args": [],
-          "command": "opencode"
         }
       },
       "defaults": {
@@ -1245,10 +1233,6 @@
           "args": [],
           "command": "gemini",
           "headlessArgs": ["-y"]
-        },
-        "opencode": {
-          "args": [],
-          "command": "opencode"
         }
       },
       "defaults": {

@@ -42,9 +42,12 @@ impl std::fmt::Debug for ConnectorsBuiltin {
     }
 }
 
+/// The text of the built-in's manifest.
+pub const MANIFEST: &str = builtin::MANIFEST;
+
 /// The built-in's manifest, which it is held to.
 pub fn manifest() -> Manifest {
-    file::parse_builtin(builtin::MANIFEST)
+    file::parse_builtin(MANIFEST)
         .expect("the Connectors built-in's manifest is checked by its tests")
 }
 
@@ -171,7 +174,7 @@ struct Entry(Arc<ConnectorsBuiltin>);
 
 impl Builtin for Entry {
     fn manifest(&self) -> &'static str {
-        builtin::MANIFEST
+        MANIFEST
     }
 
     fn events(&self) -> &'static [&'static str] {

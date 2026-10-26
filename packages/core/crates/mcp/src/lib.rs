@@ -31,6 +31,11 @@ static TOOLS: LazyLock<Value> = LazyLock::new(|| {
         .expect("generated/tools.json is JSON")
 });
 
+static HOSTED: LazyLock<Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("../generated/hosted.json"))
+        .expect("generated/hosted.json is JSON")
+});
+
 // The engine's part of the reference, generated beside the engine: the format's limits the tools check by.
 static WORKFLOW_NODES: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../workflow/generated/reference.json"))
@@ -42,9 +47,20 @@ pub fn tools_list() -> &'static Value {
     &TOOLS
 }
 
-/// How many tools the server offers.
+/// How many tools the server offers whatever is installed.
 pub fn tool_count() -> usize {
     TOOLS.as_array().map_or(0, Vec::len)
+}
+
+/// The tools of each extension Vorn ships as an install (Browser, Device,
+/// Tasks, Workflows), by its id, from `generated/hosted.json`. They are
+/// Vorn's own tools, answered here or by that extension, but listed only
+/// while it is installed, so an agent is never offered a tool nothing answers.
+pub fn hosted_tools() -> impl Iterator<Item = (&'static str, &'static [Value])> {
+    HOSTED.as_object().into_iter().flatten().map(|(id, tools)| {
+        let tools = tools.as_array().map_or(&[][..], Vec::as_slice);
+        (id.as_str(), tools)
+    })
 }
 
 /// The engine's part of the workflow reference: its limits among it.

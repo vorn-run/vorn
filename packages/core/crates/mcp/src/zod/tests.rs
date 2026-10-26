@@ -12,15 +12,16 @@ use super::*;
 #[test]
 fn every_tool_has_a_schema_entry_and_every_ref_resolves() {
     let listed = crate::tools_list().as_array().unwrap();
-    for tool in listed {
+    let hosted: Vec<&Value> = crate::hosted_tools().flat_map(|(_, t)| t).collect();
+    for tool in listed.iter().chain(hosted.iter().copied()) {
         let name = tool["name"].as_str().unwrap();
         assert!(
             registry().tool(name).is_some(),
             "{name} has no schema entry"
         );
     }
-    // The rest are the tools built-in extensions add, checked here before they get them.
-    assert_eq!(registry().tools.len(), listed.len() + 14);
+    // The rest are the tools Connectors adds, checked here before it gets them.
+    assert_eq!(registry().tools.len(), listed.len() + hosted.len() + 7);
 }
 
 #[test]

@@ -6965,24 +6965,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "vorn-adapters"
-version = "0.0.0"
-dependencies = [
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "toml 1.1.7+spec-1.1.0",
- "vorn-agents",
- "vorn-analysis",
- "vorn-extensions",
- "vorn-hooks",
- "vorn-recovery",
- "vorn-screen",
- "vorn-term-proto",
-]
-
-[[package]]
 name = "vorn-agents"
 version = "0.0.0"
 dependencies = [
@@ -6998,6 +6980,7 @@ dependencies = [
  "toml 1.1.7+spec-1.1.0",
  "vorn-analysis",
  "vorn-recovery",
+ "vorn-remote",
  "vorn-screen",
  "vorn-spawn",
  "vorn-term-proto",
@@ -7017,7 +7000,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-app"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "embed-resource",
  "futures-util",
@@ -7067,20 +7050,28 @@ dependencies = [
 
 [[package]]
 name = "vorn-bench-ext-tiers"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "libc",
  "serde_json",
  "tempfile",
  "tokio",
  "vorn-bench-crash",
+ "vorn-bench-load",
  "vorn-bench-rss",
+ "vorn-bench-widget",
  "vorn-bench-worktrees",
- "vorn-ext-widget",
  "vorn-extension-sdk",
  "vorn-extensions",
  "vorn-guest-build",
  "vorn-spawn",
+]
+
+[[package]]
+name = "vorn-bench-load"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
 ]
 
 [[package]]
@@ -7094,6 +7085,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vorn-bench-widget"
+version = "0.0.0"
+dependencies = [
+ "vorn-extension-sdk",
+]
+
+[[package]]
 name = "vorn-bench-worktrees"
 version = "0.0.0"
 dependencies = [
@@ -7102,7 +7100,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-cli"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -7118,7 +7116,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uuid",
- "vorn-adapters",
+ "vorn-agents",
  "vorn-app",
  "vorn-extensions",
  "vorn-layout",
@@ -7130,7 +7128,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-components"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "serde_json",
  "vorn-tree",
@@ -7150,7 +7148,6 @@ dependencies = [
  "ureq",
  "url",
  "uuid",
- "vorn-adapters",
  "vorn-agents",
  "vorn-extensions",
  "vorn-mcp",
@@ -7197,84 +7194,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "vorn-ext-blocks"
-version = "0.0.0"
-dependencies = [
- "serde",
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-browser"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "url",
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-device"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-files"
-version = "0.0.0"
-dependencies = [
- "serde",
- "vorn-extension-sdk",
-]
-
-[[package]]
 name = "vorn-ext-probe"
-version = "0.0.0"
-dependencies = [
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-ssh"
-version = "0.0.0"
-dependencies = [
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-tasks"
-version = "0.0.0"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "tempfile",
- "uuid",
- "vorn-extension-sdk",
- "vorn-mcp",
- "vorn-store",
-]
-
-[[package]]
-name = "vorn-ext-widget"
-version = "0.0.0"
-dependencies = [
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-workflows"
-version = "0.0.0"
-dependencies = [
- "vorn-extension-sdk",
-]
-
-[[package]]
-name = "vorn-ext-worktrees"
 version = "0.0.0"
 dependencies = [
  "vorn-extension-sdk",
@@ -7300,6 +7220,8 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
  "regress",
+ "rustix 1.1.5",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7308,7 +7230,6 @@ dependencies = [
  "tokio",
  "toml 1.1.7+spec-1.1.0",
  "tracing",
- "vorn-adapters",
  "vorn-agents",
  "vorn-extensions",
  "vorn-guest-build",
@@ -7317,6 +7238,7 @@ dependencies = [
  "vorn-tree",
  "wasmtime",
  "wasmtime-wasi",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7373,7 +7295,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-logfile"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "tempfile",
 ]
@@ -7391,7 +7313,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-phone"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "serde",
  "serde_json",
@@ -7470,7 +7392,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-scale-bench"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "futures-util",
  "libc",
@@ -7497,7 +7419,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-sessiond"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "crc32fast",
  "libc",
@@ -7545,7 +7467,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
- "vorn-adapters",
  "vorn-agents",
  "vorn-protocol",
  "vorn-workflow-file",
@@ -7582,7 +7503,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-vault"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "apple-native-keyring-store",
  "keyring-core",
@@ -7595,7 +7516,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-web"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -7639,7 +7560,7 @@ dependencies = [
 
 [[package]]
 name = "vorn-workflow-bench"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "futures-util",
  "libc",
@@ -7667,7 +7588,6 @@ dependencies = [
  "tracing",
  "uuid",
  "vorn-connectors",
- "vorn-ext-tasks",
  "vorn-extensions",
  "vorn-protocol",
  "vorn-work",
@@ -7689,7 +7609,7 @@ dependencies = [
 
 [[package]]
 name = "vornd"
-version = "0.8.0-beta.20"
+version = "0.8.0-beta.21"
 dependencies = [
  "bytes",
  "chrono",
@@ -7703,6 +7623,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tokio-rustls",
@@ -7712,15 +7633,12 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "vorn-adapters",
  "vorn-agents",
  "vorn-connectors",
  "vorn-engine",
- "vorn-ext-tasks",
  "vorn-extensions",
  "vorn-git",
  "vorn-grid-client",
- "vorn-guest-build",
  "vorn-hooks",
  "vorn-layout",
  "vorn-logfile",

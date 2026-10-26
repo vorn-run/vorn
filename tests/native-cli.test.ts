@@ -91,7 +91,7 @@ const HEADLESS = [
   },
   {
     id: '7e7e7e7e-1111-2222-3333-444455556666',
-    agentType: 'opencode',
+    agentType: 'gemini',
     projectName: 'vorn',
     projectPath: '/work/vorn',
     status: 'exited'
@@ -190,7 +190,7 @@ interface Scripted {
 type Script = (call: Call) => { result: unknown } | { error: string } | { close: number } | null
 
 /** The agents vornd lists as on, as its shipped adapters start. */
-const AGENTS_ON = ['claude', 'copilot', 'codex', 'opencode', 'gemini']
+const AGENTS_ON = ['claude', 'copilot', 'codex', 'gemini']
 
 const script: Script = ({ method, params }) => {
   const p = (params ?? {}) as Record<string, unknown>
@@ -492,7 +492,7 @@ describe.skipIf(!vornBinary)('vorn', () => {
           { project: outside }
         )
         await call(['session', 'start', '--agent', 'claude', '--headless', '--json'])
-        await call(['session', 'start', '--agent', 'opencode', '--project', 'brand-new'])
+        await call(['session', 'start', '--agent', 'gemini', '--project', 'brand-new'])
       } finally {
         fs.rmSync(parent, { recursive: true, force: true })
       }

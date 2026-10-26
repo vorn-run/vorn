@@ -139,22 +139,58 @@ impl Daemon {
         }
     }
 
-    /// Starts the work model ([`crate::native::work`]) once vornd has a
+    /// Installs the shipped set ([`crate::shipped`]) through the same path as
+    /// any package, offline, before the extension host reads the packages:
+    /// on a first launch, and whenever this build carries a newer version.
+    /// Says which it installed or updated, for [`Daemon::prepare_shipped`].
+    pub async fn install_shipped(&self) -> Vec<String> {
+        let Some(dir) = self.native.database().and_then(std::path::Path::parent) else {
+            return Vec::new();
+        };
+        let packages = dir.join("connectors");
+        let installs = self.native.installs(dir);
+        let record = vorn_extensions::shipped::Record::beside(&packages);
+        let Ok(synced) = tokio::task::spawn_blocking(move || {
+            vorn_extensions::shipped::sync(&installs, crate::shipped::SET, &record)
+        })
+        .await
+        else {
+            return Vec::new();
+        };
+        if synced.installed.is_empty() && synced.updated.is_empty() {
+            return Vec::new();
+        }
+        debug!(installed = ?synced.installed, updated = ?synced.updated, "the shipped set");
+        let adapters = Arc::clone(self.native.adapters());
+        let _ = tokio::task::spawn_blocking(move || adapters.load_installed(&packages)).await;
+        [synced.installed, synced.updated].concat()
+    }
+
+    /// Compiles the components of the shipped packs just installed, in the
+    /// background, as an install from Settings does, so no first use waits.
+    pub fn prepare_shipped(&self, ids: Vec<String>) {
+        let Some(router) = self.native.extensions().map(|e| Arc::clone(e.router())) else {
+            return;
+        };
+        if ids.is_empty() {
+            return;
+        }
+        tokio::spawn(async move {
+            for id in ids {
+                if let Err(err) = router.prepare_installed(&id).await {
+                    warn!("[extensions] {err}");
+                }
+            }
+        });
+    }
+
+    /// Opens the work model ([`crate::native::work`]) once vornd has a
     /// database, its own address and a credential for it: the desktop's, or
-    /// the local one published beside the database.
-    pub fn start_work(&self) {
+    /// the local one published beside the database. It answers calls from
+    /// here on; [`Self::start_work`] sets it running.
+    pub fn open_work(&self) {
         use crate::native::work::{db::Db, host::TOPICS, Work};
         let native = &self.native;
-        if let Some(dir) = native.database().and_then(std::path::Path::parent) {
-            use crate::native::extensions::builtin::{switched_on, tasks::TasksBuiltin};
-            // The extension host's registry keeps the switch; until it starts, the file says.
-            let on = switched_on(
-                &dir.join("builtins.json"),
-                crate::native::extensions::builtin::tasks::ID,
-                true,
-            );
-            native.set_tasks(TasksBuiltin::new(native, on));
-        }
         let (Some(db_path), Some(addr)) = (
             native.database().map(std::path::Path::to_path_buf),
             self.listen.get().copied(),
@@ -174,8 +210,16 @@ impl Daemon {
         };
         let loopback = Arc::new(crate::mcp::Loopback::with_topics(addr, &token, TOPICS));
         let work = Work::new(native, db, loopback);
-        native.set_work(Arc::clone(&work));
-        work.start();
+        native.set_work(work);
+    }
+
+    /// Sets the work model's scheduler and resumed runs going. This waits
+    /// for the installed extensions, as Workflows brings the trigger and
+    /// node types a missed schedule or a resumed run needs.
+    pub fn start_work(&self) {
+        if let Some(work) = self.native.work() {
+            work.start();
+        }
     }
 
     /// Starts the endpoint agents' hooks post to ([`crate::native::hooks`]).
@@ -285,11 +329,13 @@ impl Daemon {
         router_settings.blobs = Some(db_dir.join("extension-files"));
         // Tasks keeps its images where the board always kept them.
         router_settings.placed_blobs = vec![(
-            crate::native::extensions::builtin::tasks::ID.to_owned(),
-            db_dir.join(crate::native::extensions::builtin::tasks::IMAGES),
+            crate::native::extensions::hosted::tasks::ID.to_owned(),
+            db_dir.join(crate::native::extensions::hosted::tasks::IMAGES),
         )];
         router_settings.compiler = wasm_compiler();
         router_settings.preferences = Some(db_dir.join("extension-preferences.json"));
+        let installs = native.installs(&db_dir);
+        router_settings.trust = installs.trust().clone();
         let router = Router::new(
             store.clone(),
             lifecycle,
@@ -297,7 +343,6 @@ impl Daemon {
             router_settings,
             Arc::clone(native.events()),
         );
-        let installs = native.installs(&db_dir);
         let around = Wired {
             native: Arc::downgrade(native),
             loopback: Arc::new(crate::mcp::Loopback::new(addr, &token)),
@@ -320,7 +365,6 @@ impl Daemon {
         }
         native.set_extensions(Arc::clone(&extensions));
         extensions.start();
-        crate::native::extensions::builtin::precompile(extensions.router());
     }
 
     /// Answers `vornd:spawn` from clients from now on, for tests.
@@ -737,7 +781,7 @@ fn health(daemon: &Daemon) -> Response<Body> {
         "registry": registry_report(daemon),
         "hooks": daemon.native.hooks_activity(),
         "mcp": daemon.mcp.get().map(|mcp| json!({ "sessions": mcp.sessions() })),
-        "extensions": daemon.native.extensions().map(|e| json!({ "hosts": e.hosts(), "panes": e.panes() })),
+        "extensions": daemon.native.extensions().map(|e| json!({ "hosts": e.hosts(), "services": e.services(), "panes": e.panes() })),
     });
     let mut res = Response::new(full(body.to_string()));
     res.headers_mut().insert(

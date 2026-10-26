@@ -1,0 +1,7 @@
+[package]
+name = "ext-good"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+vorn-extension-sdk = { git = "https://example.invalid/vorn" }

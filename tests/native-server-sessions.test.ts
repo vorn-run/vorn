@@ -17,6 +17,7 @@ import type { HeadlessSession, TerminalSession } from '../packages/shared/src/ty
 import { spawnsRealServers } from './helpers/one-at-a-time'
 import {
   Watcher,
+  agentListed,
   answered,
   removeRealServerDirs,
   repository,
@@ -349,8 +350,10 @@ describe.skipIf(!runnable)('the terminals vornd creates and changes, against the
   let run: Record<string, unknown>
 
   beforeAll(async () => {
-    const server = await startRealServer()
+    // OpenCode is not installed by default: it comes from the catalog, as a person installs it.
+    const server = await startRealServer(undefined, { installed: ['vorn.agents.opencode'] })
     try {
+      await agentListed(server.vornd, 'opencode')
       run = normalizeRun(await scenario(server), server.dirs)
     } catch (err) {
       throw new Error(`${(err as Error).message}\n${server.log.join('').slice(-4000)}`, {

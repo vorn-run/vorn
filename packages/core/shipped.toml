@@ -1,0 +1,79 @@
+# The extensions the installer carries so a first launch works offline,
+# installed like any other. Each is pinned to its released pack's version
+# and sha256; vornd's build embeds `<id>-<version>.vorn.tgz` from
+# $VORN_SHIPPED_DIR (else packages/core/shipped/), and scripts/shipped.mjs
+# fetches the packs vorn-run/extensions' CI built at `rev`.
+rev = "bea3a79a1765328355e6698ab4165d31646fc7ce"
+
+[[extension]]
+id = "vorn.worktrees"
+path = "worktrees"
+version = "1.0.0"
+sha256 = "d3b9571dca202b7d7df846fb7fe575271c679fa30663ee0bd32e0b7bba163889"
+
+[[extension]]
+id = "vorn.agents.claude"
+path = "adapters/claude"
+version = "1.0.0"
+sha256 = "21e0a8d3a2765e866fc504139e759aeac1813ff114bd1d8c9bc951b1a236b516"
+
+[[extension]]
+id = "vorn.agents.copilot"
+path = "adapters/copilot"
+version = "1.0.0"
+sha256 = "5db3b8e9da814ed04dc0214778de671e4e08c26e2cd7a864eba24df77d892ff9"
+
+[[extension]]
+id = "vorn.agents.codex"
+path = "adapters/codex"
+version = "1.0.0"
+sha256 = "d71f199cad90fd207023da1e287fe124cdb9f19574912f6d93cbaac7d850a16c"
+
+[[extension]]
+id = "vorn.agents.gemini"
+path = "adapters/gemini"
+version = "1.0.0"
+sha256 = "294e8ac505024b229395c8f550d8199e3df577677400bb4f8302fe7699b62772"
+
+[[extension]]
+id = "vorn.agents.hermes"
+path = "adapters/hermes"
+version = "1.0.0"
+sha256 = "af1989feb83ed5d2bf1008a4888627046f40fe15210409ff35faaff9dc244172"
+default = false
+
+[[extension]]
+id = "vorn.files"
+path = "files"
+version = "1.0.0"
+sha256 = "f791789e03964f1a808815e3eacc250e882835361ee5fc0c32ba2a55f37e4793"
+
+[[extension]]
+id = "vorn.blocks"
+path = "blocks"
+version = "1.0.0"
+sha256 = "2c84b8617c3b68c61323c8c8415235442b2fed1ffaac422719f656a6aca61856"
+
+[[extension]]
+id = "vorn.browser"
+path = "browser"
+version = "1.0.0"
+sha256 = "db37b82a6d3c248aec3eca265fd8693447972f6e2c26f1a34e40cb6750d39ce0"
+
+[[extension]]
+id = "vorn.ssh"
+path = "ssh"
+version = "1.0.0"
+sha256 = "01bdb2a6f24c7b9f00821f38638bbd1eadb5ddd35d36bbcfbeecf9d791cab312"
+
+[[extension]]
+id = "vorn.tasks"
+path = "tasks"
+version = "1.0.0"
+sha256 = "71c39f21a20e132713f31ebbbc8913ea1381f11f31c50362590d9958215bc26f"
+
+[[extension]]
+id = "vorn.workflows"
+path = "workflows"
+version = "1.0.0"
+sha256 = "1b2aa5c71b766cd3e1ab81e0b23b5fc345706b4f8f0e7d1410ec048148f9ae08"

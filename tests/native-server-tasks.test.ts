@@ -24,6 +24,7 @@ import {
   type RealServer,
   Watcher,
   removeRealServerDirs,
+  inCatalog,
   runnable,
   startRealServer,
   stopRealServer,
@@ -36,6 +37,9 @@ interface Wrote {
   ok: boolean
   task?: TaskConfig
 }
+
+/** Whether the Widget's pack was fetched, to install from the catalog. */
+const widget = inCatalog('vorn.widget')
 
 describe.runIf(runnable)('the task board in vornd', () => {
   let server: RealServer
@@ -65,7 +69,7 @@ describe.runIf(runnable)('the task board in vornd', () => {
   }
 
   beforeAll(async () => {
-    server = await startRealServer()
+    server = await startRealServer(undefined, { installed: widget ? ['vorn.widget'] : [] })
     client = await Watcher.open(server.vornd)
     project = 'board'
     await addProject(project, server.dirs.work)
@@ -255,12 +259,10 @@ describe.runIf(runnable)('the task board in vornd', () => {
     expect(all.length).toBeGreaterThan(0)
   })
 
-  it('lists each terminal in the Widget once it is switched on', async () => {
+  it.runIf(widget)('lists each terminal in the Widget installed from the catalog', async () => {
     type Agent = { id: string; name?: string; agent?: string; status?: string }
     const agents = (): Promise<Agent[]> =>
       call<Agent[]>('extension:rows', { id: 'vorn.widget', collection: 'agents' })
-    expect(await agents()).toEqual([])
-    await call('extension:setBuiltin', { id: 'vorn.widget', on: true })
     const shell = await call<TerminalSession>('shell:create', server.dirs.work)
     let entry: Agent | undefined
     await until('the widget to list the shell', async () => {
@@ -269,6 +271,5 @@ describe.runIf(runnable)('the task board in vornd', () => {
     })
     expect(Object.keys(entry!).sort()).toEqual(['agent', 'id', 'name', 'status'])
     await call('terminal:kill', shell.id)
-    await call('extension:setBuiltin', { id: 'vorn.widget', on: false })
   })
 })

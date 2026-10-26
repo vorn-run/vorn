@@ -212,7 +212,8 @@ async fn packages_installed_for_0_9_are_relabelled_once_at_start() {
         next_id: 0,
     };
     let packs = c.result("connector:listPacks", json!(null)).await;
-    assert_eq!(packs[0]["id"], "tickets", "{packs}");
+    let mut listed = packs.as_array().into_iter().flatten();
+    assert!(listed.any(|p| p["id"] == "tickets"), "{packs}");
     let toml = served
         .data
         .path()

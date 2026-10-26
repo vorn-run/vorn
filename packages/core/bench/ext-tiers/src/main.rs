@@ -654,7 +654,7 @@ fn main() {
             .unwrap_or_else(|e| panic!("{e}"));
         compiled.insert(ext.id.to_owned(), json!(stats::round(ms(t.elapsed()))));
         let source = match ext.id {
-            "bench.widget" => crates.join("../../extensions/widget/src"),
+            "bench.widget" => crates.join("widget/src"),
             "bench.worktrees" => crates.join("worktrees/src"),
             "bench.rss" => crates.join("rss/src"),
             _ => crates.join("crash/src"),
