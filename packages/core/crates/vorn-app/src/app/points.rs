@@ -249,22 +249,23 @@ impl App {
 
     /// What preference `key` of extension `id` holds now, as its page shows it.
     fn preference(&self, id: &str, key: &str) -> Value {
-        let lists = [&self.st.points.builtins, &self.st.plugins.packs];
-        lists
-            .into_iter()
-            .flatten()
-            .filter(|e| e.get("id").and_then(Value::as_str) == Some(id))
-            .filter_map(|e| e.get("preferences").and_then(Value::as_array))
-            .flatten()
-            .find(|p| p.get("id").and_then(Value::as_str) == Some(key))
-            .and_then(|p| p.get("value").cloned())
-            .unwrap_or(Value::Null)
+        crate::points::preference(&[&self.st.points.builtins, &self.st.plugins.packs], id, key)
     }
 
     fn show_preference(&mut self, id: &str, key: &str, value: &Value) {
         self.st.points.set_preference(id, key, value);
         crate::points::set_preference(&mut self.st.plugins.packs, id, key, value);
         self.st.plugins.rebuild();
+        self.sync_task_view();
+    }
+
+    /// Moves Tasks to its Default view when that preference is first read
+    /// or changes; switching the view in Tasks lasts until then.
+    pub(super) fn sync_task_view(&mut self) {
+        let view = self.preference(crate::screen::tasks::board::TASKS, "default_view");
+        self.st
+            .tasks
+            .set_default_view(crate::tasks::Mode::from_preference(&view));
     }
 
     /// A tree field that submits on blur lost focus: what it holds is told
@@ -394,6 +395,7 @@ impl App {
                 Ok(Value::Array(list)) => {
                     self.st.points.builtins = list;
                     self.st.points.builtins_loaded = true;
+                    self.sync_task_view();
                 }
                 Ok(_) => {}
                 Err(e) => {

@@ -261,6 +261,7 @@ impl App {
         }
         let mode = match view {
             Some("tabs") => Some(LayoutMode::Tabs),
+            Some("list") => Some(LayoutMode::List),
             Some("grid" | "flexible") => Some(LayoutMode::Grid),
             _ => None,
         };

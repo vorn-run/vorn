@@ -344,7 +344,7 @@ impl App {
     }
 
     /// Re-read what the page shows; the catalog only when it opens.
-    fn plug_load(&mut self, catalog: bool) {
+    pub(super) fn plug_load(&mut self, catalog: bool) {
         let p = &mut self.st.plugins;
         p.loads += 4 + u8::from(catalog);
         self.st.ext.loaded = false;
@@ -461,7 +461,7 @@ impl App {
     }
 
     /// `inspect`: stage the pack, then install it or show the sheet.
-    fn plug_inspect(&mut self, key: &str, direct: bool) {
+    pub(super) fn plug_inspect(&mut self, key: &str, direct: bool) {
         let p = &mut self.st.plugins;
         p.report = None;
         p.pending = None;
@@ -754,6 +754,7 @@ impl App {
                     p.progress.remove(&id);
                 }
                 self.plug_loaded();
+                self.sync_task_view();
             }
             PlugCall::Catalog { load } => {
                 if let Ok(v) = &answer {

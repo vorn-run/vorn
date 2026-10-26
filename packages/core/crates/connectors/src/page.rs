@@ -1,11 +1,12 @@
 //! The Connections page, drawn as an element tree (`page/tree.rs`):
-//! every connection with what it triggers and when it last synced, Test,
-//! Import now, Sign in when its window is signed out, Roll back and Remove;
-//! and adding one, from picking an installed connector to its settings.
+//! every connection with what it triggers, when it last synced and what its
+//! key is; Import now and Sign in when its window is signed out on hover;
+//! Test, Rotate key, Roll back and Remove in its menu; and adding one, from
+//! picking an installed connector to its settings.
 //! The rows come from the built-in's own calls, so the page says what the
 //! rest of the app says.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
@@ -85,6 +86,62 @@ fn draft(c: &Connectors) -> std::sync::MutexGuard<'_, Option<Draft>> {
     c.draft.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The page's keys: the field being replaced, by connection, what replacing it
+/// last said, and the connections whose last test failed.
+#[derive(Debug, Clone, Default)]
+pub struct Keys {
+    rotating: Option<(String, String)>,
+    error: Option<String>,
+    failing: BTreeSet<String>,
+}
+
+fn keys(c: &Connectors) -> std::sync::MutexGuard<'_, Keys> {
+    c.keys.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A connection's key line from its `listKeys` entry, and its state: `failing`
+/// after a failed test, `locked` when this machine cannot read it, else `ok`.
+fn key_line(key: &Value, failing: bool) -> (String, &'static str) {
+    if failing {
+        return ("Key no longer works · Rotate".to_owned(), "failing");
+    }
+    let fields = key
+        .get("fields")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if fields
+        .iter()
+        .any(|f| f.get("readable") == Some(&Value::Bool(false)))
+    {
+        return (
+            "Key locked: this machine cannot read it".to_owned(),
+            "locked",
+        );
+    }
+    let parts: Vec<String> = fields
+        .iter()
+        .map(|f| {
+            let label = Some(text(f, "label"))
+                .filter(|l| !l.is_empty())
+                .unwrap_or("Key");
+            let shown = match f.get("envNames").and_then(Value::as_array) {
+                Some(names) => names
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                None => text(f, "hint").to_owned(),
+            };
+            if shown.is_empty() {
+                format!("{label} saved")
+            } else {
+                format!("{label} · {shown}")
+            }
+        })
+        .collect();
+    (parts.join(" · "), "ok")
+}
+
 /// The env a connection asks for: none when nothing is signed in to, and
 /// none a borrowed sign-in already covers, as the desktop's form asks.
 fn fields(manifest: &Value) -> Vec<Value> {
@@ -143,6 +200,11 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
         .filter(|p| text(p, "kind") != "extension")
         .collect();
     let builtins = list(ask(c, "connector:list", Value::Null).await);
+    let held_keys = list(ask(c, "connection:listKeys", Value::Null).await);
+    let (rotating, key_error, failing) = {
+        let k = keys(c);
+        (k.rotating.clone(), k.error.clone(), k.failing.clone())
+    };
     let listed: Vec<Value> = list(ask(c, "connection:list", json!({})).await)
         .into_iter()
         .filter(|conn| !conns::is_implicit(conn))
@@ -211,9 +273,39 @@ pub async fn rows(c: &Arc<Connectors>) -> Vec<(&'static str, Vec<Value>)> {
             if let Some(v) = pack.map(|p| text(p, "version")).filter(|v| !v.is_empty()) {
                 group.push(format!("v{v}"));
             }
+            let conn_id = text(conn, "id");
+            let key = held_keys.iter().find(|k| text(k, "connectionId") == conn_id);
+            let (key_line, key_state) = key.map_or((String::new(), ""), |k| {
+                key_line(k, failing.contains(conn_id))
+            });
+            let key_fields: Vec<Value> = key
+                .and_then(|k| k.get("fields").and_then(Value::as_array))
+                .into_iter()
+                .flatten()
+                .map(|f| json!({ "key": text(f, "key"), "label": text(f, "label") }))
+                .collect();
+            let rotating_field = rotating
+                .as_ref()
+                .filter(|(id, _)| id == conn_id)
+                .map(|(_, field)| field.as_str());
+            let rotating_label = rotating_field.map_or(String::new(), |field| {
+                key_fields
+                    .iter()
+                    .find(|f| text(f, "key") == field)
+                    .map(|f| text(f, "label"))
+                    .filter(|l| !l.is_empty())
+                    .unwrap_or("key")
+                    .to_owned()
+            });
             json!({
                 "id": conn.get("id"),
                 "name": text(conn, "name"),
+                "key_line": key_line,
+                "key_state": key_state,
+                "key_fields": key_fields,
+                "rotating": rotating_field.is_some(),
+                "rotating_label": rotating_label,
+                "rotate_error": if rotating_field.is_some() { key_error.clone().unwrap_or_default() } else { String::new() },
                 "connector": id,
                 "connector_name": service,
                 "connector_line": group.join(" · "),
@@ -537,6 +629,12 @@ pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Valu
         "test" => {
             let r = ask(c, "connection:preflight", json!(id)).await?;
             let said = text(&r, "message");
+            let failed = r.get("ok") == Some(&Value::Bool(false));
+            if failed {
+                keys(c).failing.insert(id.clone());
+            } else {
+                keys(c).failing.remove(&id);
+            }
             match r.get("ok") {
                 Some(Value::Bool(true)) => toast(format!("It answers. {said}").trim().to_owned()),
                 Some(Value::Bool(false)) => Err(said.to_owned()),
@@ -585,6 +683,49 @@ pub async fn act(c: &Arc<Connectors>, action: &str, args: &Value) -> Result<Valu
                 .and_then(Value::as_str)
                 .unwrap_or("");
             toast(format!("Back to v{v}"))
+        }
+        // `id` is `connection|field`: the field whose value is replaced.
+        "rotate" => {
+            let (conn, field) = id
+                .rsplit_once('|')
+                .ok_or("Couldn't tell which key to rotate")?;
+            let mut k = keys(c);
+            k.rotating = Some((conn.to_owned(), field.to_owned()));
+            k.error = None;
+            Ok(Value::Null)
+        }
+        "unrotate" => {
+            let mut k = keys(c);
+            k.rotating = None;
+            k.error = None;
+            Ok(Value::Null)
+        }
+        "newkey" => {
+            let value = text(args, "value").to_owned();
+            let field = keys(c)
+                .rotating
+                .clone()
+                .filter(|(conn, _)| *conn == id)
+                .map(|(_, field)| field)
+                .ok_or("Nothing is being rotated")?;
+            if value.trim().is_empty() {
+                return Err("Paste the new key first".to_owned());
+            }
+            let params = json!({ "connectionId": id, "field": field, "plaintext": value });
+            let r = ask(c, "connection:rotateSecret", params).await?;
+            if r.get("ok") != Some(&Value::Bool(true)) {
+                let e = Some(text(&r, "error"))
+                    .filter(|e| !e.is_empty())
+                    .unwrap_or("Vorn could not save the new key")
+                    .to_owned();
+                keys(c).error = Some(e.clone());
+                return Err(e);
+            }
+            let mut k = keys(c);
+            k.rotating = None;
+            k.error = None;
+            k.failing.remove(&id);
+            toast("Saved the new key".to_owned())
         }
         "add" => {
             *draft(c) = Some(Draft::default());
@@ -664,6 +805,28 @@ mod tests {
             chips(&http),
             ["baseUrl: https://api.acme.dev", "secret: ••••••"]
         );
+    }
+
+    #[test]
+    fn a_key_line_says_what_the_key_is_or_that_it_stopped_working() {
+        let token = json!({ "fields": [{ "key": "secret", "label": "Token", "readable": true,
+            "hint": "ghp_••••4f2a" }] });
+        assert_eq!(
+            key_line(&token, false),
+            ("Token · ghp_••••4f2a".to_owned(), "ok")
+        );
+        assert_eq!(
+            key_line(&token, true),
+            ("Key no longer works · Rotate".to_owned(), "failing")
+        );
+        let env = json!({ "fields": [{ "key": "secretEnv", "label": "Secrets", "readable": true,
+            "envNames": ["GH_TOKEN", "NPM_TOKEN"] }] });
+        assert_eq!(key_line(&env, false).0, "Secrets · GH_TOKEN, NPM_TOKEN");
+        let locked = json!({ "fields": [{ "key": "secret", "label": "", "readable": false }] });
+        assert_eq!(key_line(&locked, false).1, "locked");
+        let bare =
+            json!({ "fields": [{ "key": "secret", "label": "", "readable": true, "hint": "" }] });
+        assert_eq!(key_line(&bare, false).0, "Key saved");
     }
 
     #[test]

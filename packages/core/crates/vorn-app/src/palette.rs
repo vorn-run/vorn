@@ -487,7 +487,8 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
     }
     let next_layout = match LayoutMode::from_config(&store.config) {
         LayoutMode::Grid => LayoutMode::Tabs,
-        LayoutMode::Tabs => LayoutMode::Grid,
+        LayoutMode::Tabs => LayoutMode::List,
+        LayoutMode::List => LayoutMode::Grid,
     };
     vec![
         Entry::new(
@@ -567,11 +568,11 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
         stop,
         Entry::new(
             Cat::Actions,
-            "Toggle Layout (Grid/Tabs)",
+            "Toggle Layout (Grid/Tabs/List)",
             Glyph::Icon("layout-dashboard"),
             Act::Layout(next_layout),
         )
-        .keys(&["grid", "tabs", "layout", "switch", "view"]),
+        .keys(&["grid", "tabs", "list", "layout", "switch", "view"]),
         Entry::new(
             Cat::Actions,
             "Show Welcome Guide",

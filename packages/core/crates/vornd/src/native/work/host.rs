@@ -144,15 +144,22 @@ pub fn without_definition(run: &WorkflowExecution) -> Value {
 
 impl Host for VorndHost {
     /// What the engine reads of the configuration: projects, tasks,
-    /// workflows and the stored defaults. A store beside the server has none
-    /// of the app's fallbacks, so `loadConfig` is not read whole.
+    /// workflows, the stored defaults and Workflows' Step time limit. A store
+    /// beside the server has none of the app's fallbacks, so `loadConfig` is
+    /// not read whole.
     async fn config(&self) -> Option<Value> {
+        let limit = self.native.upgrade().and_then(|n| {
+            n.extensions()?
+                .router()
+                .preference(vorn_workflows::ID, vorn_workflows::STEP_TIME_LIMIT)
+        });
         self.db
-            .run(|store| {
+            .run(move |store| {
                 let config = json!({
                     "projects": store.call("dbListProjects", json!([])).ok()?,
                     "workflows": store.call("dbListWorkflows", json!([])).ok()?,
                     "defaults": store.stored_defaults().ok()?,
+                    "preferences": { vorn_workflows::STEP_TIME_LIMIT: limit },
                 });
                 Some(vorn_work::js_numbers(config))
             })
@@ -236,10 +243,21 @@ impl Host for VorndHost {
     fn publish(&self, run: &WorkflowExecution) {
         self.broadcast("workflow:runUpdated", without_definition(run));
         if let Some(native) = self.native.upgrade() {
-            if let Some(told) = native.waiting().changed(run) {
+            let waiting = native.waiting();
+            if let Some(told) = waiting.changed(run) {
                 native
                     .events()
                     .emit(super::waiting::WORKFLOW_GATES, || told);
+            }
+            for told in waiting.signing_in(run) {
+                native
+                    .events()
+                    .emit(super::waiting::WORKFLOW_SIGN_IN, || told);
+            }
+            if let Some(told) = waiting.ended(run) {
+                native
+                    .events()
+                    .emit(super::waiting::WORKFLOW_ENDED, || told);
             }
         }
     }

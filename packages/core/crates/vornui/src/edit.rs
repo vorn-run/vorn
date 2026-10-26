@@ -21,6 +21,11 @@ pub trait Clipboard {
     fn has_image(&mut self) -> bool {
         false
     }
+    /// The files it holds (copied in a file manager), which a terminal
+    /// pastes as their paths rather than their names.
+    fn files(&mut self) -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
 }
 
 /// A clipboard that lives as long as the [`Ui`](crate::Ui).

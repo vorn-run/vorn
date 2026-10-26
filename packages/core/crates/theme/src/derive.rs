@@ -142,6 +142,11 @@ impl Deriver<'_> {
             ScrollThumbHover => self.ink(0.2),
             SliderTrack => self.gray(if dark { 0.94 } else { 0.15 }),
             Shadow => Rgba8::BLACK,
+            MaterialSidebar => self
+                .get(SurfacePanel)
+                .with_alpha(if dark { 0.78 } else { 0.3 }),
+            MaterialContent => self.get(SurfaceBase).with_alpha(0.82),
+            MaterialGlass => Rgba8::BLACK.with_alpha(if dark { 0.35 } else { 0.0 }),
             Gray100 => self.gray(0.94),
             Gray200 => self.gray(0.88),
             Gray300 => self.gray(0.8),

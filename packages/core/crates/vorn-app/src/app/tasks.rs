@@ -690,15 +690,7 @@ impl App {
             TaskAct::Filter(f) => self.st.tasks.filter = f,
             TaskAct::Source(s) => self.st.tasks.source = s,
             TaskAct::ToggleArchived => self.st.tasks.archived = !self.st.tasks.archived,
-            TaskAct::Mode(m) => {
-                self.st.tasks.mode = m;
-                let mut config = self.store.config.clone();
-                if !config.get("defaults").is_some_and(Value::is_object) {
-                    config["defaults"] = json!({});
-                }
-                config["defaults"]["taskViewMode"] = json!(m.key());
-                self.save_config(config, Call::Quiet);
-            }
+            TaskAct::Mode(m) => self.st.tasks.mode = m,
             TaskAct::ToggleSection(s) => {
                 if !self.st.tasks.collapsed.remove(&s) {
                     self.st.tasks.collapsed.insert(s);

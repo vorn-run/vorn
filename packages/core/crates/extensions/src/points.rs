@@ -21,6 +21,8 @@ pub fn listed(manifest: &Manifest, settings: &Map<String, Value>) -> Vec<Value> 
             "kind": "themes",
             "id": manifest.id,
             "title": manifest.name,
+            "publisher": manifest.publisher,
+            "version": manifest.version,
             "appearance": theme.appearance.key(),
             "theme": manifest.theme,
         }));

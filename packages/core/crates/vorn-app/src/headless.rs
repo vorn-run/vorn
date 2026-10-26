@@ -17,10 +17,8 @@ const LOG_KEEP: usize = 80_000;
 
 /// The headless sessions shown, by the app's settings, project and workspace.
 pub fn shown<'a>(store: &crate::client::Store, st: &'a crate::state::State) -> Vec<&'a Headless> {
-    let show = store
-        .config
-        .pointer("/defaults/showHeadlessAgents")
-        .and_then(Value::as_bool)
+    let show = crate::workflows::preference(st, "showHeadlessAgents")
+        .as_bool()
         .unwrap_or(true);
     let workspace: HashSet<&str> = store
         .workspace_projects()

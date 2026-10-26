@@ -458,7 +458,7 @@ fn every_template_kind_draws_on_every_surface() {
     assert_eq!(app.st.dialog, None);
     shot.click(
         &mut app,
-        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Network))),
     );
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
@@ -496,7 +496,7 @@ fn every_template_kind_draws_on_every_surface() {
     shot.frame(&mut app);
     shot.click(
         &mut app,
-        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Network))),
     );
     shot.send(&mut app, key("Escape", 0, None));
     shot.frame(&mut app);
@@ -616,7 +616,7 @@ fn link_again(shot: &mut Shot, app: &mut App, turns: &str) {
     );
     shot.click(
         app,
-        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Network))),
     );
     shot.send(app, key("Escape", 0, None));
     shot.frame(app);

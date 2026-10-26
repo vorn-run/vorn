@@ -7,8 +7,12 @@ mod pages;
 
 pub use agents::agent_field_id;
 pub use pages::theme_tile_id;
-pub use pages::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
-pub(crate) use pages::{select_items, shell_panel};
+pub(crate) use pages::{
+    agent_picker, channel_items, font_picker, holder_items, notice_sources, shell_panel,
+    sound_items, theme_info, theme_picker,
+};
+pub(in crate::screen) use pages::{glyph, glyph_icon, icon_button};
+pub use pages::{AGENT_SEARCH, ROW_SLIDER, SHELL_PATH, THEME_SEARCH};
 
 use super::{c, white, Screen};
 use crate::act::Act;
@@ -32,24 +36,17 @@ fn nav_svg(cat: Category) -> String {
         Category::General => {
             r#"<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>"#
         }
-        Category::Updates => r#"<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/>"#,
         Category::Notifications => {
             r#"<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>"#
         }
         Category::Agents => {
             r#"<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>"#
         }
-        Category::Mcp => {
-            r#"<path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="4"/>"#
-        }
         Category::Connectors => {
             r#"<path d="M15.39 4.39a1 1 0 001.68-.474 2.5 2.5 0 113.014 3.015 1 1 0 00-.474 1.68l1.683 1.682a2.414 2.414 0 010 3.414L19.61 15.39a1 1 0 01-1.68-.474 2.5 2.5 0 10-3.014 3.015 1 1 0 01.474 1.68l-1.683 1.682a2.414 2.414 0 01-3.414 0L8.61 19.61a1 1 0 00-1.68.474 2.5 2.5 0 11-3.014-3.015 1 1 0 00.474-1.68l-1.683-1.682a2.414 2.414 0 010-3.414L4.39 8.61a1 1 0 011.68.474 2.5 2.5 0 103.014-3.015 1 1 0 01-.474-1.68l1.683-1.682a2.414 2.414 0 013.414 0z"/>"#
         }
         Category::Connections => {
             r#"<path d="M9 17H7A5 5 0 017 7h2"/><path d="M15 7h2a5 5 0 010 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/>"#
-        }
-        Category::Keys => {
-            r#"<circle cx="8" cy="12" r="4"/><line x1="12" y1="12" x2="21" y2="12"/><line x1="18" y1="12" x2="18" y2="16"/>"#
         }
         Category::Network => {
             r#"<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>"#
@@ -134,6 +131,40 @@ fn nav_button(s: &Screen<'_>, id: Id, label: &str, glyph: El, on: bool, rest: Rg
         .child(text(label, 13.0, fg).line_height(19.5).silent())
 }
 
+/// Back to app: a chevron and its label, on glass over the system's material.
+fn back_button(s: &Screen<'_>, back: Id, fg: Rgba) -> El {
+    let chevron = r#"<polyline points="15 18 9 12 15 6"/>"#;
+    let b = div()
+        .id(back)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .role(Role::Button, "Back to app");
+    let glass = super::chrome::glass(s)
+        .then(|| crate::ui::icons::lucide("chevron-left", 2.0))
+        .flatten();
+    let Some(svg) = glass else {
+        return b
+            .gap(8.0)
+            .child(icon(svg(chevron, 2.0), 16.0, fg))
+            .child(text("Back to app", 14.0, fg).line_height(20.0).silent());
+    };
+    b.h(32.0)
+        .pl(8.0)
+        .pr(12.0)
+        .rounded(16.0)
+        .native_glass()
+        .child(div().size(16.0, 16.0).native_icon(&svg, 16.0, fg))
+        .child(
+            text("Back to app", 13.0, white(0.0))
+                .weight(500)
+                .line_height(18.0)
+                .native_label("Back to app", 13.0, fg)
+                .silent(),
+        )
+}
+
 fn sidebar(s: &Screen<'_>) -> El {
     let back = s.acts.on("settings", set(SetAct::Close));
     let back_fg = c(look::GRAY_400).mix(c(look::WHITE), s.ui.hover(back));
@@ -147,25 +178,7 @@ fn sidebar(s: &Screen<'_>) -> El {
         .pr(12.0)
         .shrink0()
         .border_bottom(1.0, white(0.06))
-        .child(
-            div()
-                .id(back)
-                .on(Action::Click)
-                .row()
-                .items_center()
-                .gap(8.0)
-                .role(Role::Button, "Back to app")
-                .child(icon(
-                    svg(r#"<polyline points="15 18 9 12 15 6"/>"#, 2.0),
-                    16.0,
-                    back_fg,
-                ))
-                .child(
-                    text("Back to app", 14.0, back_fg)
-                        .line_height(20.0)
-                        .silent(),
-                ),
-        );
+        .child(back_button(s, back, back_fg));
     let mut list = div()
         .id(Id::new("settings-nav"))
         .col()
@@ -187,7 +200,7 @@ fn sidebar(s: &Screen<'_>) -> El {
             ),
         );
         let mut items = div().col().gap(2.0);
-        for cat in cats.iter().filter(|c| c.shown()) {
+        for cat in cats.iter() {
             items = items.child(nav_item(s, *cat, c(look::GRAY_400)));
             for p in pages.iter().filter(|p| p.placed_after() == Some(*cat)) {
                 items = items.child(ext_item(s, p));
@@ -198,7 +211,7 @@ fn sidebar(s: &Screen<'_>) -> El {
     // Connections, the Connectors built-in's page, leads the extensions' pages.
     let mut pages: Vec<_> = pages
         .into_iter()
-        .filter(|p| p.placed_after().is_none_or(|c| !c.shown()))
+        .filter(|p| p.placed_after().is_none())
         .collect();
     pages.sort_by_key(|p| p.key() != CONNECTIONS_PAGE);
     let pages = pages.into_iter().map(|p| ext_item(s, p));
@@ -224,7 +237,11 @@ fn sidebar(s: &Screen<'_>) -> El {
         .w(224.0)
         .h_full()
         .shrink0()
-        .bg(c(look::SURFACE_SUNKEN))
+        .bg(if s.ui.see_through() {
+            crate::ui::theme::material::sidebar(true)
+        } else {
+            c(look::SURFACE_SUNKEN)
+        })
         .border_right(1.0, white(0.06))
         .role(Role::Navigation, "Settings")
         .child(header)
@@ -252,11 +269,8 @@ fn category_page(s: &Screen<'_>, cat: Category) -> El {
     match cat {
         Category::Appearance => pages::appearance(s),
         Category::General => pages::general(s),
-        Category::Updates => pages::updates(s),
         Category::Notifications => pages::notifications(s),
         Category::Agents => agents::page(s),
-        Category::Mcp => pages::mcp(s),
-        Category::Keys => pages::keys(s),
         Category::About => pages::about(s),
         Category::Connectors => super::plugins::page(s),
         Category::Connections => super::points::settings_page(s, CONNECTIONS_PAGE),
@@ -269,11 +283,16 @@ fn page_with(s: &Screen<'_>, body: El) -> El {
         .row()
         .w_full()
         .h_full()
-        .bg(c(look::SURFACE_OVERLAY))
+        .bg(if s.ui.see_through() {
+            crate::ui::theme::shadow(0.0)
+        } else {
+            c(look::SURFACE_OVERLAY)
+        })
         .child(sidebar(s))
         .child(
             div()
                 .id(CONTENT)
+                .bg(crate::ui::theme::material::content(s.ui.see_through()))
                 .col()
                 .items_center()
                 .grow()
@@ -321,52 +340,75 @@ pub(in crate::screen) fn header(title: &str, description: &str, actions: Option<
         .child_if(actions)
 }
 
-/// The label and description beside `control`, a note
-/// under the description, dimmed when `disabled`.
-pub(in crate::screen) fn row(
-    label: &str,
-    description: &str,
-    note: Option<&str>,
-    control: El,
-    disabled: bool,
-) -> El {
-    let mut left = div()
-        .col()
-        .child(
-            text(label, 14.0, c(look::GRAY_200))
-                .weight(500)
-                .line_height(20.0)
-                .role(Role::Label, label),
-        )
-        .child(
-            text(description, 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .mt(2.0)
-                .wrapping()
-                .silent(),
-        );
-    if let Some(n) = note {
-        left = left.child(
-            div().mt(6.0).pl(8.0).border_left(1.0, white(0.12)).child(
-                text(n, 12.0, c(look::GRAY_400))
-                    .line_height(16.0)
-                    .wrapping()
-                    .silent(),
-            ),
-        );
-    }
+/// A title above a [`card`]: `text-[13px] font-semibold`, faint.
+pub(in crate::screen) fn section(title: &str) -> El {
+    text(title, 13.0, c(look::GRAY_500))
+        .weight(600)
+        .line_height(18.0)
+        .pl(4.0)
+        .mt(24.0)
+        .mb(8.0)
+        .role(Role::Heading, title)
+}
+
+/// Rows grouped on an inset card: a faint fill and border, a hairline
+/// between rows.
+pub(in crate::screen) fn card(rows: Vec<El>) -> El {
     let mut el = div()
+        .col()
+        .rounded(4.0)
+        .bg(white(0.03))
+        .border(1.0, white(0.06));
+    for (i, r) in rows.into_iter().enumerate() {
+        el = el.child(if i == 0 {
+            r
+        } else {
+            r.border_top(1.0, white(0.06))
+        });
+    }
+    el
+}
+
+/// One row of a [`card`]: an optional icon and the label at the left,
+/// `control` at the right; `tip` explains the row while it is hovered, unless
+/// a part of the control has a tooltip of its own.
+pub(in crate::screen) fn card_row(
+    s: &Screen<'_>,
+    mark: Option<El>,
+    label: &str,
+    tip: Option<&str>,
+    control: El,
+) -> El {
+    let name = text(label, 13.0, c(look::GRAY_200))
+        .line_height(18.0)
+        .role(Role::Label, label);
+    let row = div()
         .row()
         .items_center()
         .justify_between()
-        .py(16.0)
-        .border_bottom(1.0, white(0.06))
-        .child(left)
+        .gap(16.0)
+        .min_h(48.0)
+        .px(14.0)
+        .py(8.0)
+        .child(
+            div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .min_w0()
+                .child_if(mark)
+                .child(name),
+        )
         .child(control);
-    if disabled {
-        el = el.opacity(0.4);
+    match tip {
+        Some(t) => crate::ui::tooltip(s.ui, row, row_tip_id(label), t, None),
+        None => row,
     }
-    el
+}
+
+/// The id a [`card_row`] labelled `label` shows its tooltip under.
+pub fn row_tip_id(label: &str) -> Id {
+    Id::new("row-tip").child(label)
 }
 
 /// The one switch, [`widgets::toggle`](crate::ui::widgets::toggle).
@@ -389,6 +431,8 @@ pub(in crate::screen) struct Seg<'a> {
     pub act: Act,
     pub on: bool,
     pub disabled: bool,
+    /// Explains this option while it is hovered.
+    pub tip: Option<&'a str>,
 }
 
 /// `bg-white/[0.04] rounded-lg p-0.5 gap-0.5`.
@@ -433,6 +477,9 @@ pub(in crate::screen) fn segmented(s: &Screen<'_>, place: &str, opts: Vec<Seg<'_
         } else {
             b.on(Action::Click)
         };
+        if let Some(tip) = o.tip {
+            b = crate::ui::tooltip(s.ui, b, id, tip, None);
+        }
         row = row.child(b);
     }
     row

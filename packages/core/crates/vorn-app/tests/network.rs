@@ -1,7 +1,8 @@
 //! The Remote Access page driven as a user would, on a vornd with its own
 //! HOME and ports: share this machine on and off, pair a phone by code (the
-//! phone's half played over HTTP on loopback), mint a device token by hand
-//! and revoke it, and the use-another-machine form's validation.
+//! phone's half played over HTTP on loopback) in the Add a device sheet,
+//! mint a token for another computer under Advanced, and remove a device
+//! from its menu.
 //! `VORN_APP_SHOT=<prefix>` saves a frame of each.
 
 #![cfg(unix)]
@@ -15,10 +16,10 @@ use serde_json::{json, Value};
 use support::{connect, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::client::Endpoint;
-use vorn_app::network::{
-    Adding, Mode, NetAct, BOTH_NEEDED, DEVICE_NAME, HOST_TOKEN, HOST_URL, NO_HOST_MODE,
-};
+use vorn_app::network::{NetAct, DEVICE_NAME};
+use vorn_app::screen::settings::CONTENT;
 use vorn_app::settings::Category;
+use vorn_app::state::{Dialog, MenuKind};
 use vorn_app::ui::Id;
 use vorn_app::App;
 
@@ -94,8 +95,11 @@ fn remote_access_page() {
     // This computer's web client, before sharing anything: its address to copy or open.
     assert_eq!(app.web_url, format!("http://127.0.0.1:{port}/app/"));
     shot.frame(&mut app);
-    let open = vorn_app::App::control("net-open-web", &vorn_app::act::Act::OpenWebClient);
-    assert!(shot.ui.rect_of(open).is_some(), "the Open button shows");
+    let copy = net("net-copy", NetAct::Copy(app.web_url.clone()));
+    assert!(
+        shot.ui.rect_of(copy).is_some(),
+        "Open in a browser offers it to copy"
+    );
     shot.save(&mut app, "page");
 
     // Share this machine. Off a tailnet it asks first.
@@ -113,13 +117,19 @@ fn remote_access_page() {
 
     // Add a device by code; the phone redeems it over HTTP.
     shot.click(&mut app, net("net-add", NetAct::AddDevice));
+    assert_eq!(app.st.dialog, Some(Dialog::AddDevice));
     let code = shot.until(&mut app, "a pairing code", |app, _| {
         match &app.st.network.adding {
-            Some(Adding::Scan(c)) => Some(c.code.clone()),
+            Some(Some(c)) => Some(c.code.clone()),
             _ => None,
         }
     });
     assert!(app.st.network.pair_url().is_some());
+    shot.until(&mut app, "the QR code", |app, _| {
+        app.st.network.qr.as_ref().map(|_| ())
+    });
+    let link = app.st.network.qr.as_ref().map(|(l, _)| l.clone()).unwrap();
+    assert!(link.starts_with("vorn://pair?url=") && link.contains(&code));
     shot.save(&mut app, "code");
     let redeemed = post(
         port,
@@ -152,15 +162,27 @@ fn remote_access_page() {
         let n = &app.st.network;
         (n.active().iter().any(|t| t.name == "Test phone") && n.adding.is_none()).then_some(())
     });
+    assert_eq!(app.st.dialog, None, "approving closes the sheet");
     shot.save(&mut app, "devices");
 
-    // Pair manually: a named token, shown once.
+    // Escape closes a sheet and retires its code.
     shot.click(&mut app, net("net-add", NetAct::AddDevice));
     shot.until(&mut app, "a second code", |app, _| {
-        matches!(app.st.network.adding, Some(Adding::Scan(_))).then_some(())
+        matches!(app.st.network.adding, Some(Some(_))).then_some(())
     });
-    shot.click(&mut app, net("net-scan", NetAct::PairManually));
-    assert!(matches!(app.st.network.adding, Some(Adding::Token)));
+    shot.send(&mut app, support::key("Escape", 0, None));
+    shot.frame(&mut app);
+    assert_eq!(app.st.dialog, None);
+    assert!(app.st.network.adding.is_none());
+    assert!(app.st.settings.open, "Escape closes only the sheet");
+
+    // A token for another computer, under Advanced, shown once.
+    let id = net("net-advanced", NetAct::ToggleAdvanced);
+    shot.reveal(&mut app, CONTENT, id);
+    shot.click(&mut app, id);
+    let id = net("net-name-token", NetAct::NameToken);
+    shot.reveal(&mut app, CONTENT, id);
+    shot.click(&mut app, id);
     assert_eq!(shot.ui.focus(), Some(DEVICE_NAME));
     shot.save(&mut app, "token-form");
     shot.type_line(&mut app, "Laptop");
@@ -176,7 +198,9 @@ fn remote_access_page() {
         (app.st.network.active().len() == 2).then_some(())
     });
     shot.save(&mut app, "minted");
-    shot.click(&mut app, net("net-minted", NetAct::DoneMinted));
+    let id = net("net-minted", NetAct::DoneMinted);
+    shot.reveal(&mut app, CONTENT, id);
+    shot.click(&mut app, id);
     assert!(app.st.network.minted.is_none());
 
     // Revoke it: Remove asks, Revoke does.
@@ -188,7 +212,13 @@ fn remote_access_page() {
         .find(|t| t.name == "Laptop")
         .map(|t| t.id.clone())
         .expect("the laptop's token");
-    shot.click(&mut app, net("net-remove", NetAct::AskRevoke(id.clone())));
+    let menu = App::control("net-device", &Act::Open(MenuKind::Device(id.clone())));
+    shot.reveal(&mut app, CONTENT, menu);
+    shot.click(&mut app, menu);
+    let remove = shot
+        .labelled(&mut app, "MenuItem", "Remove\u{2026}")
+        .expect("Remove in the device's menu");
+    shot.click(&mut app, remove);
     assert_eq!(app.st.network.confirm_revoke.as_deref(), Some(id.as_str()));
     shot.save(&mut app, "revoke");
     shot.click(&mut app, net("net-revoke", NetAct::Revoke(id.clone())));
@@ -211,23 +241,13 @@ fn remote_access_page() {
     assert_eq!(revoked, Some(true), "vornd holds it revoked");
 
     // Stop sharing: back to loopback.
-    shot.click(&mut app, net("net-share", NetAct::Share(false)));
+    let off = net("net-share", NetAct::Share(false));
+    shot.reveal(&mut app, CONTENT, off);
+    shot.click(&mut app, off);
     shot.until(&mut app, "the switch off", |app, _| {
         (!sharing(app)).then_some(())
     });
     until_remote(&mut shot, &mut app, false);
-
-    // Another machine: the form, and what it says.
-    shot.click(&mut app, net("net-view", NetAct::View(Mode::Host)));
-    assert_eq!(shot.ui.focus(), Some(HOST_URL));
-    shot.click(&mut app, net("net-connect", NetAct::Connect));
-    assert_eq!(app.st.network.connect_error.as_deref(), Some(BOTH_NEEDED));
-    shot.save(&mut app, "another");
-    shot.ui.set_edit_text(HOST_URL, "http://100.64.0.2:3000");
-    shot.ui.set_edit_text(HOST_TOKEN, "a-token");
-    shot.click(&mut app, net("net-connect", NetAct::Connect));
-    assert_eq!(app.st.network.connect_error.as_deref(), Some(NO_HOST_MODE));
-    shot.save(&mut app, "another-filled");
 
     // Closing the page forgets it.
     app.st.settings.open = false;

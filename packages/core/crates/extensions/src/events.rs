@@ -46,6 +46,12 @@ pub const WORKFLOW_CHANGED: &str = "workflow.changed";
 /// A run's approval gates waiting for a person changed: `{runId, gates}`, each gate
 /// `{id, title, subtitle, message, workflow, run, node, at}`.
 pub const WORKFLOW_GATES: &str = "workflow.gates";
+/// A run that was seen running ended: `{runId, workflowId, workflow, outcome, steps}`;
+/// `outcome` is `completed`, `failed` or `rejected`, `steps` how many ran.
+pub const WORKFLOW_ENDED: &str = "workflow.ended";
+/// A run's step started waiting for a person to sign in again:
+/// `{runId, workflowId, workflow, node, title, message}`.
+pub const WORKFLOW_SIGN_IN: &str = "workflow.signIn";
 /// A worktree's HEAD moved or vornd committed in it: `{worktreePath, projectPath?, head?}`; only the latest per worktree in a batch.
 pub const GIT_CHANGED: &str = "git.changed";
 
@@ -66,6 +72,8 @@ pub const CORE_EVENTS: &[&str] = &[
     TASK_STATUS_CHANGED,
     WORKFLOW_CHANGED,
     WORKFLOW_GATES,
+    WORKFLOW_ENDED,
+    WORKFLOW_SIGN_IN,
 ];
 
 /// The namespaces the core's events live in; another extension's events live in its own.

@@ -865,6 +865,7 @@ fn gate_box(s: &Screen<'_>, run: &Value, gate: &Value, nodes: &Value) -> El {
 
 /// The landing's tools on the right of the top bar.
 pub fn header_tools(s: &Screen<'_>) -> El {
+    let glass = super::chrome::glass(s);
     let waiting = s.st.wf.waiting(&s.store.runs).len();
     let tab = |t: Tab, label: &str, count: Option<usize>| {
         let on = s.st.wf.tab == t;
@@ -883,38 +884,45 @@ pub fn header_tools(s: &Screen<'_>) -> El {
             .gap(6.0)
             .px(10.0)
             .py(4.0)
-            .rounded(6.0)
-            .bg(if on {
+            .rounded(if glass { 13.0 } else { 6.0 })
+            .bg(if glass {
+                white(0.0)
+            } else if on {
                 white(0.06)
             } else {
                 white(0.0).mix(white(0.03), hot)
             })
             .role(Role::Tab, label)
             .selected(on)
-            .child(text(label, 12.0, fg).line_height(16.0).silent());
+            .child(super::chrome::label(s, label, 12.0, 16.0, fg));
         if let Some(n) = count.filter(|n| *n > 0) {
-            b = b.child(
-                text(n.to_string(), 10.0, c(look::BRONZO))
-                    .mono()
-                    .line_height(14.0)
-                    .silent(),
-            );
+            b = b.child(super::chrome::label(
+                s,
+                &n.to_string(),
+                10.0,
+                14.0,
+                c(look::BRONZO),
+            ));
         }
         b
     };
+    let tabs = super::chrome::group(
+        s,
+        [
+            tab(Tab::All, "All runs", None),
+            tab(Tab::Review, "Needs review", Some(waiting)),
+        ],
+    )
+    .role(Role::TabList, "Runs");
     let mut right = div()
         .row()
         .items_center()
-        .gap(4.0)
-        .child(
-            div()
-                .row()
-                .gap(2.0)
-                .role(Role::TabList, "Runs")
-                .child(tab(Tab::All, "All runs", None))
-                .child(tab(Tab::Review, "Needs review", Some(waiting))),
-        )
-        .child(divider());
+        .gap(if glass { 8.0 } else { 4.0 })
+        .child(tabs);
+    if !glass {
+        right = right.child(divider());
+    }
+    let mut tools = Vec::new();
     if s.st.wf.tab == Tab::All {
         let open =
             s.st.menu
@@ -939,19 +947,20 @@ pub fn header_tools(s: &Screen<'_>) -> El {
                     .absolute_right(2.0, 2.0),
             );
         }
-        right = right.child(opts);
+        tools.push(opts);
     }
+    tools.push(tool(
+        s,
+        "toolbar",
+        act(WfAct::Refresh),
+        "refresh-cw",
+        1.5,
+        "Refresh",
+        None,
+        false,
+    ));
     right
-        .child(tool(
-            s,
-            "toolbar",
-            act(WfAct::Refresh),
-            "refresh-cw",
-            1.5,
-            "Refresh",
-            None,
-            false,
-        ))
+        .child(super::chrome::group(s, tools))
         .child_if(window_controls(s))
 }
 

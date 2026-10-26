@@ -8,78 +8,270 @@ use serde_json::{json, Value};
 use super::{list, App, Call, MOD};
 use crate::act::Act;
 use crate::client::RpcError;
-use crate::screen::settings::{rotate_id, ROW_SLIDER, SHELL_PATH, VOLUME_SLIDER};
+use crate::screen::settings::{ROW_SLIDER, SHELL_PATH};
 use crate::settings::{
-    self, split_args, AgentField, Category, ConnKey, KeyRowState, SetAct, Shell, CONNECTIONS_PAGE,
+    self, split_args, AgentField, Category, SetAct, Shell, UpdateStatus, CONNECTIONS_PAGE,
 };
 use crate::ui::{mods, Event as UiEvent, Id, Input, Ui};
 
 /// A settings call whose answer changes the page.
 pub(super) enum SetCall {
     Shells,
-    ConnKeys,
-    Preflight(String),
-    Rotated(String),
-    Core,
     Detected,
+    /// vornd stopping for Restart Vorn.
+    Restart,
+    /// A terminal started to install or connect an agent.
+    Setup(settings::AgentJob),
 }
 
 impl App {
+    /// `shot --settings PAGE [--set key=json]…`: the defaults written, then
+    /// Settings open on `page`.
+    pub fn shot_settings(&mut self, page: &str, set: &[(&str, &str)]) -> Result<(), String> {
+        let cat = Category::from_id(page).ok_or(format!("no settings page {page:?}"))?;
+        for (key, v) in set {
+            let value: Value = serde_json::from_str(v).map_err(|e| format!("--set {key}: {e}"))?;
+            self.write_defaults(|d| d[*key] = value);
+        }
+        if self.st.dialog == Some(crate::state::Dialog::Welcome)
+            && crate::onboarding::seen(&self.store.config)
+        {
+            self.st.dialog = None;
+        }
+        self.open_settings(cat);
+        Ok(())
+    }
+
+    /// `shot --update`, `--holder` and `--outdated`: About's states, faked
+    /// once vornd has answered. `update` is `idle`, `checking`, `ready:VER`
+    /// or `error:TEXT`; `holder` is `BUILD:SESSIONS`; `outdated` lists pack ids.
+    pub fn shot_about(
+        &mut self,
+        update: Option<&str>,
+        holder: Option<&str>,
+        outdated: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(u) = update {
+            self.st.settings.update = Some(match u.split_once(':') {
+                None if u == "idle" => UpdateStatus::Idle {
+                    last_checked: Some(crate::state::now_ms() - 120_000.0),
+                },
+                None if u == "checking" => UpdateStatus::Checking,
+                Some(("ready", v)) => UpdateStatus::Ready {
+                    version: v.to_owned(),
+                },
+                Some(("error", m)) => UpdateStatus::Error {
+                    message: m.to_owned(),
+                },
+                _ => {
+                    return Err(format!(
+                        "--update {u:?}: idle, checking, ready:VER or error:TEXT"
+                    ))
+                }
+            });
+        }
+        if let Some(h) = holder {
+            let (build, n) = h
+                .split_once(':')
+                .and_then(|(b, n)| Some((b, n.parse().ok()?)))
+                .ok_or(format!("--holder {h:?}: BUILD:SESSIONS"))?;
+            self.st.settings.holders = Some(settings::Holders {
+                current: true,
+                older: vec![settings::Holder {
+                    pid: 1,
+                    instance: "shot".to_owned(),
+                    build: build.to_owned(),
+                    sessions: Some(n),
+                    compatible: true,
+                }],
+                error: None,
+            });
+        }
+        for id in outdated.into_iter().flat_map(|o| o.split(',')) {
+            let mut found = false;
+            for l in self.st.plugins.listings.iter_mut().filter(|l| l.id == id) {
+                if let Some(p) = l.pack.as_mut() {
+                    p["version"] = Value::from("0.0.1");
+                    found = true;
+                }
+            }
+            if !found {
+                return Err(format!("--outdated {id}: not installed"));
+            }
+        }
+        Ok(())
+    }
+
+    /// `shot --open NAME`: an Appearance, General or About popover opened from its
+    /// control, as a click on it would; `theme-picker` and `theme-info` use the first
+    /// theme row. `extension:ID` selects that extension's page, and fails
+    /// until vornd has listed it.
+    pub fn shot_open(&mut self, ui: &mut Ui, name: &str) -> Result<(), String> {
+        use crate::state::MenuKind;
+        use vorn_theme::Appearance as Look;
+        let agent = [
+            ("agent:", false, false),
+            ("agent-advanced:", true, false),
+            ("agent-remove:", false, true),
+        ]
+        .into_iter()
+        .find_map(|(p, adv, rm)| Some((name.strip_prefix(p)?, adv, rm)));
+        if let Some((key, advanced, remove)) = agent {
+            if self.store.agents.get(key).is_none() {
+                return Err(format!("--open {name:?}: no agent {key}"));
+            }
+            let st = &mut self.st.settings;
+            st.agent = Some(key.to_owned());
+            if advanced {
+                st.agents_open.insert(key.to_owned());
+            }
+            st.confirm_remove = remove.then(|| key.to_owned());
+            return Ok(());
+        }
+        if let Some(id) = name.strip_prefix("extension:") {
+            if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+                self.run_plug(ui, crate::plugins::PlugAct::Refresh);
+            }
+            let p = &mut self.st.plugins;
+            let key = p
+                .listings
+                .iter()
+                .find(|l| l.id == id)
+                .map(|l| l.key.clone());
+            let key = key
+                .filter(|_| p.loads == 0)
+                .ok_or(format!("--open {name:?}: {id} is not listed"))?;
+            p.selected = Some(key);
+            return Ok(());
+        }
+        if let Some(states) = name.strip_prefix("net-") {
+            return self.shot_net(ui, states);
+        }
+        let prefs = crate::appearance::prefs(self.store.config.get("defaults"));
+        let look = crate::appearance::theme_rows(prefs.scheme)[0].look;
+        let (place, kind) = match name {
+            "theme-picker" => ("theme-chip", MenuKind::ThemePicker(look)),
+            "theme-info" => {
+                let id = match look {
+                    Look::Light => prefs.light,
+                    Look::Dark => prefs.dark,
+                };
+                ("theme-info", MenuKind::ThemeInfo(id))
+            }
+            "font-picker" => ("font-chip", MenuKind::FontPicker),
+            "agent-picker" => ("agent-chip", MenuKind::AgentPicker),
+            "shell-picker" => ("shell-picker", MenuKind::SetShell),
+            "channel-menu" => ("update-channel", MenuKind::UpdateChannel),
+            "sound-menu" => ("notif-sound", MenuKind::NotifSound),
+            "notice-sources" => ("notif-sources", MenuKind::NotifSources),
+            "holder-menu" => ("holder-more", MenuKind::Holder("shot".to_owned())),
+            _ => {
+                return Err(format!(
+                    "--open {name:?}: theme-picker, theme-info, font-picker, agent-picker, shell-picker, channel-menu, holder-menu, sound-menu, notice-sources, agent:KEY, agent-advanced:KEY, agent-remove:KEY or extension:ID"
+                ))
+            }
+        };
+        let src = super::Src {
+            id: Some(crate::act::Acts::id(place, &Act::Open(kind.clone()))),
+            at: None,
+        };
+        self.open_menu(ui, kind, src);
+        Ok(())
+    }
+
+    /// `shot --open net-A+B`: Remote Access states, once vornd has answered
+    /// the page: `tailnet` (a running tailnet and its address), `advanced`,
+    /// `add-device`, `pair-request` (a phone asking), `device-menu` and
+    /// `confirm-remove` on the first device.
+    fn shot_net(&mut self, ui: &mut Ui, states: &str) -> Result<(), String> {
+        use crate::network::{NetAct, PairingRequest, Tailscale};
+        use crate::state::MenuKind;
+        let n = &self.st.network;
+        if !n.open || n.loading || n.tokens.is_none() {
+            return Err(format!("--open net-{states}: Remote Access has not loaded"));
+        }
+        for state in states.split('+') {
+            let first = self.st.network.active().first().map(|t| t.id.clone());
+            match state {
+                "tailnet" => {
+                    let n = &mut self.st.network;
+                    n.status = Some(Tailscale {
+                        installed: true,
+                        running: true,
+                    });
+                    let r = n.reachable.get_or_insert_with(Default::default);
+                    r.remote = true;
+                    let url = format!("https://100.101.102.103:{}/app/", r.port);
+                    if !r.urls.contains(&url) {
+                        r.urls.insert(0, url);
+                    }
+                    if r.fingerprint.is_none() {
+                        r.fingerprint = Some("9F3A1C7E52B04D8812AF6E3390C1D7B4".to_owned());
+                    }
+                    // Only this frame's copy: the temp vornd never opens a listener.
+                    let config = &mut self.store.config;
+                    if !config.get("defaults").is_some_and(Value::is_object) {
+                        config["defaults"] = serde_json::json!({});
+                    }
+                    config["defaults"]["networkAccessEnabled"] = Value::Bool(true);
+                }
+                "advanced" => self.st.network.advanced = true,
+                "devices" => {
+                    let now = crate::state::now_ms();
+                    let device = |id: &str, name: &str, ago_ms: f64| crate::network::DeviceToken {
+                        id: id.to_owned(),
+                        name: name.to_owned(),
+                        last_seen_at: Some(crate::tasks::iso(now - ago_ms)),
+                        revoked_at: None,
+                        last_address: None,
+                    };
+                    let tokens = self.st.network.tokens.get_or_insert_with(Vec::new);
+                    if tokens.iter().any(|t| t.id == "shot-phone") {
+                        continue;
+                    }
+                    tokens.push(device("shot-phone", "Javier's iPhone", 7_200_000.0));
+                    tokens.push(device("shot-mac", "Studio Mac mini", 90_000_000.0));
+                }
+                "add-device" => self.run_net(ui, NetAct::AddDevice),
+                "pair-request" => {
+                    self.run_net(ui, NetAct::AddDevice);
+                    self.st.network.asking = Some(PairingRequest {
+                        request_id: "shot".to_owned(),
+                        device_name: "Studio iPhone".to_owned(),
+                        address: "100.101.102.104".to_owned(),
+                    });
+                }
+                "device-menu" | "confirm-remove" => {
+                    let id = first.ok_or(format!("--open net-{state}: no device"))?;
+                    if state == "confirm-remove" {
+                        self.st.network.confirm_revoke = Some(id);
+                        continue;
+                    }
+                    let kind = MenuKind::Device(id);
+                    let more = crate::act::Acts::id("net-device", &Act::Open(kind.clone()));
+                    // The menu hangs from its button, so wait for a frame that lays it out.
+                    if ui.rect_of(more).is_none() {
+                        return Err(format!("--open net-{state}: the device row is not drawn"));
+                    }
+                    let src = super::Src {
+                        id: Some(more),
+                        at: None,
+                    };
+                    self.open_menu(ui, kind, src);
+                }
+                other => return Err(format!("--open net-{other}: tailnet, advanced, devices, add-device, pair-request, device-menu or confirm-remove")),
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn set_answered(&mut self, call: SetCall, answer: Result<Value, RpcError>) {
         let st = &mut self.st.settings;
         match call {
             SetCall::Shells => {
                 st.shells = Some(list(answer).iter().filter_map(Shell::from_value).collect());
             }
-            SetCall::ConnKeys => {
-                st.keys = Some(
-                    list(answer)
-                        .iter()
-                        .filter_map(ConnKey::from_value)
-                        .collect(),
-                );
-            }
-            SetCall::Preflight(id) => {
-                let row = st.key_rows.entry(id).or_default();
-                row.testing = false;
-                row.result = Some(match answer {
-                    Ok(v) => (
-                        v.get("ok").and_then(Value::as_bool),
-                        v.get("message").and_then(Value::as_str).map(str::to_owned),
-                    ),
-                    Err(e) => (Some(false), Some(e.to_string())),
-                });
-            }
-            SetCall::Rotated(id) => {
-                let row = st.key_rows.entry(id.clone()).or_default();
-                row.saving = false;
-                let failure = match answer {
-                    Ok(v) if v.get("ok").and_then(Value::as_bool) == Some(true) => None,
-                    Ok(v) => Some(
-                        v.get("error")
-                            .and_then(Value::as_str)
-                            .unwrap_or("The key could not be replaced")
-                            .to_owned(),
-                    ),
-                    Err(e) => Some(e.to_string()),
-                };
-                match failure {
-                    Some(e) => row.error = Some(e),
-                    None => {
-                        *row = KeyRowState::default();
-                        self.call(
-                            Call::Set(SetCall::ConnKeys),
-                            "connection:listKeys",
-                            Value::Null,
-                        );
-                    }
-                }
-            }
-            SetCall::Core => {
-                if let Ok(v) = answer {
-                    st.core_version = v.get("version").and_then(Value::as_str).map(str::to_owned);
-                }
-            }
+            SetCall::Restart => self.relaunch(),
             SetCall::Detected => {
                 st.detecting = false;
                 if let Some((found, paths)) =
@@ -89,6 +281,161 @@ impl App {
                     self.st.agent_paths = paths;
                 }
             }
+            SetCall::Setup(job) => self.setup_started(job, answer),
+        }
+    }
+
+    /// Looks for the agents again.
+    fn redetect(&mut self) {
+        if self.st.settings.detecting {
+            return;
+        }
+        self.st.settings.detecting = true;
+        self.call(
+            Call::Set(SetCall::Detected),
+            "agent:locate",
+            json!({ "refresh": true }),
+        );
+    }
+
+    /// Where an agent's setup terminal starts: the composer's project, else
+    /// the first one, else home.
+    fn setup_place(&self) -> Option<(String, String)> {
+        self.composer_project().or_else(|| {
+            let p = self.store.projects.first()?;
+            Some((p.name.clone(), p.path.clone()))
+        })
+    }
+
+    /// Runs the agent's installer, or its Vorn tools setup, in a terminal card.
+    fn start_setup(&mut self, key: &str, install: bool) {
+        let Some(a) = self.store.agents.get(key) else {
+            return;
+        };
+        let place = self.setup_place();
+        let cwd = place.as_ref().map_or(Value::Null, |p| json!(p.1));
+        let (job, params) = match (&a.mcp, install) {
+            (_, true) if !a.install.is_empty() => {
+                (settings::AgentJob::Install(a.key.clone()), None)
+            }
+            (Some(m), false) if m.in_agent => {
+                let Some((name, path)) = place else {
+                    self.st
+                        .toast(format!("Add a project to connect {}.", a.name), true);
+                    return;
+                };
+                let job = settings::AgentJob::ConnectInAgent {
+                    agent: a.key.clone(),
+                    pending: m.commands.iter().cloned().collect(),
+                    since: web_time::Instant::now(),
+                };
+                let params =
+                    json!({ "agentType": a.key, "projectName": name, "projectPath": path });
+                (job, Some(params))
+            }
+            (Some(_), false) => (settings::AgentJob::Connect(a.key.clone()), None),
+            _ => return,
+        };
+        let call = Call::Set(SetCall::Setup(job));
+        match params {
+            Some(p) => self.call(call, "terminal:create", p),
+            None => self.call(call, "shell:create", cwd),
+        }
+    }
+
+    /// The setup terminal exists: shows it, and types a shell setup into it.
+    fn setup_started(&mut self, mut job: settings::AgentJob, answer: Result<Value, RpcError>) {
+        let info =
+            match answer.and_then(crate::client::rpc::decode::<vorn_protocol::TerminalSession>) {
+                Ok(info) => info,
+                Err(e) => return self.st.toast(e.to_string(), true),
+            };
+        let id = info.id.clone();
+        self.st.selected = Some(id.clone());
+        self.st.focus_terminal = true;
+        self.st.view = crate::screen::MainView::Sessions;
+        self.st.settings.open = false;
+        self.store.upsert(info);
+        let line = match &mut job {
+            settings::AgentJob::Install(k) => self
+                .store
+                .agents
+                .get(k)
+                .map(|a| format!("{} && exit\r", a.install)),
+            settings::AgentJob::Connect(k) => self
+                .store
+                .agents
+                .get(k)
+                .and_then(|a| a.mcp.as_ref())
+                .map(|m| settings::setup_line(&m.commands)),
+            settings::AgentJob::ConnectInAgent { since, .. } => {
+                *since = web_time::Instant::now();
+                None
+            }
+        };
+        if let (Some(line), Some(g)) = (line, &self.grid) {
+            g.text(&id, &line);
+        }
+        self.agent_jobs.insert(id, job);
+    }
+
+    /// A setup terminal ended: detection runs again after an installer, and
+    /// a shell setup that exited cleanly marks the agent connected.
+    pub(super) fn agent_notified(&mut self, method: &str, params: &Value) {
+        if method != "terminal:exit" {
+            return;
+        }
+        let Some(id) = params.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(job) = self.agent_jobs.remove(id) else {
+            return;
+        };
+        let ok = params.get("exitCode").and_then(Value::as_i64).unwrap_or(0) == 0;
+        match job {
+            settings::AgentJob::Install(_) => self.redetect(),
+            settings::AgentJob::Connect(k) if ok => self.mark_connected(&k),
+            _ => {}
+        }
+    }
+
+    fn mark_connected(&mut self, agent: &str) {
+        self.write_defaults(|d| {
+            if !d.get(settings::AGENT_TOOLS).is_some_and(Value::is_object) {
+                d[settings::AGENT_TOOLS] = json!({});
+            }
+            d[settings::AGENT_TOOLS][agent] = json!(true);
+        });
+    }
+
+    /// Types the next setup command into each agent session that has gone quiet.
+    pub(super) fn agent_tick(&mut self, ui: &mut Ui, now: web_time::Instant) {
+        let mut done = Vec::new();
+        for (id, job) in &mut self.agent_jobs {
+            let settings::AgentJob::ConnectInAgent {
+                agent,
+                pending,
+                since,
+            } = job
+            else {
+                continue;
+            };
+            let due = settings::type_due(self.st.last_output.get(id).copied(), *since);
+            if now < due {
+                ui.wake_at(due);
+                continue;
+            }
+            if let (Some(cmd), Some(g)) = (pending.pop_front(), &self.grid) {
+                g.text(id, &format!("{cmd}\r"));
+            }
+            *since = now;
+            if pending.is_empty() {
+                done.push((id.clone(), agent.clone()));
+            }
+        }
+        for (id, agent) in done {
+            self.agent_jobs.remove(&id);
+            self.mark_connected(&agent);
         }
     }
 
@@ -99,6 +446,14 @@ impl App {
         s.category = cat;
         s.ext_page = (cat == Category::Connections).then(|| CONNECTIONS_PAGE.to_owned());
         match cat {
+            Category::Agents => {
+                s.agent = None;
+                s.confirm_remove = None;
+                self.redetect();
+                if self.st.plugins.packs.is_empty() && self.st.plugins.loads == 0 {
+                    self.plug_load(false);
+                }
+            }
             Category::General => {
                 if s.shells.is_none() {
                     self.call(
@@ -111,16 +466,20 @@ impl App {
                     self.st.settings.cli = Some(crate::cli_link::state());
                 }
             }
-            Category::Keys => {
-                self.call(
-                    Call::Set(SetCall::ConnKeys),
-                    "connection:listKeys",
-                    Value::Null,
-                );
+            Category::Notifications => {
+                crate::notify::refresh();
+                if self.st.plugins.packs.is_empty() && self.st.plugins.loads == 0 {
+                    self.plug_load(false);
+                }
             }
             Category::About => {
-                self.call(Call::Set(SetCall::Core), "core:status", Value::Null);
                 self.health = Some(health(self.port));
+                if !crate::settings::IN_BROWSER {
+                    self.st.settings.cli = Some(crate::cli_link::state());
+                }
+                if self.st.plugins.listings.is_empty() && self.st.plugins.loads == 0 {
+                    self.plug_load(true);
+                }
             }
             _ => {}
         }
@@ -161,22 +520,13 @@ impl App {
     }
 
     /// Takes in the health check once it answers.
-    pub(super) fn settings_tick(&mut self, now: web_time::Instant) {
+    pub(super) fn settings_tick(&mut self) {
         self.cli_tick();
         if let Some(rx) = &self.health {
             if let Ok(v) = rx.try_recv() {
                 self.st.settings.holders = v.as_ref().and_then(settings::Holders::from_health);
                 self.health = None;
             }
-        }
-        if self
-            .st
-            .settings
-            .copied
-            .as_ref()
-            .is_some_and(|(_, at)| now.duration_since(*at).as_secs() >= 2)
-        {
-            self.st.settings.copied = None;
         }
     }
 
@@ -226,28 +576,25 @@ impl App {
                     return;
                 };
                 if key == "layoutMode" {
-                    self.st.layout = if value == "tabs" {
-                        crate::state::LayoutMode::Tabs
-                    } else {
-                        crate::state::LayoutMode::Grid
-                    };
-                    if value == "tabs" {
+                    let mode = crate::state::LayoutMode::from_key(value.as_str().unwrap_or(""));
+                    self.st.layout = mode;
+                    if mode != crate::state::LayoutMode::Grid {
                         self.st.focused = None;
                     }
                 }
                 self.write_defaults(|d| d[key.as_str()] = value);
             }
-            SetAct::Notify(key, on) => self.write_defaults(|d| {
-                let mut n =
-                    json!({ "enabled": false, "onWaiting": true, "onError": true, "onBell": true });
-                if let Some(Value::Object(old)) = d.get("notifications") {
-                    for (k, v) in old {
-                        n[k] = v.clone();
+            SetAct::Notify(key, value) => {
+                let Ok(value) = serde_json::from_str::<Value>(&value) else {
+                    return;
+                };
+                self.write_defaults(|d| {
+                    if !d.get("notifications").is_some_and(Value::is_object) {
+                        d["notifications"] = json!({});
                     }
-                }
-                n[key.as_str()] = json!(on);
-                d["notifications"] = n;
-            }),
+                    d["notifications"][key.as_str()] = value;
+                });
+            }
             SetAct::FontSize(delta) => {
                 let cur = self
                     .store
@@ -255,10 +602,41 @@ impl App {
                     .pointer("/defaults/fontSize")
                     .and_then(Value::as_i64)
                     .unwrap_or(13);
-                let next = (cur + i64::from(delta)).clamp(8, 24);
-                self.write_defaults(|d| d["fontSize"] = json!(next));
+                let next = settings::step_font_size(cur, delta);
+                if next != cur {
+                    self.write_defaults(|d| d["fontSize"] = json!(next));
+                }
             }
-            SetAct::TestSound => crate::system::bell(),
+            SetAct::PickTheme(id) => {
+                let installed = self.st.settings.appearance.installed();
+                let Some(look) = crate::appearance::find(installed, &id).map(|t| t.appearance)
+                else {
+                    return;
+                };
+                let scheme = crate::appearance::prefs(self.store.config.get("defaults")).scheme;
+                let writes = crate::appearance::pick_theme(scheme, &id, look);
+                self.st.settings.theme_preview = None;
+                self.write_defaults(|d| {
+                    for (k, v) in writes {
+                        d[k] = v;
+                    }
+                });
+            }
+            SetAct::ThemeFilter(f) => {
+                let on = &mut self.st.settings.theme_filter;
+                *on = (*on != Some(f)).then_some(f);
+            }
+            SetAct::Browse(query, listing) => {
+                self.open_settings(Category::Connectors);
+                ui.set_focus(None);
+                let p = &mut self.st.plugins;
+                p.tab = crate::plugins::Tab::Browse;
+                p.kind = Some(crate::plugins::Kind::Extension);
+                p.query = query;
+                p.selected = listing;
+                p.adding = None;
+            }
+            SetAct::OpenNotifSettings => crate::notify::open_system_settings(),
             SetAct::ShellMenu => {}
             SetAct::PickShell(path) => {
                 let cur = self
@@ -306,14 +684,28 @@ impl App {
             SetAct::CheckUpdates => self.check_updates(),
             SetAct::UpdateNow => self.update_action(),
             SetAct::DismissUpdate => self.st.settings.update_dismissed = true,
-            SetAct::Redetect => {
-                self.st.settings.detecting = true;
-                self.call(
-                    Call::Set(SetCall::Detected),
-                    "agent:locate",
-                    json!({ "refresh": true }),
-                );
+            SetAct::Redetect => self.redetect(),
+            SetAct::OpenAgent(key) => {
+                let st = &mut self.st.settings;
+                st.agent = key;
+                st.confirm_remove = None;
+                ui.set_focus(None);
             }
+            SetAct::InstallAgent(k) => self.start_setup(&k, true),
+            SetAct::ConnectAgent(k) => self.start_setup(&k, false),
+            SetAct::RemoveAgent(k) => {
+                if self.st.settings.confirm_remove.as_deref() != Some(k.as_str()) {
+                    self.st.settings.confirm_remove = Some(k);
+                    return;
+                }
+                self.st.settings.confirm_remove = None;
+                let Some(ext) = self.store.agents.get(&k).map(|a| a.extension.clone()) else {
+                    return;
+                };
+                self.st.settings.agent = None;
+                self.run_plug(ui, crate::plugins::PlugAct::Remove(ext));
+            }
+            SetAct::KeepAgent => self.st.settings.confirm_remove = None,
             SetAct::ResetAgent(k) => {
                 let Some(a) = self.store.agents.get(&k) else {
                     return;
@@ -329,60 +721,7 @@ impl App {
                     o.insert(k);
                 }
             }
-            SetAct::CopyInstall(k) => {
-                if let Some(a) = self.store.agents.get(&k) {
-                    ui.clipboard().set(&a.install);
-                    self.st.settings.copied = Some((k, web_time::Instant::now()));
-                }
-            }
-            SetAct::Copy(text) => {
-                ui.clipboard().set(&text);
-                self.st.settings.copied = Some((text, web_time::Instant::now()));
-            }
             SetAct::AgentText(..) => {}
-            SetAct::TestKey(id) => {
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.testing = true;
-                row.result = None;
-                self.call(
-                    Call::Set(SetCall::Preflight(id.clone())),
-                    "connection:preflight",
-                    json!(id),
-                );
-            }
-            SetAct::Rotate(id, field) => {
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.rotating = if row.rotating.as_deref() == Some(field.as_str()) {
-                    None
-                } else {
-                    Some(field)
-                };
-                row.error = None;
-                ui.set_edit_text(rotate_id(&id), "");
-                if row.rotating.is_some() {
-                    ui.set_focus(Some(rotate_id(&id)));
-                }
-            }
-            SetAct::SaveRotate(id, field) => {
-                let value = ui.edit_text(rotate_id(&id)).to_owned();
-                if value.trim().is_empty() {
-                    return;
-                }
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.saving = true;
-                row.error = None;
-                self.call(
-                    Call::Set(SetCall::Rotated(id.clone())),
-                    "connection:rotateSecret",
-                    json!({ "connectionId": id, "field": field, "plaintext": value }),
-                );
-            }
-            SetAct::CancelRotate(id) => {
-                let row = self.st.settings.key_rows.entry(id.clone()).or_default();
-                row.rotating = None;
-                row.error = None;
-                ui.set_edit_text(rotate_id(&id), "");
-            }
             SetAct::EndHolder(instance) => {
                 if self.st.settings.confirm_end.as_deref() != Some(instance.as_str()) {
                     self.st.settings.confirm_end = Some(instance);
@@ -397,29 +736,30 @@ impl App {
                     outcome.err().map(|d| format!("Could not end them: {d}."));
                 self.health = Some(health(self.port));
             }
+            SetAct::KeepHolder => self.st.settings.confirm_end = None,
+            SetAct::RestartVorn => {
+                self.call(Call::Set(SetCall::Restart), "server:shutdown", Value::Null)
+            }
+            SetAct::UpdateExtensions => {
+                let keys: Vec<String> = crate::plugins::pack_updates(&self.st.plugins.listings)
+                    .1
+                    .iter()
+                    .map(|l| l.key.clone())
+                    .collect();
+                for key in keys {
+                    self.plug_inspect(&key, true);
+                }
+            }
         }
     }
 
     /// Text typed in a settings field, and the sliders' drags.
     pub(super) fn settings_event(&mut self, ui: &mut Ui, event: &UiEvent) -> bool {
         match *event {
-            UiEvent::Move { id, x, .. } | UiEvent::Drop { id, x, .. }
-                if id == ROW_SLIDER || id == VOLUME_SLIDER =>
-            {
+            UiEvent::Move { id, x, .. } | UiEvent::Drop { id, x, .. } if id == ROW_SLIDER => {
                 let Some(r) = ui.rect_of(id) else { return true };
-                if id == ROW_SLIDER {
-                    let f = ((x - r.x - 8.0) / (r.w - 16.0)).clamp(0.0, 1.0);
-                    self.st.settings.row_height = (100.0 + f * 500.0).round();
-                } else {
-                    let f = ((x - r.x) / r.w).clamp(0.0, 1.0);
-                    let v = (f * 100.0).round() / 100.0;
-                    self.write_defaults(|d| {
-                        if !d.get("notifications").is_some_and(Value::is_object) {
-                            d["notifications"] = json!({});
-                        }
-                        d["notifications"]["soundVolume"] = json!(v);
-                    });
-                }
+                let f = ((x - r.x - 8.0) / (r.w - 16.0)).clamp(0.0, 1.0);
+                self.st.settings.row_height = (100.0 + f * 500.0).round();
                 true
             }
             UiEvent::Changed(id) => {
@@ -451,27 +791,6 @@ impl App {
             UiEvent::Submit(id) => {
                 if id == SHELL_PATH {
                     self.commit_shell(ui);
-                    return true;
-                }
-                if let Some(k) = self
-                    .st
-                    .settings
-                    .keys
-                    .iter()
-                    .flatten()
-                    .find(|k| rotate_id(&k.connection) == id)
-                {
-                    let row = self
-                        .st
-                        .settings
-                        .key_rows
-                        .get(&k.connection)
-                        .cloned()
-                        .unwrap_or_default();
-                    if let Some(f) = row.rotating {
-                        let c = k.connection.clone();
-                        self.run_set(ui, SetAct::SaveRotate(c, f));
-                    }
                     return true;
                 }
                 false
@@ -521,6 +840,11 @@ impl App {
         }
         if self.st.dialog == Some(crate::state::Dialog::ExtInstall) {
             self.run_plug(ui, crate::plugins::PlugAct::CancelInstall);
+            ui.set_focus(None);
+            return true;
+        }
+        if self.st.dialog == Some(crate::state::Dialog::AddDevice) {
+            self.run_net(ui, crate::network::NetAct::CloseAdding);
             ui.set_focus(None);
             return true;
         }

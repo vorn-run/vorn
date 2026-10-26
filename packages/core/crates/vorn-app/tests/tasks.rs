@@ -13,7 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde_json::{json, Value};
-use support::{add_project, connect, key, seed_runs, seed_tasks, Shot, TestVornd};
+use support::{add_project, connect, key, seed_runs, seed_tasks, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::runs::RunAct;
@@ -56,6 +56,68 @@ fn toast(shot: &mut Shot, app: &mut App, text: &str) {
 fn saved(app: &App, id: &str) -> Option<Value> {
     let task = app.rpc().call("task:get", json!({ "id": id })).ok()?;
     task.is_object().then_some(task)
+}
+
+#[test]
+fn the_default_view_is_chosen_on_the_tasks_extension_page() {
+    use vorn_app::plugins::PlugAct;
+    use vorn_app::points::PointAct;
+    use vorn_app::settings::{Category, SetAct};
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let (mut app, mut shot) = tasks_view(&v);
+    assert_eq!(app.st.tasks.mode, Mode::List, "Tasks opens as a list");
+
+    // Settings › Extensions › Tasks, where the Default view row is.
+    app.st.settings.open = true;
+    shot.frame(&mut app);
+    shot.click(
+        &mut app,
+        App::control(
+            "settings-nav",
+            &Act::Set(SetAct::Open(Category::Connectors)),
+        ),
+    );
+    // The list reloads as extensions start, so press the row again until its page opens.
+    wait_for("the Tasks page", || {
+        shot.frame(&mut app);
+        let p = &app.st.plugins;
+        let key = p
+            .listings
+            .iter()
+            .find(|l| l.id == "vorn.tasks")?
+            .key
+            .clone();
+        if p.selected.as_ref() == Some(&key) {
+            return Some(());
+        }
+        let row = App::control("plug-installed-row", &Act::Plug(PlugAct::Select(Some(key))));
+        if p.loads == 0 {
+            shot.try_click(&mut app, row);
+        }
+        None
+    });
+    let board = Act::Point(PointAct::Preference {
+        id: "vorn.tasks".into(),
+        key: "default_view".into(),
+        value: "\"board\"".into(),
+    });
+    let row = App::control("ext-pref-vorn.tasks-default_view", &board);
+    shot.until(&mut app, "Default view on the Tasks page", |_, ui| {
+        ui.rect_of(row).map(|_| ())
+    });
+    shot.click(&mut app, row);
+    assert_eq!(app.st.tasks.mode, Mode::Board, "the view follows at once");
+    shot.until(&mut app, "the preference kept", |app, _| {
+        let prefs = app.rpc().call("extension:installed", Value::Null).ok()?;
+        let tasks = prefs.as_array()?.iter().find(|e| e["id"] == "vorn.tasks")?;
+        let pref = tasks["preferences"]
+            .as_array()?
+            .iter()
+            .find(|p| p["id"] == "default_view")?;
+        (pref["value"] == "board").then_some(())
+    });
 }
 
 /// The Tasks view of a vornd with project `web`.
@@ -244,10 +306,6 @@ fn the_board_moves_a_dragged_card_to_the_column_it_is_dropped_on() {
         control("task-mode", task(TaskAct::Mode(Mode::Board))),
     );
     assert_eq!(app.st.tasks.mode, Mode::Board);
-    shot.until(&mut app, "the mode saved", |app, _| {
-        let c = app.rpc().call("config:load", Value::Null).ok()?;
-        (c["defaults"]["taskViewMode"] == "kanban").then_some(())
-    });
     shot.send(&mut app, key("Escape", 0, None));
     shot.save(&mut app, "tasks-board");
     support::every_size(&mut app, "tasks-board", &["Todo"]);

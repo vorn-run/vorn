@@ -74,12 +74,14 @@ impl Sort {
     }
 }
 
-/// Cards in a grid, or one at a time under tabs (`defaults.layoutMode`).
+/// Cards in a grid, one at a time under tabs, or one per row in a list
+/// (`defaults.layoutMode`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum LayoutMode {
     #[default]
     Grid,
     Tabs,
+    List,
 }
 
 impl LayoutMode {
@@ -88,7 +90,16 @@ impl LayoutMode {
             .pointer("/defaults/layoutMode")
             .and_then(Value::as_str)
         {
-            Some("tabs") => LayoutMode::Tabs,
+            Some(v) => LayoutMode::from_key(v),
+            None => LayoutMode::Grid,
+        }
+    }
+
+    /// The mode a stored `layoutMode` names; Grid for any other.
+    pub fn from_key(key: &str) -> LayoutMode {
+        match key {
+            "tabs" => LayoutMode::Tabs,
+            "list" => LayoutMode::List,
             _ => LayoutMode::Grid,
         }
     }
@@ -97,6 +108,7 @@ impl LayoutMode {
         match self {
             LayoutMode::Grid => "grid",
             LayoutMode::Tabs => "tabs",
+            LayoutMode::List => "list",
         }
     }
 }
@@ -207,8 +219,26 @@ pub enum MenuKind {
     WfIcon,
     /// The settings shell picker's list.
     SetShell,
-    /// A settings `<select>`, by the default it writes.
-    SetSelect(String),
+    /// Settings › General's agent picker.
+    AgentPicker,
+    /// An extension page's choice of many options: extension id, preference id.
+    ExtChoice(String, String),
+    /// Settings › Appearance's theme picker, for a theme row of that scheme.
+    ThemePicker(vorn_theme::Appearance),
+    /// A theme's terminal palette, publisher and version, by theme id.
+    ThemeInfo(String),
+    /// Settings › Appearance's terminal font list.
+    FontPicker,
+    /// Settings › About's Stable / Beta chip.
+    UpdateChannel,
+    /// Settings › Notifications' Sound chip.
+    NotifSound,
+    /// Settings › Notifications' From extensions popover: a switch per extension.
+    NotifSources,
+    /// Settings › About's terminals row, by the older session holder's instance.
+    Holder(String),
+    /// Settings › Remote Access's device menu, by the device's token id.
+    Device(String),
     /// A session's branch switcher.
     Branch(String),
     /// The editors a session's project opens in.
@@ -276,6 +306,8 @@ pub enum Dialog {
     SignIn,
     /// What a workflow from a project's file runs, before it is turned on.
     TurnOn(String),
+    /// Settings › Remote Access's Add a device sheet.
+    AddDevice,
 }
 
 /// A toast in the bottom right.
@@ -720,6 +752,9 @@ mod tests {
         let c = json!({ "defaults": { "layoutMode": "tabs" } });
         assert_eq!(LayoutMode::from_config(&c), LayoutMode::Tabs);
         assert_eq!(LayoutMode::from_config(&json!({})), LayoutMode::Grid);
+        for mode in [LayoutMode::Grid, LayoutMode::Tabs, LayoutMode::List] {
+            assert_eq!(LayoutMode::from_key(mode.key()), mode);
+        }
         assert_eq!(basename("/a/b/demo/"), "demo");
         assert_eq!(basename(r"C:\src\demo"), "demo");
     }

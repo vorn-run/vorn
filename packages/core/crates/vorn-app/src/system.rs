@@ -108,14 +108,6 @@ pub fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// A short tone, for the notification sound's Test button.
-pub fn bell() {
-    use std::io::Write;
-    let mut out = std::io::stdout();
-    let _ = out.write_all(b"\x07");
-    let _ = out.flush();
-}
-
 /// A GET of `path` from vornd's HTTP port, as JSON.
 pub fn http_get_json(port: u16, path: &str) -> Option<Value> {
     use std::io::{Read, Write};

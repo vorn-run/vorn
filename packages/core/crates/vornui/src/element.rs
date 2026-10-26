@@ -267,6 +267,12 @@ pub struct El {
     /// Blur what is drawn under the box by this standard deviation, in
     /// logical pixels (`backdrop-filter: blur()`).
     pub(crate) backdrop_blur: Option<f32>,
+    /// The system's own glass under the box, where the platform has one.
+    pub(crate) native_glass: bool,
+    /// An icon the system draws inside its glass: SVG, logical size and colour.
+    pub(crate) native_icon: Option<(std::rc::Rc<str>, f32, Rgba)>,
+    /// A label the system draws in its glass: text, logical size and colour.
+    pub(crate) native_label: Option<(std::rc::Rc<str>, f32, Rgba)>,
     /// What the box shows on a cells surface instead of its content and children.
     pub(crate) glyph: Option<Box<str>>,
     /// The glyph's ink, when it is not the content's.
@@ -306,6 +312,9 @@ pub fn div() -> El {
         shadows: Vec::new(),
         frames: None,
         backdrop_blur: None,
+        native_glass: false,
+        native_icon: None,
+        native_label: None,
         glyph: None,
         glyph_tint: None,
         windowed: false,
@@ -727,6 +736,15 @@ impl El {
         self
     }
 
+    /// Drawn in the installed family `name`, for a text element (a font
+    /// picker's row in its own face).
+    pub fn family(mut self, name: &str) -> El {
+        if let Content::Text { style, .. } = &mut self.content {
+            style.family = Some(crate::text::intern_family(name));
+        }
+        self
+    }
+
     /// Slanted, for a text element (a preview tab's name).
     pub fn italic(mut self) -> El {
         if let Content::Text { style, .. } = &mut self.content {
@@ -823,21 +841,33 @@ impl El {
         self.backdrop_blur = (sigma > 0.0).then_some(sigma);
         self
     }
-    /// The surface of a menu, popover or the palette: opaque with Solid
-    /// materials, otherwise translucent over a blur of what is under it.
+    /// Puts the system's own glass (Liquid Glass on macOS 26) under the
+    /// box, within its rounded corners; nothing where there is none.
+    pub fn native_glass(mut self) -> El {
+        self.native_glass = true;
+        self
+    }
+    /// An icon (`svg`, `size` logical pixels) the system draws in its glass
+    /// at the box's centre, so it takes the glass's vibrancy.
+    pub fn native_icon(mut self, svg: &str, size: f32, color: impl Into<Rgba>) -> El {
+        self.native_icon = Some((svg.into(), size, color.into()));
+        self
+    }
+    /// Text the system draws in its glass over the box, in its own font at
+    /// `size` logical pixels; the box keeps the room the app laid out.
+    pub fn native_label(mut self, text: &str, size: f32, color: impl Into<Rgba>) -> El {
+        self.native_label = Some((text.into(), size, color.into()));
+        self
+    }
+    /// The surface of a menu, popover or the palette, in the active theme's
+    /// overlay colour: opaque with Solid materials, otherwise translucent
+    /// over a blur of what is under it.
     pub fn floating(self) -> El {
-        use vorn_theme::Materials;
-        let token = vorn_theme::Token::SurfaceOverlay;
+        let fill = crate::palette::get(vorn_theme::Token::SurfaceOverlay);
+        if crate::palette::materials() == vorn_theme::Materials::Solid {
+            return self.bg(fill);
+        }
         let tuning = crate::theme::material::tuning();
-        let fill = match crate::palette::materials() {
-            Materials::Solid => return self.bg(crate::palette::get(token)),
-            // Vorn's own neutral surface of the same lightness, not the theme's.
-            Materials::Native if crate::palette::dark() => {
-                Rgba::from(vorn_theme::vorn_dark().get(token))
-            }
-            Materials::Native => Rgba::from(vorn_theme::vorn_light().get(token)),
-            Materials::Themed => crate::palette::get(token),
-        };
         self.bg(fill.alpha(tuning.opacity))
             .backdrop_blur(tuning.sigma)
     }

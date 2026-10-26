@@ -556,7 +556,6 @@ impl App {
         session: &crate::client::Session,
     ) -> Option<&'a crate::log::Shell> {
         crate::log::split(
-            &self.store.config,
             &self.st.points,
             session,
             self.st.shells.get(&session.info.id),

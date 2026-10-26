@@ -7,7 +7,7 @@
 mod support;
 
 use serde_json::json;
-use support::{add_project, connect, key, Shot, TestVornd};
+use support::{add_project, connect, key, wait_for, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::MOD;
 use vorn_app::plugins::{field_id, tabs_id, Field, Form, PlugAct, Tab};
@@ -133,6 +133,7 @@ fn plugins_page_lists_adds_and_connects() {
         let value = match key {
             "baseUrl" => "https://api.example.com",
             "profileName" => "Example API",
+            "secret" => "sk-example",
             _ => continue,
         };
         shot.type_text(&mut app, value);
@@ -150,10 +151,26 @@ fn plugins_page_lists_adds_and_connects() {
     });
     shot.save(&mut app, "pl-connected");
 
+    // The key lives on the connection's row: its menu tests and rotates it.
+    let more = wait_for("the connection's menu", || {
+        shot.labelled(&mut app, "Button", "More")
+    });
+    shot.click(&mut app, more);
+    shot.save(&mut app, "pl-key-menu");
+    let rotate = shot
+        .labelled(&mut app, "MenuItem", "Rotate key\u{2026}")
+        .expect("Rotate key in the connection's menu");
+    shot.click(&mut app, rotate);
+    wait_for("the new key's field", || {
+        shot.frame(&mut app);
+        shot.labelled(&mut app, "TextInput", "New Secret")
+    });
+    shot.save(&mut app, "pl-rotating");
+
     // Leaving the page forgets the form state.
     shot.click(
         &mut app,
-        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Keys))),
+        App::control("settings-nav", &Act::Set(SetAct::Open(Category::Network))),
     );
     assert!(!app.st.shown(Category::Connectors));
     assert!(app.st.plugins.adding.is_none());

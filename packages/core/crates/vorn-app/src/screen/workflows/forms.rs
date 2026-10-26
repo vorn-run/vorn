@@ -2725,12 +2725,11 @@ fn agent_form(s: &Screen<'_>, d: &Draft, id: &str, n: &Value) -> El {
             .and_then(Value::as_f64)
             .map(|ms| ((ms / 60_000.0).round() as i64).to_string())
             .unwrap_or_default();
-        let default = s
-            .store
-            .config
-            .pointer("/defaults/headlessStepTimeoutMinutes")
-            .and_then(Value::as_f64)
-            .map_or(30, |m| m as i64);
+        let default = crate::workflows::minutes(&crate::workflows::preference(
+            s.st,
+            "headlessStepTimeoutMinutes",
+        ))
+        .map_or(60, |m| m as i64);
         let zero = n.pointer("/config/timeoutMs").and_then(Value::as_f64) == Some(0.0);
         exec.push(block(vec![
             label("Timeout"),

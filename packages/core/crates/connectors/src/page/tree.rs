@@ -7,9 +7,9 @@ use vorn_tree::{Event, EventKind, Node, Rendered, TextStyle, Tone};
 use super::{text as s, CHOICES, CONNECTIONS, FILTERS, FORM, PROJECTS, SETTINGS, TRIGGERS};
 
 /// What the page's controls run, by the id before the first `:`; after it is what they act on.
-const DOES: [&str; 14] = [
+const DOES: [&str; 17] = [
     "refresh", "add", "add_to", "cancel", "save", "pick", "trigger", "project", "set", "test",
-    "backfill", "signin", "rollback", "remove",
+    "backfill", "signin", "rollback", "remove", "rotate", "unrotate", "newkey",
 ];
 
 /// The page drawn from its rows, by collection.
@@ -78,7 +78,8 @@ fn page(rows: &[(&str, Vec<Value>)]) -> Node {
     page
 }
 
-/// One connection: Test and Import now on hover, Roll back and Remove behind its menu.
+/// One connection with its key line: Import now on hover; Test key, Rotate key…,
+/// Roll back and Remove behind its menu.
 fn connection(r: &Value, filters: &[Value]) -> Node {
     let id = s(r, "id");
     let name = s(r, "name");
@@ -92,9 +93,23 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
     if on(r, "needs_signin") {
         actions.push(button(format!("signin:{id}"), "Sign in").icon("log-in"));
     }
-    actions.push(button(format!("test:{id}"), "Test").icon("zap"));
     actions.push(button(format!("backfill:{id}"), "Import now").icon("import"));
-    let mut more = Vec::new();
+    let mut more = vec![button(format!("test:{id}"), "Test key")
+        .icon("zap")
+        .tip("Checks that the key still works")];
+    let fields = r["key_fields"].as_array().map_or(&[][..], Vec::as_slice);
+    for f in fields {
+        let label = if fields.len() > 1 {
+            format!("Rotate {}…", s(f, "label"))
+        } else {
+            "Rotate key…".to_owned()
+        };
+        more.push(
+            button(format!("rotate:{id}|{}", s(f, "key")), label)
+                .icon("refresh-cw")
+                .tip("Swaps in a new key from the service; the old one stops working"),
+        );
+    }
     if on(r, "can_roll_back") {
         more.push(
             button(
@@ -123,7 +138,50 @@ fn connection(r: &Value, filters: &[Value]) -> Node {
     if let Some(t) = status {
         e = e.tone(t);
     }
+    if let Some(k) = key_line(r) {
+        e = e.child(k);
+    }
+    if on(r, "rotating") {
+        e = e.child(rotating(r));
+    }
     e
+}
+
+/// The key icon and what the key is, red when its last test failed.
+fn key_line(r: &Value) -> Option<Node> {
+    let line = s(r, "key_line");
+    if line.is_empty() {
+        return None;
+    }
+    let mut words = text(line).style(TextStyle::Secondary);
+    if s(r, "key_state") == "failing" {
+        words = words.tone(Tone::Bad);
+    }
+    Some(
+        row([icon("key-round"), words])
+            .gap(4.0)
+            .id(format!("key:{}", s(r, "id")))
+            .tip("Shows where the key is kept and when it last changed"),
+    )
+}
+
+/// The new key's field while one is replaced: Return saves it, Cancel keeps the old one.
+fn rotating(r: &Value) -> Node {
+    let id = s(r, "id");
+    let label = s(r, "rotating_label");
+    let mut parts = vec![row([
+        field(format!("newkey:{id}"), "")
+            .secret()
+            .placeholder(format!("New {label}, then Return"))
+            .label(format!("New {label}"))
+            .grow(),
+        button(format!("unrotate:{id}"), "Cancel"),
+    ])
+    .gap(8.0)];
+    if !s(r, "rotate_error").is_empty() {
+        parts.push(notice(s(r, "rotate_error"), Tone::Bad));
+    }
+    col(parts).gap(4.0).py(4.0)
 }
 
 /// The form a new connection is set up in, from its connector to where its tasks go.
@@ -195,7 +253,9 @@ mod tests {
             json!({ "id": id, "name": name, "connector": "http", "connector_name": "HTTP",
                 "connector_line": "2 connections", "can_add": true, "icon": "connector:http",
                 "line": "HTTP · synced just now", "state": "ok", "needs_signin": false,
-                "can_roll_back": false, "previous": "" })
+                "can_roll_back": false, "previous": "", "key_line": "Secret · ••••4f2a",
+                "key_state": "ok", "key_fields": [{ "key": "secret", "label": "Secret" }],
+                "rotating": id == "b", "rotating_label": "Secret", "rotate_error": "" })
         };
         let mut out = vec![
             (
@@ -239,6 +299,10 @@ mod tests {
         assert!(json.contains("add_to:http"), "{json}");
         assert!(json.contains("baseUrl: https://api.example.com"), "{json}");
         assert!(json.contains("\"id\":\"add\""), "{json}");
+        assert!(json.contains("\"id\":\"key:a\""), "{json}");
+        assert!(json.contains("rotate:a|secret"), "{json}");
+        assert!(json.contains("\"id\":\"newkey:b\""), "{json}");
+        assert!(!json.contains("\"id\":\"newkey:a\""), "{json}");
         let adding = render(&rows(true));
         let read = vorn_tree::read(&adding).expect("a valid tree with the form");
         let json = serde_json::to_string(&read.tree).unwrap();
@@ -264,6 +328,13 @@ mod tests {
         assert_eq!(
             event(&ev("add", EventKind::Click, "")).unwrap().1,
             Value::Null
+        );
+        let (does, args) = event(&ev("rotate:c1|secret", EventKind::Click, "")).unwrap();
+        assert_eq!((does, args), ("rotate", json!({ "id": "c1|secret" })));
+        let (does, args) = event(&ev("newkey:c1", EventKind::Submit, "k")).unwrap();
+        assert_eq!(
+            (does, args),
+            ("newkey", json!({ "id": "c1", "value": "k" }))
         );
         assert!(event(&ev("drop:x", EventKind::Click, "")).is_err());
     }

@@ -5,7 +5,16 @@
 //! vorn-app update [--channel stable|beta] [--data-dir D]
 //! vorn-app --version | --help
 //! vorn-app shot --out a.png [--data-dir D] [--size WxH] [--scale S] [--select N]
-//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off] [--layout tabs]
+//!               [--keys K1,K2] [--clipboard TEXT] [--chrome off]
+//!               [--layout tabs|list] [--settings PAGE] [--set KEY=JSON]...
+//!               [--open theme-picker|theme-info|font-picker|agent-picker|shell-picker|
+//!                       channel-menu|holder-menu|agent:KEY|agent-advanced:KEY|
+//!                       agent-remove:KEY|extension:ID|net-STATE+STATE]
+//!               [--update idle|checking|ready:VER|error:TEXT] [--holder BUILD:N]
+//!               [--outdated ID,ID] [--confirm-end on] [--missing KEY,KEY]
+//!               [--click X,Y]... [--type TEXT] [--hover X,Y]
+//!               [--reduced-transparency on] [--tui-drawing cells|pixels]
+//!               [--notif-denied on]
 //! vorn-app cells --out a.html [--data-dir D] [--size COLSxROWS] [--select N]
 //!               [--keys K1,K2] [--click COL:ROW] [--png a.png] [--scale S]
 //!               [--layout tabs]
@@ -24,6 +33,22 @@
 //! `--keys` sends keys before the shot (`Mod+KeyN`, `Alt+Digit2`,
 //! `F2`, `Escape`, `KeyE,KeyC,Tab`); a bare letter types itself. A paste
 //! among them reads `--clipboard`.
+//!
+//! `--settings appearance` opens Settings on that page after writing each
+//! `--set colorScheme="dark"` to the defaults (vornd keeps them), and
+//! `--open` opens one of its popovers from its control, or with
+//! `extension:vorn.tasks` that extension's page under `--settings extensions`,
+//! or with `agent:claude` that agent's page under `--settings agents`;
+//! `net-tailnet+add-device` (also `advanced`, `devices`, `pair-request`, `device-menu`,
+//! `confirm-remove`) sets Remote Access states under `--settings network`.
+//! Then each `--click X,Y` presses there, `--type` types letters into the
+//! focused field, and `--hover X,Y` rests the pointer past the tooltip delay.
+//! `--reduced-transparency on`, `--tui-drawing` and `--notif-denied on` (the
+//! system blocks Vorn's notifications) stand in for the system.
+//! On About, `--update`, `--holder` (an older session holder with N
+//! terminals), `--outdated` (installed packs shown as behind) and
+//! `--confirm-end` fake the states once vornd has answered; `--missing`
+//! shows those agents as not found.
 //!
 //! Both find vornd through `D` (default `VORN_DATA_DIR`, else `~/.vorn`).
 //! `window` starts the vornd shipped beside it when none answers, and waits
@@ -120,11 +145,31 @@ impl Args {
         }
     }
 
-    /// `--layout tabs` shows the sessions as tabs.
+    /// `--layout tabs|list` shows the sessions as tabs or as a list.
     fn layout(&self, app: &mut App) {
-        if self.get("layout") == Some("tabs") {
-            app.st.layout = vorn_app::state::LayoutMode::Tabs;
+        if let Some(l @ ("tabs" | "list")) = self.get("layout") {
+            app.st.layout = vorn_app::state::LayoutMode::from_key(l);
         }
+    }
+
+    /// Every value of a repeated flag, in order.
+    fn all<'a>(&'a self, key: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.flags
+            .iter()
+            .filter(move |(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Every `--set KEY=JSON`, in order.
+    fn sets(&self) -> Result<Vec<(&str, &str)>, String> {
+        self.flags
+            .iter()
+            .filter(|(k, _)| k == "set")
+            .map(|(_, v)| {
+                v.split_once('=')
+                    .ok_or(format!("--set {v:?} needs KEY=JSON"))
+            })
+            .collect()
     }
 }
 
@@ -156,6 +201,16 @@ fn shot(args: &Args) -> Result<(), String> {
     // Drawn window controls stand in for the traffic lights.
     app.traffic = cfg!(target_os = "macos") && !app.chrome;
     let mut ui = Ui::headless(RenderMode::from_env(), &ui_config(scale));
+    ui.set_reduced_transparency(args.get("reduced-transparency") == Some("on"));
+    if args.get("notif-denied") == Some("on") {
+        vorn_app::notify::show_blocked();
+    }
+    app.term_drawing = args
+        .get("tui-drawing")
+        .map(|d| vorn_app::screen::TermDrawing {
+            supported: true,
+            pixels: d == "pixels",
+        });
     if let Some(c) = args.get("clipboard") {
         ui.set_clipboard(Box::new(MemoryClipboard::text(c)));
     }
@@ -172,6 +227,74 @@ fn shot(args: &Args) -> Result<(), String> {
     for k in args.get("keys").into_iter().flat_map(|k| k.split(',')) {
         app.frame(&mut ui, size);
         app.send(&mut ui, key(k));
+    }
+    if let Some(page) = args.get("settings") {
+        app.shot_settings(page, &args.sets()?)?;
+        app.frame(&mut ui, size);
+        app.frame(&mut ui, size);
+    }
+    if ["update", "holder", "outdated", "confirm-end", "missing"]
+        .iter()
+        .any(|k| args.get(k).is_some())
+    {
+        // vornd's answers land first, so they do not overwrite the fakes.
+        let until = Instant::now() + Duration::from_secs(10);
+        while (app.busy() || app.st.plugins.loads > 0) && Instant::now() < until {
+            app.frame(&mut ui, size);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        app.shot_about(args.get("update"), args.get("holder"), args.get("outdated"))?;
+        if args.get("confirm-end").is_some() {
+            app.st.settings.confirm_end = Some("shot".to_owned());
+        }
+        let missing: Vec<&str> = args.get("missing").unwrap_or_default().split(',').collect();
+        if let Some(found) = app.st.installed.as_mut() {
+            found.retain(|k| !missing.contains(&k.as_str()));
+        }
+        app.frame(&mut ui, size);
+    }
+    if let Some(name) = args.get("open") {
+        // An extension's page, or Remote Access, waits for vornd to answer.
+        let until = Instant::now() + Duration::from_secs(10);
+        while let Err(e) = app.shot_open(&mut ui, name) {
+            let waits = name.starts_with("extension:") || name.starts_with("net-");
+            if !waits || Instant::now() > until {
+                return Err(e);
+            }
+            app.frame(&mut ui, size);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    for at in args.all("click") {
+        let (x, y) = point(at)?;
+        app.frame(&mut ui, size);
+        app.frame(&mut ui, size);
+        ui.pointer_move(x, y);
+        ui.pointer_down();
+        ui.pointer_up();
+        app.events(&mut ui);
+    }
+    for c in args.get("type").unwrap_or_default().chars() {
+        app.frame(&mut ui, size);
+        app.send(
+            &mut ui,
+            Input::Key {
+                code: format!("Key{}", c.to_ascii_uppercase()),
+                mods: 0,
+                text: Some(c.to_string()),
+            },
+        );
+    }
+    if let Some(at) = args.get("hover") {
+        let (x, y) = point(at)?;
+        // An open popover finishes growing in before the pointer lands on it.
+        std::thread::sleep(Duration::from_millis(300));
+        app.frame(&mut ui, size);
+        ui.pointer_move(x, y);
+        app.events(&mut ui);
+        app.frame(&mut ui, size);
+        // Past the tooltip delay.
+        std::thread::sleep(Duration::from_millis(600));
     }
     let px = (
         (size.0 * scale).round() as u32,
@@ -413,6 +536,13 @@ fn term(args: &Args) -> Result<(), String> {
     paint_view(&view, out, scale, vorn_app::paint::Caret::Live)?;
     println!("{out}");
     Ok(())
+}
+
+/// A point in window coordinates from `X,Y`.
+fn point(at: &str) -> Result<(f32, f32), String> {
+    at.split_once(',')
+        .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
+        .ok_or(format!("bad point {at:?}, want X,Y"))
 }
 
 /// A key from its name: `Mod+KeyN`, `Alt+Digit2`, `Shift+Tab`, `F2`.

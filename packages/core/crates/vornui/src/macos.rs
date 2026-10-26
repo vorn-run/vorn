@@ -238,6 +238,16 @@ pub(crate) fn clipboard_has_image() -> bool {
     }
 }
 
+/// The files on the system clipboard, as a file manager's copy leaves them.
+pub(crate) fn clipboard_files() -> Vec<std::path::PathBuf> {
+    // SAFETY: the general pasteboard is safe to read from any thread.
+    let pb = unsafe { NSPasteboard::generalPasteboard() };
+    if !has_files(&pb) {
+        return Vec::new();
+    }
+    files(&pb).unwrap_or_default()
+}
+
 /// Paints the window's own background `rgb` (0 to 1), so a window shown
 /// before its first frame is the app's colour rather than the system's.
 pub(crate) fn set_background(window: &Window, (r, g, b): (f64, f64, f64)) {
@@ -362,4 +372,216 @@ pub(crate) fn set_material(window: &Window, dark: Option<bool>, solid: (f64, f64
         }
         true
     })
+}
+
+thread_local! {
+    /// The glass views over this thread's window, one a box, reused frame to frame.
+    static GLASS: std::cell::RefCell<Vec<Retained<NSView>>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Template images made from icon SVGs, by SVG text.
+    static ICONS: std::cell::RefCell<std::collections::HashMap<std::rc::Rc<str>, Retained<AnyObject>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+extern "C" fn pass_through(_: &AnyObject, _: Sel, _: objc2_foundation::NSPoint) -> *mut AnyObject {
+    std::ptr::null_mut()
+}
+
+/// NSGlassEffectView that lets every press through to the app under it,
+/// which draws the button's states and answers it.
+fn glass_class() -> Option<&'static objc2::runtime::AnyClass> {
+    static CLASS: std::sync::OnceLock<Option<&'static objc2::runtime::AnyClass>> =
+        std::sync::OnceLock::new();
+    *CLASS.get_or_init(|| {
+        let sup = objc2::runtime::AnyClass::get("NSGlassEffectView")?;
+        if let Some(c) = objc2::runtime::AnyClass::get("VornGlassView") {
+            return Some(c);
+        }
+        let mut b = objc2::runtime::ClassBuilder::new("VornGlassView", sup)?;
+        // SAFETY: hitTest: takes an NSPoint and answers a view or nil.
+        unsafe {
+            b.add_method(sel!(hitTest:), pass_through as extern "C" fn(_, _, _) -> _);
+        }
+        Some(b.register())
+    })
+}
+
+/// A template image of `svg`, so the glass tints it as its own label.
+fn icon_image(svg: &std::rc::Rc<str>) -> Option<Retained<AnyObject>> {
+    ICONS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(img) = cache.get(svg) {
+            return Some(img.clone());
+        }
+        let cls = objc2::runtime::AnyClass::get("NSImage")?;
+        let data = NSData::with_bytes(svg.as_bytes());
+        // SAFETY: NSImage made from data on the main thread.
+        let img: Option<Retained<AnyObject>> = unsafe {
+            let img: *mut AnyObject = objc2::msg_send![cls, alloc];
+            let img: *mut AnyObject = objc2::msg_send![img, initWithData: &*data];
+            Retained::from_raw(img)
+        };
+        let img = img?;
+        // SAFETY: a plain setter on the image just made.
+        unsafe {
+            let _: () = objc2::msg_send![&*img, setTemplate: true];
+        }
+        cache.insert(svg.clone(), img.clone());
+        Some(img)
+    })
+}
+
+/// Puts the system's glass (NSGlassEffectView, macOS 26) over each box,
+/// given in device pixels with its corner radius, with the icons inside it
+/// drawn by the system; none on older systems.
+pub(crate) fn sync_glass(
+    window: &Window,
+    boxes: &[(crate::scene::Rect, f32)],
+    icons: &[(crate::scene::Rect, std::rc::Rc<str>, crate::scene::Rgba)],
+    labels: &[(
+        crate::scene::Rect,
+        std::rc::Rc<str>,
+        f32,
+        crate::scene::Rgba,
+    )],
+    scale: f64,
+) {
+    let Some(cls) = glass_class() else {
+        return;
+    };
+    let Some(content) = content_view(window) else {
+        return;
+    };
+    // SAFETY: the content view is winit's, live and used on the main thread.
+    let Some(frame) = (unsafe { content.superview() }) else {
+        return;
+    };
+    let height = content.frame().size.height;
+    let s = scale.max(1.0);
+    let pt = |r: &crate::scene::Rect| {
+        (
+            f64::from(r.x) / s,
+            f64::from(r.y) / s,
+            f64::from(r.w) / s,
+            f64::from(r.h) / s,
+        )
+    };
+    GLASS.with(|g| {
+        let mut g = g.borrow_mut();
+        while g.len() > boxes.len() {
+            if let Some(v) = g.pop() {
+                // SAFETY: a view this module added, removed on the main thread.
+                unsafe { v.removeFromSuperview() };
+            }
+        }
+        // NSWindowAbove: over the app's own drawing, so the glass bends it.
+        const ABOVE: isize = 1;
+        for (i, (r, radius)) in boxes.iter().enumerate() {
+            let (x, y, w, h) = pt(r);
+            let rect = objc2_foundation::NSRect::new(
+                objc2_foundation::NSPoint::new(x, height - y - h),
+                objc2_foundation::NSSize::new(w, h),
+            );
+            // SAFETY: AppKit's own view classes made and placed on the main
+            // thread; the selectors and argument types are AppKit's.
+            unsafe {
+                if i == g.len() {
+                    let view: *mut AnyObject = objc2::msg_send![cls, alloc];
+                    let view: *mut AnyObject = objc2::msg_send![view, initWithFrame: rect];
+                    let Some(view) = Retained::from_raw(view.cast::<NSView>()) else {
+                        return;
+                    };
+                    let inner: *mut AnyObject = objc2::msg_send![objc2::class!(NSView), alloc];
+                    let bounds = objc2_foundation::NSRect::new(
+                        objc2_foundation::NSPoint::new(0.0, 0.0),
+                        rect.size,
+                    );
+                    let inner: *mut AnyObject = objc2::msg_send![inner, initWithFrame: bounds];
+                    let _: () = objc2::msg_send![&*view, setContentView: inner];
+                    let _: () = objc2::msg_send![inner, release];
+                    let _: () = objc2::msg_send![
+                        &*frame,
+                        addSubview: &*view,
+                        positioned: ABOVE,
+                        relativeTo: content
+                    ];
+                    g.push(view);
+                }
+                let v = &g[i];
+                v.setFrame(rect);
+                let _: () = objc2::msg_send![&**v, setCornerRadius: f64::from(*radius) / s];
+                let [r, g, b, a] = crate::palette::get(vorn_theme::Token::MaterialGlass).0;
+                let tint = (a > 0.0).then(|| {
+                    objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(
+                        r.into(),
+                        g.into(),
+                        b.into(),
+                        a.into(),
+                    )
+                });
+                let _: () = objc2::msg_send![&**v, setTintColor: tint.as_deref()];
+                let inner: *mut AnyObject = objc2::msg_send![&**v, contentView];
+                let subs: *mut AnyObject = objc2::msg_send![inner, subviews];
+                let old: *mut AnyObject = objc2::msg_send![subs, copy];
+                let _: () =
+                    objc2::msg_send![old, makeObjectsPerformSelector: sel!(removeFromSuperview)];
+                let _: () = objc2::msg_send![old, release];
+                for (ir, svg, color) in icons {
+                    let (ix, iy, iw, ih) = pt(ir);
+                    if ix < x || iy < y || ix + iw > x + w + 0.5 || iy + ih > y + h + 0.5 {
+                        continue;
+                    }
+                    let Some(img) = icon_image(svg) else { continue };
+                    let iv: *mut AnyObject =
+                        objc2::msg_send![objc2::class!(NSImageView), imageViewWithImage: &*img];
+                    let at = objc2_foundation::NSRect::new(
+                        objc2_foundation::NSPoint::new(ix - x, h - (iy - y) - ih),
+                        objc2_foundation::NSSize::new(iw, ih),
+                    );
+                    let _: () = objc2::msg_send![iv, setFrame: at];
+                    let [cr, cg, cb, ca] = color.0;
+                    let tint = objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(
+                        f64::from(cr),
+                        f64::from(cg),
+                        f64::from(cb),
+                        f64::from(ca),
+                    );
+                    let _: () = objc2::msg_send![iv, setContentTintColor: &*tint];
+                    let _: () = objc2::msg_send![inner, addSubview: iv];
+                }
+                for (lr, text, size, color) in labels {
+                    let (lx, ly, lw, lh) = pt(lr);
+                    if lx < x || ly < y || lx + lw > x + w + 0.5 || ly + lh > y + h + 0.5 {
+                        continue;
+                    }
+                    let t = NSString::from_str(text);
+                    let tf: *mut AnyObject =
+                        objc2::msg_send![objc2::class!(NSTextField), labelWithString: &*t];
+                    let font: *mut AnyObject = objc2::msg_send![
+                        objc2::class!(NSFont),
+                        systemFontOfSize: f64::from(*size) / s,
+                        weight: 0.23f64
+                    ];
+                    let _: () = objc2::msg_send![tf, setFont: font];
+                    let [cr, cg, cb, ca] = color.0;
+                    let ink = objc2_app_kit::NSColor::colorWithSRGBRed_green_blue_alpha(
+                        f64::from(cr),
+                        f64::from(cg),
+                        f64::from(cb),
+                        f64::from(ca),
+                    );
+                    let _: () = objc2::msg_send![tf, setTextColor: &*ink];
+                    let fit: objc2_foundation::NSSize = objc2::msg_send![tf, fittingSize];
+                    let at = objc2_foundation::NSRect::new(
+                        objc2_foundation::NSPoint::new(
+                            lx - x,
+                            h - (ly - y) - lh + (lh - fit.height) / 2.0,
+                        ),
+                        objc2_foundation::NSSize::new(lw.max(fit.width), fit.height),
+                    );
+                    let _: () = objc2::msg_send![tf, setFrame: at];
+                    let _: () = objc2::msg_send![inner, addSubview: tf];
+                }
+            }
+        }
+    });
 }

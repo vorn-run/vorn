@@ -645,6 +645,38 @@ pub fn install(staged: &Staged, data_dir: Option<&Path>) -> Result<(), String> {
     }
 }
 
+/// Starts this app again once it exits, on `data_dir` when given; the caller
+/// exits next.
+pub fn relaunch(data_dir: Option<&Path>) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    // A macOS bundle reopens through `open`, as an update does.
+    #[cfg(target_os = "macos")]
+    if let Some(app) = exe
+        .ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"))
+    {
+        let mut command = match data_dir {
+            Some(dir) => after_exit("open \"$1\" --args --data-dir \"$2\"", &[app, dir]),
+            None => after_exit("open \"$1\"", &[app]),
+        };
+        return spawn_detached(&mut command);
+    }
+    #[cfg(unix)]
+    let mut command = match data_dir {
+        Some(dir) => after_exit("exec \"$1\" --data-dir \"$2\"", &[exe.as_path(), dir]),
+        None => after_exit("exec \"$1\"", &[exe.as_path()]),
+    };
+    #[cfg(not(unix))]
+    let mut command = {
+        let mut command = command(&exe);
+        if let Some(dir) = data_dir {
+            command.arg("--data-dir").arg(dir);
+        }
+        command
+    };
+    spawn_detached(&mut command)
+}
+
 /// The channel `Vorn update` reads when none is named: a prerelease build
 /// follows betas, as the person who installed one chose.
 pub fn default_channel(current: &str) -> &'static str {
@@ -697,11 +729,11 @@ pub fn update_now(
     Ok(Outcome::Installed { version })
 }
 
-/// What the person last chose, read from the config each frame.
+/// What the person last chose, read from the config each frame. A newer
+/// release always downloads; it installs only on Restart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prefs {
     pub channel: String,
-    pub auto_download: bool,
 }
 
 impl Prefs {
@@ -714,10 +746,6 @@ impl Prefs {
                 .filter(|c| *c == "beta")
                 .unwrap_or("stable")
                 .to_owned(),
-            auto_download: d
-                .and_then(|d| d.get("updateAutoDownload"))
-                .and_then(Value::as_bool)
-                .unwrap_or(true),
         }
     }
 }
@@ -877,11 +905,14 @@ impl Updater {
             return;
         };
         self.set(UpdateStatus::Checking);
-        self.checked(fetch_feed(&prefs.channel), &prefs);
+        if self.checked(fetch_feed(&prefs.channel)) {
+            self.run_download();
+        }
     }
 
-    /// Offers a release newer than the staged update (or this build); else a staged update stays ready.
-    fn checked(&self, feed: Result<Feed, String>, prefs: &Prefs) {
+    /// Offers a release newer than the staged update (or this build); else a
+    /// staged update stays ready. Whether one was offered, to download.
+    fn checked(&self, feed: Result<Feed, String>) -> bool {
         let staged = self.lock().staged.as_ref().map(|s| s.version.clone());
         let base = staged.as_deref().unwrap_or(env!("CARGO_PKG_VERSION"));
         let found = feed.map(|feed| {
@@ -903,13 +934,11 @@ impl Updater {
                     inner.offered = Some(asset);
                     inner.offered_version = version.clone();
                 }
-                if prefs.auto_download {
-                    self.run_download();
-                } else {
-                    self.set(UpdateStatus::Available { version });
-                }
+                self.set(UpdateStatus::Available { version });
+                return true;
             }
         }
+        false
     }
 
     fn run_download(&self) {
@@ -1031,19 +1060,10 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_channel_and_auto_download() {
-        assert_eq!(
-            Prefs::from_config(&json!({})),
-            Prefs {
-                channel: "stable".into(),
-                auto_download: true
-            }
-        );
-        let p = Prefs::from_config(
-            &json!({ "defaults": { "updateChannel": "beta", "updateAutoDownload": false } }),
-        );
+    fn reads_the_channel() {
+        assert_eq!(Prefs::from_config(&json!({})).channel, "stable");
+        let p = Prefs::from_config(&json!({ "defaults": { "updateChannel": "beta" } }));
         assert_eq!(p.channel, "beta");
-        assert!(!p.auto_download);
     }
 
     #[test]
@@ -1159,11 +1179,6 @@ mod tests {
         .unwrap()
     }
 
-    const ASKING: Prefs = Prefs {
-        channel: String::new(),
-        auto_download: false,
-    };
-
     #[test]
     fn a_check_with_an_update_staged_offers_only_a_newer_one() {
         let install = Install::Mac(PathBuf::from("/Applications/Vorn.app"));
@@ -1177,12 +1192,12 @@ mod tests {
             Some(staged("98.0.0", PathBuf::from("/x"), &install)),
         );
         // The same release again, or a failed check, keeps the staged one ready.
-        u.checked(Ok(feed("98.0.0", key)), &ASKING);
+        u.checked(Ok(feed("98.0.0", key)));
         assert_eq!(u.status(), ready("98.0.0"));
-        u.checked(Err("offline".into()), &ASKING);
+        u.checked(Err("offline".into()));
         assert_eq!(u.status(), ready("98.0.0"));
         // A newer release is offered in its place; the staged one stays until it lands.
-        u.checked(Ok(feed("99.0.0", key)), &ASKING);
+        u.checked(Ok(feed("99.0.0", key)));
         assert_eq!(
             u.status(),
             UpdateStatus::Available {
@@ -1205,14 +1220,14 @@ mod tests {
             return;
         };
         let u = updater(install, None);
-        u.checked(Ok(feed(env!("CARGO_PKG_VERSION"), key)), &ASKING);
+        u.checked(Ok(feed(env!("CARGO_PKG_VERSION"), key)));
         assert!(matches!(
             u.status(),
             UpdateStatus::Idle {
                 last_checked: Some(_)
             }
         ));
-        u.checked(Err("offline".into()), &ASKING);
+        u.checked(Err("offline".into()));
         assert_eq!(
             u.status(),
             UpdateStatus::Error {

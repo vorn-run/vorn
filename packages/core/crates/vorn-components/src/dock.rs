@@ -233,6 +233,8 @@ pub struct DockState {
     pub collapsed: bool,
     /// The chip's or the overflow's popover is open.
     pub open: bool,
+    /// The toolbar sits on the system's glass, so the chip does too.
+    pub glass: bool,
 }
 
 /// `SessionDock`: `items` in order (approvals first), or nothing when
@@ -247,7 +249,7 @@ pub fn dock(ui: &Ui, ids: DockIds, state: DockState, items: Vec<(DockKind, El)>)
         .count();
     let minimized = items.len() - waiting;
     if state.collapsed {
-        return Some(collapsed(ui, ids, state.open, waiting, minimized, items));
+        return Some(collapsed(ui, ids, state, waiting, minimized, items));
     }
     let mut row = div().row().items_center().gap(6.0).min_w(0.0);
     let mut items = items;
@@ -358,47 +360,23 @@ pub fn breakdown(waiting: usize, minimized: usize) -> String {
 fn collapsed(
     ui: &Ui,
     ids: DockIds,
-    open: bool,
+    state: DockState,
     waiting: usize,
     minimized: usize,
     items: Vec<(DockKind, El)>,
 ) -> El {
+    let open = state.open;
     let tip = breakdown(waiting, minimized);
     let hot = ui.hover(ids.chip);
     let fg = color::GRAY_300.mix(color::WHITE, hot);
-    let chip = div()
-        .id(ids.chip)
-        .on(Action::Click)
-        .row()
-        .items_center()
-        .gap(6.0)
-        .h(26.0)
-        .px(8.0)
-        .rounded(radius::MD)
-        .border(
-            1.0,
-            vornui::theme::bright(0.06).mix(vornui::theme::bright(0.12), hot),
-        )
-        .bg(color::SURFACE_RAISED)
-        .ring(radius::MD)
-        .role(Role::Button, &tip)
-        .has_popup()
-        .expanded(open)
-        .child(lucide("layers", 11.0, 1.5, fg))
-        .child(
-            text((waiting + minimized).to_string(), 11.0, fg)
-                .weight(500)
-                .mono()
-                .line_height(11.0)
-                .silent(),
-        )
-        .child_if((waiting > 0).then(|| {
-            div()
-                .size(6.0, 6.0)
-                .rounded(3.0)
-                .bg(color::BRONZO)
-                .absolute_right(-2.0, -2.0)
-        }));
+    let glass_icon = state
+        .glass
+        .then(|| vornui::icons::lucide("layers", 1.5))
+        .flatten();
+    let chip = match glass_icon {
+        Some(svg) => glass_chip(ids.chip, &tip, open, waiting, minimized, &svg, fg),
+        None => solid_chip(ids.chip, &tip, open, waiting, minimized, fg, hot),
+    };
     let chip = tooltip_at(ui, chip, ids.chip, &tip, None, Place::Below);
     if !open {
         return chip;
@@ -415,6 +393,91 @@ fn collapsed(
         .child(lucide("chevrons-right", 11.0, 1.75, fg))
         .child(label("Expand", 10.0, fg));
     chip.overlay(panel(items, Some(expand)), Place::BelowStart, 6.0)
+}
+
+/// The chip as a glass capsule like the toolbar's other buttons; the system
+/// draws its icon and count, and a waiting approval tints the count.
+fn glass_chip(
+    id: Id,
+    tip: &str,
+    open: bool,
+    waiting: usize,
+    minimized: usize,
+    svg: &str,
+    fg: Rgba,
+) -> El {
+    let n = (waiting + minimized).to_string();
+    let count = if waiting > 0 {
+        color::BRONZO.rgba()
+    } else {
+        fg
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .h(32.0)
+        .px(12.0)
+        .rounded(16.0)
+        .native_glass()
+        .shrink0()
+        .role(Role::Button, tip)
+        .has_popup()
+        .expanded(open)
+        .child(div().size(14.0, 14.0).native_icon(svg, 14.0, fg))
+        .child(
+            text(&n, 12.0, Rgba::TRANSPARENT)
+                .weight(500)
+                .line_height(14.0)
+                .native_label(&n, 12.0, count)
+                .silent(),
+        )
+}
+
+fn solid_chip(
+    id: Id,
+    tip: &str,
+    open: bool,
+    waiting: usize,
+    minimized: usize,
+    fg: Rgba,
+    hot: f32,
+) -> El {
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .h(26.0)
+        .px(8.0)
+        .rounded(radius::MD)
+        .border(
+            1.0,
+            vornui::theme::bright(0.06).mix(vornui::theme::bright(0.12), hot),
+        )
+        .bg(color::SURFACE_RAISED)
+        .ring(radius::MD)
+        .role(Role::Button, tip)
+        .has_popup()
+        .expanded(open)
+        .child(lucide("layers", 11.0, 1.5, fg))
+        .child(
+            text((waiting + minimized).to_string(), 11.0, fg)
+                .weight(500)
+                .mono()
+                .line_height(11.0)
+                .silent(),
+        )
+        .child_if((waiting > 0).then(|| {
+            div()
+                .size(6.0, 6.0)
+                .rounded(3.0)
+                .bg(color::BRONZO)
+                .absolute_right(-2.0, -2.0)
+        }))
 }
 
 /// `DockGroupedPopover`: the footer, then each group under its title when

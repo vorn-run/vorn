@@ -503,6 +503,29 @@ pub fn describe(state: &PackState) -> PackStatus {
     }
 }
 
+/// The installed packs, counted once each, and those with a newer release.
+pub fn pack_updates(listings: &[Listing]) -> (usize, Vec<&Listing>) {
+    let mut seen = std::collections::HashSet::new();
+    let installed: Vec<&Listing> = listings
+        .iter()
+        .filter(|l| l.pack.is_some() && seen.insert(l.id.as_str()))
+        .collect();
+    let outdated = installed
+        .iter()
+        .copied()
+        .filter(|l| {
+            matches!(
+                l.state(None),
+                PackState::Installed {
+                    available: Some(_),
+                    ..
+                }
+            )
+        })
+        .collect();
+    (installed.len(), outdated)
+}
+
 /// Semver precedence, prereleases included.
 pub fn is_newer(candidate: &str, current: &str) -> bool {
     #[derive(PartialEq)]
@@ -1008,6 +1031,11 @@ fn use_phrase(name: &str) -> Option<(&'static str, &'static str, bool)> {
         "terminal.selection" => ("Terminal", "reads the selected text in sessions it started", true),
         "terminal.send" => ("Terminal", "types into sessions it started", true),
         "card.rename" => ("Cards", "renames session cards", true),
+        "notifications.send" => (
+            "Notifications",
+            "sends notifications you can switch off on its page",
+            true,
+        ),
         "agent.usage" => ("Agents", "reads context and allowance", true),
         "agent.permissions" => (
             "Agents",
@@ -1274,6 +1302,18 @@ fn haystack(l: &Listing) -> String {
         if let Some(items) = l.contributes.as_ref().and_then(|c| c.get(key)?.as_array()) {
             parts.extend(items.iter().filter_map(|i| s(i, "title")));
         }
+    }
+    if let Some(themes) = l
+        .contributes
+        .as_ref()
+        .and_then(|c| c.get("themes")?.as_array())
+    {
+        parts.push("theme");
+        parts.extend(
+            themes
+                .iter()
+                .filter_map(|t| s(t, "name").or_else(|| s(t, "title"))),
+        );
     }
     parts.extend(
         l.permissions
@@ -2466,6 +2506,20 @@ mod tests {
         );
         assert_eq!(side.capabilities, ["triggers"]);
         assert_eq!(ls.iter().filter(|l| l.id == "http").count(), 1);
+    }
+
+    #[test]
+    fn pack_updates_count_each_pack_once_and_name_the_outdated() {
+        let packs = [
+            json!({"id": "ado", "name": "ADO", "version": "1.0.0"}),
+            json!({"id": "kusto", "name": "Kusto", "version": "0.2.0"}),
+            json!({"id": "side", "name": "Side", "version": "0.1.0"}),
+        ];
+        let ls = build_listings(&builtins(), &catalog(), &[], &packs, &[]);
+        let (installed, outdated) = pack_updates(&ls);
+        assert_eq!(installed, 3);
+        let names: Vec<_> = outdated.iter().map(|l| l.id.as_str()).collect();
+        assert_eq!(names, ["kusto"]);
     }
 
     #[test]

@@ -169,7 +169,10 @@ impl Screen<'_> {
         }
         // Over the system's material only the sidebar is see-through.
         let (root_bg, main_bg) = if self.ui.see_through() {
-            (crate::ui::theme::shadow(0.0), c(look::SURFACE_BASE))
+            (
+                crate::ui::theme::shadow(0.0),
+                crate::ui::theme::material::content(true),
+            )
         } else {
             (c(look::SURFACE_BASE), crate::ui::theme::shadow(0.0))
         };
@@ -178,7 +181,11 @@ impl Screen<'_> {
             .w_full()
             .h_full()
             .bg(root_bg)
-            .child(row.child(main.bg(main_bg)));
+            // Settings over the material covers the app, so it is not drawn under it.
+            .child_if(
+                (!(self.st.settings.open && self.ui.see_through()))
+                    .then(|| row.child(main.bg(main_bg))),
+            );
         if self.st.view == MainView::Tasks {
             root = root.child_if(tasks::ghost(self));
         }
@@ -206,6 +213,11 @@ impl Screen<'_> {
                 crate::state::MenuKind::GroupIcon(g) => sidebar::group_icon_picker(self, g),
                 crate::state::MenuKind::Workspace => sidebar::workspace_panel(self),
                 crate::state::MenuKind::SetShell => settings::shell_panel(self),
+                crate::state::MenuKind::AgentPicker => settings::agent_picker(self),
+                crate::state::MenuKind::ThemePicker(look) => settings::theme_picker(self, *look),
+                crate::state::MenuKind::ThemeInfo(ref id) => settings::theme_info(self, id),
+                crate::state::MenuKind::FontPicker => settings::font_picker(self),
+                crate::state::MenuKind::NotifSources => settings::notice_sources(self),
                 crate::state::MenuKind::LaunchModel => composer::model_panel(self),
                 crate::state::MenuKind::Branch(_) => git::branch_panel(self),
                 crate::state::MenuKind::OpenIn(ref sid) => git::open_in_panel(self, sid),
@@ -242,6 +254,7 @@ impl Screen<'_> {
         let st = self.st;
         let body = match st.view {
             MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
+            MainView::Sessions if st.layout == LayoutMode::List => cards::list(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
             MainView::Workflows => workflows::view(self),

@@ -50,6 +50,10 @@ impl Clipboard for System {
     fn has_image(&mut self) -> bool {
         clipboard_has_image()
     }
+    #[cfg(target_os = "macos")]
+    fn files(&mut self) -> Vec<std::path::PathBuf> {
+        crate::macos::clipboard_files()
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -789,6 +793,18 @@ impl<A: App> Live<A> {
                 let px = (config.width, config.height);
                 let view = frame.texture.create_view(&Default::default());
                 let laid = draw(&mut self.ui, &mut self.app, now, px, Some(&view));
+                #[cfg(target_os = "macos")]
+                if self.ui.see_through() {
+                    crate::macos::sync_glass(
+                        &self.window,
+                        &self.ui.glass,
+                        &self.ui.glass_icons,
+                        &self.ui.glass_labels,
+                        self.window.scale_factor(),
+                    );
+                } else {
+                    crate::macos::sync_glass(&self.window, &[], &[], &[], 1.0);
+                }
                 self.window.pre_present_notify();
                 frame.present();
                 laid

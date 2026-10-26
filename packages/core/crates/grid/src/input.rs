@@ -92,7 +92,7 @@ impl InputEncoder {
                 .set_consumed_mods(ghostty_mods(*consumed_mods))
                 .set_composing(*composing)
                 .set_utf8(text.clone());
-                ev.set_unshifted_codepoint(unshifted.unwrap_or('\0'));
+                ev.set_unshifted_codepoint(unshifted.or_else(|| us_char(*key)).unwrap_or('\0'));
                 self.key.set_options_from_terminal(t);
                 self.key.encode_to_vec(&self.key_event, &mut out)?;
             }
@@ -275,6 +275,22 @@ fn legacy(t: &Term, key: KeyCode, action: KeyAction, m: u16) -> Result<Legacy, E
     })
 }
 
+/// What a letter or digit key types on a US layout. A key sent with no
+/// text (the app's own Ctrl+V for an image paste) still needs it: Kitty key
+/// reports name letters by their character, and with none they send nothing.
+fn us_char(key: KeyCode) -> Option<char> {
+    let name = key.name();
+    let c = match name.strip_prefix("Digit") {
+        Some(d) => d,
+        None => name,
+    };
+    let mut chars = c.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c @ ('A'..='Z' | '0'..='9')), None) => Some(c.to_ascii_lowercase()),
+        _ => None,
+    }
+}
+
 /// The cell a position in cells falls in, held inside the pane as Ghostty holds it.
 fn clamp_cell(at: f32, n: u32) -> u32 {
     (at.max(0.0) as u32).min(n.saturating_sub(1))
@@ -417,6 +433,28 @@ mod tests {
         let mut send = |t: &Term, name, m| enc.encode(t, &key(name, m, None)).unwrap();
         assert_ne!(bytes(send(&t, "Enter", shift)), b"\r");
         assert_eq!(bytes(send(&t, "ArrowLeft", alt)), b"\x1b[1;3D");
+    }
+
+    #[test]
+    fn a_ctrl_letter_with_no_text_still_reaches_a_kitty_program() {
+        let mut t = Term::new(20, 5).unwrap();
+        let mut enc = InputEncoder::new().unwrap();
+        let ctrl_v = key("V", mods::CTRL, None);
+        assert_eq!(bytes(enc.encode(&t, &ctrl_v).unwrap()), b"\x16");
+        t.vt_write(b"\x1b[>1u");
+        assert_eq!(bytes(enc.encode(&t, &ctrl_v).unwrap()), b"\x1b[118;5u");
+        let ctrl_1 = key("Digit1", mods::CTRL, None);
+        assert_eq!(bytes(enc.encode(&t, &ctrl_1).unwrap()), b"\x1b[49;5u");
+    }
+
+    #[test]
+    fn only_letters_and_digits_have_a_us_character() {
+        let c = |n| us_char(KeyCode::from_name(n).unwrap());
+        assert_eq!(c("V"), Some('v'));
+        assert_eq!(c("Digit7"), Some('7'));
+        for n in ["Enter", "Tab", "F1", "Numpad1", "Minus", "Unidentified"] {
+            assert_eq!(c(n), None, "{n}");
+        }
     }
 
     #[test]

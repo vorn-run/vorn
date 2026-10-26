@@ -361,8 +361,6 @@ export function isTerminalTaskStatus(status: TaskStatus): boolean {
   return status === 'done' || status === 'cancelled'
 }
 
-export type TaskViewMode = 'list' | 'kanban'
-
 export const MINIMIZED_PLACEMENTS = ['canvas', 'toolbar', 'both'] as const
 export type MinimizedPlacement = (typeof MINIMIZED_PLACEMENTS)[number]
 
@@ -1042,7 +1040,7 @@ export interface LaunchAgentConfig {
    * How long a headless step may run before the engine gives up on it, in
    * milliseconds. On expiry the agent is killed, the node is marked `error`,
    * and the run finishes — so one agent that never exits can't hold its run
-   * open forever. Unset falls back to `defaults.headlessStepTimeoutMinutes`.
+   * open forever. Unset falls back to the Workflows extension's Step time limit.
    */
   timeoutMs?: number
 }
@@ -1417,12 +1415,11 @@ export interface TailscaleStatus {
 }
 
 export interface NotificationConfig {
-  enabled: boolean
-  onWaiting: boolean
-  onError: boolean
-  onBell: boolean
-  soundEnabled?: boolean
-  soundVolume?: number // 0.0 – 1.0, default 0.5
+  enabled?: boolean // default true
+  onWaiting?: boolean
+  onBell?: boolean
+  show?: 'background' | 'always'
+  sound?: string // 'default', 'none' or a system sound's name
 }
 
 /**
@@ -1495,20 +1492,13 @@ export interface AppConfig {
     reopenSessions?: boolean
     // Open Vorn at sign-in. Off until asked; a no-op on Linux.
     startAtLogin?: boolean
-    taskViewMode?: TaskViewMode
-    layoutMode?: 'grid' | 'tabs'
+    layoutMode?: 'grid' | 'tabs' | 'list'
     /** Each workspace's grid: its columns, or the Flexible split tree. Kept per viewer. */
     gridLayout?: Record<string, { view?: 'grid' | 'flexible'; columns?: number; tree?: unknown }>
     minimizedPlacement?: MinimizedPlacement
     mainViewMode?: MainViewMode
     activeWorkspace?: string
     updateChannel?: 'stable' | 'beta'
-    /**
-     * Whether a found update downloads on its own. Install always waits for a
-     * restart either way; this only governs the transfer, which matters on a
-     * metered connection. Defaults to true — the behaviour before it existed.
-     */
-    updateAutoDownload?: boolean
     webAccessEnabled?: boolean
     mobileAccessEnabled?: boolean
     networkAccessEnabled?: boolean
@@ -1521,14 +1511,6 @@ export interface AppConfig {
      * takes another and remembers that one instead.
      */
     serverPort?: number
-    showHeadlessAgents?: boolean
-    headlessRetentionMinutes?: number
-    /**
-     * Ceiling on a headless workflow step, in minutes, for steps that don't set
-     * their own timeout. Guards against an agent that starts but never exits —
-     * without it the step waits forever and its run never closes. 0 disables it.
-     */
-    headlessStepTimeoutMinutes?: number
     /**
      * Environment variable names to forward to agent sessions and workflow
      * script nodes even though they match a sensitive prefix. Opt-in and
@@ -1543,39 +1525,6 @@ export interface AppConfig {
      * knowing on POSIX where the two really are different variables.
      */
     envPassthrough?: string[]
-    enableHoverPreview?: boolean
-    /**
-     * Shell sessions only. Replaces the shell's own prompt with a single
-     * glyph, so each command reads as a heading above its output instead of
-     * repeating your username, host and path on every line. Defaults to on;
-     * turn it off to keep your own prompt exactly as your shell renders it.
-     */
-    minimalShellPrompt?: boolean
-    /**
-     * Draw finished commands as real elements instead of leaving them in the
-     * terminal grid. The live command stays in the terminal; everything
-     * already finished becomes a container that can have padding, a boundary
-     * and its own copy button without anything being printed into the shell.
-     */
-    domBlockRendering?: boolean
-    /**
-     * Whether the server keeps running after the last window closes.
-     *
-     * The agents are the point. A PTY belongs to the server process, so while
-     * the server was a child of the app, quitting killed every session and
-     * reopening could only relaunch them from their transcripts — losing the
-     * process, the turn in flight, and any prompt waiting for an answer.
-     * With this on, quitting closes a window and nothing else; the next launch
-     * reconnects to the sessions that were already running.
-     *
-     * The background server shuts itself down once nothing is left running,
-     * so this does not leave a process behind for ever.
-     *
-     * Defaults to on. Turning it off restores the old behaviour exactly, and
-     * "Stop Sessions and Server" in the File menu does it once without changing
-     * the setting.
-     */
-    keepSessionsRunning?: boolean
     /**
      * Set to `true` after the seeded "Default Task Workflow" has been inserted
      * once. Ensures deleting the workflow sticks — we don't resurrect it on
@@ -1594,6 +1543,10 @@ export interface AppConfig {
     interfaceStyle?: 'neutral' | 'tinted'
     contrastCorrection?: boolean
     materials?: 'solid' | 'native' | 'themed'
+    /** The family the terminal draws in; the bundled monospace face when unset. */
+    terminalFontFamily?: string
+    /** The agents Vorn connected its tools to, by agent id. */
+    agentTools?: Partial<Record<AiAgentType, boolean>>
   }
   projects: ProjectConfig[]
   agentCommands?: Partial<Record<AiAgentType, AgentCommandConfig>>

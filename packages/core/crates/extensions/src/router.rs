@@ -610,6 +610,21 @@ impl Router {
         Ok(())
     }
 
+    /// Preference `key` of installed extension `id`: what the person chose,
+    /// or its default. None when `id` is not installed or does not declare it.
+    pub fn preference(&self, id: &str, key: &str) -> Option<Value> {
+        let pack = self.pack(id).ok()?;
+        guard(&self.preferences)
+            .resolved(&pack.manifest)
+            .remove(key)
+    }
+
+    /// Keeps `values` for extension `id` where the person has chosen nothing
+    /// yet: the one-time move of settings Vorn kept itself before.
+    pub fn adopt_preferences(&self, id: &str, values: Map<String, Value>) {
+        guard(&self.preferences).adopt(id, values);
+    }
+
     /// Forgets the preferences a person gave extension `id`, as it is removed.
     pub fn forget_preferences(&self, id: &str) {
         guard(&self.preferences).forget(id);

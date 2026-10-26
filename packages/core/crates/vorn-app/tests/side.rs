@@ -460,20 +460,20 @@ fn a_ready_update_is_offered_in_the_sidebar_until_dismissed() {
         ),
     );
     assert!(shot.ui.rect_of(restart).is_none(), "the notice is gone");
-    // The gear keeps a dot and opens the Updates page.
+    // The gear keeps a dot and opens About, where the update is.
     shot.click(
         &mut app,
         control(
             "sidebar-footer",
             Act::Set(vorn_app::settings::SetAct::Open(
-                vorn_app::settings::Category::Updates,
+                vorn_app::settings::Category::About,
             )),
         ),
     );
     assert!(app.st.settings.open);
     assert_eq!(
         app.st.settings.category,
-        vorn_app::settings::Category::Updates
+        vorn_app::settings::Category::About
     );
 }
 
