@@ -420,6 +420,56 @@ async fn feed_server() -> u16 {
     port
 }
 
+/// The Sandbox switch is offered only for a package that runs a program the
+/// profile holds: not for one that runs none, nor for a Wasm component.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_a_package_running_a_program_offers_the_sandbox() {
+    let data = tempfile::tempdir().unwrap();
+    let head = |id: &str| {
+        format!(
+            "id = \"{id}\"\nname = \"{id}\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n"
+        )
+    };
+    let packs = [
+        ("tickets", MANIFEST.to_owned()),
+        (
+            "pages",
+            head("pages") + "\n[[contributes.settings]]\nid = \"p\"\ntitle = \"P\"\ntree = true\n",
+        ),
+        (
+            "wasm",
+            head("wasm") + "\n[service]\ncomponent = \"x.wasm\"\n",
+        ),
+    ];
+    for (id, manifest) in &packs {
+        let pack = data.path().join("connectors").join(id);
+        std::fs::create_dir_all(pack.join("1.0.0")).unwrap();
+        std::fs::write(pack.join("1.0.0").join("vorn-extension.toml"), manifest).unwrap();
+        std::fs::write(pack.join("1.0.0").join("x.wasm"), b"\0asm").unwrap();
+        std::fs::write(pack.join("current.json"), r#"{"version":"1.0.0"}"#).unwrap();
+    }
+
+    let served = serve_in(data);
+    let mut c = Ws {
+        ws: connect(served.port, CREDENTIAL).await,
+        next_id: 0,
+    };
+    let installed = c.result("extension:installed", json!(null)).await;
+    let offered = |id: &str| {
+        installed
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|p| p["id"] == id)
+            .unwrap_or_else(|| panic!("{id} is listed: {installed}"))["sandboxAvailable"]
+            .clone()
+    };
+    let available = vorn_extensions::sandbox::available();
+    assert_eq!(offered("tickets"), json!(available), "{installed}");
+    assert_eq!(offered("pages"), json!(false), "{installed}");
+    assert_eq!(offered("wasm"), json!(false), "{installed}");
+}
+
 /// The RSS connector, sandboxed, reads a feed its connection names through
 /// the bridge's proxy. macOS, with `VORN_CONNECTORS_CHECKOUT` naming a
 /// connectors checkout whose folders are built.

@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::child::Launch;
+use crate::manifest::Manifest;
 
 /// Where the switch is kept, beside `current.json`.
 pub const SETTINGS_FILE: &str = "sandbox.json";
@@ -23,6 +24,33 @@ pub const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 /// Whether this machine can start a program under the profile.
 pub fn available() -> bool {
     cfg!(target_os = "macos") && Path::new(SANDBOX_EXEC).is_file()
+}
+
+/// Why the profile has nothing to hold for a package.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unheld {
+    /// It runs no program: data only, such as an agent adapter or a theme.
+    NoProgram,
+    /// Its only program is a Wasm component, which is sandboxed always.
+    Component,
+}
+
+/// What keeps the profile from holding `manifest`'s programs, if anything:
+/// the one rule behind both the switch and whether a client offers it.
+pub fn unheld(manifest: &Manifest) -> Option<Unheld> {
+    if !manifest.runs.is_empty() {
+        return None;
+    }
+    match &manifest.service {
+        None => Some(Unheld::NoProgram),
+        Some(s) if s.component.is_some() => Some(Unheld::Component),
+        Some(_) => None,
+    }
+}
+
+/// Whether the profile would hold any of `manifest`'s programs.
+pub fn sandboxable(manifest: &Manifest) -> bool {
+    unheld(manifest).is_none()
 }
 
 /// Whether the person turned the profile on for the extension kept at `home` (`<root>/<id>`).
@@ -116,6 +144,26 @@ pub fn wrap_through(launch: Launch, dir: &Path, proxy: Option<u16>) -> Launch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_program_outside_wasm_is_held() {
+        let head = "id = \"x\"\nname = \"X\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n";
+        let manifest = |rest: &str| crate::manifest::file::parse(&format!("{head}{rest}")).unwrap();
+        let none =
+            manifest("\n[[contributes.settings]]\nid = \"page\"\ntitle = \"Page\"\ntree = true\n");
+        let wasm = manifest("\n[service]\ncomponent = \"x.wasm\"\n");
+        let program = manifest("\n[service]\ncommand = [\"node\", \"main.js\"]\n");
+        let one_shot =
+            manifest("\n[actions.go]\ntitle = \"Go\"\ncommand = [\"bash\", \"go.sh\"]\n");
+        let wasm_and_run = manifest(
+            "\n[service]\ncomponent = \"x.wasm\"\n\n[actions.go]\ntitle = \"Go\"\ncommand = [\"bash\", \"go.sh\"]\n",
+        );
+        assert_eq!(unheld(&none), Some(Unheld::NoProgram));
+        assert_eq!(unheld(&wasm), Some(Unheld::Component));
+        for held in [&program, &one_shot, &wasm_and_run] {
+            assert!(sandboxable(held), "{held:?}");
+        }
+    }
 
     #[test]
     fn quotes_the_folder_and_holds_writes_to_it() {

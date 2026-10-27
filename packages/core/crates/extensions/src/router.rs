@@ -354,19 +354,17 @@ impl Router {
     /// programs stop, so the next start is under the new setting.
     pub async fn set_sandboxed(&self, id: &str, on: bool) -> Result<(), String> {
         let pack = self.pack(id)?;
-        if pack.manifest.service.is_none() && pack.manifest.runs.is_empty() {
-            return Err(format!("{} runs no program to hold", pack.name()));
-        }
-        let component = pack
-            .manifest
-            .service
-            .as_ref()
-            .is_some_and(|s| s.component.is_some());
-        if component && pack.manifest.runs.is_empty() {
-            return Err(format!(
-                "{} runs as a Wasm component, which Vorn sandboxes always",
-                pack.name()
-            ));
+        match sandbox::unheld(&pack.manifest) {
+            Some(sandbox::Unheld::NoProgram) => {
+                return Err(format!("{} runs no program to hold", pack.name()));
+            }
+            Some(sandbox::Unheld::Component) => {
+                return Err(format!(
+                    "{} runs as a Wasm component, which Vorn sandboxes always",
+                    pack.name()
+                ));
+            }
+            None => {}
         }
         sandbox::set(&self.store.root().join(id), on)?;
         self.lifecycle.stop_extension(id).await;
