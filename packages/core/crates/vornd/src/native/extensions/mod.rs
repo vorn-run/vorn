@@ -765,7 +765,10 @@ impl Extensions {
                 let mut value = json!(pack);
                 value["running"] = json!(running.iter().any(|k| k.extension == pack.id));
                 value["sandboxed"] = json!(self.router.sandboxed(&pack.id));
-                value["sandboxAvailable"] = json!(vorn_extensions::sandbox::available());
+                value["sandboxAvailable"] = json!(
+                    vorn_extensions::sandbox::available()
+                        && vorn_extensions::sandbox::sandboxable(&pack.manifest)
+                );
                 value["preferences"] = json!(self.router.listed_preferences(&pack.manifest));
                 if let Some(svg) = pack.logo_svg(false) {
                     value["logo"] = json!(svg);
