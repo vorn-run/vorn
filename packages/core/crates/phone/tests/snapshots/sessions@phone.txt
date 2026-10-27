@@ -15,7 +15,7 @@ column
         icon label="<svg>" value="agent:acme"
         status value="waiting" style="warn"
         column
-          text label="vorn" style="title"
+          text label="vorn #" style="title"
           text label="Nov ## · main" style="secondary"
         badge value="Asks" style="warn"
     section label="Running"
