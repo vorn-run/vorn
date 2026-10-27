@@ -336,6 +336,24 @@ impl App {
         }
     }
 
+    /// Mod+Alt+O or T: the current card's folder or shells, when its More menu offers them.
+    pub(super) fn side_key(&mut self, ui: &mut Ui, folder: bool) {
+        let Some(s) = self.current().and_then(|id| self.store.session(&id)) else {
+            return;
+        };
+        let id = s.info.id.clone();
+        let act = if folder {
+            let files = self.st.points.find(FILES, kind::PANES, "files");
+            files.is_some().then_some(SideAct::ToggleFiles(id))
+        } else {
+            let has = self.st.side.saved.panels.contains_key(&id);
+            (!s.is_shell() || has).then_some(SideAct::ToggleTerminals(id))
+        };
+        if let Some(act) = act {
+            self.run_side(ui, act, Src::default());
+        }
+    }
+
     pub(super) fn run_side(&mut self, ui: &mut Ui, act: SideAct, _src: Src) {
         match act {
             SideAct::ToggleFiles(owner) => {

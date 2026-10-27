@@ -1,7 +1,7 @@
 //! The modal dialogs: the keyboard shortcuts panel and the add or edit
 //! project dialog.
 
-use super::{alt_label, c, ico, mod_label, white, Screen};
+use super::{alt_label, c, ico, mod_alt_label, mod_label, white, Screen};
 use crate::act::Act;
 use crate::look;
 use crate::state::Dialog;
@@ -54,6 +54,8 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
             vec![
                 ("New session", format!("{m}N")),
                 ("Rename session", "F2".to_owned()),
+                ("Show or hide the folder", format!("{}O", mod_alt_label())),
+                ("Open or close shells", format!("{}T", mod_alt_label())),
             ],
         ),
         (

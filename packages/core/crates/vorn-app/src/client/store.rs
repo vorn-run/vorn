@@ -47,15 +47,24 @@ pub struct Session {
     pub exited: Option<i64>,
     /// Why a session carried over from the last run ended, when it did.
     pub cause: Option<&'static str>,
+    /// Its place among its project's unnamed sessions, from 0 ([`Store::number_titles`]).
+    pub ordinal: usize,
 }
 
 impl Session {
-    /// The name given, else the project's.
+    /// The name given, else the project's, numbered from its second unnamed session on (`vorn 2`).
     pub fn title(&self) -> String {
-        match self.info.display_name.as_deref().map(str::trim) {
-            Some(name) if !name.is_empty() => name.to_owned(),
-            _ => self.info.project_name.clone(),
+        match self.own_name() {
+            Some(name) => name.to_owned(),
+            None if self.ordinal > 0 => format!("{} {}", self.info.project_name, self.ordinal + 1),
+            None => self.info.project_name.clone(),
         }
+    }
+
+    /// The name it was given, if any.
+    fn own_name(&self) -> Option<&str> {
+        let name = self.info.display_name.as_deref().map(str::trim)?;
+        (!name.is_empty()).then_some(name)
     }
 
     /// Whether this is a plain shell rather than an agent.
@@ -343,19 +352,43 @@ impl Store {
                 info,
                 exited: None,
                 cause: None,
+                ordinal: 0,
             }),
         }
+        self.number_titles();
     }
 
     /// Takes the session with `id` off the screen.
     pub fn remove(&mut self, id: &str) {
         self.sessions.retain(|s| s.info.id != id);
         self.gone.insert(id.to_owned());
+        self.number_titles();
     }
 
     /// Takes the session with `id` off the screen while it may still live: its next update brings it back.
     pub fn forget(&mut self, id: &str) {
         self.sessions.retain(|s| s.info.id != id);
+        self.number_titles();
+    }
+
+    /// Numbers each project's unnamed sessions by creation, so no two cards share a title.
+    pub fn number_titles(&mut self) {
+        let mut order: Vec<usize> = (0..self.sessions.len())
+            .filter(|&i| self.sessions[i].own_name().is_none())
+            .collect();
+        order.sort_by(|&a, &b| {
+            let (a, b) = (&self.sessions[a].info, &self.sessions[b].info);
+            (a.project_name.cmp(&b.project_name)).then(a.created_at.total_cmp(&b.created_at))
+        });
+        for s in &mut self.sessions {
+            s.ordinal = 0;
+        }
+        for pair in order.windows(2) {
+            let (prev, i) = (&self.sessions[pair[0]], &self.sessions[pair[1]]);
+            if prev.info.project_name == i.info.project_name {
+                self.sessions[pair[1]].ordinal = prev.ordinal + 1;
+            }
+        }
     }
 
     /// Folds one notification in.
@@ -383,6 +416,7 @@ impl Store {
                         .unwrap_or(usize::MAX)
                 };
                 self.sessions.sort_by_key(|s| rank(&s.info.id));
+                self.number_titles();
                 Change::Sessions
             }
             "terminal:exit" => {
@@ -651,6 +685,29 @@ mod tests {
         assert_eq!(ids(&s), ["a", "b"]);
         assert_eq!(s.sessions[0].title(), "Shell 1");
         assert_eq!(s.sessions[0].status(), "waiting");
+    }
+
+    #[test]
+    fn unnamed_sessions_of_one_project_are_numbered_by_creation() {
+        let mut s = Store::default();
+        let make = |id: &str, project: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": project,
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        // Listed out of creation order, as a reorder leaves them.
+        s.apply("session:created", make("b", "vorn", 2.0));
+        s.apply("session:created", make("a", "vorn", 1.0));
+        s.apply("session:created", make("j", "journey", 3.0));
+        s.apply("session:created", make("c", "vorn", 4.0));
+        let titles = |s: &Store| s.sessions.iter().map(Session::title).collect::<Vec<_>>();
+        assert_eq!(titles(&s), ["vorn 2", "vorn", "journey", "vorn 3"]);
+        // A renamed session leaves the count; the rest close up.
+        let mut named = make("a", "vorn", 1.0);
+        named["displayName"] = json!("docs");
+        s.apply("session:updated", named);
+        assert_eq!(titles(&s), ["vorn", "docs", "journey", "vorn 2"]);
+        s.remove("b");
+        assert_eq!(titles(&s), ["docs", "journey", "vorn"]);
     }
 
     #[test]

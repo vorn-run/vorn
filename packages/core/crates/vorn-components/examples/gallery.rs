@@ -432,7 +432,6 @@ fn card_ids(variant: CardVariant) -> CardActions<'static> {
     CardActions {
         variant,
         more: base.child("more"),
-        panes: &[],
         minimize: base.child("min"),
         toggle: base.child("toggle"),
         close: base.child("close"),

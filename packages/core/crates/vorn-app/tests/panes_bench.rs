@@ -64,12 +64,14 @@ fn gone(app: &App) -> Option<()> {
     app.placed_pages().is_empty().then_some(())
 }
 
+/// The card menu's entry that opens or closes the browser.
 fn globe(shot: &mut Shot, app: &mut App, sid: &str) -> Id {
-    shot.hover(app, term_id(sid));
-    wait_for("the card's globe", || {
-        app.pump();
-        shot.labelled(app, "Button", "Open browser")
-    })
+    let i = shot.card_menu_entry(app, sid, |labels| {
+        labels
+            .iter()
+            .position(|l| l == "Open in browser" || l == "Close browser")
+    });
+    vorn_app::ui::item_id(vorn_app::screen::menus::MENU, i)
 }
 
 #[test]

@@ -335,7 +335,8 @@ async function files(page, vornd) {
     return b && b.width > 0 ? b : null
   })
   await page.mouse.move(card.x + card.width / 2, card.y + 20)
-  await press(page, '[role="button"][aria-label="Browse files"]', 'Browse files')
+  await press(page, '[role="button"][aria-label="More actions"]', "the card's menu")
+  await press(page, '[role="menuitem"][aria-label="Show folder"]', 'Show folder')
   await press(page, '[aria-label="src"]', 'the src folder')
   await press(page, '[aria-label="app.ts"]', 'app.ts')
   await until('the editor', () =>

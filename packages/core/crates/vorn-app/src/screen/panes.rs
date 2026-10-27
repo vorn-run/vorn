@@ -1717,7 +1717,23 @@ fn should_show_button(mobile: Option<bool>, has_pane: bool, shell: bool) -> bool
     !shell && mobile == Some(true)
 }
 
-/// The card's globe and phone, after its More button.
+/// The card menu's browser entry, as act and label, when the session has one.
+pub(super) fn browser_entry(s: &Screen<'_>, session: &Session) -> Option<(Act, &'static str)> {
+    let sid = session.info.id.as_str();
+    let open = s.st.bench.pages.contains_key(sid);
+    (browser_key(&s.st.points, sid).is_some() && (!session.is_shell() || open)).then(|| {
+        (
+            Act::Pane(PaneAct::ToggleBrowser(sid.to_owned())),
+            if open {
+                "Close browser"
+            } else {
+                "Open in browser"
+            },
+        )
+    })
+}
+
+/// The card's phone, before its window controls, while the session has one.
 pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVariant) -> Vec<El> {
     let button = |act: Act, icon: &str, label: &str, tip: &str| {
         let b = CardButton {
@@ -1733,15 +1749,6 @@ pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVaria
     let sid = session.info.id.as_str();
     let bench = &s.st.bench;
     let mut out = Vec::new();
-    let browser_on = browser_key(&s.st.points, sid).is_some();
-    if browser_on && (!session.is_shell() || bench.pages.contains_key(sid)) {
-        out.push(button(
-            Act::Pane(PaneAct::ToggleBrowser(sid.to_owned())),
-            "globe",
-            "Open browser",
-            "Open browser",
-        ));
-    }
     let key = device_key(&s.st.points, sid);
     let has = bench.devices.contains(sid);
     let mobile = bench.mobile.get(&session.info.project_path).copied();

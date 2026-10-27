@@ -91,8 +91,7 @@ fn bench_open_a_large_folder() {
     let card = App::control("card-box", &vorn_app::act::Act::Select(sid.clone()));
     shot.click(&mut app, card);
     shot.hover(&mut app, card);
-    let browse = wait(&mut shot, &mut app, "Button", "Browse files");
-    shot.click(&mut app, browse);
+    shot.card_menu(&mut app, &sid, "Show folder");
     let open = timed(&mut shot, &mut app, |s, a| {
         s.labelled(a, "TreeItem", "many")
     });

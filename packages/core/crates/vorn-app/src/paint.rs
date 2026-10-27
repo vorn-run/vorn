@@ -15,6 +15,28 @@ pub enum Caret {
     Hidden,
 }
 
+/// Logical pixels between a card's edges and its terminal's first and last columns.
+pub const INSET: f32 = 12.0;
+
+/// [`INSET`] for `ui`, in what its boxes measure: whole physical pixels, or one column on cells.
+pub fn inset_of(ui: &Ui) -> f32 {
+    if ui.is_cells() {
+        ui.text.cell().w
+    } else {
+        (INSET * ui.scale()).round()
+    }
+}
+
+/// The part of `r` a terminal draws in, `pad` in from left and right, and the whole `(cols, rows)` that fit.
+pub fn inset(r: Rect, pad: f32, cell: (f32, f32)) -> (Rect, u16, u16) {
+    let pad = pad.clamp(0.0, r.w.max(0.0) / 2.0);
+    let inner = Rect::new(r.x + pad, r.y, r.w - 2.0 * pad, r.h);
+    // Whole cells only; f32 to u16 saturates.
+    let cols = (inner.w / cell.0).floor() as u16;
+    let rows = (inner.h / cell.1).floor() as u16;
+    (inner, cols, rows)
+}
+
 /// Draws `v` in `r` (physical pixels) with its cursor shown as `caret`,
 /// `dy` whole pixels down from the top while scrolling; `preedit` is IME
 /// composition shown at the cursor.
@@ -295,6 +317,23 @@ mod tests {
     use super::*;
     use crate::ui::cells::Op;
     use crate::view::Run;
+
+    #[test]
+    fn the_inset_takes_its_columns_from_both_sides() {
+        let r = Rect::new(100.0, 40.0, 816.0, 340.0);
+        // 816 px is 102 columns of 8; 12 px each side leaves 792, 99 of them.
+        assert_eq!(inset(r, 0.0, (8.0, 17.0)).1, 102);
+        let (inner, cols, rows) = inset(r, 12.0, (8.0, 17.0));
+        assert_eq!((inner.x, inner.w, cols, rows), (112.0, 792.0, 99, 20));
+        // On cells the inset is one column a side.
+        assert_eq!(
+            inset(Rect::new(0.0, 0.0, 80.0, 24.0), 1.0, (1.0, 1.0)).1,
+            78
+        );
+        // A box narrower than the inset holds no columns rather than a negative width.
+        let (tiny, cols, _) = inset(Rect::new(0.0, 0.0, 10.0, 20.0), 12.0, (8.0, 17.0));
+        assert_eq!((tiny.x, tiny.w, cols), (5.0, 0.0, 0));
+    }
 
     #[test]
     fn wide_bytes_land_one_per_cell() {

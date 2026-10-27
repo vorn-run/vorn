@@ -482,7 +482,7 @@ fn terminals_card(s: &Screen<'_>, owner: &str) -> El {
             .min_h(0.0)
             .pt(2.0)
             .bg(c(look::SURFACE_SUNKEN))
-            .child(div().w(8.0).shrink0())
+            .child_if(blocks.is_some().then(|| div().w(8.0).shrink0()))
             .child(body)
             .child_if(blocks.is_none().then(|| cards::scrollbar(s, sid)).flatten());
         s.acts
@@ -775,19 +775,20 @@ pub(super) fn alert(
         .child(panel)
 }
 
-/// The card header's pane buttons: Browse files, and the terminals panel
-/// for an agent (or a shell that has one open), as act, icon and label.
-pub(super) fn header_buttons(
+/// The card menu's folder and shells entries: act, icon, label and their Mod+Alt letter.
+pub(super) fn pane_entries(
     s: &Screen<'_>,
     session: &Session,
-) -> Vec<(Act, &'static str, &'static str)> {
+) -> Vec<(Act, &'static str, &'static str, char)> {
     let sid = session.info.id.clone();
     let mut out = Vec::new();
     if files_key(s, &sid).is_some() {
+        let open = s.st.side.files.contains(&sid);
         out.push((
             pane(SideAct::ToggleFiles(sid.clone())),
             "folder-open",
-            "Browse files",
+            if open { "Hide folder" } else { "Show folder" },
+            'O',
         ));
     }
     let has = s.st.side.saved.panels.contains_key(&sid);
@@ -796,10 +797,11 @@ pub(super) fn header_buttons(
             pane(SideAct::ToggleTerminals(sid)),
             "square-terminal",
             if has {
-                "Close terminals"
+                "Close shells"
             } else {
-                "Add a terminal"
+                "New shell here"
             },
+            'T',
         ));
     }
     out

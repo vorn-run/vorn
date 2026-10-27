@@ -54,11 +54,6 @@ fn agent(shot: &mut Shot, app: &mut App, dir: &std::path::Path) -> String {
     id
 }
 
-/// Shows the card header's actions, which appear on hover.
-fn hover_card(shot: &mut Shot, app: &mut App, id: &str) {
-    shot.hover(app, control("card-box", Act::Select(id.to_owned())));
-}
-
 #[test]
 fn git_follows_a_sessions_changes_into_a_commit_and_a_branch() {
     let Some(v) = TestVornd::start() else {
@@ -256,12 +251,7 @@ fn panes_split_the_card_and_hold_terminals() {
     let sid = agent(&mut shot, &mut app, &repo);
 
     // The Files pane opens beside the terminal: the Files extension's, drawn from its tree.
-    hover_card(&mut shot, &mut app, &sid);
-    let browse = wait_for("Browse files", || {
-        app.pump();
-        shot.button(&mut app, "Browse files")
-    });
-    shot.click(&mut app, browse);
+    shot.card_menu(&mut app, &sid, "Show folder");
     wait_for("the tree", || {
         app.pump();
         shot.labelled(&mut app, "TreeItem", "src")
@@ -286,11 +276,7 @@ fn panes_split_the_card_and_hold_terminals() {
     assert!(view.contains("\"terminal\""), "{view}");
 
     // The terminals panel starts a shell of its own, kept out of the grid.
-    hover_card(&mut shot, &mut app, &sid);
-    shot.click(
-        &mut app,
-        control("card", Act::Side(SideAct::ToggleTerminals(sid.clone()))),
-    );
+    shot.card_menu(&mut app, &sid, "New shell here");
     let held = shot.until(&mut app, "the panel's shell", |a, _| {
         a.st.side
             .saved
@@ -490,11 +476,7 @@ fn what_is_typed_in_a_panel_terminal_stays_on_screen() {
     app.rpc().call("config:save", config).expect("saved");
     let mut shot = Shot::new();
     let sid = agent(&mut shot, &mut app, &repo);
-    hover_card(&mut shot, &mut app, &sid);
-    shot.click(
-        &mut app,
-        control("card", Act::Side(SideAct::ToggleTerminals(sid.clone()))),
-    );
+    shot.card_menu(&mut app, &sid, "New shell here");
     let held = shot.until(&mut app, "the panel's shell", |a, _| {
         a.st.side
             .saved

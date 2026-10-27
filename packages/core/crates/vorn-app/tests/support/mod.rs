@@ -606,6 +606,36 @@ impl Shot {
 
     /// Rests the pointer on `id`, for what shows on hover.
     #[track_caller]
+    /// Chooses `label` from `session`'s card More menu, opening it first.
+    pub fn card_menu(&mut self, app: &mut App, session: &str, label: &str) {
+        let i = self.card_menu_entry(app, session, |labels| {
+            labels.iter().position(|l| l == label)
+        });
+        self.click(app, vorn_app::ui::item_id(vorn_app::screen::menus::MENU, i));
+    }
+
+    /// Opens `session`'s card More menu and waits until `pick` finds what it wants in its labels.
+    pub fn card_menu_entry<T>(
+        &mut self,
+        app: &mut App,
+        session: &str,
+        mut pick: impl FnMut(&[String]) -> Option<T>,
+    ) -> T {
+        let more = App::control(
+            "card",
+            &vorn_app::act::Act::Open(vorn_app::state::MenuKind::Card(session.to_owned())),
+        );
+        wait_for("the card menu's entry", || {
+            if app.st.menu.is_none() {
+                self.hover(app, vorn_app::screen::term_id(session));
+                self.click(app, more);
+            }
+            app.pump();
+            self.frame(app);
+            pick(&app.menu_labels(&self.ui))
+        })
+    }
+
     pub fn hover(&mut self, app: &mut App, id: Id) {
         self.frame(app);
         let r = self
