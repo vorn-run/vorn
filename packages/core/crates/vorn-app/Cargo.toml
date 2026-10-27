@@ -68,6 +68,9 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 wry = { version = "0.57", optional = true }
 # The updater: the release feed, the download and its checksum.
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+# The feed's Ed25519 signature; ring is already in the tree under rustls.
+ring = { version = "0.17", default-features = false, features = ["alloc"] }
+data-encoding = "2"
 
 # A browser's: vornd over the page's WebSockets, and the page's own clipboard,
 # storage, notifications, file pickers and tabs.

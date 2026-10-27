@@ -1,6 +1,7 @@
 //! What vornd says of itself and of this machine: the core that answers
-//! (`core:status`) and whether a remote host can be logged in to, which
-//! the SSH built-in asks with `remote.test`.
+//! (`core:status`), where secrets are kept (`vault:status`), and whether a
+//! remote host can be logged in to, which the SSH built-in asks with
+//! `remote.test`.
 
 use std::sync::Arc;
 
@@ -9,10 +10,10 @@ use serde_json::{json, Value};
 use super::{Answer, Native};
 
 /// Every call this module answers.
-pub const METHODS: &[&str] = &["core:status"];
+pub const METHODS: &[&str] = &["core:status", "vault:status"];
 
 /// Answers `method`.
-pub async fn answer(_native: &Arc<Native>, method: &str, _params: Value) -> Answer {
+pub async fn answer(native: &Arc<Native>, method: &str, _params: Value) -> Answer {
     match method {
         // vornd is the core now: it is loaded whenever it answers, with everything built in.
         "core:status" => Answer::Result(json!({
@@ -21,6 +22,8 @@ pub async fn answer(_native: &Arc<Native>, method: &str, _params: Value) -> Answ
             "error": null,
             "missing": [],
         })),
+        // `keychain: false` only when the OS keychain was wanted and is missing, so secrets sit in a file.
+        "vault:status" => Answer::Result(json!({ "keychain": !native.secrets.keychain_missing() })),
         _ => Answer::Unanswered,
     }
 }

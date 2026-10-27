@@ -83,8 +83,11 @@ async fn boot() -> Result<(), String> {
     )
 }
 
-/// A token handed over in the address (`?token=` or `#token=`, as a phone
-/// opening this page passes it) is kept, then taken out of the address.
+/// A token handed over in the address's fragment (`#token=`, as a phone
+/// opening this page passes it) is kept, then taken out of the address. A
+/// fragment never leaves the browser; a token in the query (`?token=`) would
+/// reach the server's logs and the history first, so one there is dropped
+/// unread.
 fn take_token_from_address() {
     let Some(win) = web_sys::window() else { return };
     let loc = win.location();
@@ -92,27 +95,15 @@ fn take_token_from_address() {
         loc.search().unwrap_or_default(),
         loc.hash().unwrap_or_default(),
     );
-    let found = [search.trim_start_matches('?'), hash.trim_start_matches('#')]
-        .into_iter()
-        .flat_map(|q| q.split('&'))
-        .find_map(|kv| kv.strip_prefix("token="))
-        .map(str::to_owned);
-    let Some(token) = found.filter(|t| !t.is_empty()) else {
+    let (search, hash) = (search.trim_start_matches('?'), hash.trim_start_matches('#'));
+    if let Some(token) = token_in(hash) {
+        page::save(TOKEN_KEY, token);
+    }
+    if token_in(search).is_none() && token_in(hash).is_none() {
         return;
-    };
-    page::save(TOKEN_KEY, &token);
-    // Everything but the token stays, `?renderer=` among it.
-    let without = |q: &str| {
-        q.split('&')
-            .filter(|kv| !kv.is_empty() && !kv.starts_with("token="))
-            .collect::<Vec<_>>()
-            .join("&")
-    };
+    }
     let mut path = loc.pathname().unwrap_or_else(|_| "/app/".into());
-    for (mark, q) in [
-        ("?", without(search.trim_start_matches('?'))),
-        ("#", without(hash.trim_start_matches('#'))),
-    ] {
+    for (mark, q) in [("?", without_token(search)), ("#", without_token(hash))] {
         if !q.is_empty() {
             path = format!("{path}{mark}{q}");
         }
@@ -120,6 +111,21 @@ fn take_token_from_address() {
     if let Ok(history) = win.history() {
         let _ = history.replace_state_with_url(&JsValue::NULL, "", Some(&path));
     }
+}
+
+/// The `token=` pair's value in `q` (`a=1&token=x`), when it has one.
+fn token_in(q: &str) -> Option<&str> {
+    q.split('&')
+        .find_map(|kv| kv.strip_prefix("token="))
+        .filter(|t| !t.is_empty())
+}
+
+/// `q` with every `token=` pair taken out; `?renderer=` and the rest stay.
+fn without_token(q: &str) -> String {
+    q.split('&')
+        .filter(|kv| !kv.is_empty() && !kv.starts_with("token="))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 /// What the page shows.

@@ -23,6 +23,7 @@ import {
   until,
   type RealServer
 } from './helpers/real-server'
+import { vorndReport } from './helpers/served'
 
 spawnsRealServers()
 
@@ -201,7 +202,7 @@ describe.skipIf(!runnable)('extensions through vornd', () => {
 
   it('reports its extension hosts in its health check', async () => {
     const health = (await (
-      await fetch(`http://127.0.0.1:${server.vornd}/vornd/health`)
+      await vorndReport(server.vornd, '/vornd/health', server.dirs.data)
     ).json()) as { extensions: { hosts?: number } }
     expect(health.extensions).toMatchObject({ hosts: 2 })
   })

@@ -4,11 +4,12 @@
 
 use serde_json::Value;
 
-use super::{act, activity_line, logo, maker, progress_bar, tag, tone_line, R};
+use super::{act, activity_line, chip_button, logo, maker, progress_bar, tag, tone_line, R};
 use crate::act::Act;
 use crate::plugins::list::{self, Item as Row, Maker, Showcase, Status, Tag, Verb};
 use crate::plugins::{
     describe, details, place_groups, runs_line, uses, Kind, Listing, PackState, PlugAct, Source,
+    Tone,
 };
 use crate::points::PointAct;
 use crate::runs::s as sv;
@@ -154,6 +155,25 @@ pub(super) fn view(s: &Screen<'_>, l: &Listing) -> El {
         matches!(state, PackState::Installed { .. }),
     ) {
         notes = notes.child(tone_line(said.tone, detail, 12.0));
+    }
+    if let Some((line, folder)) = pack.and_then(|p| {
+        let line = crate::plugins::widened_line(p)?;
+        Some((line, sv(p, "path")?.to_owned()))
+    }) {
+        notes = notes
+            .child(tone_line(Tone::Blocked, &line, 12.0))
+            .child(div().row().child(chip_button(
+                s,
+                "plug-detail-link-again",
+                PlugAct::LinkAgain(folder),
+                Some("link"),
+                "Link again",
+                k::GRAY_300,
+                true,
+            )));
+    }
+    for line in pack.map(crate::plugins::closed_lines).unwrap_or_default() {
+        notes = notes.child(tone_line(Tone::Idle, &line, 12.0));
     }
     notes = notes.child_if(activity_line(s, &l.id));
     draw(s, page, Some(notes))
@@ -352,7 +372,9 @@ pub(in crate::screen) fn menu_items(s: &Screen<'_>, key: &str) -> Vec<Item> {
         ));
     }
     if let Some(pack) = l.pack.as_ref() {
-        if pack.get("sandboxAvailable") == Some(&Value::Bool(true)) {
+        // `sandbox` is null for a package whose programs the profile does not hold.
+        let runs = pack.get("sandbox").is_some_and(|v| !v.is_null());
+        if runs && pack.get("sandboxAvailable") == Some(&Value::Bool(true)) {
             let on = pack.get("sandboxed") == Some(&Value::Bool(true));
             out.push(
                 Item::new(
@@ -360,7 +382,22 @@ pub(in crate::screen) fn menu_items(s: &Screen<'_>, key: &str) -> Vec<Item> {
                     "Sandbox",
                     act(PlugAct::Sandbox(l.id.clone(), !on)),
                 )
-                .detail(if on { "On" } else { "Off" }),
+                .detail(match (on, pack.get("sandbox").and_then(Value::as_str)) {
+                    (true, Some("files-only")) => "Files only",
+                    (true, _) => "On",
+                    (false, _) => "Off",
+                }),
+            );
+        } else if runs {
+            // Nothing to switch: this machine has no sandbox for programs.
+            out.push(
+                Item::new(
+                    "shield",
+                    "Sandbox",
+                    act(PlugAct::Sandbox(l.id.clone(), true)),
+                )
+                .detail("Unsandboxed")
+                .disabled(true),
             );
         }
         if let Some(path) = sv(pack, "path").filter(|p| !p.is_empty()) {

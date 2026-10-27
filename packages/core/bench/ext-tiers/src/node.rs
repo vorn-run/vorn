@@ -54,6 +54,7 @@ impl NodeRss {
             launch,
             source: Source::Command,
             protocol: None,
+            redact: Vec::new(),
         };
         let client = connector::open(&sdk, "bench.rss-node", "bench", Timeouts::default())
             .await

@@ -12,9 +12,11 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
+import { generateKeyPairSync } from 'node:crypto'
 import { createServer } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { publicBase64, signFeed } from './sign-feed.mjs'
 
 const USAGE = `usage: update-path.mjs --dir DIR --key KEY --work DIR [--repo OWNER/NAME] [--old FILE]
 
@@ -143,13 +145,17 @@ async function fetchPrevious({ repo, version, key, into }) {
   return { file, version: feed.version, tag: prev.tag_name }
 }
 
-function serve(dir, feedBody) {
+function serve(dir, feedBody, signed) {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
       const name = decodeURIComponent(new URL(req.url, 'http://x').pathname.slice(1))
       if (name === 'vorn-update.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         return res.end(feedBody())
+      }
+      if (name === 'vorn-update.json.sig') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        return res.end(signed(feedBody()))
       }
       const file = path.join(dir, path.basename(name))
       if (path.basename(name) !== name || !existsSync(file)) {
@@ -325,7 +331,10 @@ async function main() {
   }
 
   let feedBody = ''
-  const server = await serve(dir, () => feedBody)
+  // The rehearsal's own key, made for this run and named to the app beside the feed it signs.
+  const { privateKey } = generateKeyPairSync('ed25519')
+  const signed = (body) => signFeed(Buffer.from(body), privateKey)
+  const server = await serve(dir, () => feedBody, signed)
   const base = `http://127.0.0.1:${server.address().port}`
   const env = {
     ...process.env,
@@ -334,6 +343,7 @@ async function main() {
     VORN_DATA_DIR: data,
     VORN_CLI_DIR: path.join(work, 'bin'),
     VORN_UPDATE_FEED: `${base}/vorn-update.json`,
+    VORN_UPDATE_KEY: publicBase64(privateKey),
     VORN_TAILSCALE: 'none',
     VORN_EXIT_WITH: String(process.pid),
     APPIMAGE_EXTRACT_AND_RUN: '1'

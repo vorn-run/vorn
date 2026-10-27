@@ -1,9 +1,12 @@
-//! Commands run on a remote host over `ssh`: in batch mode, accepting a new host key, sharing
-//! one connection per host for a minute where ssh can, with the person's key
-//! file and options.
+//! Commands run on a remote host over `ssh`: in batch mode, trusting only
+//! host keys already known (a new one is accepted where a person sees it, in
+//! a terminal), sharing one connection per host for a minute through a folder
+//! only this user can reach, with the person's key file and options.
 
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -68,14 +71,14 @@ pub fn args(
         "-o".to_owned(),
         "BatchMode=yes".to_owned(),
         "-o".to_owned(),
-        "StrictHostKeyChecking=accept-new".to_owned(),
+        "StrictHostKeyChecking=yes".to_owned(),
     ];
     if let Some(dir) = multiplex_dir {
         args.extend([
             "-o".to_owned(),
             "ControlMaster=auto".to_owned(),
             "-o".to_owned(),
-            format!("ControlPath={dir}/vorn-ssh-%h-%p"),
+            format!("ControlPath={dir}/%C"),
             "-o".to_owned(),
             "ControlPersist=60".to_owned(),
         ]);
@@ -104,17 +107,57 @@ fn destination(host: &Host) -> String {
     }
 }
 
-/// Where connections are shared: `$TMPDIR` or `/tmp`; none on Windows.
+/// The folder connections are shared through, once [`share_connections_in`] made it.
+static MULTIPLEX: OnceLock<String> = OnceLock::new();
+
+/// The longest folder a control socket may sit in: a socket's path holds at
+/// most 103 bytes on macOS (108 with its NUL on Linux); `%C` adds a slash and
+/// 40 characters, and ssh a 17-character suffix while it sets one up.
+const MAX_MULTIPLEX_DIR: usize = 103 - 1 - 40 - 17;
+
+/// Shares connections through `<data_dir>/ssh`, made (or made again) for
+/// this user alone. Without it, or where the path would not make a usable
+/// socket, each command logs in on its own.
+pub fn share_connections_in(data_dir: &Path) -> std::io::Result<()> {
+    let dir = data_dir.join("ssh");
+    let text = private_dir(&dir)?.to_string_lossy().into_owned();
+    if usable_multiplex_dir(&text) {
+        let _ = MULTIPLEX.set(text);
+    }
+    Ok(())
+}
+
+/// `dir`, created 0700, or set to 0700 when it was there already.
+fn private_dir(dir: &Path) -> std::io::Result<PathBuf> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        builder.mode(0o700);
+        builder.create(dir)?;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    builder.create(dir)?;
+    Ok(dir.to_owned())
+}
+
+/// Whether ssh can take `dir` whole in `ControlPath`: short enough for a
+/// socket, and with nothing ssh would read as a separator or a token.
+fn usable_multiplex_dir(dir: &str) -> bool {
+    !dir.is_empty()
+        && dir.len() <= MAX_MULTIPLEX_DIR
+        && !dir.contains(|c: char| c.is_whitespace() || matches!(c, '%' | '"' | '\\'))
+}
+
+/// Where connections are shared, if [`share_connections_in`] set a folder;
+/// none on Windows, whose ssh has no multiplexing.
 pub fn multiplex_dir() -> Option<String> {
     if cfg!(windows) {
         return None;
     }
-    Some(
-        std::env::var("TMPDIR")
-            .ok()
-            .filter(|d| !d.is_empty())
-            .unwrap_or_else(|| "/tmp".to_owned()),
-    )
+    MULTIPLEX.get().cloned()
 }
 
 /// What a finished `ssh` printed.
@@ -272,6 +315,10 @@ pub struct Tested {
 
 const OK_MARKER: &str = "__VORN_OK__";
 
+/// What a test says of a host whose key this machine has not seen: Vorn
+/// never accepts one on its own, so the person checks it where ssh shows it.
+pub const UNKNOWN_HOST_KEY: &str = "This host's key is not trusted yet. Connect to it once from a terminal with ssh to check and accept its key, then test again.";
+
 /// Logs in to `host` and runs `echo __VORN_OK__`.
 pub fn test(host: &Host, env: &[(String, String)]) -> Tested {
     let started = Instant::now();
@@ -319,7 +366,9 @@ fn tested(ran: std::io::Result<Output>, duration_ms: u64) -> Tested {
         .trim()
         .to_owned();
     let mut message = if clean.is_empty() { fallback } else { clean };
-    if message.contains("Host key verification failed") {
+    if message.contains("host key is known for") {
+        message = UNKNOWN_HOST_KEY.to_owned();
+    } else if message.contains("Host key verification failed") {
         message =
             "Host key changed — remove old entry from known_hosts or verify the server".to_owned();
     } else if message.contains("Permission denied") {
@@ -350,8 +399,8 @@ mod tests {
     fn builds_the_ssh_arguments() {
         assert_eq!(
             args(&host(), 5, Some("/t")).unwrap().join(" "),
-            "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
-             -o ControlMaster=auto -o ControlPath=/t/vorn-ssh-%h-%p -o ControlPersist=60 \
+            "-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+             -o ControlMaster=auto -o ControlPath=/t/%C -o ControlPersist=60 \
              -p 2222 -i /k -o ServerAliveInterval=30 -- me@box"
         );
         let plain: Host = serde_json::from_value(serde_json::json!({
@@ -416,6 +465,15 @@ mod tests {
         );
         let key = tested(out(Some(255), "", "Host key verification failed."), 1);
         assert!(key.message.starts_with("Host key changed"));
+        let unknown = tested(
+            out(
+                Some(255),
+                "",
+                "No ED25519 host key is known for box and you have requested strict checking.\nHost key verification failed.",
+            ),
+            1,
+        );
+        assert_eq!(unknown.message, UNKNOWN_HOST_KEY);
         assert_eq!(
             tested(out(Some(255), "", "Warning: only"), 1).message,
             "Command failed with exit code 255"
@@ -426,6 +484,29 @@ mod tests {
             (missing.success, missing.message.as_str()),
             (false, "spawn ssh ENOENT")
         );
+    }
+
+    #[test]
+    fn shares_connections_only_through_a_folder_ssh_can_use() {
+        assert!(usable_multiplex_dir("/Users/me/.vorn/ssh"));
+        assert!(!usable_multiplex_dir("/Users/me/Application Support/ssh"));
+        assert!(!usable_multiplex_dir("/tmp/100%/ssh"));
+        assert!(usable_multiplex_dir(&format!("/{}", "a".repeat(44))));
+        assert!(!usable_multiplex_dir(&format!("/{}", "a".repeat(45))));
+        assert!(!usable_multiplex_dir(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shared_folder_is_this_users_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let data = tempfile::tempdir().unwrap();
+        let dir = data.path().join("ssh");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        private_dir(&dir).unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 
     #[test]

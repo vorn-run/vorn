@@ -19,6 +19,8 @@ apple-native-keyring-store = { version = "1", features = ["keychain"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = { version = "1", default-features = false }
+# icacls, started without a console window, for owner-only files.
+vorn-spawn = { path = "../spawn" }
 
 # Secret Service over a pure-Rust D-Bus, so no system library is needed to build.
 [target.'cfg(target_os = "linux")'.dependencies]

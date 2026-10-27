@@ -18,6 +18,10 @@ use crate::{clip_units, dimension, is_plausible_path, percent_decode, Result};
 /// The longest unfinished sequence a checkpoint carries; inside a longer one none is cut.
 pub(crate) const MAX_CONTINUATION: usize = 1 << 20;
 
+/// The most a program may put on the clipboard in one write, in decoded
+/// bytes: room for a long file, not for a flood. A larger write is refused.
+pub const MAX_CLIPBOARD_WRITE: usize = 256 * 1024;
+
 /// What the terminal asks its host to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -218,12 +222,17 @@ impl Emulator {
         term.on_bell(move |_| sink.borrow_mut().push(Effect::Bell))?;
         let sink = Rc::clone(&effects);
         term.on_clipboard_write(move |_, write| {
-            use libghostty_vt::terminal::ClipboardLocation as L;
+            use libghostty_vt::terminal::{ClipboardLocation as L, ClipboardWriteError};
             let location = match write.location() {
                 L::Selection => ClipboardTarget::Selection,
                 L::Primary => ClipboardTarget::Primary,
                 _ => ClipboardTarget::Standard,
             };
+            let size: usize = write.contents().map(|c| c.data.len()).sum();
+            if size > MAX_CLIPBOARD_WRITE {
+                write.reply(Err(ClipboardWriteError::Denied), false);
+                return;
+            }
             let contents = write
                 .contents()
                 .map(|c| {
@@ -917,6 +926,25 @@ mod tests {
             ]
         );
         assert_eq!((em.title(), em.cwd()), ("t", "/srv"));
+    }
+
+    #[test]
+    fn refuses_a_clipboard_write_larger_than_the_cap() {
+        let mut em = Emulator::new(20, 3).unwrap();
+        let mut fx = Vec::new();
+        // "aaa" is "YWFh" in base64: n thirds of a write of 3n bytes.
+        let at = |thirds: usize| format!("\x1b]52;c;{}\x07", "YWFh".repeat(thirds)).into_bytes();
+        let under = MAX_CLIPBOARD_WRITE / 3;
+        em.feed(&at(under), &mut fx);
+        assert!(
+            matches!(&fx[..], [Effect::Clipboard { contents, .. }] if contents[0].1.len() == under * 3)
+        );
+        fx.clear();
+        em.feed(&at(under + 1), &mut fx);
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::Clipboard { .. })),
+            "{fx:?}"
+        );
     }
 
     #[test]

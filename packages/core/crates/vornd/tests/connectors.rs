@@ -464,7 +464,8 @@ async fn only_a_package_running_a_program_offers_the_sandbox() {
             .unwrap_or_else(|| panic!("{id} is listed: {installed}"))["sandboxAvailable"]
             .clone()
     };
-    let available = vorn_extensions::sandbox::available();
+    // vornd is its own confining helper, so only the OS decides.
+    let available = vorn_extensions::sandbox::Kind::here() != vorn_extensions::sandbox::Kind::None;
     assert_eq!(offered("tickets"), json!(available), "{installed}");
     assert_eq!(offered("pages"), json!(false), "{installed}");
     assert_eq!(offered("wasm"), json!(false), "{installed}");

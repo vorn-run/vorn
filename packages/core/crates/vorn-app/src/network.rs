@@ -101,7 +101,14 @@ pub struct DeviceToken {
     pub revoked_at: Option<String>,
     #[serde(default)]
     pub last_address: Option<String>,
+    /// Unused for longer than vornd keeps a device signed in.
+    #[serde(default)]
+    pub expired: bool,
 }
+
+/// How long a device may go without connecting before it is signed out, as the page says it.
+pub const IDLE_EXPIRY: &str =
+    "A device that does not connect for 30 days is signed out and pairs again.";
 
 /// What kind of device a token stands for, by the icon it gets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +133,9 @@ impl DeviceToken {
 
     /// The line under the device's name, `now_ms` since the epoch.
     pub fn seen(&self, now_ms: f64) -> String {
+        if self.expired {
+            return "Signed out: not connected for 30 days".to_owned();
+        }
         let when = self
             .last_seen_at
             .as_deref()
@@ -503,6 +513,7 @@ mod tests {
             last_seen_at: None,
             revoked_at: None,
             last_address: None,
+            expired: false,
         };
         assert_eq!(phone.seen(t), "Never connected");
         let phone = DeviceToken {
@@ -521,6 +532,11 @@ mod tests {
             mac.seen(t + 86_400_000.0),
             "Another Vorn · last seen yesterday"
         );
+        let gone = DeviceToken {
+            expired: true,
+            ..mac
+        };
+        assert_eq!(gone.seen(t), "Signed out: not connected for 30 days");
     }
 
     #[test]
@@ -532,6 +548,7 @@ mod tests {
                 last_seen_at: None,
                 revoked_at: None,
                 last_address: None,
+                expired: false,
             }
             .kind()
         };
@@ -610,6 +627,7 @@ mod tests {
             last_seen_at: None,
             revoked_at: revoked.then(|| "2030-01-01T00:00:00Z".into()),
             last_address: None,
+            expired: false,
         };
         let n = Network {
             tokens: Some(vec![t("a", false), t("b", true), t("c", false)]),

@@ -448,8 +448,9 @@ async fn twenty_idle_node_services_all_stop() {
     }
     let ids: Vec<String> = (0..20).map(|i| format!("svc{i:02}")).collect();
     let names: Vec<&str> = ids.iter().map(String::as_str).collect();
+    // Long enough to start all twenty, each in its sandbox, before the first idles out.
     let policy = Policy {
-        idle: Duration::from_secs(3),
+        idle: Duration::from_secs(8),
         cap: 32,
         ..Policy::default()
     };

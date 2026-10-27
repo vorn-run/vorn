@@ -40,7 +40,8 @@ The app starts it; `vorn server serve` runs it from a terminal.
 
 ```sh
 cargo run -p vornd -- --data-dir /tmp/vorn-dev --port 0   # prints {"port":N,"protocol":1}
-curl http://127.0.0.1:N/vornd/health                      # its sessions, holder and hooks
+curl -H "Authorization: Bearer $(cat /tmp/vorn-dev/local-token)" \
+  http://127.0.0.1:N/vornd/health                         # its sessions, holder and hooks
 ```
 
 With `--sessiond` it keeps a session holder under the data directory and

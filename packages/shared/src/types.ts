@@ -1931,6 +1931,7 @@ export const IPC = {
   WORKTREE_ACTIVE_SESSIONS: 'worktree:activeSessions',
   WORKTREE_INVENTORY: 'worktree:inventory',
   CORE_STATUS: 'core:status',
+  VAULT_STATUS: 'vault:status',
   VORND_STATUS: 'vornd:status',
   VORND_SESSION_HOLDERS: 'vornd:session-holders',
   VORND_END_SESSION_HOLDER: 'vornd:end-session-holder',

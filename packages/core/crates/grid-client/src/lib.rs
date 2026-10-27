@@ -22,6 +22,9 @@ use vorn_term_proto::msg::{
 use vorn_term_proto::screen::Image;
 
 /// One attachment as the client sees it.
+/// How many of a pane's events [`Pane::events`] keeps.
+pub const EVENTS_KEPT: usize = 64;
+
 #[derive(Default)]
 pub struct Pane {
     pub session: String,
@@ -322,6 +325,10 @@ impl Client {
             }
             ServerMsg::Event { sid, id, ref kind } => {
                 if let Some(pane) = self.panes.get_mut(&sid) {
+                    // The latest few, for a test or a tool to read; the app hears each one as it comes.
+                    if pane.events.len() == EVENTS_KEPT {
+                        pane.events.remove(0);
+                    }
                     pane.events.push((id, kind.clone()));
                 }
                 Got::Message(m)

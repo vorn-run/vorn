@@ -244,6 +244,17 @@ impl Child {
         name: String,
         inbox: Option<Inbox>,
     ) -> Result<Child, String> {
+        Child::start_redacting(launch, name, inbox, Vec::new())
+    }
+
+    /// [`Child::start_with`], with `secrets` (values the child was handed)
+    /// taken out of every stderr line before it is logged or kept.
+    pub fn start_redacting(
+        launch: &Launch,
+        name: String,
+        inbox: Option<Inbox>,
+        secrets: Vec<String>,
+    ) -> Result<Child, String> {
         let spawn = |program: &Path| {
             vorn_spawn::tokio_command(program)
                 .args(&launch.args)
@@ -285,7 +296,12 @@ impl Child {
         let (signals, mut signal_rx) = mpsc::unbounded_channel::<Signal>();
         let (exit_tx, exit) = watch::channel(None);
 
-        let stderr_done = tokio::spawn(read_stderr(stderr, name.clone(), Arc::clone(&state)));
+        let stderr_done = tokio::spawn(read_stderr(
+            stderr,
+            name.clone(),
+            Arc::clone(&state),
+            secrets,
+        ));
         let stdout_done = tokio::spawn(read_stdout(
             stdout,
             name.clone(),
@@ -525,7 +541,8 @@ fn send_signal(child: &mut tokio::process::Child, pid: Option<u32>, sig: Signal)
 /// searches as before, and says ENOENT for a missing one. Like `execvp`, an
 /// entry this process may not execute is skipped.
 #[cfg(unix)]
-fn on_path(program: &Path, env: &[(String, String)], cwd: &Path) -> Option<PathBuf> {
+/// `program`'s full path on the child's own `PATH`, for a bare name.
+pub(crate) fn on_path(program: &Path, env: &[(String, String)], cwd: &Path) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     if program.is_absolute() || program.components().count() != 1 {
         return None;
@@ -555,7 +572,7 @@ fn bare_name_may_run(err: &std::io::Error) -> bool {
 
 /// Windows starts no process by forking, so there is nothing to spare.
 #[cfg(not(unix))]
-fn on_path(_: &Path, _: &[(String, String)], _: &Path) -> Option<PathBuf> {
+pub(crate) fn on_path(_: &Path, _: &[(String, String)], _: &Path) -> Option<PathBuf> {
     None
 }
 
@@ -574,12 +591,90 @@ fn spawn_reason(program: &std::path::Path, err: &std::io::Error) -> String {
     }
 }
 
-async fn read_stderr(stderr: tokio::process::ChildStderr, name: String, state: Arc<Mutex<State>>) {
+/// The shortest secret [`redact`] looks for: shorter values (`1`, `on`)
+/// would blank ordinary words.
+pub const MIN_REDACTED: usize = 4;
+
+/// `line` with every secret in `secrets` replaced by `[redacted]`.
+pub fn redact<'a>(line: &'a str, secrets: &[String]) -> std::borrow::Cow<'a, str> {
+    let mut out = std::borrow::Cow::Borrowed(line);
+    for secret in secrets.iter().filter(|s| s.len() >= MIN_REDACTED) {
+        if out.contains(secret.as_str()) {
+            out = std::borrow::Cow::Owned(out.replace(secret.as_str(), "[redacted]"));
+        }
+    }
+    out
+}
+
+/// Takes secrets out of a stream read in pieces, so one split across two
+/// reads is caught too: a piece that does not end its line holds back its
+/// last bytes, as many as could start a secret, for the next piece.
+#[derive(Debug)]
+pub struct Redactor {
+    secrets: Vec<Vec<u8>>,
+    carry: Vec<u8>,
+}
+
+const REDACTED: &[u8] = b"[redacted]";
+
+impl Redactor {
+    pub fn new(secrets: &[String]) -> Redactor {
+        Redactor {
+            secrets: secrets
+                .iter()
+                .filter(|s| s.len() >= MIN_REDACTED)
+                .map(|s| s.as_bytes().to_vec())
+                .collect(),
+            carry: Vec::new(),
+        }
+    }
+
+    /// `piece` with every secret taken out, minus what is held back when
+    /// `ends_line` is false; the held-back bytes come out with the next piece.
+    pub fn push(&mut self, piece: &[u8], ends_line: bool) -> Vec<u8> {
+        let mut buf = std::mem::take(&mut self.carry);
+        buf.extend_from_slice(piece);
+        for secret in &self.secrets {
+            buf = replace_all(&buf, secret);
+        }
+        if !ends_line {
+            // A secret that starts before this point ended inside `buf` and is gone.
+            let hold = self.secrets.iter().map(Vec::len).max().unwrap_or(1) - 1;
+            let at = buf.len().saturating_sub(hold);
+            self.carry = buf.split_off(at);
+        }
+        buf
+    }
+}
+
+/// `hay` with every `needle` replaced by `[redacted]`.
+fn replace_all(hay: &[u8], needle: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(hay.len());
+    let mut i = 0;
+    while i < hay.len() {
+        if hay[i..].starts_with(needle) {
+            out.extend_from_slice(REDACTED);
+            i += needle.len();
+        } else {
+            out.push(hay[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+async fn read_stderr(
+    stderr: tokio::process::ChildStderr,
+    name: String,
+    state: Arc<Mutex<State>>,
+    secrets: Vec<String>,
+) {
+    let mut redactor = Redactor::new(&secrets);
     let mut reader = BufReader::new(stderr);
     let mut buf = Vec::new();
     loop {
         buf.clear();
-        // Bounded, so a child that never ends a line cannot grow it for ever.
+        // Bounded, so a child that never ends a line cannot grow it for ever; the redactor joins the pieces.
         let read = (&mut reader)
             .take(MAX_STDERR_LINE as u64 + 1)
             .read_until(b'\n', &mut buf)
@@ -588,7 +683,8 @@ async fn read_stderr(stderr: tokio::process::ChildStderr, name: String, state: A
             Ok(0) | Err(_) => return,
             Ok(_) => {}
         }
-        let text = String::from_utf8_lossy(&buf);
+        let piece = redactor.push(&buf, buf.ends_with(b"\n"));
+        let text = String::from_utf8_lossy(&piece);
         let text = text.trim_end_matches('\n').trim_end_matches('\r');
         if js::trim(text).is_empty() {
             continue;
@@ -907,5 +1003,53 @@ mod tests {
             .expect("answered");
         assert_eq!(answer, json!("ok"));
         child.close().await;
+    }
+
+    #[test]
+    fn a_secret_split_across_two_reads_is_still_taken_out() {
+        let mut r = Redactor::new(&["s3cret-value".to_owned()]);
+        let mut out = r.push(b"token s3cr", false);
+        out.extend(r.push(b"et-value and more", false));
+        out.extend(r.push(b" end\n", true));
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text, "token [redacted] and more end\n");
+        // Nothing held once a line ends.
+        assert_eq!(r.push(b"plain\n", true), b"plain\n");
+    }
+
+    #[test]
+    fn redacts_every_secret_long_enough_to_mean_one() {
+        let secrets = vec!["hunter22".to_owned(), "on".to_owned()];
+        assert_eq!(
+            redact("auth hunter22 then hunter22 on", &secrets),
+            "auth [redacted] then [redacted] on"
+        );
+        assert!(matches!(
+            redact("nothing here", &secrets),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_secret_the_child_prints_to_stderr_is_never_kept() {
+        let launch = Launch {
+            program: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "echo \"error: bad token s3cr3t-value\" >&2; exit 3".into(),
+            ],
+            cwd: std::env::temp_dir(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+        };
+        let child = Child::start_redacting(&launch, "sh".into(), None, vec!["s3cr3t-value".into()])
+            .expect("starts");
+        let err = child
+            .request("ping", json!({}), Duration::from_secs(10))
+            .await
+            .expect_err("it exits first");
+        let message = format!("{err:?}");
+        assert!(message.contains("[redacted]"), "{message}");
+        assert!(!message.contains("s3cr3t-value"), "{message}");
     }
 }

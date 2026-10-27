@@ -55,6 +55,18 @@ impl Category {
 /// (sign-in, updates, the command line tool, the widget) belong to the desktop app.
 pub const IN_BROWSER: bool = cfg!(target_arch = "wasm32");
 
+/// Said once a run when vornd found no OS keychain.
+pub const NO_KEYCHAIN: &str =
+    "No OS keychain found. Vorn keeps secrets in a file only you can read, unencrypted.";
+
+/// How secrets are kept, as a form's hint says it: `keychain` from `vault:status`.
+pub fn secrets_kept(keychain: Option<bool>) -> &'static str {
+    match keychain {
+        Some(false) => "No OS keychain: kept unencrypted in a file only you can read",
+        _ => "Encrypted with your OS keychain",
+    }
+}
+
 /// The sidebar's sections, as `SIDEBAR_SECTIONS` lists them; the
 /// EXTENSIONS group follows them, with [`EXTENSIONS`] first.
 pub const SECTIONS: [(&str, &[Category]); 2] = [

@@ -678,6 +678,7 @@ impl Connectors {
             command: launch.launch.program.to_string_lossy().into_owned(),
             args: launch.launch.args.clone(),
             env: launch.own_env,
+            secrets: launch.secrets,
         };
         self.mcp
             .client(text(conn, "id"), &launch, self.host.child_env())
@@ -850,6 +851,7 @@ impl Connectors {
             }
         };
         let mut own: Vec<(String, String)> = Vec::new();
+        let mut secret_values: Vec<String> = Vec::new();
         let mut put = |k: String, v: String| match own.iter_mut().find(|(key, _)| *key == k) {
             Some(slot) => slot.1 = v,
             None => own.push((k, v)),
@@ -863,6 +865,7 @@ impl Connectors {
                     .await
                     .unwrap_or_default();
             for (k, v) in borrowed {
+                secret_values.push(v.clone());
                 put(k, v);
             }
         }
@@ -870,8 +873,17 @@ impl Connectors {
             put(k, v.as_str().unwrap_or("").to_owned());
         }
         if let Some(secrets) = self.secrets_of(text(conn, "id")).await {
+            // Every field the vault holds, not only those passed on: a child may echo any it reads.
+            secret_values.extend(
+                secrets
+                    .iter()
+                    .filter(|(k, _)| k.as_str() != "secretEnv")
+                    .map(|(_, v)| v.expose().to_owned()),
+            );
             for (k, v) in secret_env(&secrets) {
-                put(k, v.as_str().unwrap_or("").to_owned());
+                let v = v.as_str().unwrap_or("").to_owned();
+                secret_values.push(v.clone());
+                put(k, v);
             }
         }
         let browser = auth
@@ -893,6 +905,7 @@ impl Connectors {
                 env,
             },
             own_env: own,
+            secrets: secret_values,
             source,
             protocol,
             name,
@@ -940,6 +953,7 @@ impl Connectors {
                     launch: held,
                     source: spawn.source,
                     protocol: spawn.protocol,
+                    redact: spawn.secrets,
                 };
                 sdk::open(
                     &launch,
@@ -953,10 +967,11 @@ impl Connectors {
             .await
     }
 
-    /// `launch` under the macOS sandbox profile when the person turned it
-    /// on for package `sdk_id`: no network but the proxy's, which lets it
+    /// `launch` sandboxed unless the person turned it off for package
+    /// `sdk_id`: its own folder, no network but the proxy's, which lets it
     /// through to the hosts its manifest declares and those the connection's
-    /// settings (`own`) name where the manifest says so.
+    /// settings (`own`) name where the manifest says so, and vornd's own
+    /// port, where it reaches its sign-in window.
     fn held(
         &self,
         launch: Launch,
@@ -964,10 +979,13 @@ impl Connectors {
         own: &[(String, String)],
     ) -> (Launch, Option<ProxyGrant>) {
         let store = self.packs();
-        if !vorn_extensions::pack::is_safe_id(sdk_id)
-            || !vorn_extensions::sandbox::available()
-            || !vorn_extensions::sandbox::is_on(&store.root().join(sdk_id))
-        {
+        let confiner = &self.services.confiner;
+        if !vorn_extensions::pack::is_safe_id(sdk_id) {
+            return (launch, None);
+        }
+        let mut launch = launch;
+        confiner.name_data(sdk_id, &mut launch);
+        if !confiner.available() || !vorn_extensions::sandbox::is_on(&store.root().join(sdk_id)) {
             return (launch, None);
         }
         let Ok(pack) = store.inspect_unmeasured(sdk_id) else {
@@ -980,29 +998,20 @@ impl Connectors {
                 hosts.extend(hosts_in(value));
             }
         }
-        let grant =
-            self.services
-                .proxy
-                .as_ref()
-                .and_then(|proxy| match proxy.grant(sdk_id, hosts) {
-                    Ok(grant) => Some(grant),
-                    Err(err) => {
-                        warn!("[connectors] {sdk_id} runs without a network: {err}");
-                        None
-                    }
-                });
-        let mut launch = launch;
-        if let Some(grant) = &grant {
-            for (k, v) in grant.env() {
-                launch.env.retain(|(key, _)| *key != k);
-                launch.env.push((k, v));
-            }
+        let mut reach = confiner.reach(&pack.path, sdk_id, false);
+        if let Some(port) = self
+            .services
+            .origin
+            .rsplit_once(':')
+            .and_then(|(_, p)| p.parse().ok())
+        {
+            reach.ports.push(port);
         }
-        let port = grant.as_ref().map(ProxyGrant::port);
-        (
-            vorn_extensions::sandbox::wrap_through(launch, &pack.path, port),
-            grant,
-        )
+        let grant = confiner.grant(sdk_id, hosts, &mut launch, &mut reach);
+        match confiner.wrap(launch.clone(), &reach) {
+            Some(held) => (held, grant),
+            None => (launch, None),
+        }
     }
 
     /// Runs `action` in a process of its own when the connection's package
@@ -1033,6 +1042,7 @@ impl Connectors {
             launch: held,
             source: spawn.source,
             protocol: spawn.protocol,
+            redact: spawn.secrets,
         };
         let name = pack.name().to_owned();
         let client = match sdk::open(
@@ -2003,16 +2013,22 @@ impl Connectors {
     }
 
     async fn connections_of(&self, connector_id: &str) -> Vec<Value> {
+        self.try_connections_of(connector_id)
+            .await
+            .unwrap_or_default()
+    }
+
+    async fn try_connections_of(&self, connector_id: &str) -> Result<Vec<Value>, String> {
         let all = self
             .store(|s| s.call("dbListSourceConnections", json!([null])))
-            .await
-            .unwrap_or(Value::Null);
-        all.as_array()
+            .await?;
+        Ok(all
+            .as_array()
             .into_iter()
             .flatten()
             .filter(|c| conns::connector_id_of(c) == connector_id)
             .cloned()
-            .collect()
+            .collect())
     }
 
     /// The package connection `id` belongs to, if it is one.
@@ -2028,17 +2044,34 @@ impl Connectors {
         self.changed();
     }
 
+    /// A package about to be removed: the programs of its connections stop,
+    /// so none writes while its files go; its connections stay until it is gone.
+    pub async fn package_stopping(&self, id: &str) {
+        for conn in self.connections_of(id).await {
+            self.stop_children(text(&conn, "id")).await;
+        }
+    }
+
     /// A package removed through the extension bridge takes every connection
     /// made with it, and their secrets: nothing of it is left.
-    pub async fn package_removed(&self, id: &str) {
-        for conn in self.connections_of(id).await {
+    pub async fn package_removed(&self, id: &str) -> Result<(), String> {
+        let mut failed = Vec::new();
+        for conn in self.try_connections_of(id).await? {
             let conn_id = text(&conn, "id");
             if let Err(err) = self.remove_connection(conn_id).await {
                 warn!("[packs] could not remove {conn_id} with {id}: {err}");
+                failed.push(format!("{conn_id}: {err}"));
             }
         }
         self.pack_changed(id).await;
         self.changed();
+        if failed.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "could not remove its connections ({})",
+            failed.join("; ")
+        ))
     }
 
     /// After a pack changed, no child runs its old files, and the connection
@@ -2354,6 +2387,8 @@ struct Spawn {
     launch: Launch,
     /// The connection's own variables, which win over the safe environment.
     own_env: Vec<(String, String)>,
+    /// The secret values among them, kept out of what the child's stderr logs.
+    secrets: Vec<String>,
     source: LaunchSource,
     protocol: Option<u64>,
     /// The name an installed pack gives itself.

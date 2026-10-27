@@ -65,6 +65,8 @@ function normalizer(dirs: () => Record<string, string>, ports: () => number[]) {
       if (!ids.has(id)) ids.set(id, `<id${ids.size + 1}>`)
       return ids.get(id)!
     })
+    // A page's ticket is new on every read.
+    out = out.replace(/ticket=[0-9a-f]{64}/g, 'ticket=<ticket>')
     out = out.replace(/\b[0-9a-f]{32}\b|\b[A-Za-z0-9_-]{43}\b/g, (t) => {
       if (!tokens.has(t)) tokens.set(t, `<token${tokens.size + 1}>`)
       return tokens.get(t)!

@@ -7,6 +7,16 @@
 use sha2::{Digest, Sha256};
 
 const PREFIX: &str = "vorn_";
+
+/// How long a device token may go unused before it stops working: a phone
+/// left in a drawer for a month pairs again.
+pub const IDLE_EXPIRY_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// Whether a token last used (else made) at `last_used_ms` has gone unused
+/// for longer than [`IDLE_EXPIRY_MS`] by `now_ms`.
+pub fn idle_expired(last_used_ms: i64, now_ms: i64) -> bool {
+    now_ms.saturating_sub(last_used_ms) > IDLE_EXPIRY_MS
+}
 const SECRET_BYTES: usize = 32;
 
 /// A token's two halves.
@@ -125,6 +135,15 @@ mod tests {
             hash_hex("secret"),
             "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
         );
+    }
+
+    #[test]
+    fn a_token_stops_working_after_thirty_idle_days() {
+        let day = 24 * 60 * 60 * 1000;
+        assert!(!idle_expired(0, 30 * day));
+        assert!(idle_expired(0, 30 * day + 1));
+        // A clock that went back never expires one.
+        assert!(!idle_expired(10 * day, 0));
     }
 
     #[test]

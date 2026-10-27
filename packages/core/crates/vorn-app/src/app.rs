@@ -244,6 +244,8 @@ enum Picked {
 enum Call {
     /// `terminal:listActive` as the app starts.
     Sessions,
+    /// `vault:status` once vornd says who it is.
+    Vault,
     /// The composer's `terminal:create`.
     Launch,
     /// A session or shell that should be selected once it exists.
@@ -408,6 +410,8 @@ pub struct App {
     size: (f32, f32),
     /// vornd's HTTP port, for pages it serves (a gate's review page).
     port: u16,
+    /// The credential the app connected with, which vornd's own reports want.
+    local_token: String,
     /// The sessions the banner offers, with why each ended.
     carried: Vec<(TerminalSession, &'static str)>,
     /// vornd's data directory, where its session holders announce
@@ -586,6 +590,7 @@ impl App {
             term_drawing: None,
             size: look::WINDOW,
             port: ep.port,
+            local_token: ep.token.clone(),
             carried: Vec::new(),
             data_dir: None,
             health: None,
@@ -919,6 +924,7 @@ impl App {
                             .get("appVersion")
                             .and_then(Value::as_str)
                             .map(str::to_owned);
+                        self.call(Call::Vault, "vault:status", Value::Null);
                         continue;
                     }
                     if method == "connector:catalogChanged" {
@@ -1124,6 +1130,16 @@ impl App {
                 if !self.saving && std::mem::take(&mut self.config_stale) {
                     self.call(Call::Config, "config:load", Value::Null);
                 }
+            }
+            Call::Vault => {
+                let keychain = answer
+                    .ok()
+                    .and_then(|v| v.get("keychain").and_then(Value::as_bool));
+                // Said once a run: a reconnect to the same vornd has nothing new to say.
+                if keychain == Some(false) && self.st.keychain != Some(false) {
+                    self.st.toast(crate::settings::NO_KEYCHAIN, true);
+                }
+                self.st.keychain = keychain;
             }
             Call::Config => {
                 if self.saving {
@@ -2311,6 +2327,7 @@ impl App {
             Act::Paste(id) => self.paste_clipboard(ui, &id),
             Act::CopySelection(id) => self.copy_selection(&id),
             Act::ConfirmPaste(run) => self.confirm_paste(ui, run),
+            Act::ConfirmProgramCopy(copy) => self.confirm_program_copy(ui, copy),
             Act::ScrollToBottom(id) => self.return_to_live(&id),
             Act::ScrollPage(id, up) => {
                 if let Some(v) = self.views.get(&id) {
@@ -3050,6 +3067,12 @@ impl App {
             if self.st.dialog == Some(Dialog::Paste) && matches!(code.as_str(), "Escape" | "Enter")
             {
                 self.confirm_paste(ui, code == "Enter");
+                return true;
+            }
+            if self.st.dialog == Some(Dialog::ProgramCopy)
+                && matches!(code.as_str(), "Escape" | "Enter")
+            {
+                self.confirm_program_copy(ui, code == "Enter");
                 return true;
             }
         }
