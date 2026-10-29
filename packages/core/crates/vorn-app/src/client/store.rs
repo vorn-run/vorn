@@ -371,14 +371,16 @@ impl Store {
         self.number_titles();
     }
 
-    /// Numbers each project's unnamed sessions by creation from vornd's records alone, so every client agrees.
+    /// Numbers each project's live unnamed sessions by creation (then id) from vornd's records alone, so every client agrees.
     pub fn number_titles(&mut self) {
         let mut order: Vec<usize> = (0..self.sessions.len())
-            .filter(|&i| self.sessions[i].own_name().is_none())
+            .filter(|&i| self.sessions[i].own_name().is_none() && !self.sessions[i].ended())
             .collect();
         order.sort_by(|&a, &b| {
             let (a, b) = (&self.sessions[a].info, &self.sessions[b].info);
-            (a.project_name.cmp(&b.project_name)).then(a.created_at.total_cmp(&b.created_at))
+            (a.project_name.cmp(&b.project_name))
+                .then(a.created_at.total_cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
         });
         for s in &mut self.sessions {
             s.ordinal = 0;
@@ -427,6 +429,7 @@ impl Store {
                     return Change::Nothing;
                 };
                 s.exited = Some(params.get("exitCode").and_then(Value::as_i64).unwrap_or(0));
+                self.number_titles();
                 Change::Exited(id.to_owned())
             }
             "workflow:runUpdated" => {
@@ -708,6 +711,48 @@ mod tests {
         assert_eq!(titles(&s), ["vorn", "docs", "journey", "vorn 2"]);
         s.remove("b");
         assert_eq!(titles(&s), ["docs", "journey", "vorn"]);
+    }
+
+    #[test]
+    fn tied_creation_times_number_by_id_whatever_the_arrival_order() {
+        let make = |id: &str| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": 5.0, "pid": 1.0 })
+        };
+        let numbered = |ids: [&str; 3]| {
+            let mut s = Store::default();
+            for id in ids {
+                s.apply("session:created", make(id));
+            }
+            let mut t: Vec<(String, String)> = s
+                .sessions
+                .iter()
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        assert_eq!(numbered(["a", "b", "c"]), numbered(["c", "a", "b"]));
+        assert_eq!(
+            numbered(["b", "c", "a"])[2],
+            ("c".to_owned(), "vorn 3".to_owned())
+        );
+    }
+
+    #[test]
+    fn an_ended_session_gives_up_its_number() {
+        let mut s = Store::default();
+        for (id, at) in [("a", 1.0), ("b", 2.0), ("c", 3.0)] {
+            s.apply(
+                "session:created",
+                json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                        "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 }),
+            );
+        }
+        // Another client closed `a`: this one only hears it exit, and numbers as a fresh one would.
+        s.apply("terminal:exit", json!({ "id": "a", "exitCode": 0 }));
+        let titles = |s: &Store| s.sessions.iter().map(Session::title).collect::<Vec<_>>();
+        assert_eq!(titles(&s), ["vorn", "vorn", "vorn 2"]);
     }
 
     #[test]

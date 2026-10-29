@@ -1309,6 +1309,7 @@ impl App {
             s.cause = None;
             s.exited = None;
         }
+        self.store.number_titles();
         self.views.remove(&id);
         if bound {
             self.st.toast(
@@ -1363,6 +1364,7 @@ impl App {
         if let Some(s) = self.store.sessions.iter_mut().find(|s| s.info.id == id) {
             s.cause = Some(cause);
         }
+        self.store.number_titles();
     }
 
     fn visible_ids(&self) -> Vec<String> {
