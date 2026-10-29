@@ -127,7 +127,9 @@ pub(super) fn top_buttons(s: &Screen<'_>) -> Vec<TopButton> {
                 view: MainView::of(p),
                 icon: p.icon.clone().unwrap_or_else(|| "puzzle".to_owned()),
                 label: p.title.clone(),
-                keys: p.key.as_deref().map(key_label),
+                keys: (p.key.as_deref())
+                    .filter(|k| !crate::app::built_in_key(k))
+                    .map(key_label),
                 on: shown.as_deref() == Some(p.key().as_str()),
             });
     std::iter::once(sessions).chain(views).collect()

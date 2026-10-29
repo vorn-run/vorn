@@ -734,21 +734,25 @@ impl Points {
 /// Whether key `spec` (`Mod+Shift+W`) is the key pressed: `code` with modifiers `m`.
 pub fn key_hit(spec: &str, code: &str, m: u16, primary: u16) -> bool {
     use crate::ui::mods;
+    let held = m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
+    key_parts(spec, primary).is_some_and(|(named, want)| held == want && named == code)
+}
+
+/// A manifest's key as the key code and modifiers that press it; none when it names an unknown modifier.
+pub fn key_parts(spec: &str, primary: u16) -> Option<(String, u16)> {
+    use crate::ui::mods;
     let mut want = 0;
     let mut parts: Vec<&str> = spec.split('+').collect();
-    let Some(key) = parts.pop() else {
-        return false;
-    };
+    let key = parts.pop()?;
     for p in parts {
         want |= match p {
             "Mod" => primary,
             "Ctrl" => mods::CTRL,
             "Alt" => mods::ALT,
             "Shift" => mods::SHIFT,
-            _ => return false,
+            _ => return None,
         };
     }
-    let held = m & (mods::CTRL | mods::SUPER | mods::ALT | mods::SHIFT);
     let named = match key.chars().next() {
         Some(c) if key.len() == 1 && c.is_ascii_alphabetic() => {
             format!("Key{}", c.to_ascii_uppercase())
@@ -756,7 +760,7 @@ pub fn key_hit(spec: &str, code: &str, m: u16, primary: u16) -> bool {
         Some(c) if key.len() == 1 && c.is_ascii_digit() => format!("Digit{c}"),
         _ => key.to_owned(),
     };
-    held == want && named == code
+    Some((named, want))
 }
 
 /// Every id in `tree`.

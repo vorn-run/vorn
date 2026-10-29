@@ -119,6 +119,19 @@ pub enum Shortcut {
     Split(bool),
 }
 
+/// Whether a built-in shortcut always takes manifest key `spec` before a view or command could.
+pub fn built_in_key(spec: &str) -> bool {
+    let Some((code, m)) = crate::points::key_parts(spec, MOD()) else {
+        return false;
+    };
+    match shortcut(&code, m) {
+        // Extensions keep these, and the permission keys only answer an agent's ask.
+        None | Some(Shortcut::Folder | Shortcut::Shells | Shortcut::Permission(true)) => false,
+        Some(Shortcut::Permission(false)) => mods::mac(),
+        Some(_) => true,
+    }
+}
+
 /// The global shortcuts. Escape is not one: it closes what is open, else a
 /// terminal takes it, as xterm does.
 pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
@@ -3973,6 +3986,19 @@ fn list(answer: Result<Value, RpcError>) -> Vec<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_view_key_a_built_in_shortcut_takes_is_not_shown_as_its_own() {
+        assert_eq!(built_in_key("Mod+T"), mods::mac(), "+ owns Mod+T on macOS");
+        assert!(built_in_key("Mod+K"), "the palette");
+        assert!(
+            !built_in_key("Mod+Shift+O"),
+            "an extension keeps the folder key"
+        );
+        assert!(!built_in_key("Mod+Shift+A"), "approve only answers an ask");
+        assert!(!built_in_key("Mod+Shift+L"));
+        assert!(!built_in_key("Hyper+T"));
+    }
 
     #[test]
     fn the_stored_font_family_reaches_the_terminal_text() {
