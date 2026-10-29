@@ -151,6 +151,8 @@ pub(crate) mod tip {
     pub const STARTS_AGENT: &str = "Starts the agent above";
     pub const STARTS_SHELL: &str = "Starts a plain shell";
     pub const ARRANGE: &str = "Order and show or hide what each place shows";
+    pub const CARD_SHOWN: &str =
+        "How many buttons a card's header shows; the rest go in its More menu";
     pub const CUSTOMIZE: &str =
         "Opens the sheet that arranges the toolbar, the sidebar's tabs and a card's panes";
     pub const MORE_AGENTS: &str = "Finds more agents in the extensions catalog";
@@ -1444,13 +1446,22 @@ pub(super) fn general(s: &Screen<'_>) -> El {
             card_row(s, None, "Shell", Some(tip::SHELL), shell_picker(s)),
         ]))
         .child(section("Layout"))
-        .child(card(vec![card_row(
-            s,
-            None,
-            "Toolbar, sidebar tabs and panes",
-            Some(tip::ARRANGE),
-            customize_button(s),
-        )]))
+        .child(card(vec![
+            card_row(
+                s,
+                None,
+                "Toolbar, sidebar tabs and card buttons",
+                Some(tip::ARRANGE),
+                customize_button(s),
+            ),
+            card_row(
+                s,
+                None,
+                "Buttons on the card",
+                Some(tip::CARD_SHOWN),
+                crate::screen::customize::card_stepper(s),
+            ),
+        ]))
 }
 
 /// New session starts: the agent below, or a shell.

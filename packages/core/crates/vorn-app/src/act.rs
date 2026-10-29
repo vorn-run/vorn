@@ -62,6 +62,8 @@ pub enum Act {
         id: String,
         to: usize,
     },
+    /// How many buttons a card's header shows before the rest go into More.
+    CardShown(usize),
     /// Shows or hides an arranged item.
     ArrangeShow {
         list: crate::arrange::List,

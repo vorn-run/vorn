@@ -140,34 +140,72 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
     )
 }
 
-/// Minimize on a grid card, expand or collapse, close, then More actions with the rest.
+/// The card's buttons as arranged, as many as it shows, then More with the
+/// rest; close asks first.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
-    use crate::components::card::{card_actions_with, CardActions, CardVariant};
+    use crate::components::card::CardVariant;
+    use crate::ui::widgets::{confirm, tooltip_at, Tone};
     let sid = session.info.id.clone();
-    let (variant, toggle, key) = if focused {
-        (CardVariant::Focused, Act::Collapse, 'W')
+    let variant = if focused {
+        CardVariant::Focused
     } else {
-        (CardVariant::Mini, Act::Expand(sid.clone()), 'O')
+        CardVariant::Mini
     };
-    let confirming = (s.st.confirm_close.as_deref() == Some(sid.as_str())).then(|| {
-        (
-            s.acts.on("confirm", Act::CloseSession(sid.clone())),
-            s.acts.on("confirm", Act::AskClose(String::new())),
-        )
-    });
-    card_actions_with(
-        s.ui,
-        &CardActions {
-            variant,
-            more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
-            minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
-            toggle: s.acts.on("card", toggle),
-            close: s.acts.on("card", Act::AskClose(sid)),
-            toggle_key: &format!("{m}{key}", m = mod_label()),
-            confirming,
-        },
-        panes.into_iter().map(|(_, el)| el),
-    )
+    let place = variant.tip_place();
+    let all = super::card_buttons::buttons(s, session, focused);
+    let n = super::card_buttons::shown(s);
+    // The device button keeps its own, which holds the simulator picker.
+    let mut device = panes::card_buttons(s, session, variant);
+    let mut row = div().row().items_center().gap(2.0).shrink0();
+    for b in all.iter().take(n) {
+        if let Some(at) = device.iter().position(|(id, _)| *id == b.id) {
+            row = row.child(device.remove(at).1);
+            continue;
+        }
+        let id = s.acts.on("card", b.act.clone());
+        let hot = s.ui.hover(id);
+        let fg = if b.danger {
+            c(look::INK).mix(c(look::DANGER), hot)
+        } else {
+            c(look::INK)
+        };
+        let el = div()
+            .id(id)
+            .on(Action::Click)
+            .p(4.0)
+            .rounded(4.0)
+            .bg(white(0.0).mix(white(0.10), hot))
+            .ring(4.0)
+            .role(Role::Button, b.label.as_str())
+            .child(b.icon.draw(14.0, fg));
+        let mut el = tooltip_at(s.ui, el, id, &b.label, b.shortcut.as_deref(), place);
+        if b.id == super::card_buttons::CLOSE && s.st.confirm_close.as_deref() == Some(sid.as_str())
+        {
+            let ok = s.acts.on("confirm", Act::CloseSession(sid.clone()));
+            let cancel = s.acts.on("confirm", Act::AskClose(String::new()));
+            el = confirm(
+                s.ui,
+                el,
+                "Close this session?",
+                (ok, "Close"),
+                cancel,
+                Tone::Danger,
+            );
+        }
+        row = row.child(el);
+    }
+    let more = s.acts.on("card", Act::Open(MenuKind::Card(sid)));
+    let hot = s.ui.hover(more);
+    let b = div()
+        .id(more)
+        .on(Action::Click)
+        .p(4.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.10), hot))
+        .ring(4.0)
+        .role(Role::Button, "More actions")
+        .child(ico("ellipsis", 14.0, 2.0, c(look::INK)));
+    row.child(tooltip_at(s.ui, b, more, "More actions", None, place))
 }
 
 /// The title, or the inline rename field while renaming.

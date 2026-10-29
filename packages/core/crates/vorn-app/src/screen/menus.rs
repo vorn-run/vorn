@@ -37,6 +37,7 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::LaunchBranch => 220.0,
         MenuKind::Headless => 280.0,
         MenuKind::NewMenu => 240.0,
+        MenuKind::CardPoint(..) => 220.0,
         MenuKind::ToolbarMenu => 200.0,
         MenuKind::TabMenu => 200.0,
         MenuKind::Popover(_) => 380.0,
@@ -122,6 +123,7 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
             Vec::new()
         }
         MenuKind::NewMenu => new_menu(s),
+        MenuKind::CardPoint(sid, key) => card_point(s, sid, key),
         MenuKind::ToolbarMenu => vec![Item::new(
             "sliders-horizontal",
             "Customize Toolbar\u{2026}",
@@ -443,54 +445,28 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         .worktree_path
         .clone()
         .filter(|_| info.is_worktree == Some(true));
-    // The header's folder, shell and browser buttons, then Rename, each with its key.
-    let keyed = |key: char| format!("{}\u{21e7}{key}", super::mod_label());
+    let focused = s.st.focused.as_deref() == Some(id);
+    // First the card's buttons its header has no room for, in their order.
+    let shown = super::card_buttons::shown(s);
     let mut items: Vec<Item> = Vec::new();
-    for (act, icon, label, key) in super::side::pane_entries(s, session) {
-        let mut it = Item::new(icon, label, act);
-        it.shortcut = key.map(keyed);
-        items.push(it);
-    }
-    if let Some((act, label)) = super::panes::browser_entry(s, session) {
-        items.push(Item::new("globe", label, act));
+    for b in super::card_buttons::buttons(s, session, focused)
+        .into_iter()
+        .skip(shown)
+    {
+        if let Act::Open(MenuKind::CardPoint(_, key)) = &b.act {
+            items.extend(row_menu(s, key, Some(id)));
+            continue;
+        }
+        let mut it = Item::new("puzzle", b.label.as_str(), b.act);
+        it.icon = None;
+        it.shortcut = b.shortcut;
+        it.danger = b.danger;
+        items.push(it.mark(b.icon.draw(14.0, c(look::GRAY_500))));
     }
     let mut rename = Item::new("pencil", "Rename\u{2026}", Act::Rename(id.to_owned()));
     rename.shortcut = Some("F2".to_owned());
+    rename.separator = !items.is_empty();
     items.push(rename);
-    // Then, and not behind a submenu: what this card can show.
-    let shown = items.len();
-    items.extend(
-        (s.st.ext.items(id).into_iter())
-            .chain(s.st.ext.builtin_items(id, &s.st.points))
-            .map(|p| {
-                let label = if p.open {
-                    format!("Close {}", p.title)
-                } else {
-                    p.title.clone()
-                };
-                let act = Act::Ext(crate::extensions::ExtAct::Toggle {
-                    session: id.to_owned(),
-                    extension: p.extension_id,
-                    pane: p.pane_id,
-                });
-                let mut it = Item::new("puzzle", label, act).detail(p.extension_name);
-                it.icon = None;
-                it.mark(super::panes::extension_icon(
-                    p.icon.as_ref(),
-                    14.0,
-                    c(look::GRAY_500),
-                ))
-            }),
-    );
-    if let Some(first) = items.get_mut(shown) {
-        first.separator = true;
-    }
-    let args = serde_json::json!({ "sessionId": id }).to_string();
-    for (act, icon, label, _) in super::points::menu_items(s, "card", &args) {
-        let mut it = Item::new("puzzle", label, act);
-        it.icon = None;
-        items.push(it.mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500))));
-    }
     items.extend([
         Item::new(
             "bot",
@@ -532,12 +508,32 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                 .submenu(agents),
         );
     }
-    items.extend(row_menus(s, "card", Some(id)));
-    // A rule under the splits.
-    if let Some(it) = items.get_mut(2) {
-        it.separator = true;
-    }
+    items.push(
+        Item::new(
+            "sliders-horizontal",
+            "Customize card buttons\u{2026}",
+            Act::Customize(crate::arrange::List::Card),
+        )
+        .tip("Orders the card's buttons and sets how many show on it")
+        .sep(),
+    );
     items
+}
+
+/// A card button an extension's menu adds with rows: its entries, opened from the header.
+fn card_point(s: &Screen<'_>, sid: &str, key: &str) -> Vec<Item> {
+    row_menu(s, key, Some(sid))
+        .map(|it| it.sub)
+        .unwrap_or_default()
+}
+
+/// The submenu menu point `key` adds, one entry per row it lists.
+fn row_menu(s: &Screen<'_>, key: &str, source: Option<&str>) -> Option<Item> {
+    let p = s.st.points.get(key)?;
+    let menu = p.menu.clone()?;
+    row_menus(s, &menu, source)
+        .into_iter()
+        .find(|it| it.label == p.title)
 }
 
 fn terminal(s: &Screen<'_>, id: &str) -> Vec<Item> {

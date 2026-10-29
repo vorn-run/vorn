@@ -141,6 +141,9 @@ pub enum MenuKind {
     ToolbarMenu,
     /// A right click on a sidebar tab.
     TabMenu,
+    /// A card button an extension's menu adds, opened from the header: its
+    /// session and the menu point's key.
+    CardPoint(String, String),
     /// A toolbar item's popover: its tree, by the scoped key it draws for.
     Popover(String),
     /// A project row's context menu in the sidebar.

@@ -775,11 +775,11 @@ pub(super) fn alert(
         .child(panel)
 }
 
-/// The card menu's folder and shells entries: act, icon, label and their Mod+Shift letter, if any.
+/// A card's folder and shells buttons: id, act, icon, label and their Mod+Shift letter, if any.
 pub(super) fn pane_entries(
     s: &Screen<'_>,
     session: &Session,
-) -> Vec<(Act, &'static str, &'static str, Option<char>)> {
+) -> Vec<(String, Act, &'static str, &'static str, Option<char>)> {
     let sid = session.info.id.clone();
     let mut out = Vec::new();
     if files_key(s, &sid).is_some() {
