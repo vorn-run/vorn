@@ -140,7 +140,10 @@ pub fn available(st: &crate::state::State, list: List) -> Vec<String> {
     match list {
         List::Toolbar => crate::toolbar::available(&st.points),
         List::Tabs => tab_ids(&st.points),
-        List::Panes => panes(st).into_iter().map(|p| p.id).collect(),
+        List::Card => super::card_buttons::catalog(st)
+            .into_iter()
+            .map(|e| e.id)
+            .collect(),
     }
 }
 
@@ -172,10 +175,12 @@ fn row_of(st: &crate::state::State, list: List, id: &str) -> Option<Row> {
             let tip = format!("The {} tab", p.title);
             (icon, p.title.clone(), Some(p.extension_name.clone()), tip)
         }
-        List::Panes => {
-            let p = panes(st).into_iter().find(|p| p.id == id)?;
-            let tip = format!("{} on a card", p.title);
-            (p.icon, p.title, p.from, tip)
+        List::Card => {
+            let e = super::card_buttons::catalog(st)
+                .into_iter()
+                .find(|e| e.id == id)?;
+            let tip = format!("{} on a card's header, or in its More menu", e.title);
+            (e.icon, e.title, e.from, tip)
         }
     };
     Some(Row {
@@ -404,6 +409,11 @@ fn list_of(s: &Screen<'_>, list: List, query: &str) -> (El, usize, usize) {
         }
         let last = at + 1 >= shown_n;
         col = col.child(row(s, list, r, at, shown, last, shown && !filtering));
+        // Where the card's header ends and its More menu begins.
+        let cut = s.st.arrange.card_shown;
+        if list == List::Card && !filtering && shown && at + 1 == cut && at + 1 < shown_n {
+            col = col.child(more_line(cut));
+        }
     }
     if found == 0 {
         col = col.child(
@@ -416,7 +426,53 @@ fn list_of(s: &Screen<'_>, list: List, query: &str) -> (El, usize, usize) {
     (col, found, total)
 }
 
-/// The sheet: Toolbar · Tabs · Panes, the filter, one list that scrolls in
+/// The dashed line under the last button a card's header shows.
+fn more_line(n: usize) -> El {
+    let dash = || div().grow().h(1.0).border_top(1.0, white(0.14)).silent();
+    let says = format!("in \u{22ef} after {n}");
+    div()
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(8.0)
+        .py(2.0)
+        .child(dash())
+        .child(
+            text(says.as_str(), 11.0, c(look::GRAY_500))
+                .line_height(16.0)
+                .role(Role::Label, says.as_str()),
+        )
+        .child(dash())
+}
+
+/// Buttons on the card: − n +, how many the header shows before More.
+pub(super) fn card_stepper(s: &Screen<'_>) -> El {
+    let n = s.st.arrange.card_shown;
+    let total = super::card_buttons::catalog(s.st).len();
+    let step = |to: usize, glyph: &str, tip: &str, off: bool| {
+        small(s, "card-shown", Act::CardShown(to), glyph, tip, off)
+    };
+    div()
+        .row()
+        .items_center()
+        .gap(4.0)
+        .child(step(
+            n.saturating_sub(1),
+            "minus",
+            "Show one fewer on the card",
+            n == 0,
+        ))
+        .child(
+            text(n.to_string(), 13.0, c(look::GRAY_200))
+                .mono()
+                .line_height(18.0)
+                .w(24.0)
+                .role(Role::Label, "Buttons on the card"),
+        )
+        .child(step(n + 1, "plus", "Show one more on the card", n >= total))
+}
+
+/// The sheet: Toolbar · Tabs · Card, the filter, one list that scrolls in
 /// a sheet of one height, and Done.
 pub(super) fn sheet(s: &Screen<'_>) -> El {
     use super::settings::{segmented, Seg};
@@ -427,7 +483,7 @@ pub(super) fn sheet(s: &Screen<'_>) -> El {
     let what = match list {
         List::Toolbar => "items",
         List::Tabs => "tabs",
-        List::Panes => "panes",
+        List::Card => "buttons",
     };
     let count = if query.is_empty() {
         format!("{total} {what}")
@@ -448,11 +504,7 @@ pub(super) fn sheet(s: &Screen<'_>) -> El {
         vec![
             seg("Toolbar", List::Toolbar, "The toolbar's items"),
             seg("Tabs", List::Tabs, "The sidebar's tabs"),
-            seg(
-                "Panes",
-                List::Panes,
-                "What a card shows beside its terminal",
-            ),
+            seg("Card", List::Card, "The buttons on a card's header"),
         ],
         16.0,
     );
@@ -554,6 +606,18 @@ pub(super) fn sheet(s: &Screen<'_>) -> El {
                 .px(20.0)
                 .pb(8.0)
                 .child(segments)
+                .child_if((list == List::Card).then(|| {
+                    div()
+                        .row()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            text("Buttons on the card", 13.0, c(look::GRAY_200))
+                                .line_height(18.0)
+                                .silent(),
+                        )
+                        .child(card_stepper(s))
+                }))
                 .child(search),
         )
         .child(

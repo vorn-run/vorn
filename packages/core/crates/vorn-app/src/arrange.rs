@@ -107,7 +107,8 @@ pub enum List {
     #[default]
     Toolbar,
     Tabs,
-    Panes,
+    /// A card's buttons.
+    Card,
 }
 
 /// The arrangements together, as they are saved.
@@ -116,7 +117,9 @@ pub enum List {
 pub struct Prefs {
     pub toolbar: Arrangement,
     pub tabs: Arrangement,
-    pub panes: Arrangement,
+    pub card: Arrangement,
+    /// How many of a card's buttons its header shows; the rest go into More.
+    pub card_shown: usize,
 }
 
 impl Default for Prefs {
@@ -128,7 +131,8 @@ impl Default for Prefs {
                 hidden: [crate::toolbar::SPLIT.to_owned()].into(),
             },
             tabs: Arrangement::default(),
-            panes: Arrangement::default(),
+            card: Arrangement::default(),
+            card_shown: crate::screen::card_buttons::DEFAULT_SHOWN,
         }
     }
 }
@@ -138,7 +142,7 @@ impl Prefs {
         match list {
             List::Toolbar => &self.toolbar,
             List::Tabs => &self.tabs,
-            List::Panes => &self.panes,
+            List::Card => &self.card,
         }
     }
 
@@ -146,7 +150,7 @@ impl Prefs {
         match list {
             List::Toolbar => &mut self.toolbar,
             List::Tabs => &mut self.tabs,
-            List::Panes => &mut self.panes,
+            List::Card => &mut self.card,
         }
     }
 
@@ -264,7 +268,7 @@ mod tests {
         let mut p = Prefs::default();
         p.toolbar.move_to(&["view", "new"], "new", 0);
         p.tabs.set_shown("vorn.tasks/views/tasks", false);
-        p.panes.move_to(
+        p.card.move_to(
             &["terminals", "vorn.browser/panes/browser"],
             "vorn.browser/panes/browser",
             0,

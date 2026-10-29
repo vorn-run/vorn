@@ -1659,6 +1659,7 @@ impl App {
                 if matches!(
                     kind,
                     MenuKind::Grid
+                        | MenuKind::CardPoint(..)
                         | MenuKind::NewMenu
                         | MenuKind::Popover(_)
                         | MenuKind::ViewOptions
@@ -2253,6 +2254,13 @@ impl App {
                 let ids = crate::screen::customize::available(&self.st, list);
                 let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
                 self.arrange(list, |a| a.move_shown(&refs, &id, to));
+            }
+            Act::CardShown(n) => {
+                let most = crate::screen::card_buttons::catalog(&self.st).len();
+                self.st.arrange.card_shown = n.min(most);
+                if let Some(dir) = &self.data_dir {
+                    self.st.arrange.save(&crate::arrange::file(dir));
+                }
             }
             Act::ArrangeShow { list, id, shown } => self.arrange(list, |a| a.set_shown(&id, shown)),
             Act::QuickSession => match self.active_project() {
@@ -3082,6 +3090,7 @@ impl App {
                 | Act::SidebarField(_)
                 | Act::OnlyActive
                 | Act::ArrangeShow { .. }
+                | Act::CardShown(_)
                 | Act::Task(crate::tasks::TaskAct::AskDelete(_))
         );
         if stays {
@@ -3987,7 +3996,10 @@ mod tests {
             assert_eq!(shortcut("KeyD", MOD()), None);
             let ctrl_shift = MOD() | mods::SHIFT;
             assert_eq!(shortcut("KeyN", ctrl_shift), Some(Shortcut::QuickStart));
-            assert_eq!(shortcut("Backslash", ctrl_shift), Some(Shortcut::Split(false)));
+            assert_eq!(
+                shortcut("Backslash", ctrl_shift),
+                Some(Shortcut::Split(false))
+            );
             assert_eq!(shortcut("Minus", ctrl_shift), Some(Shortcut::Split(true)));
             assert_eq!(shortcut("KeyT", ctrl_shift), Some(Shortcut::Shells));
             assert_eq!(shortcut("KeyO", ctrl_shift), Some(Shortcut::Folder));

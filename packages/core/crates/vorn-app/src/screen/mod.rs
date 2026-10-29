@@ -5,6 +5,7 @@
 
 mod cards;
 pub use cards::{flex_divider_id, grid_id};
+pub mod card_buttons;
 mod chrome;
 pub mod code;
 pub use chrome::{DOCK, VIEWS};
