@@ -90,8 +90,6 @@ impl App {
         out
     }
 
-    /// Before a frame: the panes Files lists, its codes kept in step with
-    /// the edits they hold, and what is left of the dead sessions' panes.
     /// Tells the store which shells the panels hold, so their titles take no number.
     fn hold_panel_shells(&mut self) {
         let panels = &self.st.side.saved.panels;
@@ -108,6 +106,8 @@ impl App {
         }
     }
 
+    /// Before a frame: the panes Files lists, its codes kept in step with
+    /// the edits they hold, and what is left of the dead sessions' panes.
     pub(super) fn panes_tick(&mut self, ui: &mut Ui) {
         self.hold_panel_shells();
         let live: HashSet<&str> = self
