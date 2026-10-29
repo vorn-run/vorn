@@ -409,11 +409,6 @@ fn list_of(s: &Screen<'_>, list: List, query: &str) -> (El, usize, usize) {
         }
         let last = at + 1 >= shown_n;
         col = col.child(row(s, list, r, at, shown, last, shown && !filtering));
-        // Where the card's header ends and its More menu begins.
-        let cut = s.st.arrange.card_shown;
-        if list == List::Card && !filtering && shown && at + 1 == cut && at + 1 < shown_n {
-            col = col.child(more_line(cut));
-        }
     }
     if found == 0 {
         col = col.child(
@@ -424,25 +419,6 @@ fn list_of(s: &Screen<'_>, list: List, query: &str) -> (El, usize, usize) {
         );
     }
     (col, found, total)
-}
-
-/// The dashed line under the last button a card's header shows.
-fn more_line(n: usize) -> El {
-    let dash = || div().grow().h(1.0).border_top(1.0, white(0.14)).silent();
-    let says = format!("in \u{22ef} after {n}");
-    div()
-        .row()
-        .items_center()
-        .gap(8.0)
-        .px(8.0)
-        .py(2.0)
-        .child(dash())
-        .child(
-            text(says.as_str(), 11.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .role(Role::Label, says.as_str()),
-        )
-        .child(dash())
 }
 
 /// Buttons on the card: − n +, how many the header shows before More.
@@ -606,18 +582,6 @@ pub(super) fn sheet(s: &Screen<'_>) -> El {
                 .px(20.0)
                 .pb(8.0)
                 .child(segments)
-                .child_if((list == List::Card).then(|| {
-                    div()
-                        .row()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            text("Buttons on the card", 13.0, c(look::GRAY_200))
-                                .line_height(18.0)
-                                .silent(),
-                        )
-                        .child(card_stepper(s))
-                }))
                 .child(search),
         )
         .child(
