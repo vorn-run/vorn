@@ -287,7 +287,7 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
         )
         .keys(&["view", &p.extension_name])
         .keys(&words);
-        if let Some(k) = &p.key {
+        if let Some(k) = p.key.as_deref().filter(|k| !crate::app::built_in_key(k)) {
             e = e.shortcut(k.replace("Mod+", m).replace('+', ""));
         }
         out.push(e);
