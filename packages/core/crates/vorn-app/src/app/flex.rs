@@ -120,6 +120,7 @@ impl App {
         }
         let area = self.flex_area(ui);
         let anchor = self.st.flex_anchor.clone();
+        let mut split = self.st.flex_split.take();
         let grid = self.grid_mut();
         let mut tree = grid
             .tree
@@ -141,11 +142,21 @@ impl App {
         for (id, owner) in &members {
             match &mut tree {
                 Some(t) if t.contains(id) => {}
+                // The first new card after a split goes beside the card it split.
+                Some(t) if owner.is_none() && split.is_some() => {
+                    if let Some((at, dir)) = split.take() {
+                        if !t.insert_beside(id, &at, dir) {
+                            t.insert(id, anchor.as_deref(), area);
+                        }
+                    }
+                }
                 Some(t) => t.insert(id, owner.as_deref().or(anchor.as_deref()), area),
                 None => tree = Some(Node::leaf(id)),
             }
         }
         grid.tree = tree;
+        // A split whose card has not come yet waits for it.
+        self.st.flex_split = split;
         self.save_grids();
     }
 

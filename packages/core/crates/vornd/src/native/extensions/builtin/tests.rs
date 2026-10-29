@@ -114,6 +114,11 @@ fn every_bundled_extension_s_id_is_kept_from_installs() {
     // Tasks and Workflows are installed from their packs like any extension.
     assert_eq!(
         ids.into_iter().collect::<Vec<_>>(),
-        ["vorn.artifacts", "vorn.connectors"]
+        [
+            "vorn.artifacts",
+            "vorn.connectors",
+            "vorn.recent",
+            "vorn.status"
+        ]
     );
 }

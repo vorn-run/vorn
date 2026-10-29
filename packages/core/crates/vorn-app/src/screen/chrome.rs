@@ -7,7 +7,7 @@ use crate::act::Act;
 use crate::components::glyph;
 use crate::headless::Headless;
 use crate::look::{self, Color};
-use crate::state::{now_ms, time_ago, MenuKind};
+use crate::state::{now_ms, MenuKind};
 use crate::ui::widgets::{self, Pill, ToastKind};
 use crate::ui::{div, icon, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense};
 use crate::workflows::WfAct;
@@ -118,14 +118,18 @@ pub(super) fn top_buttons(s: &Screen<'_>) -> Vec<TopButton> {
     };
     let shown = super::view_point(&s.st.points, s.st.view, s.st.ext_view.as_deref())
         .map(crate::points::Point::key);
-    let views = s.st.points.top_bar().into_iter().map(|p| TopButton {
-        act: MainView::act(p),
-        view: MainView::of(p),
-        icon: p.icon.clone().unwrap_or_else(|| "puzzle".to_owned()),
-        label: p.title.clone(),
-        keys: p.key.as_deref().map(key_label),
-        on: shown.as_deref() == Some(p.key().as_str()),
-    });
+    let views =
+        s.st.points
+            .tabs(&s.st.arrange.tabs)
+            .into_iter()
+            .map(|p| TopButton {
+                act: MainView::act(p),
+                view: MainView::of(p),
+                icon: p.icon.clone().unwrap_or_else(|| "puzzle".to_owned()),
+                label: p.title.clone(),
+                keys: p.key.as_deref().map(key_label),
+                on: shown.as_deref() == Some(p.key().as_str()),
+            });
     std::iter::once(sessions).chain(views).collect()
 }
 
@@ -643,128 +647,6 @@ fn headless_pill(s: &Screen<'_>, h: &Headless, now: f64) -> El {
     pill
 }
 
-/// The sessions this machine ran here, newest
-/// first, resumable ones on a click.
-pub(super) fn recent_panel(s: &Screen<'_>) -> El {
-    let scope = s.st.project.as_deref().unwrap_or("All Projects");
-    let header = div()
-        .row()
-        .items_center()
-        .gap(6.0)
-        .px(16.0)
-        .py(12.0)
-        .child(
-            text("Recent Sessions", 13.0, c(look::WHITE))
-                .weight(500)
-                .line_height(18.0)
-                .role(Role::Heading, "Recent Sessions"),
-        )
-        .child(
-            text(format!("\u{b7} {scope}"), 12.0, c(look::GRAY_500))
-                .line_height(16.0)
-                .silent(),
-        )
-        .child(div().grow())
-        .child(
-            text(s.st.recent.len().to_string(), 11.0, c(look::GRAY_600))
-                .line_height(14.0)
-                .silent(),
-        );
-    let now = now_ms();
-    let mut list = div()
-        .id(Id::new("recent-list"))
-        .col()
-        .scroll_y()
-        .max_h(340.0)
-        .px(4.0)
-        .pb(4.0);
-    if s.st.recent.is_empty() {
-        list = list.child(
-            div().py(24.0).center().child(
-                text("No recent sessions", 12.0, c(look::GRAY_500))
-                    .line_height(16.0)
-                    .role(Role::Label, "No recent sessions"),
-            ),
-        );
-    }
-    for (i, r) in s.st.recent.iter().enumerate() {
-        let id = s.acts.on("recent", Act::ResumeRecent(i));
-        let hot = s.ui.hover(id);
-        let title = if r.display.is_empty() {
-            "Untitled session"
-        } else {
-            r.display.as_str()
-        };
-        let project = crate::state::basename(&r.project_path);
-        let meta = format!(
-            "{project} \u{b7} {} \u{b7} {}",
-            time_ago(r.timestamp, now),
-            r.activity_text()
-        );
-        let side = if r.running_in.is_some() {
-            Some(
-                text("running", 10.0, c(look::GREEN_400))
-                    .line_height(14.0)
-                    .silent(),
-            )
-        } else if r.can_resume {
-            (hot > 0.5).then(|| {
-                text("resume", 10.0, c(look::GRAY_400))
-                    .line_height(14.0)
-                    .silent()
-            })
-        } else {
-            Some(
-                text("history only", 10.0, c(look::GRAY_600))
-                    .line_height(14.0)
-                    .silent(),
-            )
-        };
-        let row = div()
-            .id(id)
-            .on(Action::Click)
-            .row()
-            .items_center()
-            .gap(10.0)
-            .px(12.0)
-            .py(8.0)
-            .rounded(8.0)
-            .bg(white(0.0).mix(white(0.04), hot))
-            .role(Role::Button, title)
-            .child(super::agent_icon(s, &r.agent, 14.0))
-            .child(
-                div()
-                    .col()
-                    .grow()
-                    .min_w0()
-                    .child(
-                        text(title, 12.0, c(look::GRAY_300))
-                            .line_height(16.0)
-                            .truncate()
-                            .silent(),
-                    )
-                    .child(
-                        text(meta, 10.0, c(look::GRAY_600))
-                            .line_height(14.0)
-                            .truncate()
-                            .silent(),
-                    ),
-            )
-            .child_if(side);
-        list = list.child(row);
-    }
-    div()
-        .col()
-        .w(380.0)
-        .bg(c(look::SURFACE_OVERLAY))
-        .border(1.0, white(0.08))
-        .rounded(12.0)
-        .clip()
-        .role(Role::Dialog, "Recent sessions")
-        .child(header)
-        .child(list)
-}
-
 /// The glyphs of `WindowControls`, 10 px at a 1.2 stroke.
 fn glyph(kind: &str) -> String {
     let body = match kind {
@@ -820,8 +702,9 @@ pub(super) fn window_controls(s: &Screen<'_>) -> Option<El> {
     Some(row)
 }
 
-/// What the toolbar shows on its right: grid options, recent sessions,
-/// new session and the window controls. The tab strip ends with the same.
+/// What the toolbar shows on its right: its items as arranged (the view
+/// options, what extensions add, Split and New), then the window controls.
+/// A right click on it offers Customize Toolbar. The tab strip ends with the same.
 pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
     if s.st.view == MainView::Workflows {
         return super::workflows::header_tools(s);
@@ -842,58 +725,133 @@ pub(super) fn right_cluster(s: &Screen<'_>, plus: bool) -> El {
             .child(group(s, [task_options(s), add]))
             .child_if(window_controls(s));
     }
-    if s.st.view == MainView::Sessions {
-        let open = menu_open(s, &MenuKind::ViewOptions);
-        let mut opts = tool(
-            s,
-            "toolbar",
-            Act::Open(MenuKind::ViewOptions),
-            "sliders-horizontal",
-            1.5,
-            "View options",
-            Some(&format!("{m}J", m = mod_label())),
-            open,
-        );
-        if s.st.options_changed() && !open {
-            opts = div().child(opts).child(
-                div()
-                    .size(6.0, 6.0)
-                    .rounded(3.0)
-                    .bg(look::INK.alpha(look::INK_SECONDARY))
-                    .absolute_right(2.0, 2.0),
-            );
-        }
-        right = if glass(s) {
-            right.gap(8.0).child(group(s, [opts]))
-        } else {
-            right.child(opts).child(divider())
+    use crate::toolbar::{available, Item};
+    let ids = available(&s.st.points);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut items = Vec::new();
+    for id in s.st.arrange.toolbar.shown(&refs) {
+        let Some(item) = Item::of(&s.st.points, id) else {
+            continue;
         };
+        items.push(match item {
+            Item::View if s.st.view == MainView::Sessions => view_options(s),
+            Item::View => continue,
+            Item::New if plus => new_button(s),
+            Item::New => continue,
+            Item::Split => tool(
+                s,
+                "toolbar",
+                Act::Split {
+                    session: None,
+                    down: false,
+                },
+                "columns-2",
+                1.5,
+                "Split right",
+                Some(&split_key(false)),
+                false,
+            ),
+            Item::Point(p) => {
+                let key = p.key();
+                let open = s
+                    .st
+                    .menu
+                    .as_ref()
+                    .is_some_and(|m| matches!(&m.kind, MenuKind::Popover(k) if crate::points::unscope(k).0 == key));
+                let icon = p.icon.as_deref().unwrap_or("puzzle");
+                tool(s, "toolbar", Act::Tool(key), icon, 1.5, item.tip(), None, open)
+            }
+        });
     }
-    let recent = tool(
+    right = if glass(s) {
+        right.gap(8.0).child(group(s, items))
+    } else {
+        items.into_iter().fold(right, El::child)
+    };
+    let id = Id::new("toolbar-items");
+    s.acts
+        .context(right.id(id), id, Act::Open(MenuKind::ToolbarMenu))
+        .child_if(window_controls(s))
+}
+
+/// The keys Split right and Split down go by on this platform.
+pub(super) fn split_key(down: bool) -> String {
+    match (crate::ui::mods::mac(), down) {
+        (true, false) => format!("{}D", mod_label()),
+        (true, true) => format!("\u{21e7}{}D", mod_label()),
+        (false, false) => "Ctrl+Shift+\\".to_owned(),
+        (false, true) => "Ctrl+Shift+-".to_owned(),
+    }
+}
+
+/// The key the toolbar's + goes by on this platform.
+pub(super) fn quick_key() -> String {
+    if crate::ui::mods::mac() {
+        format!("{}T", mod_label())
+    } else {
+        "Ctrl+Shift+N".to_owned()
+    }
+}
+
+/// View options, white with a dot while the grid's options differ.
+fn view_options(s: &Screen<'_>) -> El {
+    let open = menu_open(s, &MenuKind::ViewOptions);
+    let opts = tool(
         s,
         "toolbar",
-        Act::Open(MenuKind::Recent),
-        "rotate-ccw",
+        Act::Open(MenuKind::ViewOptions),
+        "sliders-horizontal",
         1.5,
-        "Recent sessions",
-        None,
-        menu_open(s, &MenuKind::Recent),
+        "View options",
+        Some(&format!("{m}J", m = mod_label())),
+        open,
     );
-    let new = plus.then(|| {
-        tool(
-            s,
-            "toolbar",
-            Act::Open(MenuKind::Grid),
-            "plus",
-            2.0,
-            "New session",
-            None,
-            menu_open(s, &MenuKind::Grid),
-        )
-    });
-    right
-        .child(group(s, std::iter::once(recent).chain(new)))
-        .child_if(window_controls(s))
+    if !s.st.options_changed() || open {
+        return opts;
+    }
+    div().child(opts).child(
+        div()
+            .size(6.0, 6.0)
+            .rounded(3.0)
+            .bg(look::INK.alpha(look::INK_SECONDARY))
+            .absolute_right(2.0, 2.0),
+    )
+}
+
+/// The plus starts a session at once with what General says; the chevron
+/// beside it lists the agents, a shell and the other ways to start one.
+fn new_button(s: &Screen<'_>) -> El {
+    let starts = s
+        .store
+        .config
+        .pointer(&format!("/defaults/{}", crate::app::NEW_SESSION_STARTS))
+        .and_then(serde_json::Value::as_str);
+    let what = if starts == Some("shell") {
+        "New shell".to_owned()
+    } else {
+        "New session".to_owned()
+    };
+    let plus = tool(
+        s,
+        "toolbar",
+        Act::QuickStart,
+        "plus",
+        2.0,
+        &what,
+        Some(&quick_key()),
+        false,
+    );
+    let more = tool(
+        s,
+        "toolbar",
+        Act::Open(MenuKind::NewMenu),
+        "chevron-down",
+        2.0,
+        "More ways to start",
+        None,
+        menu_open(s, &MenuKind::NewMenu),
+    );
+    div().row().items_center().gap(0.0).child(plus).child(more)
 }
 
 /// TaskToolbar's trigger: ink-secondary, white with a dot while a filter is on.

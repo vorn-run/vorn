@@ -218,6 +218,25 @@ pub fn view_key(p: &OpenPane) -> Option<String> {
     p.nonce.strip_prefix(VIEW_NONCE).map(str::to_owned)
 }
 
+/// Every pane the installed packs contribute: extension, pane id, title, and its icon as declared.
+pub fn pack_panes(packs: &[Value]) -> Vec<(String, String, String, Option<Value>)> {
+    let mut out = Vec::new();
+    for pack in packs {
+        let Some(ext) = s(pack, "id") else {
+            continue;
+        };
+        for pane in panes_of(Some(pack)) {
+            let Some(id) = s(pane, "id") else {
+                continue;
+            };
+            let title = s(pane, "title").unwrap_or(id).to_owned();
+            let icon = pane.get("icon").filter(|i| !i.is_null()).cloned();
+            out.push((ext.to_owned(), id.to_owned(), title, icon));
+        }
+    }
+    out
+}
+
 fn panes_of(pack: Option<&Value>) -> Vec<&Value> {
     pack.and_then(|p| p.pointer("/contributes/panes"))
         .and_then(Value::as_array)

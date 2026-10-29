@@ -166,7 +166,7 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             toggle_key: &format!("{m}{key}", m = mod_label()),
             confirming,
         },
-        panes::card_buttons(s, session, variant),
+        panes.into_iter().map(|(_, el)| el),
     )
 }
 

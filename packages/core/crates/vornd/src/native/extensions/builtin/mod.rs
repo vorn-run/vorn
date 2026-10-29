@@ -6,6 +6,8 @@
 
 pub mod artifacts;
 pub mod connectors;
+pub mod recent;
+pub mod status;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -132,7 +134,11 @@ impl std::fmt::Debug for Builtins {
 /// The built-ins this Vorn ships, in the order Settings lists them, with
 /// those vornd starts before the extension host (Connectors) after them.
 fn shipped(started: Vec<Arc<dyn Builtin>>) -> Vec<Arc<dyn Builtin>> {
-    let mut all: Vec<Arc<dyn Builtin>> = vec![Arc::new(artifacts::Artifacts)];
+    let mut all: Vec<Arc<dyn Builtin>> = vec![
+        Arc::new(artifacts::Artifacts),
+        Arc::new(recent::Recent),
+        Arc::new(status::Status),
+    ];
     all.extend(started);
     all
 }

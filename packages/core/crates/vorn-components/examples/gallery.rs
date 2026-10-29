@@ -410,12 +410,12 @@ fn composed(b: &mut Builder) {
                     row,
                     &SessionRow {
                         name: "api-server",
-                        branch: None,
+                        line: "main",
                         agent: "alpha",
                         status: Status::Waiting,
+                        agent_icon: true,
                         active,
-                        detail: None,
-                        steps: &[],
+                        unseen: false,
                     },
                 ))
             },

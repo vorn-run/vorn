@@ -143,6 +143,7 @@ mod tests {
             cause: None,
             ordinal: 0,
             offer: false,
+            changed_at: 1.0,
         }
     }
 

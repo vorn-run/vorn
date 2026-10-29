@@ -365,6 +365,46 @@ async fn start_session(
     Ok(id)
 }
 
+/// `sessions.launch` with `resume`: the agent's past conversation of that id, started
+/// again in `project`'s folder as the app's Recent sessions did.
+async fn resume_session(
+    native: &Arc<Native>,
+    extension: &str,
+    args: &Value,
+    project: Option<String>,
+) -> Result<String, ExtError> {
+    let m = "sessions.launch";
+    let conversation =
+        text(args, "resume").ok_or_else(|| needs(m, "resume: a conversation's id"))?;
+    let agent = text(args, "agent")
+        .filter(|a| a != "shell")
+        .ok_or_else(|| needs(m, "the agent whose conversation it resumes"))?;
+    let project = project.ok_or_else(|| needs(m, "the project to start it in"))?;
+    if !std::path::Path::new(&project).is_absolute() {
+        return Err(ExtError::new(
+            "bad-request",
+            format!("a session starts in a project's absolute folder, not \"{project}\""),
+        ));
+    }
+    let name = std::path::Path::new(&project)
+        .file_name()
+        .map_or_else(|| project.clone(), |n| n.to_string_lossy().into_owned());
+    let params = json!({
+        "agentType": agent, "projectName": name, "projectPath": project,
+        "resumeSessionId": conversation,
+    });
+    let started = ask(native, "terminal:create", params).await?;
+    let id = started
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| ExtError::new("failed", "Vorn started no session"))?;
+    if let Some(host) = native.extensions() {
+        host.given().started(extension, &id);
+    }
+    Ok(id)
+}
+
 /// `sessions.launch`'s args as the session to start, its project the call's when it names none.
 fn launch_args(args: &Value, project: Option<String>) -> Result<SessionStart, ExtError> {
     let project = project.ok_or_else(|| needs("sessions.launch", "the project to start it in"))?;
@@ -559,6 +599,18 @@ impl World for Wired {
                         .ok_or_else(|| {
                             ExtError::new("not-found", format!("Session not found: {id}"))
                         })
+                }
+                "sessions.recent" => {
+                    ask(
+                        &native,
+                        "sessions:getRecent",
+                        project.map_or(Value::Null, Value::from),
+                    )
+                    .await
+                }
+                "sessions.launch" if args.get("resume").is_some() => {
+                    let id = resume_session(&native, &extension, &args, project).await?;
+                    Ok(json!({ "sessionId": id }))
                 }
                 "sessions.launch" => {
                     let req = launch_args(&args, project)?;

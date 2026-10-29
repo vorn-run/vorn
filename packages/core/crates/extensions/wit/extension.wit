@@ -40,6 +40,18 @@
 // and `{tokens, tree}` out, and `ui.event` with `{point, event}` tells the
 // extension what was clicked, typed or chosen there.
 //
+// A `[[contributes.toolbar]]` item sits in the window's toolbar beside the
+// app's own (View, New, Split), where a person can reorder or hide it. It has
+// an id, `icon`, `title` and `description` (its tooltip), and does one thing:
+// `call` a method, open a `window`, or, with `tree = true`, show its tree in a
+// popover under the icon, rendered with `{point, surface}` as any tree is. A
+// `[[contributes.groupings]]` entry is a way to group the sidebar's sessions:
+// each row of its `rows` collection is `{id: <session id>, group: <heading>}`,
+// headings in the order the rows first name them, unnamed sessions last.
+// `sessions.recent` lists the agent conversations this machine ran (in
+// `project`, else everywhere), and `sessions.launch` with `resume` set to
+// one's `sessionId` (and its `agent`) starts that conversation again.
+//
 // An `[agent]` section makes the package an agent adapter: everything Vorn
 // needs to run one agent CLI, as data, with no program. Its fields (checked
 // against `vorn_agents::AgentSpec`; docs/adding-an-agent.md walks through

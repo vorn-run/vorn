@@ -579,6 +579,39 @@ pub(super) fn pane(s: &Screen<'_>, key: &str) -> El {
     }
 }
 
+/// A toolbar item's popover: its tree drawn for `key`'s scope, or a quiet
+/// line until it renders.
+pub(super) fn popover(s: &Screen<'_>, key: &str) -> El {
+    let title = s.st.points.get(key).map_or("", |p| p.title.as_str());
+    let body = match s.st.points.trees.get(key) {
+        Some(Ok(t)) => {
+            let bind = TreeBinder {
+                acts: s.acts,
+                points: &s.st.points,
+                key,
+            };
+            tree::view(s.ui, t, &bind)
+        }
+        Some(Err(errors)) => tree::invalid(title, errors),
+        None => div().p(16.0).child(
+            text("Loading\u{2026}", 12.0, k::INK_FAINT)
+                .line_height(16.0)
+                .role(Role::Label, "Loading"),
+        ),
+    };
+    div()
+        .id(Id::new("popover").child(key))
+        .col()
+        .w(380.0)
+        .max_h(420.0)
+        .scroll_y()
+        .bg(k::SURFACE_OVERLAY)
+        .border(1.0, crate::ui::theme::bright(0.08))
+        .rounded(4.0)
+        .role(Role::Dialog, title)
+        .child(body)
+}
+
 /// The dialog an extension opened, centred over a scrim.
 pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
     let key = s.st.points.dialog.as_deref()?;

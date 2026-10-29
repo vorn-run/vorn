@@ -1795,7 +1795,10 @@ pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVaria
                 4.0,
             );
         }
-        out.push(b);
+        out.push((
+            super::customize::pane_id(crate::panes::DEVICE, crate::panes::DEVICE_PANE),
+            b,
+        ));
     }
     out
 }

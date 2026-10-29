@@ -606,11 +606,17 @@ pub enum Place {
     /// the waiting pill counts them, and the approve and deny keys answer
     /// the oldest with `call` or `deny`.
     Attention,
+    /// An item in the window's toolbar: an icon that runs `call`, opens
+    /// `window`, or shows its tree in a popover under it.
+    Toolbar,
+    /// A way to group the sidebar's sessions: each row of `rows` names a
+    /// session by its `id` and the heading it goes under as `group`.
+    Groupings,
 }
 
 impl Place {
     /// Every place a `points` entry may be, panes aside (they are `panes`).
-    pub const POINTS: [Place; 15] = [
+    pub const POINTS: [Place; 17] = [
         Place::Sidebar,
         Place::Badges,
         Place::CardFooters,
@@ -626,6 +632,8 @@ impl Place {
         Place::Shell,
         Place::Cards,
         Place::Attention,
+        Place::Toolbar,
+        Place::Groupings,
     ];
 
     /// Its key in the JSON the manifest reads through.
@@ -647,6 +655,8 @@ impl Place {
             Place::Shell => "shell",
             Place::Cards => "cards",
             Place::Attention => "attention",
+            Place::Toolbar => "toolbar",
+            Place::Groupings => "groupings",
         }
     }
 
@@ -669,6 +679,8 @@ impl Place {
             Place::Shell => "Shell commands",
             Place::Cards => "Card",
             Place::Attention => "Waiting for you",
+            Place::Toolbar => "Toolbar item",
+            Place::Groupings => "Sidebar grouping",
         }
     }
 
@@ -684,8 +696,19 @@ impl Place {
     fn needs_view(self) -> bool {
         !matches!(
             self,
-            Place::Commands | Place::Launchers | Place::Menus | Place::Attention
+            Place::Commands
+                | Place::Launchers
+                | Place::Menus
+                | Place::Attention
+                | Place::Toolbar
+                | Place::Groupings
         )
+    }
+
+    /// Whether an entry may draw a tree: every place that needs one, and a
+    /// toolbar item's popover.
+    fn may_draw(self) -> bool {
+        self.needs_view() || self == Place::Toolbar
     }
 }
 
@@ -1937,10 +1960,10 @@ fn read_point(
         Some(Value::Bool(true)) => true,
         Some(_) => return Err(("tree", "is true or false".into())),
     };
-    if tree && !place.needs_view() {
+    if tree && !place.may_draw() {
         return Err((
             "tree",
-            "draws in a place that shows one: a sidebar section, a badge, a card footer, a decoration, the composer, a settings page, a window or a dialog".into(),
+            "draws in a place that shows one: a sidebar section, a badge, a card footer, a decoration, the composer, a settings page, a window, a dialog or a toolbar item's popover".into(),
         ));
     }
     if place.needs_view() && !tree {
@@ -2000,11 +2023,23 @@ fn read_point(
         Place::Commands | Place::Menus | Place::Launchers if does != 1 => {
             return Err(("", "does one of call and window".into()));
         }
-        Place::Commands | Place::Menus | Place::Launchers => {}
+        Place::Toolbar if does + usize::from(tree) != 1 => {
+            return Err((
+                "",
+                "does one of call, window and tree (a popover under it)".into(),
+            ));
+        }
+        Place::Toolbar if icon.is_none() => {
+            return Err((
+                "icon",
+                "is what the toolbar shows: an icon name such as clock".into(),
+            ));
+        }
+        Place::Commands | Place::Menus | Place::Launchers | Place::Toolbar => {}
         _ if window.is_some() => {
             return Err((
                 "window",
-                "opens from a command, a menu or a launcher".into(),
+                "opens from a command, a menu, a launcher or a toolbar item".into(),
             ));
         }
         _ => {}
@@ -2040,9 +2075,24 @@ fn read_point(
                 "names the collection whose rows are the cards".into(),
             ));
         }
-        Place::Attention | Place::Menus | Place::Cards => {}
+        Place::Groupings if rows.is_none() => {
+            return Err((
+                "rows",
+                "names the collection whose rows put sessions in groups".into(),
+            ));
+        }
+        Place::Groupings if call.is_some() => {
+            return Err((
+                "call",
+                "belongs to a place that is chosen; a grouping is not".into(),
+            ));
+        }
+        Place::Attention | Place::Menus | Place::Cards | Place::Groupings => {}
         _ if rows.is_some() => {
-            return Err(("rows", "belongs to a menu item, a card or attention".into()));
+            return Err((
+                "rows",
+                "belongs to a menu item, a card, attention or a grouping".into(),
+            ));
         }
         _ => {}
     }

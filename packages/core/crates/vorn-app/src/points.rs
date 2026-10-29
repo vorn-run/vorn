@@ -68,6 +68,8 @@ pub mod kind {
     pub const SHELL: &str = "shell";
     pub const CARDS: &str = "cards";
     pub const ATTENTION: &str = "attention";
+    pub const TOOLBAR: &str = "toolbar";
+    pub const GROUPINGS: &str = "groupings";
 }
 
 /// Between a point's key and the scope a tree of it draws for: `ext/kind/id#scope`.
@@ -380,6 +382,19 @@ impl Points {
         let mut views = self.views();
         views.retain(|p| p.button);
         views
+    }
+
+    /// The tabs after Sessions as `arranged`: the top bar's views in the
+    /// person's order, less the ones they hid.
+    pub fn tabs(&self, arranged: &crate::arrange::Arrangement) -> Vec<&Point> {
+        let views = self.top_bar();
+        let keys: Vec<String> = views.iter().map(|p| p.key()).collect();
+        let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+        arranged
+            .shown(&refs)
+            .into_iter()
+            .filter_map(|k| views.iter().copied().find(|p| p.key() == k))
+            .collect()
     }
 
     /// Shows extension `id`'s preference `key` as `value` on the built-ins' pages.

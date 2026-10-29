@@ -126,7 +126,7 @@ fn tasks_view(v: &TestVornd) -> (App, Shot) {
     add_project(&mut app, v, "web", json!({}));
     let mut shot = Shot::new();
     support::views_listed(&mut shot, &mut app);
-    shot.send(&mut app, key("KeyT", MOD(), None));
+    support::open_tasks(&mut shot, &mut app);
     assert_eq!(app.st.view, MainView::Tasks);
     board_drawn(&mut shot, &mut app);
     (app, shot)
@@ -457,7 +457,7 @@ fn a_review_shows_the_diff_takes_line_comments_and_commits() {
     repo(&dir);
     let mut shot = Shot::new();
     support::views_listed(&mut shot, &mut app);
-    shot.send(&mut app, key("KeyT", MOD(), None));
+    support::open_tasks(&mut shot, &mut app);
     board_drawn(&mut shot, &mut app);
     let id = create(&mut shot, &mut app, "Add two");
     shot.click(&mut app, card_id(&id));

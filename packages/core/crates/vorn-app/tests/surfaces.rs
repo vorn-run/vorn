@@ -199,19 +199,22 @@ fn cards_take_their_menus_rename_close_and_the_intent_bar() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     shot.save(&mut app, "cards");
 
-    // The toolbar's plus.
-    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::Grid)));
-    assert_eq!(menu(&app), Some(MenuKind::Grid));
+    // The chevron beside the toolbar's plus.
+    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::NewMenu)));
+    assert_eq!(menu(&app), Some(MenuKind::NewMenu));
     let labels = app.menu_labels(&shot.ui);
-    assert!(labels.starts_with(&[
-        "New session in\u{2026}".into(),
-        "New terminal in\u{2026}".into()
-    ]));
-    shot.save(&mut app, "grid-menu");
+    for want in [
+        "Shell",
+        "In project\u{2026}",
+        "New session with a prompt\u{2026}",
+    ] {
+        assert!(labels.iter().any(|l| l == want), "{want:?} in {labels:?}");
+    }
+    shot.save(&mut app, "new-menu");
     escape(&mut shot, &mut app);
     assert_eq!(menu(&app), None);
 
-    // A right click on the grid's empty cell opens the same menu there.
+    // A right click on the grid's empty cell opens the grid's menu there.
     app.st.columns = 2;
     shot.frame(&mut app);
     let r = shot.ui.rect_of(Id::new("grid")).expect("grid");
@@ -436,11 +439,27 @@ fn a_restart_offers_the_sessions_back_with_recent_and_headless() {
         &mut app,
         control("sidebar-project", Act::Project(Some("demo".into()))),
     );
-    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::Recent)));
-    shot.until(&mut app, "the recent list", |app, _| {
-        app.st.recent.first().map(|r| r.session_id.clone())
+    // Recent is the built-in extension's toolbar item: its popover is its tree.
+    let recent = "vorn.recent/toolbar/recent".to_owned();
+    shot.until(&mut app, "the Recent item", |app, _| {
+        app.st.points.get(&recent).map(|_| ())
     });
-    assert_eq!(app.st.recent[0].display, "Fix the flaky test");
+    shot.click(&mut app, control("toolbar", Act::Tool(recent)));
+    let key = match menu(&app) {
+        Some(MenuKind::Popover(key)) => key,
+        other => panic!("the popover, not {other:?}"),
+    };
+    assert!(
+        key.ends_with(&format!("#{}", project.display())),
+        "drawn for the project: {key}"
+    );
+    shot.until(&mut app, "the recent list", |app, _| {
+        let tree = app.st.points.tree(&key)?;
+        serde_json::to_string(tree)
+            .ok()
+            .filter(|t| t.contains("Fix the flaky test"))
+            .map(|_| ())
+    });
     shot.frame(&mut app);
     shot.save(&mut app, "recent");
     escape(&mut shot, &mut app);
