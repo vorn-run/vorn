@@ -449,10 +449,9 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
     // First the card's buttons its header has no room for, in their order.
     let shown = super::card_buttons::shown(s);
     let mut items: Vec<Item> = Vec::new();
-    for b in super::card_buttons::buttons(s, session, focused)
-        .into_iter()
-        .skip(shown)
-    {
+    let all = super::card_buttons::buttons(s, session, focused);
+    let close_hidden = !all.iter().any(|b| b.id == super::card_buttons::CLOSE);
+    for b in all.into_iter().skip(shown) {
         if let Act::Open(MenuKind::CardPoint(_, key)) = &b.act {
             items.extend(row_menu(s, key, Some(id)));
             continue;
@@ -507,6 +506,11 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                 .mark(super::agent_icon(s, s.store.default_agent(), 14.0))
                 .submenu(agents),
         );
+    }
+    if close_hidden {
+        let mut close = Item::new("x", "Close session", Act::AskClose(id.to_owned())).sep();
+        close.danger = true;
+        items.push(close);
     }
     items.push(
         Item::new(
