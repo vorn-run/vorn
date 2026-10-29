@@ -225,6 +225,24 @@ fn plus_starts_at_once_and_a_card_splits_right_then_down() {
     );
     assert!(!labels.iter().any(|l| l == "Split right"), "{labels:?}");
     shot.save(&mut app, "card-more-overflow");
+
+    // Close from More asks on the header, and closes.
+    shot.click(&mut app, item_id(MENU, close.expect("listed")));
+    assert_eq!(app.st.confirm_close.as_deref(), Some(a.as_str()));
+    shot.save(&mut app, "card-more-close-asks");
+    shot.click(&mut app, control("confirm", Act::CloseSession(a.clone())));
+    shot.until(&mut app, "the card closed", |app, _| {
+        app.store.session(&a).is_none().then_some(())
+    });
+
+    // A card whose Close is hidden still closes from More.
+    (app.st.arrange.card).set_shown(vorn_app::screen::card_buttons::CLOSE, false);
+    shot.card_menu(&mut app, &b, "Close session");
+    assert_eq!(app.st.confirm_close.as_deref(), Some(b.as_str()));
+    shot.click(&mut app, control("confirm", Act::CloseSession(b.clone())));
+    shot.until(&mut app, "the other card closed", |app, _| {
+        app.store.session(&b).is_none().then_some(())
+    });
 }
 
 /// The direction of the split whose two children are exactly `first` and `second`.

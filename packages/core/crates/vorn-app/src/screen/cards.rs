@@ -157,6 +157,20 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
     // The device button keeps its own, which holds the simulator picker.
     let mut device = panes::card_buttons(s, session, variant);
     let mut row = div().row().items_center().gap(2.0).shrink0();
+    // Close asked from More, or hidden, asks on More instead.
+    let mut asking = s.st.confirm_close.as_deref() == Some(sid.as_str());
+    let ask = |el: El| {
+        let ok = s.acts.on("confirm", Act::CloseSession(sid.clone()));
+        let cancel = s.acts.on("confirm", Act::AskClose(String::new()));
+        confirm(
+            s.ui,
+            el,
+            "Close this session?",
+            (ok, "Close"),
+            cancel,
+            Tone::Danger,
+        )
+    };
     for b in all.iter().take(n) {
         if let Some(at) = device.iter().position(|(id, _)| *id == b.id) {
             row = row.child(device.remove(at).1);
@@ -179,22 +193,13 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             .role(Role::Button, b.label.as_str())
             .child(b.icon.draw(14.0, fg));
         let mut el = tooltip_at(s.ui, el, id, &b.label, b.shortcut.as_deref(), place);
-        if b.id == super::card_buttons::CLOSE && s.st.confirm_close.as_deref() == Some(sid.as_str())
-        {
-            let ok = s.acts.on("confirm", Act::CloseSession(sid.clone()));
-            let cancel = s.acts.on("confirm", Act::AskClose(String::new()));
-            el = confirm(
-                s.ui,
-                el,
-                "Close this session?",
-                (ok, "Close"),
-                cancel,
-                Tone::Danger,
-            );
+        if b.id == super::card_buttons::CLOSE && asking {
+            el = ask(el);
+            asking = false;
         }
         row = row.child(el);
     }
-    let more = s.acts.on("card", Act::Open(MenuKind::Card(sid)));
+    let more = s.acts.on("card", Act::Open(MenuKind::Card(sid.clone())));
     let hot = s.ui.hover(more);
     let b = div()
         .id(more)
@@ -205,7 +210,8 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
         .ring(4.0)
         .role(Role::Button, "More actions")
         .child(ico("ellipsis", 14.0, 2.0, c(look::INK)));
-    row.child(tooltip_at(s.ui, b, more, "More actions", None, place))
+    let more = tooltip_at(s.ui, b, more, "More actions", None, place);
+    row.child(if asking { ask(more) } else { more })
 }
 
 /// The title, or the inline rename field while renaming.
