@@ -375,6 +375,7 @@ impl Store {
             return;
         }
         self.sessions.push(Session {
+            changed_at: info.created_at,
             info,
             exited: None,
             cause: Some(cause),
