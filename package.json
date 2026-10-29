@@ -40,7 +40,7 @@
     "*.{json,css,md,html}": "prettier --write"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "shiki": "^4.5.0",
     "ws": "^8.22.0",
     "zod": "^4.6.7"
@@ -49,7 +49,7 @@
     "@eslint/js": "^10.0.1",
     "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "5.0.5",
-    "@vitest/eslint-plugin": "^1.6.27",
+    "@vitest/eslint-plugin": "^1.6.28",
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "libsql": "^0.5.29",
@@ -59,8 +59,8 @@
     "simple-git-hooks": "^2.14.0",
     "ts-json-schema-generator": "^2.9.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.2",
-    "vite": "^8.2.2",
+    "typescript-eslint": "^8.72.0",
+    "vite": "^8.3.5",
     "vitest": "5.0.5"
   },
   "resolutions": {
