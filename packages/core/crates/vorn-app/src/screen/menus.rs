@@ -447,11 +447,10 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         .filter(|_| info.is_worktree == Some(true));
     let focused = s.st.focused.as_deref() == Some(id);
     // First the card's buttons its header has no room for, in their order.
-    let shown = super::card_buttons::shown(s);
     let mut items: Vec<Item> = Vec::new();
     let all = super::card_buttons::buttons(s, session, focused);
     let close_hidden = !all.iter().any(|b| b.id == super::card_buttons::CLOSE);
-    for b in all.into_iter().skip(shown) {
+    for b in all.into_iter().filter(|b| !b.header) {
         if let Act::Open(MenuKind::CardPoint(_, key)) = &b.act {
             items.extend(row_menu(s, key, Some(id)));
             continue;
