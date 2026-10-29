@@ -52,7 +52,10 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
         (
             "Sessions",
             vec![
-                ("New session", format!("{m}N")),
+                ("New session at once", super::chrome::quick_key()),
+                ("New session with a prompt", format!("{m}N")),
+                ("Split right", super::chrome::split_key(false)),
+                ("Split down", super::chrome::split_key(true)),
                 ("Rename session", "F2".to_owned()),
                 ("Show or hide the folder", format!("{m}\u{21e7}O")),
             ]
@@ -69,7 +72,6 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
                 ("Toggle sidebar", format!("{m}B")),
                 ("New terminal session", "Ctrl+`".to_owned()),
                 ("Sessions view", format!("{m}S")),
-                ("Tasks view", format!("{m}T")),
                 ("Workflows view", format!("{m}\u{21e7}W")),
                 ("View options", format!("{m}J")),
                 ("Fit the whole workflow on the canvas", "1".to_owned()),
@@ -553,6 +555,7 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::SignIn => super::signin::sheet(s)?,
         Dialog::ExtInstall => super::plugins::dialog(s)?,
         Dialog::AddDevice => super::network::sheet(s),
+        Dialog::Customize => super::customize::sheet(s),
     })
 }
 

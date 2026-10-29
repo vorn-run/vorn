@@ -1,0 +1,15 @@
+id = "vorn.status"
+name = "Status grouping"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "Groups the sidebar's sessions by what they are doing: waiting, running, failed or idle. Off, the sidebar has no Status grouping."
+
+[declares]
+uses = ["sessions.read"]
+
+[[contributes.groupings]]
+id = "status"
+title = "Status"
+description = "Groups sessions by what they are doing"
+rows = "status"

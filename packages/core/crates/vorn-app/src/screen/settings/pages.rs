@@ -148,6 +148,12 @@ pub(crate) mod tip {
     pub const LOGIN: &str = "Opens Vorn when you sign in to your computer";
     pub const REOPEN: &str = "Brings back the sessions open when Vorn last quit";
     pub const AGENT: &str = "Starts new sessions with this agent";
+    pub const STARTS: &str = "What the toolbar's + and its key start, at once";
+    pub const STARTS_AGENT: &str = "Starts the agent above";
+    pub const STARTS_SHELL: &str = "Starts a plain shell";
+    pub const ARRANGE: &str = "Order and show or hide what each place shows";
+    pub const CUSTOMIZE: &str =
+        "Opens the sheet that arranges the toolbar, the sidebar's tabs and a card's panes";
     pub const MORE_AGENTS: &str = "Finds more agents in the extensions catalog";
     #[cfg(target_os = "macos")]
     pub const AGENT_ROW: &str = "Shows Ready once Vorn finds the agent's command on this Mac";
@@ -1434,11 +1440,68 @@ pub(super) fn general(s: &Screen<'_>) -> El {
         .child(card(startup))
         .child(section("New sessions"))
         .child(card(vec![
+            card_row(s, None, "New session starts", Some(tip::STARTS), starts(s)),
             card_row(s, None, "Agent", Some(tip::AGENT), agent_chip(s)),
             card_row(s, None, "Shell", Some(tip::SHELL), shell_picker(s)),
         ]))
+        .child(section("Layout"))
+        .child(card(vec![card_row(
+            s,
+            None,
+            "Toolbar, sidebar tabs and panes",
+            Some(tip::ARRANGE),
+            customize_button(s),
+        )]))
         .child(section("Clipboard from programs"))
         .child(card(clipboard_rows(s)))
+}
+
+/// New session starts: the agent below, or a shell.
+fn starts(s: &Screen<'_>) -> El {
+    let key = crate::app::NEW_SESSION_STARTS;
+    let shell = defaults(s).and_then(|d| d.get(key)).and_then(Value::as_str) == Some("shell");
+    let seg = |label, v: &str, on, tip| Seg {
+        label,
+        icon: None,
+        act: seg_act(key, format!("\"{v}\"")),
+        on,
+        disabled: false,
+        tip: Some(tip),
+    };
+    segmented(
+        s,
+        key,
+        vec![
+            seg("Agent", "agent", !shell, tip::STARTS_AGENT),
+            seg("Shell", "shell", shell, tip::STARTS_SHELL),
+        ],
+        12.0,
+    )
+}
+
+/// Customize…, opening the sheet on the toolbar.
+fn customize_button(s: &Screen<'_>) -> El {
+    let id = s.acts.on(
+        "general-customize",
+        Act::Customize(crate::arrange::List::Toolbar),
+    );
+    let hot = s.ui.hover(id);
+    let b = div()
+        .id(id)
+        .on(Action::Click)
+        .px(12.0)
+        .py(4.0)
+        .rounded(4.0)
+        .bg(white(0.04).mix(white(0.08), hot))
+        .border(1.0, white(0.08))
+        .ring(4.0)
+        .role(Role::Button, "Customize")
+        .child(
+            text("Customize\u{2026}", 12.0, c(look::GRAY_200))
+                .line_height(16.0)
+                .silent(),
+        );
+    tooltip(s.ui, b, id, tip::CUSTOMIZE, None)
 }
 
 /// What a program in a terminal may put on the clipboard: this machine, then

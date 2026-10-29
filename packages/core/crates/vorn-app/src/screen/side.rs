@@ -785,6 +785,7 @@ pub(super) fn pane_entries(
     if files_key(s, &sid).is_some() {
         let open = s.st.side.files.contains(&sid);
         out.push((
+            super::customize::pane_id(crate::app::FILES, "files"),
             pane(SideAct::ToggleFiles(sid.clone())),
             "folder-open",
             if open { "Hide folder" } else { "Show folder" },
@@ -794,6 +795,7 @@ pub(super) fn pane_entries(
     let has = s.st.side.saved.panels.contains_key(&sid);
     if !session.is_shell() || has {
         out.push((
+            super::customize::TERMINALS.to_owned(),
             pane(SideAct::ToggleTerminals(sid)),
             "square-terminal",
             if has {

@@ -361,6 +361,7 @@ pub fn admit_storage(manifest: &Manifest) -> Result<(), ExtError> {
 pub const CORE_METHODS: &[(&str, Permission)] = &[
     ("sessions.list", Permission::SessionsRead),
     ("sessions.get", Permission::SessionsRead),
+    ("sessions.recent", Permission::SessionsRead),
     ("sessions.launch", Permission::SessionsLaunch),
     ("sessions.close", Permission::SessionsLaunch),
     ("terminal.read", Permission::TerminalRead),

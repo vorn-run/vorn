@@ -52,6 +52,7 @@ pub use side::FILES;
 pub mod signin;
 mod tasks;
 mod term;
+mod toolbar;
 mod video;
 mod web;
 mod workflows;
@@ -61,6 +62,9 @@ mod workflows;
 pub fn MOD() -> u16 {
     mods::primary()
 }
+
+/// The setting General's New session starts keeps: `agent` or `shell`.
+pub const NEW_SESSION_STARTS: &str = "newSessionStarts";
 
 /// What a key does before it reaches a field, a terminal or the composer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,6 +112,11 @@ pub enum Shortcut {
     Folder,
     /// Mod+Shift+T: the current card's shells opened or closed.
     Shells,
+    /// Mod+T (Ctrl+Shift+N off macOS): what the toolbar's + starts.
+    QuickStart,
+    /// Mod+D and Mod+Shift+D (Ctrl+Shift+\ and Ctrl+Shift+- off macOS): a shell beside
+    /// or under the selected card; `true` is under.
+    Split(bool),
 }
 
 /// The global shortcuts. Escape is not one: it closes what is open, else a
@@ -121,6 +130,10 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
         return match code {
             "KeyA" => Some(Shortcut::Permission(true)),
             "KeyD" => Some(Shortcut::Permission(false)),
+            // Ctrl+D and Ctrl+T belong to the terminal off macOS: | and _ split there.
+            "Backslash" if !mods::mac() => Some(Shortcut::Split(false)),
+            "Minus" if !mods::mac() => Some(Shortcut::Split(true)),
+            "KeyN" if !mods::mac() => Some(Shortcut::QuickStart),
             "ArrowUp" => Some(Shortcut::Prompt(true)),
             "ArrowDown" => Some(Shortcut::Prompt(false)),
             "KeyO" => Some(Shortcut::Folder),
@@ -177,6 +190,8 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
         "KeyK" => Shortcut::Palette,
         "BracketRight" => Shortcut::Cycle(true),
         "BracketLeft" => Shortcut::Cycle(false),
+        "KeyT" if mods::mac() => Shortcut::QuickStart,
+        "KeyD" if mods::mac() => Shortcut::Split(false),
         _ => {
             let d = code.strip_prefix("Digit")?.parse::<usize>().ok()?;
             Shortcut::Jump(d.checked_sub(1)?)
@@ -454,6 +469,10 @@ pub struct App {
     raised: Vec<String>,
     /// A tree's answer asked for the main window to come forward.
     come_forward: bool,
+    /// A toolbar popover asked to close, which needs the UI's menu state.
+    close_popover: bool,
+    /// A session a popover picked that has not reached the store yet.
+    pending_select: Option<String>,
     /// The OS file picker, what it is for, while it is open.
     picking: Option<(
         Picked,
@@ -614,6 +633,8 @@ impl App {
             panels: HashMap::new(),
             raised: Vec::new(),
             come_forward: false,
+            close_popover: false,
+            pending_select: None,
             hotkeys: None,
             picking: None,
             picker: crate::system::os_picker(),
@@ -761,6 +782,7 @@ impl App {
         self.st.side = crate::side::Side::load(Some(crate::side::view_file(&dir)));
         self.st.sidebar_view =
             crate::sidebar_view::SidebarView::load(&crate::sidebar_view::file(&dir));
+        self.st.arrange = crate::arrange::Prefs::load(&crate::arrange::file(&dir));
         self.web.host.set_profiles(dir.join("connection-profiles"));
         self.data_dir = Some(dir);
     }
@@ -1308,6 +1330,7 @@ impl App {
         if let Some(s) = self.store.sessions.iter_mut().find(|s| s.info.id == id) {
             s.cause = None;
             s.exited = None;
+            s.changed_at = now_ms();
         }
         self.views.remove(&id);
         if bound {
@@ -1461,6 +1484,14 @@ impl App {
             Shortcut::View(v) => self.run(ui, Act::View(v), Src::default()),
             Shortcut::NewShell => self.run(ui, Act::NewShellIn(String::new()), Src::default()),
             Shortcut::NewSession => self.run(ui, Act::NewSession, Src::default()),
+            Shortcut::QuickStart => self.run(ui, Act::QuickStart, Src::default()),
+            Shortcut::Split(down) => {
+                let act = Act::Split {
+                    session: None,
+                    down,
+                };
+                self.run(ui, act, Src::default());
+            }
             Shortcut::Cycle(forward) => {
                 let ids = self.visible_ids();
                 let at = self
@@ -1544,6 +1575,12 @@ impl App {
         }
     }
 
+    /// Whether an agent or an extension waits for an answer.
+    fn answer_waits(&self) -> bool {
+        self.store.sessions.iter().any(|s| s.status() == "waiting")
+            || !self.st.points.attention(self.store.workspace()).is_empty()
+    }
+
     /// Mod+Shift+A or D: an agent asking is answered first, as always;
     /// with none asking, the oldest thing an extension says waits for a
     /// person (a workflow's gate), approved or denied.
@@ -1582,7 +1619,13 @@ impl App {
             _ => return,
         };
         for allow in presses {
-            self.answer_oldest(ui, allow);
+            // The system holds the key, so the window never sees it: with
+            // nothing asking it splits, as it does while the keys are free.
+            if !allow && mods::mac() && ui.window_focused() && !self.answer_waits() {
+                self.run_shortcut(ui, Shortcut::Split(true));
+            } else {
+                self.answer_oldest(ui, allow);
+            }
         }
     }
 
@@ -1616,6 +1659,8 @@ impl App {
                 if matches!(
                     kind,
                     MenuKind::Grid
+                        | MenuKind::NewMenu
+                        | MenuKind::Popover(_)
                         | MenuKind::ViewOptions
                         | MenuKind::TaskOptions
                         | MenuKind::ExtInstall
@@ -1663,14 +1708,6 @@ impl App {
                     let arg = json!(path);
                     self.call(Call::Worktrees(path), "git:listWorktrees", arg);
                 }
-            }
-            MenuKind::Recent => {
-                let path = self.active_project().map(|p| json!(p.1));
-                self.call(
-                    Call::Recent,
-                    "sessions:getRecent",
-                    path.unwrap_or(Value::Null),
-                );
             }
             MenuKind::Headless => self.call(Call::Headless, "headless:list", Value::Null),
             MenuKind::LaunchModel => {
@@ -2193,6 +2230,31 @@ impl App {
                     }
                 }
             }
+            Act::QuickStart => {
+                let agent = self.new_session_starts();
+                self.start_with(ui, agent);
+            }
+            Act::StartWith(agent) => self.start_with(ui, agent),
+            Act::Split { session, down } => self.split(ui, session, down),
+            Act::Tool(key) => self.run_tool(ui, key, src),
+            Act::Customize(list) => {
+                if self.st.dialog != Some(Dialog::Customize) {
+                    self.st.menu = None;
+                    ui.close_menu();
+                    ui.set_edit_text(crate::screen::customize::SEARCH, "");
+                    self.st.dialog = Some(Dialog::Customize);
+                }
+                if self.st.customize_list != list {
+                    ui.set_scroll_offset(crate::screen::customize::LIST, 0.0);
+                }
+                self.st.customize_list = list;
+            }
+            Act::ArrangeMove { list, id, to } => {
+                let ids = crate::screen::customize::available(&self.st, list);
+                let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+                self.arrange(list, |a| a.move_shown(&refs, &id, to));
+            }
+            Act::ArrangeShow { list, id, shown } => self.arrange(list, |a| a.set_shown(&id, shown)),
             Act::QuickSession => match self.active_project() {
                 Some((name, path)) => {
                     let params = json!({
@@ -2502,10 +2564,10 @@ impl App {
                 };
                 self.st.dialog = Some(Dialog::Project(Some(name)));
             }
-            Act::SidebarMode(m) => self.set_sidebar_view(|v| v.view_mode = m),
-            Act::ProjectSort(m) => self.set_sidebar_view(|v| v.project_sort = m),
-            Act::WorktreeSort(m) => self.set_sidebar_view(|v| v.worktree_sort = m),
-            Act::WorktreeFilter(f) => self.set_sidebar_view(|v| v.worktree_filter = f),
+            Act::GroupBy(g) => self.set_sidebar_view(|v| v.group_by = g),
+            Act::SidebarOrder(o) => self.set_sidebar_view(|v| v.order = o),
+            Act::SidebarField(f) => self.set_sidebar_view(|v| f.toggle(&mut v.fields)),
+            Act::OnlyActive => self.set_sidebar_view(|v| v.only_active = !v.only_active),
             Act::ToggleSection => self.st.section_folded = !self.st.section_folded,
             Act::Group(g) => {
                 // A group row toggles its filter; All Sessions clears both.
@@ -2754,6 +2816,7 @@ impl App {
             || self.plug_event(ui, &event)
             || self.net_event(ui, &event)
             || self.term_event(ui, &event)
+            || self.arrange_event(ui, &event)
         {
             return;
         }
@@ -2769,7 +2832,7 @@ impl App {
                             | Act::Columns(_)
                             | Act::Layout(_)
                     ) || self.st.menu.as_ref().is_some_and(|m| {
-                        matches!(m.kind, MenuKind::Recent | MenuKind::Headless)
+                        matches!(m.kind, MenuKind::Headless)
                             && matches!(
                                 act,
                                 Act::ToggleHeadless(_)
@@ -2803,10 +2866,10 @@ impl App {
                             || matches!(m.kind, MenuKind::SidebarOptions)
                                 && matches!(
                                     act,
-                                    Act::SidebarMode(_)
-                                        | Act::ProjectSort(_)
-                                        | Act::WorktreeSort(_)
-                                        | Act::WorktreeFilter(_)
+                                    Act::GroupBy(_)
+                                        | Act::SidebarOrder(_)
+                                        | Act::SidebarField(_)
+                                        | Act::OnlyActive
                                 )
                     });
                     if !keep && self.st.menu.is_some() {
@@ -2873,7 +2936,12 @@ impl App {
             UiEvent::Select { group, index } if group == VIEWS => {
                 let act = match index.checked_sub(1) {
                     None => Some(Act::View(MainView::Sessions)),
-                    Some(i) => self.st.points.top_bar().get(i).map(|p| MainView::act(p)),
+                    Some(i) => self
+                        .st
+                        .points
+                        .tabs(&self.st.arrange.tabs)
+                        .get(i)
+                        .map(|p| MainView::act(p)),
                 };
                 if let Some(act) = act {
                     self.run(ui, act, Src::default());
@@ -3009,10 +3077,11 @@ impl App {
                 | Act::Layout(_)
                 | Act::AskDeleteProject(_)
                 | Act::AskDeleteGroup(_)
-                | Act::SidebarMode(_)
-                | Act::ProjectSort(_)
-                | Act::WorktreeSort(_)
-                | Act::WorktreeFilter(_)
+                | Act::GroupBy(_)
+                | Act::SidebarOrder(_)
+                | Act::SidebarField(_)
+                | Act::OnlyActive
+                | Act::ArrangeShow { .. }
                 | Act::Task(crate::tasks::TaskAct::AskDelete(_))
         );
         if stays {
@@ -3102,8 +3171,15 @@ impl App {
                 return true;
             }
         }
-        // The approve and deny keys exist once an agent has asked for permission.
+        // The approve and deny keys exist once an agent has asked for
+        // permission; on macOS deny's key splits down while nothing asks.
         let s = shortcut(code, *m)
+            .map(|s| match s {
+                Shortcut::Permission(false) if mods::mac() && !self.answer_waits() => {
+                    Shortcut::Split(true)
+                }
+                s => s,
+            })
             .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys)
             // An extension that binds the folder or shells key keeps it.
             .filter(|s| {
@@ -3900,9 +3976,22 @@ mod tests {
             shortcut("KeyS", MOD()),
             Some(Shortcut::View(MainView::Sessions))
         );
-        // Tasks' and Workflows' keys come from their manifests, with their views.
-        assert_eq!(shortcut("KeyT", MOD()), None);
+        // Workflows' key comes from its manifest; on macOS Cmd+T starts a session
+        // and Cmd+D splits, while Ctrl+T and Ctrl+D stay the terminal's elsewhere.
         assert_eq!(shortcut("KeyW", MOD() | mods::SHIFT), None);
+        if mods::mac() {
+            assert_eq!(shortcut("KeyT", MOD()), Some(Shortcut::QuickStart));
+            assert_eq!(shortcut("KeyD", MOD()), Some(Shortcut::Split(false)));
+        } else {
+            assert_eq!(shortcut("KeyT", MOD()), None);
+            assert_eq!(shortcut("KeyD", MOD()), None);
+            let ctrl_shift = MOD() | mods::SHIFT;
+            assert_eq!(shortcut("KeyN", ctrl_shift), Some(Shortcut::QuickStart));
+            assert_eq!(shortcut("Backslash", ctrl_shift), Some(Shortcut::Split(false)));
+            assert_eq!(shortcut("Minus", ctrl_shift), Some(Shortcut::Split(true)));
+            assert_eq!(shortcut("KeyT", ctrl_shift), Some(Shortcut::Shells));
+            assert_eq!(shortcut("KeyO", ctrl_shift), Some(Shortcut::Folder));
+        }
         assert_eq!(shortcut("Digit3", MOD()), Some(Shortcut::Jump(2)));
         assert_eq!(shortcut("Digit0", MOD()), None);
         assert_eq!(shortcut("BracketRight", MOD()), Some(Shortcut::Cycle(true)));

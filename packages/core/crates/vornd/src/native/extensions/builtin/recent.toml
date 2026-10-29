@@ -1,0 +1,16 @@
+id = "vorn.recent"
+name = "Recent sessions"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn"
+description = "The agent conversations you ran on this machine, in a toolbar popover, to start one again. Off, the toolbar has no Recent button."
+
+[declares]
+uses = ["sessions.read", "sessions.launch", "process.run"]
+
+[[contributes.toolbar]]
+id = "recent"
+title = "Recent"
+description = "Recent sessions"
+icon = "clock"
+tree = true

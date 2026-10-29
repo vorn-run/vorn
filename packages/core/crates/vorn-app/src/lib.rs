@@ -15,6 +15,7 @@ pub mod act;
 pub mod agents;
 pub mod app;
 pub mod appearance;
+pub mod arrange;
 pub mod artifact;
 pub mod canvas;
 pub mod cli_link;
@@ -66,6 +67,7 @@ pub mod state;
 pub mod system;
 pub mod tasks;
 pub mod templates;
+pub mod toolbar;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tui;
 pub mod ui;

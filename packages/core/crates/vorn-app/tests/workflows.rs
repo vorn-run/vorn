@@ -914,7 +914,7 @@ fn projects_workflows_and_runs_draw_their_configured_icons() {
 
     // The task dialog's project picker draws `ProjectPicker`'s own icons.
     support::views_listed(&mut shot, &mut app);
-    shot.send(&mut app, key("KeyT", MOD(), None));
+    support::open_tasks(&mut shot, &mut app);
     shot.click(
         &mut app,
         App::control("toolbar", &Act::Task(TaskAct::New("todo".into()))),

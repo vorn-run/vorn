@@ -11,8 +11,8 @@ use support::{connect, key, seed_acme, Shot, TestVornd};
 use vorn_app::act::Act;
 use vorn_app::app::WS_NAME;
 use vorn_app::screen::menus::{MENU, SUB};
-use vorn_app::sidebar_view::{ProjectSort, WorktreeFilter};
-use vorn_app::state::{MenuKind, SidebarMode};
+use vorn_app::sidebar_view::{GroupBy, Order};
+use vorn_app::state::MenuKind;
 use vorn_app::ui::{self, item_id, Id};
 use vorn_app::App;
 
@@ -95,39 +95,50 @@ fn the_sidebar_options_persist_and_rearrange_it() {
     assert_eq!(menu(&app), Some(MenuKind::SidebarOptions));
     let labels = app.menu_labels(&shot.ui);
     for want in [
-        "Projects > Worktrees",
-        "Projects > Worktrees > Sessions",
-        "Projects > Sessions",
-        "Groups > Sessions",
-        "Sessions (Flat)",
-        "With active sessions",
-        "Recent activity",
+        "None",
+        "Project",
+        "Worktree",
+        "My groups",
+        "Manual",
+        "Created",
+        "Last change",
+        "Branch",
+        "Status text",
+        "Progress",
+        "Agent icon",
+        "Only active sessions",
     ] {
         assert!(labels.iter().any(|l| l == want), "{want:?} in {labels:?}");
     }
     shot.save(&mut app, "sidebar-options");
 
-    choose(&mut shot, &mut app, "With active sessions");
-    assert_eq!(app.st.sidebar_view.worktree_filter, WorktreeFilter::Active);
+    choose(&mut shot, &mut app, "Only active sessions");
+    assert!(app.st.sidebar_view.only_active);
     if menu(&app).is_none() {
         shot.click(&mut app, options);
     }
-    choose(&mut shot, &mut app, "Name");
-    assert_eq!(app.st.sidebar_view.project_sort, ProjectSort::Name);
+    choose(&mut shot, &mut app, "Last change");
+    assert_eq!(app.st.sidebar_view.order, Order::LastChange);
     if menu(&app).is_none() {
         shot.click(&mut app, options);
     }
-    choose(&mut shot, &mut app, "Sessions (Flat)");
-    assert_eq!(app.st.sidebar_view.view_mode, SidebarMode::Flat);
+    choose(&mut shot, &mut app, "Progress");
+    assert!(app.st.sidebar_view.fields.progress);
+    if menu(&app).is_none() {
+        shot.click(&mut app, options);
+    }
+    choose(&mut shot, &mut app, "None");
+    assert_eq!(app.st.sidebar_view.group_by, GroupBy::None);
     escape(&mut shot, &mut app);
     park(&mut shot, &mut app);
     shot.save(&mut app, "sidebar-flat");
 
     let saved = std::fs::read_to_string(v.home.join("desktop/sidebar.json")).expect("saved");
     let saved: Value = serde_json::from_str(&saved).expect("json");
-    assert_eq!(saved["viewMode"], "sessions-flat");
-    assert_eq!(saved["worktreeFilter"], "active");
-    assert_eq!(saved["projectSort"], "name");
+    assert_eq!(saved["groupBy"], "none");
+    assert_eq!(saved["onlyActive"], true);
+    assert_eq!(saved["order"], "lastChange");
+    assert_eq!(saved["fields"]["progress"], true);
 
     let again = connect(&v);
     assert_eq!(
@@ -252,16 +263,20 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
             .map(|_| ())
     });
 
-    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::Grid)));
-    assert_eq!(menu(&app), Some(MenuKind::Grid));
+    shot.click(&mut app, control("toolbar", Act::Open(MenuKind::NewMenu)));
+    assert_eq!(menu(&app), Some(MenuKind::NewMenu));
     let labels = app.menu_labels(&shot.ui);
-    for want in ["New session...", "New session in\u{2026}"] {
+    for want in [
+        "New session with a prompt\u{2026}",
+        "In project\u{2026}",
+        "Shell",
+    ] {
         assert!(labels.iter().any(|l| l == want), "{want:?} in {labels:?}");
     }
     shot.save(&mut app, "plus-menu");
     let i = labels
         .iter()
-        .position(|l| l == "New session in\u{2026}")
+        .position(|l| l == "In project\u{2026}")
         .expect("the submenu");
     shot.hover(&mut app, item_id(MENU, i));
     assert_eq!(open_sub(&app), Some(i), "hovering opens the submenu");
@@ -313,14 +328,18 @@ fn the_new_session_menu_lists_every_project_and_worktree() {
     // A click on the entry toggles its submenu; the menu stays.
     shot.click(&mut app, item_id(MENU, i));
     assert_eq!(open_sub(&app), None);
-    assert_eq!(menu(&app), Some(MenuKind::Grid));
+    assert_eq!(menu(&app), Some(MenuKind::NewMenu));
     shot.click(&mut app, item_id(MENU, i));
     assert_eq!(open_sub(&app), Some(i));
 
     // Keys: Left closes one level, Right opens into it, Escape closes one level.
     shot.send(&mut app, key("Escape", 0, None));
     assert_eq!(open_sub(&app), None);
-    assert_eq!(menu(&app), Some(MenuKind::Grid), "Escape closed one level");
+    assert_eq!(
+        menu(&app),
+        Some(MenuKind::NewMenu),
+        "Escape closed one level"
+    );
     for _ in 0..labels.len() {
         if shot.ui.focused(item_id(MENU, i)) {
             break;

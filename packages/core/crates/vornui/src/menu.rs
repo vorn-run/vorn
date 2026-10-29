@@ -69,6 +69,8 @@ pub struct Item<T> {
     pub detail_color: Option<Rgba>,
     /// Its submenu's width, when not 200.
     pub sub_w: Option<f32>,
+    /// What it does, shown beside it when hovered.
+    pub tip: Option<String>,
 }
 
 /// A sidebar menu row's padding: its left edge and above and below.
@@ -153,6 +155,12 @@ impl<T> Item<T> {
         self
     }
 
+    /// Says what it does in a tooltip beside it.
+    pub fn tip(mut self, t: impl Into<String>) -> Item<T> {
+        self.tip = Some(t.into());
+        self
+    }
+
     pub fn detail(mut self, d: impl Into<String>) -> Item<T> {
         self.detail = Some(d.into());
         self
@@ -202,6 +210,7 @@ impl<T> Default for Item<T> {
             nested: Default::default(),
             detail_color: Default::default(),
             sub_w: Default::default(),
+            tip: Default::default(),
         }
     }
 }
@@ -216,6 +225,17 @@ fn hot(ui: &Ui, id: Id) -> f32 {
 }
 
 fn row<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>) -> El {
+    match item.tip.take() {
+        Some(tip) if item.choosable() => {
+            let id = item_id(group, i);
+            let el = entry(ui, group, i, item, sub_open);
+            crate::widgets::tooltip_at(ui, el, id, &tip, None, crate::Place::Right)
+        }
+        _ => entry(ui, group, i, item, sub_open),
+    }
+}
+
+fn entry<T>(ui: &Ui, group: Id, i: usize, mut item: Item<T>, sub_open: Option<El>) -> El {
     if let Some(r) = item.row {
         return r;
     }

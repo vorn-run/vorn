@@ -19,7 +19,8 @@ use vorn_app::git::GitAct;
 use vorn_app::screen::menus::MENU;
 use vorn_app::screen::tasks::card_id;
 use vorn_app::screen::MainView;
-use vorn_app::state::{LayoutMode, MenuKind, SidebarMode};
+use vorn_app::sidebar_view::GroupBy;
+use vorn_app::state::{LayoutMode, MenuKind};
 use vorn_app::tasks::{Mode, TaskAct};
 use vorn_app::ui::{item_id, mods, Id};
 use vorn_app::workflows::{Anchor, WfAct};
@@ -152,10 +153,7 @@ fn the_sessions_screens() {
     let mut app = connect(&v);
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
-    assert_eq!(
-        app.st.sidebar_view.view_mode,
-        SidebarMode::WorktreesSessions
-    );
+    assert_eq!(app.st.sidebar_view.group_by, GroupBy::Worktree);
     park(&mut shot, &mut app);
     shot.save(&mut app, "sidebar");
 
@@ -295,8 +293,8 @@ fn session_groups_work_through_their_menus() {
         &mut app,
         control("sidebar", Act::Open(MenuKind::SidebarOptions)),
     );
-    choose(&mut shot, &mut app, "Groups > Sessions");
-    assert_eq!(app.st.sidebar_view.view_mode, SidebarMode::Groups);
+    choose(&mut shot, &mut app, "My groups");
+    assert_eq!(app.st.sidebar_view.group_by, GroupBy::Groups);
     escape(&mut shot, &mut app);
     park(&mut shot, &mut app);
     shot.save(&mut app, "groups");
@@ -432,7 +430,7 @@ fn the_tasks_screens() {
     let mut shot = Shot::new();
     seed(&v, &mut shot, &mut app);
     support::views_listed(&mut shot, &mut app);
-    shot.send(&mut app, key("KeyT", MOD(), None));
+    support::open_tasks(&mut shot, &mut app);
     assert_eq!(app.st.view, MainView::Tasks);
     park(&mut shot, &mut app);
     shot.save(&mut app, "tasks-list");

@@ -400,6 +400,14 @@ impl Node {
         });
     }
 
+    /// Splits the leaf `at` in two along `dir`, `id` after it (right of it
+    /// or under it) at half its room. Whether `at` was there.
+    pub fn insert_beside(&mut self, id: &str, at: &str, dir: Dir) -> bool {
+        self.replace_leaf(at, &mut |old| {
+            Node::split(dir, 0.5, Node::Leaf(old), Node::leaf(id))
+        })
+    }
+
     fn replace_leaf(&mut self, target: &str, f: &mut impl FnMut(String) -> Node) -> bool {
         match self {
             Node::Leaf(l) if l == target => {
@@ -605,6 +613,28 @@ mod tests {
         let r = t.rects(AREA);
         assert_eq!(r[1], ("b", Rect::new(600.0, 0.0, 600.0, 400.0)));
         assert_eq!(r[2], ("c", Rect::new(600.0, 400.0, 600.0, 400.0)));
+    }
+
+    #[test]
+    fn a_split_puts_the_new_pane_right_of_or_under_its_card_only() {
+        let mut t = Node::split(Dir::Row, 0.3, Node::leaf("a"), Node::leaf("b"));
+        assert!(t.insert_beside("c", "b", Dir::Row));
+        assert_eq!(
+            t,
+            Node::split(
+                Dir::Row,
+                0.3,
+                Node::leaf("a"),
+                Node::split(Dir::Row, 0.5, Node::leaf("b"), Node::leaf("c")),
+            ),
+            "beside, at half the card's room, the others untouched"
+        );
+        assert!(t.insert_beside("d", "a", Dir::Col));
+        let r = t.rects(AREA);
+        assert_eq!(r[0], ("a", Rect::new(0.0, 0.0, 360.0, 400.0)));
+        assert_eq!(r[1], ("d", Rect::new(0.0, 400.0, 360.0, 400.0)));
+        assert!(!t.insert_beside("e", "gone", Dir::Row));
+        assert_eq!(ids(&t), ["a", "d", "b", "c"]);
     }
 
     #[test]

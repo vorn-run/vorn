@@ -313,6 +313,17 @@ pub fn views_listed_in(app: &mut App, ui: &mut Ui, size: (f32, f32)) {
     });
 }
 
+/// Opens the Tasks view from its sidebar tab, as a person clicks it.
+#[allow(dead_code)]
+pub fn open_tasks(shot: &mut Shot, app: &mut App) {
+    let tab = App::control(
+        "sidebar-mode",
+        &vorn_app::act::Act::View(vorn_app::screen::MainView::Tasks),
+    );
+    shot.until(app, "the Tasks tab", |_, ui| ui.rect_of(tab));
+    shot.click(app, tab);
+}
+
 /// Polls `f` until it answers, or fails the test with `what`.
 #[track_caller]
 pub fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {

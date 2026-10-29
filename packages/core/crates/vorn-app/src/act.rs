@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::screen::MainView;
-use crate::state::{Filter, LayoutMode, MenuKind, SidebarMode, Sort};
+use crate::state::{Filter, LayoutMode, MenuKind, Sort};
 use crate::ui::{Action, El, Id, Sense};
 
 /// One thing a control does.
@@ -41,6 +41,33 @@ pub enum Act {
     /// A session of the default agent in the active project at once, or
     /// the launcher when there is none.
     QuickSession,
+    /// The toolbar's +: what General's New session starts, at once, in the
+    /// focused card's project and worktree.
+    QuickStart,
+    /// A session of this agent (or `shell`) in the focused card's project and worktree.
+    StartWith(String),
+    /// A shell in the card's folder beside it (`down` under it), on the
+    /// Flexible grid; the selected card when none is named.
+    Split {
+        session: Option<String>,
+        down: bool,
+    },
+    /// A toolbar item an extension adds, by its point key: its call, window or popover.
+    Tool(String),
+    /// Opens the customize sheet on this list, or shows it there.
+    Customize(crate::arrange::List),
+    /// Moves an arranged item to place `to` of its list as the sheet lists it.
+    ArrangeMove {
+        list: crate::arrange::List,
+        id: String,
+        to: usize,
+    },
+    /// Shows or hides an arranged item.
+    ArrangeShow {
+        list: crate::arrange::List,
+        id: String,
+        shown: bool,
+    },
     /// A session of the default agent (or `agent`) in a project, or one of
     /// its worktrees.
     NewSessionIn {
@@ -109,14 +136,14 @@ pub enum Act {
         path: String,
     },
     AddProject,
-    /// How the sidebar arranges the sessions.
-    SidebarMode(SidebarMode),
-    /// The sidebar's project order.
-    ProjectSort(crate::sidebar_view::ProjectSort),
-    /// The sidebar's worktree order.
-    WorktreeSort(crate::sidebar_view::WorktreeSort),
-    /// Whether the sidebar shows only projects and worktrees with sessions.
-    WorktreeFilter(crate::sidebar_view::WorktreeFilter),
+    /// What the sidebar groups sessions under.
+    GroupBy(crate::sidebar_view::GroupBy),
+    /// The order of the sidebar's sessions and groups.
+    SidebarOrder(crate::sidebar_view::Order),
+    /// Turns one of a sidebar row's fields on or off.
+    SidebarField(crate::sidebar_view::Field),
+    /// Turns hiding ended sessions and empty groups on or off.
+    OnlyActive,
     /// Folds the sessions sidebar's section.
     ToggleSection,
     /// Filters the grid to a group's sessions, or clears it.
