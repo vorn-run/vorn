@@ -257,3 +257,57 @@ fn split_of(node: &Node, first: &str, second: &str) -> Option<Dir> {
         }
     }
 }
+
+#[test]
+fn every_entry_in_a_cards_more_menu_runs_under_the_pointer() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    add_project(&mut app, &v, "demo", json!({}));
+    let mut shot = Shot::new();
+    shot.frame(&mut app);
+    shot.click(
+        &mut app,
+        control("sidebar-project", Act::Project(Some("demo".into()))),
+    );
+    let a = new_shell(&mut shot, &mut app);
+    let _b = new_shell(&mut shot, &mut app);
+    app.st.arrange.card_shown = 0;
+    shot.hover(&mut app, vorn_app::screen::term_id(&a));
+    shot.click(
+        &mut app,
+        control("card", Act::Open(MenuKind::Card(a.clone()))),
+    );
+    let labels = app.menu_labels(&shot.ui);
+    let at = labels
+        .iter()
+        .position(|l| l == "Expand")
+        .expect("{labels:?}");
+    // The pointer travels from More to the entry over a few frames, as a hand does.
+    let to = shot
+        .ui
+        .rect_of(item_id(MENU, at))
+        .expect("the entry is laid out");
+    let from = shot
+        .ui
+        .rect_of(control("card", Act::Open(MenuKind::Card(a.clone()))))
+        .expect("More");
+    let mut now = shot.ui.now();
+    for step in 1..=12 {
+        let t = step as f32 / 12.0;
+        shot.ui.pointer_move(
+            from.x + (to.x + to.w / 2.0 - from.x) * t,
+            from.y + (to.y + to.h / 2.0 - from.y) * t,
+        );
+        now += std::time::Duration::from_millis(16);
+        shot.ui.set_now(now);
+        shot.frame(&mut app);
+    }
+    assert!(app.st.menu.is_some(), "the menu stays open on the way");
+    shot.ui.pointer_down();
+    shot.ui.pointer_up();
+    app.events(&mut shot.ui);
+    shot.frame(&mut app);
+    assert_eq!(app.st.focused.as_deref(), Some(a.as_str()), "Expand ran");
+}
