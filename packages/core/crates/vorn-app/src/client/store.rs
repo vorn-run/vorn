@@ -50,6 +50,8 @@ pub struct Session {
     pub cause: Option<&'static str>,
     /// Its place among its project's unnamed sessions, from 0 ([`Store::number_titles`]).
     pub ordinal: usize,
+    /// Shown from the last run's list, not vornd's: an offer to resume, which takes no number.
+    pub offer: bool,
 }
 
 impl Session {
@@ -348,15 +350,31 @@ impl Store {
                     info.branch = s.info.branch.take();
                 }
                 s.info = info;
+                s.offer = false;
             }
             None => self.sessions.push(Session {
                 info,
                 exited: None,
                 cause: None,
                 ordinal: 0,
+                offer: false,
             }),
         }
         self.number_titles();
+    }
+
+    /// Shows a session the last run left as an ended card offering to resume, unless one with its id is here.
+    pub fn offer(&mut self, info: TerminalSession, cause: &'static str) {
+        if self.session(&info.id).is_some() {
+            return;
+        }
+        self.sessions.push(Session {
+            info,
+            exited: None,
+            cause: Some(cause),
+            ordinal: 0,
+            offer: true,
+        });
     }
 
     /// Takes the session with `id` off the screen.
@@ -375,7 +393,7 @@ impl Store {
     /// Numbers each project's unnamed sessions by creation (then id) from vornd's records alone, so every client agrees.
     pub fn number_titles(&mut self) {
         let mut order: Vec<usize> = (0..self.sessions.len())
-            .filter(|&i| self.sessions[i].own_name().is_none())
+            .filter(|&i| !self.sessions[i].offer && self.sessions[i].own_name().is_none())
             .collect();
         order.sort_by(|&a, &b| {
             let (a, b) = (&self.sessions[a].info, &self.sessions[b].info);
@@ -812,6 +830,53 @@ mod tests {
         assert_eq!(
             live.apply("session:removed", json!({ "id": "b" })),
             Change::Nothing
+        );
+    }
+
+    #[test]
+    fn a_carried_over_offer_takes_no_number_until_vornd_lists_it() {
+        let record = |id: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        let titles = |s: &Store| {
+            let mut t: Vec<(String, String)> = (s.sessions.iter())
+                .filter(|x| x.info.id != "old")
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        let mut phone = Store::default();
+        phone.take_sessions(json!([record("a", 2.0), record("b", 3.0)]));
+        let mut desktop = Store::default();
+        desktop.take_sessions(json!([record("a", 2.0), record("b", 3.0)]));
+        // Older than both, so it would sort first and push them along if it counted.
+        desktop.offer(
+            serde_json::from_value(record("old", 1.0)).unwrap(),
+            "stopped",
+        );
+        assert_eq!(titles(&desktop), titles(&phone));
+        assert_eq!(
+            desktop.session("old").map(Session::title).as_deref(),
+            Some("vorn")
+        );
+        // Resumed: vornd lists it under its id and it counts, as it does for the phone.
+        desktop.apply("session:created", record("old", 1.0));
+        phone.apply("session:created", record("old", 1.0));
+        let all = |s: &Store| {
+            let mut t: Vec<(String, String)> = s
+                .sessions
+                .iter()
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        assert_eq!(all(&desktop), all(&phone));
+        assert_eq!(
+            desktop.session("a").map(Session::title).as_deref(),
+            Some("vorn 2")
         );
     }
 

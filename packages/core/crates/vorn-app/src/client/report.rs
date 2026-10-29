@@ -142,6 +142,7 @@ mod tests {
             exited: None,
             cause: None,
             ordinal: 0,
+            offer: false,
         }
     }
 
