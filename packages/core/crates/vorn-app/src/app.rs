@@ -271,6 +271,11 @@ enum Call {
     Launch,
     /// A session or shell that should be selected once it exists.
     Created,
+    /// A split's shell: selected, and placed beside `at` on the flexible grid.
+    Split {
+        at: String,
+        dir: crate::flex::Dir,
+    },
     /// An ended session started again in place; an automatic one says
     /// nothing when it fails.
     Resumed {
@@ -1096,6 +1101,17 @@ impl App {
         }
     }
 
+    /// Selects a session or shell just created.
+    fn created(&mut self, info: TerminalSession) {
+        self.st.selected = Some(info.id.clone());
+        self.st.focus_terminal = true;
+        if self.st.focused.is_some() {
+            self.st.focused = Some(info.id.clone());
+        }
+        self.st.view = MainView::Sessions;
+        self.store.upsert(info);
+    }
+
     fn answered(&mut self, kind: Call, answer: Result<Value, RpcError>) {
         match kind {
             Call::Launch => {
@@ -1115,14 +1131,13 @@ impl App {
                 }
             }
             Call::Created => match answer.and_then(decode::<TerminalSession>) {
+                Ok(info) => self.created(info),
+                Err(e) => self.st.toast(e.to_string(), true),
+            },
+            Call::Split { at, dir } => match answer.and_then(decode::<TerminalSession>) {
                 Ok(info) => {
-                    self.st.selected = Some(info.id.clone());
-                    self.st.focus_terminal = true;
-                    if self.st.focused.is_some() {
-                        self.st.focused = Some(info.id.clone());
-                    }
-                    self.st.view = MainView::Sessions;
-                    self.store.upsert(info);
+                    self.split_created(&info.id, at, dir);
+                    self.created(info);
                 }
                 Err(e) => self.st.toast(e.to_string(), true),
             },

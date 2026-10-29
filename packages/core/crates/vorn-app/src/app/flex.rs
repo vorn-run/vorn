@@ -120,7 +120,7 @@ impl App {
         }
         let area = self.flex_area(ui);
         let anchor = self.st.flex_anchor.clone();
-        let mut split = self.st.flex_split.take();
+        let mut split = std::mem::take(&mut self.st.flex_split);
         let grid = self.grid_mut();
         let mut tree = grid
             .tree
@@ -142,9 +142,9 @@ impl App {
         for (id, owner) in &members {
             match &mut tree {
                 Some(t) if t.contains(id) => {}
-                // The first new card after a split goes beside the card it split.
-                Some(t) if owner.is_none() && split.is_some() => {
-                    if let Some((at, dir)) = split.take() {
+                // A split's own shell goes beside the card it split.
+                Some(t) if owner.is_none() && split.contains_key(id) => {
+                    if let Some((at, dir)) = split.remove(id) {
                         if !t.insert_beside(id, &at, dir) {
                             t.insert(id, anchor.as_deref(), area);
                         }
@@ -155,9 +155,17 @@ impl App {
             }
         }
         grid.tree = tree;
-        // A split whose card has not come yet waits for it.
+        // A split whose card has not come yet waits for it, while its session lives.
+        split.retain(|id, _| self.store.session(id).is_some());
         self.st.flex_split = split;
         self.save_grids();
+    }
+
+    /// Places a split's shell beside `at` once its card comes; one already placed moves there.
+    pub(super) fn split_created(&mut self, id: &str, at: String, dir: Dir) {
+        let grid = self.grid_mut();
+        grid.tree = grid.tree.take().and_then(|t| t.remove(id));
+        self.st.flex_split.insert(id.to_owned(), (at, dir));
     }
 
     /// Writes every workspace's grid to this viewer's settings.
