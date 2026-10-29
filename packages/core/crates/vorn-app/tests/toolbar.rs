@@ -164,17 +164,15 @@ fn plus_starts_at_once_and_a_card_splits_right_then_down() {
     assert!(app.st.menu.is_none());
     assert!(app.store.session(&b).is_some_and(|s| s.is_shell()));
 
-    // The card's More menu: Split Right turns the grid flexible and puts a
-    // shell right of the card.
+    // The card's header: Split right turns the grid flexible and puts a
+    // shell right of the card; the first five buttons show there.
     shot.hover(&mut app, vorn_app::screen::term_id(&a));
-    shot.click(
-        &mut app,
-        control("card", Act::Open(MenuKind::Card(a.clone()))),
-    );
-    let labels = app.menu_labels(&shot.ui);
-    assert_eq!(labels[..2], ["Split Right", "Split Down"], "{labels:?}");
-    shot.save(&mut app, "card-menu-split");
-    shot.click(&mut app, item_id(MENU, 0));
+    let split = Act::Split {
+        session: Some(a.clone()),
+        down: false,
+    };
+    shot.save(&mut app, "card-header-split");
+    shot.click(&mut app, control("card", split));
     assert_eq!(app.st.columns, -1);
     let right = shot.until(&mut app, "the shell beside", |app, _| {
         let tree = app.st.grids.values().next()?.tree.clone()?;
@@ -209,6 +207,24 @@ fn plus_starts_at_once_and_a_card_splits_right_then_down() {
         "{down:?}"
     );
     shot.save(&mut app, "split-down");
+
+    // With two on the header, the rest open from More in the same order.
+    app.st.arrange.card_shown = 2;
+    shot.hover(&mut app, vorn_app::screen::term_id(&a));
+    shot.click(
+        &mut app,
+        control("card", Act::Open(MenuKind::Card(a.clone()))),
+    );
+    let labels = app.menu_labels(&shot.ui);
+    let expand = labels.iter().position(|l| l == "Expand");
+    let close = labels.iter().position(|l| l == "Close session");
+    let rename = labels.iter().position(|l| l == "Rename\u{2026}");
+    assert!(
+        expand.is_some() && expand < close && close < rename,
+        "{labels:?}"
+    );
+    assert!(!labels.iter().any(|l| l == "Split right"), "{labels:?}");
+    shot.save(&mut app, "card-more-overflow");
 }
 
 /// The direction of the split whose two children are exactly `first` and `second`.

@@ -101,12 +101,15 @@ fn an_extension_pane_opens_from_the_card_menu() {
 
     open_menu(&mut shot, &mut app, &id);
     let labels = app.menu_labels(&shot.ui);
+    // Past the buttons the card shows, its panes come first, in their order.
     let rename = labels.iter().position(|l| l == "Rename\u{2026}");
-    let panes = rename.map(|r| &labels[r + 1..r + 3]);
+    let report = labels.iter().position(|l| l == "Report");
+    assert!(report.is_some() && report < rename, "{labels:?}");
+    let panes = report.map(|r| &labels[r..r + 2]);
     assert_eq!(
         panes,
         Some(&["Report".to_owned(), "Tail".to_owned()][..]),
-        "panes follow Rename: {labels:?}"
+        "{labels:?}"
     );
     shot.save(&mut app, "ext-menu");
     choose(&mut shot, &mut app, "Report");

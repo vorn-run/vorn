@@ -323,8 +323,8 @@ fn every_template_kind_draws_on_every_surface() {
         &mut shot,
         &mut app,
         "t-extensions",
-        &["Installed 15", "PANES 4", "Connectors", "Turns"],
-        &["Installed 15", "PANES 4", "Turns"],
+        &["Installed 17", "PANES 4", "Connectors", "Turns"],
+        &["Installed 17", "PANES 4", "Turns"],
     );
     every_surface_at(
         &mut shot,
