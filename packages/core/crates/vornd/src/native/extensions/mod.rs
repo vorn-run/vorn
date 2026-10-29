@@ -263,6 +263,8 @@ pub struct Extensions {
     relist: AtomicBool,
     /// A package was removed: its sessions are settled now, not on the next pack check.
     removed: Arc<Notify>,
+    /// Each pack's version as last handled; a link, install or removal holds it, so the pack watcher acts only on changes made elsewhere.
+    packs: tokio::sync::Mutex<Fingerprint>,
     me: Weak<Extensions>,
 }
 
@@ -357,6 +359,7 @@ impl Extensions {
             next_sync: AtomicU64::new(0),
             relist: AtomicBool::new(false),
             removed: Arc::default(),
+            packs: tokio::sync::Mutex::default(),
             me: me.clone(),
         })
     }
@@ -541,17 +544,25 @@ impl Extensions {
                     text(params, "confirm").to_owned(),
                 );
                 let id = self.installs.staged_manifest(&token).map(|m| m.id);
-                if let Err(err) = self.finish_removal(id).await {
-                    return Answer::Error(err);
-                }
-                let installs = Arc::clone(&self.installs);
-                match blocking(move || installs.confirm(&token, &typed)).await {
-                    Ok(pack) => {
-                        self.package_changed(&pack.id).await;
-                        Ok(json!(pack))
+                let mut packs = self.packs.lock().await;
+                let finished = self.finish_removal(id.clone()).await;
+                let installed = match finished {
+                    Ok(()) => {
+                        let installs = Arc::clone(&self.installs);
+                        blocking(move || installs.confirm(&token, &typed)).await
                     }
                     Err(err) => Err(err),
+                };
+                if let Ok(pack) = &installed {
+                    self.package_changed(&pack.id).await;
                 }
+                self.handled(
+                    &mut packs,
+                    id.as_deref()
+                        .into_iter()
+                        .chain(installed.iter().map(|p| p.id.as_str())),
+                );
+                installed.map(|pack| json!(pack))
             }
             "extension:link" => {
                 let path = PathBuf::from(home_path(text(params, "path")));
@@ -566,19 +577,32 @@ impl Extensions {
                     .await
                     .ok()
                     .flatten();
-                if let Err(err) = self.finish_removal(id).await {
-                    return Answer::Error(err);
-                }
-                let installs = Arc::clone(&self.installs);
-                match blocking(move || installs.link_as_read(&path, read.as_deref())).await {
-                    Ok(pack) => {
-                        self.package_changed(&pack.id).await;
-                        Ok(json!(pack))
+                let mut packs = self.packs.lock().await;
+                let linked = match self.finish_removal(id.clone()).await {
+                    Ok(()) => {
+                        let installs = Arc::clone(&self.installs);
+                        blocking(move || installs.link_as_read(&path, read.as_deref())).await
                     }
                     Err(err) => Err(err),
+                };
+                if let Ok(pack) = &linked {
+                    self.package_changed(&pack.id).await;
                 }
+                self.handled(
+                    &mut packs,
+                    id.as_deref()
+                        .into_iter()
+                        .chain(linked.iter().map(|p| p.id.as_str())),
+                );
+                linked.map(|pack| json!(pack))
             }
-            "extension:remove" => self.remove(text(params, "id")).await,
+            "extension:remove" => {
+                let id = text(params, "id");
+                let mut packs = self.packs.lock().await;
+                let removed = self.remove(id).await;
+                self.handled(&mut packs, [id]);
+                removed
+            }
             "extension:call" => {
                 let ctx = CallCtx {
                     caller: "client".to_owned(),
@@ -896,6 +920,36 @@ impl Extensions {
         self.around.pack_changed(id).await;
         self.relist.store(true, Ordering::Relaxed);
         self.contributions_changed(id);
+    }
+
+    /// Handles each pack changed since it was last handled, here or by a
+    /// link, install or removal; whether any had.
+    async fn check_packs(&self) -> bool {
+        let mut packs = self.packs.lock().await;
+        let now = fingerprint(self.hosts.store().root());
+        let moved = changed(&packs, &now);
+        *packs = now;
+        for id in &moved {
+            debug!("[extensions] pack {id} changed");
+            self.pack_changed(id).await;
+            self.start_if_stopped(id);
+        }
+        // An adapter installed from the catalog reaches vornd only as a changed pack.
+        if !moved.is_empty() {
+            self.sync_adapters();
+        }
+        !moved.is_empty()
+    }
+
+    /// Records the packs `ids` as they are now, as handled here.
+    fn handled<'a>(&self, packs: &mut Fingerprint, ids: impl IntoIterator<Item = &'a str>) {
+        let root = self.hosts.store().root();
+        for id in ids {
+            match stamp(root, id) {
+                Some(now) => packs.insert(id.to_owned(), now),
+                None => packs.remove(id),
+            };
+        }
     }
 
     /// Whether `method` is `<id>:<action>` for an installed program extension.
@@ -1386,11 +1440,17 @@ fn fingerprint(root: &Path) -> Fingerprint {
     entries
         .flatten()
         .filter_map(|entry| {
-            let meta = std::fs::metadata(entry.path().join("current.json")).ok()?;
             let id = entry.file_name().into_string().ok()?;
-            Some((id, (meta.modified().ok(), meta.len())))
+            let now = stamp(root, &id)?;
+            Some((id, now))
         })
         .collect()
+}
+
+/// Pack `id`'s current version, if it is installed.
+fn stamp(root: &Path, id: &str) -> Option<(Option<SystemTime>, u64)> {
+    let meta = std::fs::metadata(root.join(id).join("current.json")).ok()?;
+    Some((meta.modified().ok(), meta.len()))
 }
 
 /// The packs whose current version differs between `before` and `after`.
@@ -1421,12 +1481,12 @@ async fn next_note(notes: &mut Option<broadcast::Receiver<Value>>) {
 /// and settles every session again after a pack changed.
 async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value>>) {
     let mut known: HashMap<String, Live> = HashMap::new();
-    let Some((mut packs, removed)) = me
-        .upgrade()
-        .map(|e| (fingerprint(e.hosts.store().root()), Arc::clone(&e.removed)))
-    else {
+    let Some(extensions) = me.upgrade() else {
         return;
     };
+    *extensions.packs.lock().await = fingerprint(extensions.hosts.store().root());
+    let removed = Arc::clone(&extensions.removed);
+    drop(extensions);
     let mut tick = tokio::time::interval(PACK_CHECK);
     loop {
         tokio::select! {
@@ -1437,19 +1497,8 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
         let Some(extensions) = me.upgrade() else {
             return;
         };
-        let now = fingerprint(extensions.hosts.store().root());
-        let moved = changed(&packs, &now);
-        packs = now;
-        for id in &moved {
-            debug!("[extensions] pack {id} changed");
-            extensions.pack_changed(id).await;
-            extensions.start_if_stopped(id);
-        }
-        // An adapter installed from the catalog reaches vornd only as a changed pack.
-        if !moved.is_empty() {
-            extensions.sync_adapters();
-        }
-        reconcile(&extensions, &mut known, !moved.is_empty());
+        let moved = extensions.check_packs().await;
+        reconcile(&extensions, &mut known, moved);
     }
 }
 
