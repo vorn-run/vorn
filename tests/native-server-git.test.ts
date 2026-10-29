@@ -260,6 +260,13 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
     }
   })
 
+  /** An answer without git's usage text, whose options change between git releases. */
+  const usageless = (a: Answer): Answer => {
+    const error = a.error as { message?: string } | undefined
+    if (typeof error?.message !== 'string') return a
+    return { ...a, error: { ...error, message: error.message.split('\nusage: ')[0] } }
+  }
+
   it('makes the same changes the server makes, and answers them the same', async () => {
     /** One side: the client it calls through, its fixture copy, and what it made up. */
     interface Side {
@@ -295,7 +302,7 @@ describe.skipIf(!vornd)('the native server answers as the server does', () => {
       }
       const key = `change ${++steps} ${method}`
       const want = await reference.want(key, gone)
-      expect(await run(through), `${key}`).toEqual(want)
+      expect(usageless(await run(through)), `${key}`).toEqual(usageless(want))
     }
 
     try {
