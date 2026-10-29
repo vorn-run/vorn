@@ -184,7 +184,7 @@ jobs:
           { echo "TMPDIR=$dir"; echo "TMP=$dir"; echo "TEMP=$dir"; } >> "$GITHUB_ENV"
 
       # nextest runs the test binaries side by side instead of one after another; doc tests run separately.
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: cargo-nextest@0.9.145
 
