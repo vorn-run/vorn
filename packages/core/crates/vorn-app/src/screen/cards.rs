@@ -291,7 +291,13 @@ fn position_badge(i: usize, dim: f32) -> El {
 
 /// CardHeader, mini variant: actions on hover, the position badge idle.
 fn header(s: &Screen<'_>, session: &Session, i: usize, dim: f32, hot: bool) -> El {
-    let right = if hot || s.st.confirm_close.as_deref() == Some(session.info.id.as_str()) {
+    let sid = session.info.id.as_str();
+    // More stays while its menu is open: the menu closes when its trigger leaves the layout.
+    let menu = s.st.menu.as_ref().is_some_and(|m| match &m.kind {
+        MenuKind::Card(id) | MenuKind::CardPoint(id, _) => id == sid,
+        _ => false,
+    });
+    let right = if hot || menu || s.st.confirm_close.as_deref() == Some(sid) {
         actions(s, session, false)
     } else if i < 9 {
         position_badge(i, dim)
