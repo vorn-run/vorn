@@ -306,29 +306,48 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         .worktree_path
         .clone()
         .filter(|_| info.is_worktree == Some(true));
-    // First, and not behind a submenu: what this card can show.
-    let mut items: Vec<Item> = (s.st.ext.items(id).into_iter())
-        .chain(s.st.ext.builtin_items(id, &s.st.points))
-        .map(|p| {
-            let label = if p.open {
-                format!("Close {}", p.title)
-            } else {
-                p.title.clone()
-            };
-            let act = Act::Ext(crate::extensions::ExtAct::Toggle {
-                session: id.to_owned(),
-                extension: p.extension_id,
-                pane: p.pane_id,
-            });
-            let mut it = Item::new("puzzle", label, act).detail(p.extension_name);
-            it.icon = None;
-            it.mark(super::panes::extension_icon(
-                p.icon.as_ref(),
-                14.0,
-                c(look::GRAY_500),
-            ))
-        })
-        .collect();
+    // The header's folder, shell and browser buttons, then Rename, each with its key.
+    let keyed = |key: char| format!("{}\u{21e7}{key}", super::mod_label());
+    let mut items: Vec<Item> = Vec::new();
+    for (act, icon, label, key) in super::side::pane_entries(s, session) {
+        let mut it = Item::new(icon, label, act);
+        it.shortcut = key.map(keyed);
+        items.push(it);
+    }
+    if let Some((act, label)) = super::panes::browser_entry(s, session) {
+        items.push(Item::new("globe", label, act));
+    }
+    let mut rename = Item::new("pencil", "Rename\u{2026}", Act::Rename(id.to_owned()));
+    rename.shortcut = Some("F2".to_owned());
+    items.push(rename);
+    // Then, and not behind a submenu: what this card can show.
+    let shown = items.len();
+    items.extend(
+        (s.st.ext.items(id).into_iter())
+            .chain(s.st.ext.builtin_items(id, &s.st.points))
+            .map(|p| {
+                let label = if p.open {
+                    format!("Close {}", p.title)
+                } else {
+                    p.title.clone()
+                };
+                let act = Act::Ext(crate::extensions::ExtAct::Toggle {
+                    session: id.to_owned(),
+                    extension: p.extension_id,
+                    pane: p.pane_id,
+                });
+                let mut it = Item::new("puzzle", label, act).detail(p.extension_name);
+                it.icon = None;
+                it.mark(super::panes::extension_icon(
+                    p.icon.as_ref(),
+                    14.0,
+                    c(look::GRAY_500),
+                ))
+            }),
+    );
+    if let Some(first) = items.get_mut(shown) {
+        first.separator = true;
+    }
     let args = serde_json::json!({ "sessionId": id }).to_string();
     for (act, icon, label, _) in super::points::menu_items(s, "card", &args) {
         let mut it = Item::new("puzzle", label, act);

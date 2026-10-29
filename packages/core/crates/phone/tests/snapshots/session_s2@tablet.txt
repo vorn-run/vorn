@@ -1,5 +1,5 @@
 column
-  bar label="vorn"
+  bar label="vorn #"
     more
       link value="rename:s#" style="sheet"
         icon value="pencil"

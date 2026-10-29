@@ -22,6 +22,7 @@ pub const TOPICS: &[&str] = &[
     "session:created",
     "session:updated",
     "session:reordered",
+    "session:removed",
     "terminal:exit",
     "config:changed",
     "layout:opened",
@@ -47,15 +48,26 @@ pub struct Session {
     pub exited: Option<i64>,
     /// Why a session carried over from the last run ended, when it did.
     pub cause: Option<&'static str>,
+    /// Its place among its project's unnamed sessions, from 0 ([`Store::number_titles`]).
+    pub ordinal: usize,
+    /// Shown from the last run's list, not vornd's: an offer to resume, which takes no number.
+    pub offer: bool,
 }
 
 impl Session {
-    /// The name given, else the project's.
+    /// The name given, else the project's, numbered from its second unnamed session on (`vorn 2`).
     pub fn title(&self) -> String {
-        match self.info.display_name.as_deref().map(str::trim) {
-            Some(name) if !name.is_empty() => name.to_owned(),
-            _ => self.info.project_name.clone(),
+        match self.own_name() {
+            Some(name) => name.to_owned(),
+            None if self.ordinal > 0 => format!("{} {}", self.info.project_name, self.ordinal + 1),
+            None => self.info.project_name.clone(),
         }
+    }
+
+    /// The name it was given, if any.
+    fn own_name(&self) -> Option<&str> {
+        let name = self.info.display_name.as_deref().map(str::trim)?;
+        (!name.is_empty()).then_some(name)
     }
 
     /// Whether this is a plain shell rather than an agent.
@@ -338,24 +350,66 @@ impl Store {
                     info.branch = s.info.branch.take();
                 }
                 s.info = info;
+                s.offer = false;
             }
             None => self.sessions.push(Session {
                 info,
                 exited: None,
                 cause: None,
+                ordinal: 0,
+                offer: false,
             }),
         }
+        self.number_titles();
+    }
+
+    /// Shows a session the last run left as an ended card offering to resume, unless one with its id is here.
+    pub fn offer(&mut self, info: TerminalSession, cause: &'static str) {
+        if self.session(&info.id).is_some() {
+            return;
+        }
+        self.sessions.push(Session {
+            info,
+            exited: None,
+            cause: Some(cause),
+            ordinal: 0,
+            offer: true,
+        });
     }
 
     /// Takes the session with `id` off the screen.
     pub fn remove(&mut self, id: &str) {
         self.sessions.retain(|s| s.info.id != id);
         self.gone.insert(id.to_owned());
+        self.number_titles();
     }
 
     /// Takes the session with `id` off the screen while it may still live: its next update brings it back.
     pub fn forget(&mut self, id: &str) {
         self.sessions.retain(|s| s.info.id != id);
+        self.number_titles();
+    }
+
+    /// Numbers each project's unnamed sessions by creation (then id) from vornd's records alone, so every client agrees.
+    pub fn number_titles(&mut self) {
+        let mut order: Vec<usize> = (0..self.sessions.len())
+            .filter(|&i| !self.sessions[i].offer && self.sessions[i].own_name().is_none())
+            .collect();
+        order.sort_by(|&a, &b| {
+            let (a, b) = (&self.sessions[a].info, &self.sessions[b].info);
+            (a.project_name.cmp(&b.project_name))
+                .then(a.created_at.total_cmp(&b.created_at))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        for s in &mut self.sessions {
+            s.ordinal = 0;
+        }
+        for pair in order.windows(2) {
+            let (prev, i) = (&self.sessions[pair[0]], &self.sessions[pair[1]]);
+            if prev.info.project_name == i.info.project_name {
+                self.sessions[pair[1]].ordinal = prev.ordinal + 1;
+            }
+        }
     }
 
     /// Folds one notification in.
@@ -383,8 +437,16 @@ impl Store {
                         .unwrap_or(usize::MAX)
                 };
                 self.sessions.sort_by_key(|s| rank(&s.info.id));
+                self.number_titles();
                 Change::Sessions
             }
+            "session:removed" => match params.get("id").and_then(Value::as_str) {
+                Some(id) if self.session(id).is_some() => {
+                    self.remove(id);
+                    Change::Sessions
+                }
+                _ => Change::Nothing,
+            },
             "terminal:exit" => {
                 let Some(id) = params.get("id").and_then(Value::as_str) else {
                     return Change::Nothing;
@@ -651,6 +713,193 @@ mod tests {
         assert_eq!(ids(&s), ["a", "b"]);
         assert_eq!(s.sessions[0].title(), "Shell 1");
         assert_eq!(s.sessions[0].status(), "waiting");
+    }
+
+    #[test]
+    fn unnamed_sessions_of_one_project_are_numbered_by_creation() {
+        let mut s = Store::default();
+        let make = |id: &str, project: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": project,
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        // Listed out of creation order, as a reorder leaves them.
+        s.apply("session:created", make("b", "vorn", 2.0));
+        s.apply("session:created", make("a", "vorn", 1.0));
+        s.apply("session:created", make("j", "journey", 3.0));
+        s.apply("session:created", make("c", "vorn", 4.0));
+        let titles = |s: &Store| s.sessions.iter().map(Session::title).collect::<Vec<_>>();
+        assert_eq!(titles(&s), ["vorn 2", "vorn", "journey", "vorn 3"]);
+        // A renamed session leaves the count; the rest close up.
+        let mut named = make("a", "vorn", 1.0);
+        named["displayName"] = json!("docs");
+        s.apply("session:updated", named);
+        assert_eq!(titles(&s), ["vorn", "docs", "journey", "vorn 2"]);
+        s.remove("b");
+        assert_eq!(titles(&s), ["docs", "journey", "vorn"]);
+    }
+
+    #[test]
+    fn tied_creation_times_number_by_id_whatever_the_arrival_order() {
+        let make = |id: &str| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": 5.0, "pid": 1.0 })
+        };
+        let numbered = |ids: [&str; 3]| {
+            let mut s = Store::default();
+            for id in ids {
+                s.apply("session:created", make(id));
+            }
+            let mut t: Vec<(String, String)> = s
+                .sessions
+                .iter()
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        assert_eq!(numbered(["a", "b", "c"]), numbered(["c", "a", "b"]));
+        assert_eq!(
+            numbered(["b", "c", "a"])[2],
+            ("c".to_owned(), "vorn 3".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_long_connected_store_numbers_as_a_fresh_one_at_every_step() {
+        let record = |id: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        let titles = |s: &Store| {
+            let mut t: Vec<(String, String)> = s
+                .sessions
+                .iter()
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        let fresh = |rows: Value| {
+            let mut s = Store::default();
+            s.take_sessions(rows);
+            titles(&s)
+        };
+        let ended = |id: &str, at: f64| {
+            let mut r = record(id, at);
+            r["ended"] = json!(true);
+            r
+        };
+        let mut live = Store::default();
+        for (id, at) in [("a", 1.0), ("b", 2.0), ("c", 3.0)] {
+            live.apply("session:created", record(id, at));
+        }
+        assert_eq!(
+            titles(&live),
+            fresh(json!([
+                record("a", 1.0),
+                record("b", 2.0),
+                record("c", 3.0)
+            ]))
+        );
+        // `a` ends: vornd keeps listing it, marked ended.
+        live.apply("terminal:exit", json!({ "id": "a", "exitCode": 0 }));
+        assert_eq!(
+            titles(&live),
+            fresh(json!([ended("a", 1.0), record("b", 2.0), record("c", 3.0)]))
+        );
+        // Resumed elsewhere under its id: only an update arrives.
+        live.apply("session:updated", record("a", 1.0));
+        assert_eq!(
+            titles(&live),
+            fresh(json!([
+                record("a", 1.0),
+                record("b", 2.0),
+                record("c", 3.0)
+            ]))
+        );
+        // Closed on another client: the removal reaches this one too.
+        assert_eq!(
+            live.apply("session:removed", json!({ "id": "b" })),
+            Change::Sessions
+        );
+        assert_eq!(
+            titles(&live),
+            fresh(json!([record("a", 1.0), record("c", 3.0)]))
+        );
+        assert_eq!(titles(&live)[1].1, "vorn 2");
+        assert_eq!(
+            live.apply("session:removed", json!({ "id": "b" })),
+            Change::Nothing
+        );
+    }
+
+    #[test]
+    fn a_carried_over_offer_takes_no_number_until_vornd_lists_it() {
+        let record = |id: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        let titles = |s: &Store| {
+            let mut t: Vec<(String, String)> = (s.sessions.iter())
+                .filter(|x| x.info.id != "old")
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        let mut phone = Store::default();
+        phone.take_sessions(json!([record("a", 2.0), record("b", 3.0)]));
+        let mut desktop = Store::default();
+        desktop.take_sessions(json!([record("a", 2.0), record("b", 3.0)]));
+        // Older than both, so it would sort first and push them along if it counted.
+        desktop.offer(
+            serde_json::from_value(record("old", 1.0)).unwrap(),
+            "stopped",
+        );
+        assert_eq!(titles(&desktop), titles(&phone));
+        assert_eq!(
+            desktop.session("old").map(Session::title).as_deref(),
+            Some("vorn")
+        );
+        // Resumed: vornd lists it under its id and it counts, as it does for the phone.
+        desktop.apply("session:created", record("old", 1.0));
+        phone.apply("session:created", record("old", 1.0));
+        let all = |s: &Store| {
+            let mut t: Vec<(String, String)> = s
+                .sessions
+                .iter()
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        assert_eq!(all(&desktop), all(&phone));
+        assert_eq!(
+            desktop.session("a").map(Session::title).as_deref(),
+            Some("vorn 2")
+        );
+    }
+
+    #[test]
+    fn a_shell_vornd_names_takes_no_number() {
+        let mut s = Store::default();
+        let agent = |id: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p/vorn", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        s.apply("session:created", agent("a", 1.0));
+        // A card's panel shell, as `shell:create` records it: named, in the same folder.
+        s.apply(
+            "session:created",
+            json!({ "id": "panel", "agentType": "shell", "projectName": "vorn",
+                    "projectPath": "/p/vorn", "displayName": "Shell 1", "status": "running",
+                    "createdAt": 2.0, "pid": 1.0 }),
+        );
+        s.apply("session:created", agent("b", 3.0));
+        let titles = |s: &Store| s.sessions.iter().map(Session::title).collect::<Vec<_>>();
+        assert_eq!(titles(&s), ["vorn", "Shell 1", "vorn 2"]);
+        s.remove("panel");
+        assert_eq!(titles(&s), ["vorn", "vorn 2"]);
     }
 
     #[test]

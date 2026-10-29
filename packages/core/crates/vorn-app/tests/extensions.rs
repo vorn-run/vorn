@@ -101,7 +101,13 @@ fn an_extension_pane_opens_from_the_card_menu() {
 
     open_menu(&mut shot, &mut app, &id);
     let labels = app.menu_labels(&shot.ui);
-    assert_eq!(labels[..2], ["Report", "Tail"], "panes come first");
+    let rename = labels.iter().position(|l| l == "Rename\u{2026}");
+    let panes = rename.map(|r| &labels[r + 1..r + 3]);
+    assert_eq!(
+        panes,
+        Some(&["Report".to_owned(), "Tail".to_owned()][..]),
+        "panes follow Rename: {labels:?}"
+    );
     shot.save(&mut app, "ext-menu");
     choose(&mut shot, &mut app, "Report");
     let url = shot.until(&mut app, "the page pane", |app, _| {

@@ -62,9 +62,8 @@ pub fn card_button(ui: &Ui, b: &CardButton<'_>, place: Place) -> El {
 /// The ids and shortcut labels a [`card_actions`] cluster reports with.
 pub struct CardActions<'a> {
     pub variant: CardVariant,
+    /// More actions: the folder, shell, browser and Rename live behind it.
     pub more: Id,
-    /// The session's pane buttons (Browse files, Terminals, ...), after More.
-    pub panes: &'a [CardButton<'a>],
     /// Only a grid card minimizes.
     pub minimize: Id,
     /// Expand on a grid card, Collapse on the stage.
@@ -76,15 +75,12 @@ pub struct CardActions<'a> {
     pub confirming: Option<(Id, Id)>,
 }
 
-/// `CardActionCluster`: More actions, the pane buttons, Minimize (grid
-/// cards only), Expand or Collapse, and Close with its confirmation,
-/// `gap-0.5`.
+/// `CardActionCluster`: Minimize (grid only), Expand or Collapse, Close, then More actions.
 pub fn card_actions(ui: &Ui, a: &CardActions<'_>) -> El {
     card_actions_with(ui, a, [])
 }
 
-/// [`card_actions`] with `extra` buttons after the pane buttons, where the
-/// card's browser and device toggles sit.
+/// [`card_actions`] with `extra` buttons first, where a card's device toggle sits.
 pub fn card_actions_with(ui: &Ui, a: &CardActions<'_>, extra: impl IntoIterator<Item = El>) -> El {
     let place = a.variant.tip_place();
     let button = |b: CardButton<'_>| card_button(ui, &b, place);
@@ -142,12 +138,14 @@ pub fn card_actions_with(ui: &Ui, a: &CardActions<'_>, extra: impl IntoIterator<
             danger: false,
         })
     });
-    let mut row = div().row().items_center().gap(2.0).shrink0().child(more);
-    for p in a.panes {
-        row = row.child(card_button(ui, p, place));
-    }
-    row.children(extra)
+    div()
+        .row()
+        .items_center()
+        .gap(2.0)
+        .shrink0()
+        .children(extra)
         .child_if(minimize)
         .child(button(toggle))
         .child(close)
+        .child(more)
 }

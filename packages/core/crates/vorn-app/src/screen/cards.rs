@@ -140,10 +140,9 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
     )
 }
 
-/// More actions, minimize on a grid card, expand or
-/// collapse, and close behind its confirmation.
+/// Minimize on a grid card, expand or collapse, close, then More actions with the rest.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
-    use crate::components::card::{card_actions_with, CardActions, CardButton, CardVariant};
+    use crate::components::card::{card_actions_with, CardActions, CardVariant};
     let sid = session.info.id.clone();
     let (variant, toggle, key) = if focused {
         (CardVariant::Focused, Act::Collapse, 'W')
@@ -156,24 +155,11 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             s.acts.on("confirm", Act::AskClose(String::new())),
         )
     });
-    let specs = super::side::header_buttons(s, session);
-    let side: Vec<CardButton<'_>> = specs
-        .iter()
-        .map(|(act, icon, label)| CardButton {
-            id: s.acts.on("card", act.clone()),
-            icon,
-            label,
-            tip: label,
-            shortcut: None,
-            danger: false,
-        })
-        .collect();
     card_actions_with(
         s.ui,
         &CardActions {
             variant,
             more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
-            panes: &side,
             minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
             toggle: s.acts.on("card", toggle),
             close: s.acts.on("card", Act::AskClose(sid)),
@@ -587,7 +573,7 @@ fn spine(s: &Screen<'_>, session: &Session) -> El {
 }
 
 /// The terminal beside a shell's spine, in a box that takes the
-/// right-click and the wheel. An agent's terminal fills the box, as today.
+/// right-click and the wheel; it draws `paint::INSET` in from either side.
 fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     let sid = session.info.id.as_str();
     let id = term_id(sid);
@@ -605,7 +591,7 @@ fn terminal(s: &Screen<'_>, i: usize, session: &Session) -> El {
     }
     let mut inner = div().row().grow().min_h(0.0);
     if session.is_shell() && intent::blocks_on(&s.st.points) {
-        inner = inner.child(spine(s, session)).child(div().w(8.0).shrink0());
+        inner = inner.child(spine(s, session));
     }
     let mut screen = custom(CARD_ID_BASE + i as u64).grow();
     let back = s.panes.get(sid).is_some_and(|v| v.back() > 0);

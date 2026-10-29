@@ -67,8 +67,7 @@ fn the_files_pane_browses_edits_finds_saves_and_pops_out() {
     shot.click(&mut app, card);
     shot.hover(&mut app, card);
 
-    let browse = wait(&mut shot, &mut app, "Button", "Browse files");
-    shot.click(&mut app, browse);
+    shot.card_menu(&mut app, &sid, "Show folder");
     let src = wait(&mut shot, &mut app, "TreeItem", "src");
     both(
         &mut shot,

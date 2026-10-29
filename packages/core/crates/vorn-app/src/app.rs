@@ -104,6 +104,10 @@ pub enum Shortcut {
     PaneResize(crate::flex::Side),
     /// Mod+Alt+=: every flexible pane back to an equal share.
     PaneEqualize,
+    /// Mod+Shift+O: the current card's folder shown or hidden.
+    Folder,
+    /// Mod+Shift+T: the current card's shells opened or closed.
+    Shells,
 }
 
 /// The global shortcuts. Escape is not one: it closes what is open, else a
@@ -119,6 +123,8 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
             "KeyD" => Some(Shortcut::Permission(false)),
             "ArrowUp" => Some(Shortcut::Prompt(true)),
             "ArrowDown" => Some(Shortcut::Prompt(false)),
+            "KeyO" => Some(Shortcut::Folder),
+            "KeyT" => Some(Shortcut::Shells),
             _ => None,
         };
     }
@@ -1352,11 +1358,7 @@ impl App {
         if self.store.session(&info.id).is_some() {
             return;
         }
-        let id = info.id.clone();
-        self.store.upsert(info);
-        if let Some(s) = self.store.sessions.iter_mut().find(|s| s.info.id == id) {
-            s.cause = Some(cause);
-        }
+        self.store.offer(info, cause);
     }
 
     fn visible_ids(&self) -> Vec<String> {
@@ -1510,6 +1512,8 @@ impl App {
             Shortcut::PaneFocus(_) | Shortcut::PaneResize(_) | Shortcut::PaneEqualize => {
                 self.flex_key(ui, s);
             }
+            Shortcut::Folder => self.side_key(ui, true),
+            Shortcut::Shells => self.side_key(ui, false),
         }
     }
 
@@ -2958,6 +2962,7 @@ impl App {
             if let Some(s) = self.store.sessions.iter_mut().find(|s| s.info.id == sid) {
                 s.info.display_name = Some(name.clone());
             }
+            self.store.number_titles();
             self.call(
                 Call::Toast(format!("Renamed to \"{name}\"")),
                 "terminal:rename",
@@ -3099,7 +3104,11 @@ impl App {
         }
         // The approve and deny keys exist once an agent has asked for permission.
         let s = shortcut(code, *m)
-            .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys);
+            .filter(|s| !matches!(s, Shortcut::Permission(_)) || self.st.permission_keys)
+            // An extension that binds the folder or shells key keeps it.
+            .filter(|s| {
+                !matches!(s, Shortcut::Folder | Shortcut::Shells) || !self.point_key(code, *m)
+            });
         if let Some(s) = s {
             self.run_shortcut(ui, s);
             return true;
@@ -3175,6 +3184,14 @@ impl App {
             return false;
         }
         true
+    }
+
+    /// Whether an extension's view or command is bound to this key.
+    fn point_key(&self, code: &str, m: u16) -> bool {
+        let points = &self.st.points;
+        (points.views().into_iter())
+            .chain(points.at(crate::points::kind::COMMANDS))
+            .any(|p| (p.key.as_deref()).is_some_and(|k| crate::points::key_hit(k, code, m, MOD())))
     }
 
     /// Whether a terminal holds the keyboard: typing reaches a card and no
@@ -3621,8 +3638,19 @@ impl App {
             ui.wake_at(now);
         } else {
             let n = rows.take(dy, phase, cell.h, route);
-            let col = ((x - r.x) * k / cell.w).floor().max(0.0);
-            let row = ((y - r.y) * k / cell.h).floor().max(0.0);
+            let screen = (self.term_boxes.get(&session).copied())
+                .unwrap_or_else(|| crate::ui::Rect::new(r.x * k, r.y * k, r.w * k, r.h * k));
+            let (cols, lines) = self
+                .views
+                .get(&session)
+                .map_or((1, 1), |v| (v.cols, v.rows));
+            let at = |p: f32, o: f32, size: f32, n: u16| {
+                ((p * k - o) / size)
+                    .floor()
+                    .clamp(0.0, f32::from(n.saturating_sub(1)))
+            };
+            let col = at(x, screen.x, cell.w, cols);
+            let row = at(y, screen.y, cell.h, lines);
             g.wheel_rows(&session, n, route, col, row);
         }
         self.wheel = Some((session, route, rows, now));
@@ -3724,12 +3752,14 @@ impl App {
             let sid = session.info.id.as_str();
             let split =
                 crate::log::split(&self.st.points, session, self.st.shells.get(sid)).is_some();
+            let (inner, cols, rows) = if split {
+                (*r, 0, 0)
+            } else {
+                paint::inset(*r, paint::inset_of(ui), (cell.w, cell.h))
+            };
             if !split {
                 if let Some(g) = &self.grid {
                     if !session.ended() {
-                        // Whole cells only; f32 to u16 saturates.
-                        let cols = (r.w / cell.w).floor() as u16;
-                        let rows = (r.h / cell.h).floor() as u16;
                         g.attach(
                             sid,
                             cols,
@@ -3779,15 +3809,15 @@ impl App {
                     _ => Vec::new(),
                 };
                 if ui.is_cells() {
-                    paint::pane_cells(ui, v, *r, caret);
+                    paint::pane_cells(ui, v, inner, caret);
                 } else {
                     // A screen not yet resized to a narrower box stays inside it.
-                    ui.scene.push_clip(*r);
-                    paint::pane(ui, v, *r, caret, pre, &sel, dy);
+                    ui.scene.push_clip(inner);
+                    paint::pane(ui, v, inner, caret, pre, &sel, dy);
                     ui.scene.pop_clip();
                 }
             }
-            self.term_boxes.insert(sid.to_owned(), *r);
+            self.term_boxes.insert(sid.to_owned(), inner);
         }
         self.paint_web(ui, laid);
         self.paint_video(ui, laid);
@@ -3908,6 +3938,16 @@ mod tests {
         assert_eq!(shortcut("KeyJ", MOD()), Some(Shortcut::ViewOptions));
         assert_eq!(shortcut("KeyB", MOD()), Some(Shortcut::Sidebar));
         assert_eq!(shortcut("F2", 0), Some(Shortcut::Rename));
+        assert_eq!(
+            shortcut("KeyO", MOD() | mods::SHIFT),
+            Some(Shortcut::Folder)
+        );
+        assert_eq!(
+            shortcut("KeyT", MOD() | mods::SHIFT),
+            Some(Shortcut::Shells)
+        );
+        // Off a Mac, Ctrl+Alt is AltGr typing a letter, not a shortcut.
+        assert_eq!(shortcut("KeyO", mods::CTRL | mods::ALT), None);
         assert_eq!(
             shortcut("Digit3", mods::ALT),
             Some(Shortcut::Filter(Filter::Waiting))

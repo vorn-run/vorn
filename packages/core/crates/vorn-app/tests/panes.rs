@@ -135,8 +135,8 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
     let mut shot = Shot::new();
     let sid = agent(&mut shot, &mut app);
 
-    // The globe opens an empty pane beside the terminal.
-    shot.click(&mut app, card(PaneAct::ToggleBrowser(sid.clone())));
+    // Open in browser opens an empty pane beside the terminal.
+    shot.card_menu(&mut app, &sid, "Open in browser");
     until_shown(&mut shot, &mut app, &sid, "about:blank");
     assert_eq!(app.st.bench.kinds(&sid), [PaneKind::Browser]);
     assert_eq!(tabs(&app, &sid), ["New tab"]);
@@ -187,8 +187,8 @@ fn the_browser_pane_opens_from_the_card_and_follows_the_agent() {
     assert!(went.is_object(), "{went}");
     until_shown(&mut shot, &mut app, &sid, "https://example.com/");
 
-    // The globe closes it again.
-    shot.click(&mut app, card(PaneAct::ToggleBrowser(sid.clone())));
+    // Close browser closes it again.
+    shot.card_menu(&mut app, &sid, "Close browser");
     shot.until(&mut app, "the pane closed", |app, _| {
         app.pump();
         app.st.bench.kinds(&sid).is_empty().then_some(())
@@ -204,7 +204,7 @@ fn uninstalled_the_browser_leaves_no_globe_and_refuses_its_calls() {
     add_project(&mut app, &v, "demo", json!({}));
     let mut shot = Shot::new();
     let sid = agent(&mut shot, &mut app);
-    shot.click(&mut app, card(PaneAct::ToggleBrowser(sid.clone())));
+    shot.card_menu(&mut app, &sid, "Open in browser");
     until_shown(&mut shot, &mut app, &sid, "about:blank");
 
     app.rpc()
@@ -214,11 +214,12 @@ fn uninstalled_the_browser_leaves_no_globe_and_refuses_its_calls() {
         app.pump();
         (app.st.points.loaded && app.st.bench.kinds(&sid).is_empty()).then_some(())
     });
-    shot.hover(&mut app, term_id(&sid));
+    let labels = shot.card_menu_entry(&mut app, &sid, |l| Some(l.to_vec()));
     assert!(
-        shot.labelled(&mut app, "Button", "Open browser").is_none(),
-        "no globe once it is uninstalled"
+        !labels.iter().any(|l| l.contains("browser")),
+        "no browser entry once it is uninstalled: {labels:?}"
     );
+    shot.send(&mut app, key("Escape", 0, None));
     let refused = app
         .rpc()
         .call("browser:listTabs", json!({ "sessionId": sid }))

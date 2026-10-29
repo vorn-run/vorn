@@ -54,7 +54,11 @@ pub fn shortcut_groups() -> Vec<(&'static str, Vec<(&'static str, String)>)> {
             vec![
                 ("New session", format!("{m}N")),
                 ("Rename session", "F2".to_owned()),
-            ],
+                ("Show or hide the folder", format!("{m}\u{21e7}O")),
+            ]
+            .into_iter()
+            .chain(super::SHELLS_KEY.then(|| ("Open or close shells", format!("{m}\u{21e7}T"))))
+            .collect(),
         ),
         (
             "View",
