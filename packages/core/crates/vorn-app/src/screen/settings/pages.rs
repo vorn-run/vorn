@@ -7,7 +7,6 @@ use vorn_theme::{Appearance as Look, Chrome, Materials, Scheme, Theme};
 
 use super::{button, card, card_row, header, section, segmented, set, svg, toggle, Seg};
 use crate::act::{Act, Acts};
-use crate::copying;
 use crate::look;
 use crate::screen::{agent_icon, c, ico, white, Screen};
 use crate::settings::{self, sigil, SetAct, UpdateAction, UpdateStatus};
@@ -1437,66 +1436,6 @@ pub(super) fn general(s: &Screen<'_>) -> El {
             card_row(s, None, "Agent", Some(tip::AGENT), agent_chip(s)),
             card_row(s, None, "Shell", Some(tip::SHELL), shell_picker(s)),
         ]))
-        .child(section("Clipboard from programs"))
-        .child(card(clipboard_rows(s)))
-}
-
-/// What a program in a terminal may put on the clipboard: this machine, then
-/// one row per remote host.
-fn clipboard_rows(s: &Screen<'_>) -> Vec<El> {
-    let choice = |key: &str, fallback: &str| {
-        let chosen = defaults(s)
-            .and_then(|d| d.get(key))
-            .and_then(Value::as_str)
-            .unwrap_or(fallback);
-        let segs = copying::OPTIONS
-            .iter()
-            .map(|&(label, v)| Seg {
-                label,
-                icon: None,
-                act: seg_act(key, format!("\"{v}\"")),
-                on: chosen == v,
-                disabled: false,
-                tip: None,
-            })
-            .collect();
-        segmented(s, key, segs, 12.0)
-    };
-    let mut rows = vec![card_row(
-        s,
-        None,
-        "This machine",
-        Some("What a program in a terminal on this machine may put on your clipboard. A copy from a card you are not typing into says so."),
-        choice(copying::LOCAL_KEY, "allow"),
-    )];
-    for host in s
-        .store
-        .config
-        .get("remoteHosts")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let field = |k: &str| host.get(k).and_then(Value::as_str).unwrap_or_default();
-        let (id, name) = (field("id"), field("label"));
-        if id.is_empty() {
-            continue;
-        }
-        let name = if name.is_empty() {
-            field("hostname")
-        } else {
-            name
-        };
-        let tip = format!("What a program on {name} may put on your clipboard.");
-        rows.push(card_row(
-            s,
-            None,
-            name,
-            Some(&tip),
-            choice(&copying::host_key(id), "ask"),
-        ));
-    }
-    rows
 }
 
 /// The agent new sessions start with: the stored one, else the first.

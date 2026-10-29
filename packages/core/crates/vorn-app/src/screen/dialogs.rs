@@ -544,7 +544,6 @@ pub(super) fn dialog(s: &Screen<'_>) -> Option<El> {
         Dialog::GitCommit => super::tasks::commit(s, super::tasks::diff::Scope::Session),
         Dialog::Ask => super::side::ask(s),
         Dialog::Paste => paste(s)?,
-        Dialog::ProgramCopy => program_copy(s)?,
         Dialog::Output => super::tasks::output(s),
         Dialog::RunPrompt | Dialog::Missed | Dialog::TurnOn(_) => super::workflows::dialog(s)?,
         Dialog::GateReview => super::gates::review(s)?,
@@ -572,24 +571,6 @@ fn paste(s: &Screen<'_>) -> Option<El> {
         Some("The program runs each line as it arrives."),
         ("Paste", Act::ConfirmPaste(true)),
         Act::ConfirmPaste(false),
-    ))
-}
-
-/// "Let it copy?" before a program's text goes on the clipboard.
-fn program_copy(s: &Screen<'_>) -> Option<El> {
-    let p = s.st.program_copy.as_ref()?;
-    let title = format!("Let {} copy to the clipboard?", p.who);
-    let info = format!(
-        "A program there wants to put {} on your clipboard. Settings \u{203a} General sets what each place may do.",
-        crate::copying::size(&p.text)
-    );
-    Some(super::side::alert(
-        s,
-        "program-copy",
-        &title,
-        Some(&info),
-        ("Copy", Act::ConfirmProgramCopy(true)),
-        Act::ConfirmProgramCopy(false),
     ))
 }
 

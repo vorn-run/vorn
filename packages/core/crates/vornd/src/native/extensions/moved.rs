@@ -38,13 +38,30 @@ const MOVED: &[(&str, &str, &str)] = &[
 ];
 
 /// Settings nothing reads: Command Blocks is the Blocks extension's own
-/// switch, and updates always download.
+/// switch, updates always download and programs may always copy.
 const GONE: &[&str] = &[
     "domBlockRendering",
     "keepSessionsRunning",
     "enableHoverPreview",
     "updateAutoDownload",
+    "clipboardFromPrograms",
 ];
+
+/// Prefix of the per-remote-host clipboard choices, gone with the one above.
+const GONE_PREFIX: &str = "clipboardFromHost:";
+
+/// The `defaults` keys among `stored` to drop: moved or gone.
+fn dropped(stored: &Map<String, Value>) -> Vec<&str> {
+    stored
+        .keys()
+        .map(String::as_str)
+        .filter(|key| {
+            MOVED.iter().any(|(moved, ..)| moved == key)
+                || GONE.contains(key)
+                || key.starts_with(GONE_PREFIX)
+        })
+        .collect()
+}
 
 /// Notification settings nothing reads: errors, a sound switch and a volume
 /// gave way to the system's sound.
@@ -113,12 +130,7 @@ pub fn migrate(native: &Native, router: &Router) {
             warn!(%err, "could not drop the notification settings nothing reads");
         }
     }
-    let dropped: Vec<&str> = MOVED
-        .iter()
-        .map(|(key, ..)| *key)
-        .chain(GONE.iter().copied())
-        .filter(|key| stored.contains_key(*key))
-        .collect();
+    let dropped = dropped(&stored);
     if dropped.is_empty() {
         return;
     }
@@ -168,6 +180,26 @@ mod tests {
                     "headlessRetentionMinutes": "m30"
                 }
             })
+        );
+    }
+
+    #[test]
+    fn moved_and_gone_settings_are_dropped_and_others_kept() {
+        let stored = json!({
+            "taskViewMode": "list",
+            "clipboardFromPrograms": "ask",
+            "clipboardFromHost:h1": "off",
+            "theme": "dark",
+        });
+        let mut keys = dropped(stored.as_object().unwrap());
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "clipboardFromHost:h1",
+                "clipboardFromPrograms",
+                "taskViewMode"
+            ]
         );
     }
 

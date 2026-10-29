@@ -378,55 +378,28 @@ impl App {
         }
     }
 
-    /// The program-copy dialog's answer.
-    pub(super) fn confirm_program_copy(&mut self, ui: &mut Ui, copy: bool) {
-        let pending = self.st.program_copy.take();
-        if self.st.dialog == Some(Dialog::ProgramCopy) {
-            self.st.dialog = None;
-            ui.set_focus(None);
-        }
-        if let (true, Some(p)) = (copy, pending) {
-            ui.clipboard().set(&p.text);
-        }
-    }
-
-    /// A program's copy (OSC 52), as the place it runs in allows: onto the
-    /// clipboard, with a word when its card is not the one being typed into;
-    /// asked about first; or dropped.
-    fn program_copied(&mut self, ui: &mut Ui, session: &str, text: String) {
-        use crate::copying::{decide, policy, Decision};
+    /// A program's copy (OSC 52): onto the clipboard, with a word when its
+    /// card is not the one being typed into.
+    fn program_copied(&mut self, ui: &mut Ui, session: &str, text: &str) {
         let Some(s) = self.store.session(session) else {
             return;
         };
-        let host = s.info.remote_host_id.as_deref();
+        ui.clipboard().set(text);
+        if ui.window_focused() && self.typing_target().as_deref() == Some(session) {
+            return;
+        }
         let place = s
             .info
             .remote_host_label
             .as_deref()
-            .filter(|l| host.is_some() && !l.is_empty());
+            .filter(|l| s.info.remote_host_id.is_some() && !l.is_empty());
         let who = match place {
             Some(label) => format!("{} on {label}", s.title()),
             None => s.title(),
         };
-        let chosen = policy(self.store.config.get("defaults"), host);
-        let foreground = ui.window_focused() && self.typing_target().as_deref() == Some(session);
-        match decide(chosen, foreground) {
-            Decision::Copy => ui.clipboard().set(&text),
-            Decision::CopyAndTell => {
-                ui.clipboard().set(&text);
-                let size = crate::copying::size(&text);
-                self.st
-                    .toast(format!("{who} copied {size} to the clipboard"), false);
-            }
-            // A newer copy replaces one still asked about; another dialog open drops it.
-            Decision::Ask => {
-                if matches!(self.st.dialog, None | Some(Dialog::ProgramCopy)) {
-                    self.st.program_copy = Some(crate::state::ProgramCopy { who, text });
-                    self.st.dialog = Some(Dialog::ProgramCopy);
-                }
-            }
-            Decision::Drop => {}
-        }
+        let size = copy_size(text);
+        self.st
+            .toast(format!("{who} copied {size} to the clipboard"), false);
     }
 
     /// What vornd answered: a word to select, text to copy, a paste to confirm.
@@ -452,7 +425,7 @@ impl App {
                         self.st.dialog = Some(Dialog::Paste);
                     }
                 }
-                Reply::ProgramCopied { session, text } => self.program_copied(ui, &session, text),
+                Reply::ProgramCopied { session, text } => self.program_copied(ui, &session, &text),
             }
         }
     }
@@ -555,6 +528,17 @@ impl App {
             }
             _ => false,
         }
+    }
+}
+
+/// A copy's size for a sentence: `12 characters`, `1 line`, `3 lines`.
+fn copy_size(text: &str) -> String {
+    let lines = text.lines().count();
+    if lines > 1 {
+        format!("{lines} lines")
+    } else {
+        let n = text.chars().count();
+        format!("{n} character{}", if n == 1 { "" } else { "s" })
     }
 }
 
@@ -694,5 +678,12 @@ mod tests {
         let err = save_image(&link, "image.png", b"x").expect_err("a link is refused");
         assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn says_how_much_was_copied() {
+        assert_eq!(copy_size("a"), "1 character");
+        assert_eq!(copy_size("héllo"), "5 characters");
+        assert_eq!(copy_size("a\nb\nc"), "3 lines");
     }
 }

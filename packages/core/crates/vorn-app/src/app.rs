@@ -2331,7 +2331,6 @@ impl App {
             Act::Paste(id) => self.paste_clipboard(ui, &id),
             Act::CopySelection(id) => self.copy_selection(&id),
             Act::ConfirmPaste(run) => self.confirm_paste(ui, run),
-            Act::ConfirmProgramCopy(copy) => self.confirm_program_copy(ui, copy),
             Act::ScrollToBottom(id) => self.return_to_live(&id),
             Act::ScrollPage(id, up) => {
                 if let Some(v) = self.views.get(&id) {
@@ -3072,12 +3071,6 @@ impl App {
             if self.st.dialog == Some(Dialog::Paste) && matches!(code.as_str(), "Escape" | "Enter")
             {
                 self.confirm_paste(ui, code == "Enter");
-                return true;
-            }
-            if self.st.dialog == Some(Dialog::ProgramCopy)
-                && matches!(code.as_str(), "Escape" | "Enter")
-            {
-                self.confirm_program_copy(ui, code == "Enter");
                 return true;
             }
         }
