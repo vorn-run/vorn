@@ -1394,6 +1394,7 @@ export interface ServerNotifications {
   'session:created': TerminalSession
   'session:updated': TerminalSession
   'session:reordered': string[]
+  'session:removed': { id: string }
   'permission:requested': PermissionRequest
   'permission:closed': { requestId: string; terminalId: string }
   'headless:data': { id: string; data: string }

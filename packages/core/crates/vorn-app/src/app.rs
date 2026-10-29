@@ -976,6 +976,12 @@ impl App {
                     if method == "workflow:changed" {
                         self.wf_files();
                     }
+                    if method == "session:removed" {
+                        let id = params.get("id").and_then(Value::as_str);
+                        if let (Some(g), Some(id)) = (&self.grid, id) {
+                            g.detach(id);
+                        }
+                    }
                     let before = self.store.workspace().to_owned();
                     // A read running may predate these rows, and rows may predate the app's
                     // own writes: either way the list is read again once both have landed.
@@ -1309,7 +1315,6 @@ impl App {
             s.cause = None;
             s.exited = None;
         }
-        self.store.number_titles();
         self.views.remove(&id);
         if bound {
             self.st.toast(
@@ -1364,7 +1369,6 @@ impl App {
         if let Some(s) = self.store.sessions.iter_mut().find(|s| s.info.id == id) {
             s.cause = Some(cause);
         }
-        self.store.number_titles();
     }
 
     fn visible_ids(&self) -> Vec<String> {

@@ -388,7 +388,10 @@ impl Told {
             }
             Some("remove") if kind == Some("terminal") => {
                 if let Some(id) = note.get("id").and_then(Value::as_str) {
-                    self.terminals.remove(id);
+                    if self.terminals.remove(id) {
+                        // Every client drops it, not only the one that closed it.
+                        native.broadcast("session:removed", json!({ "id": id }));
+                    }
                     self.statuses.remove(id);
                     self.terminal_exited(native, id, Value::Null);
                 }
@@ -549,7 +552,32 @@ mod tests {
             &json!({ "op": "remove", "kind": "terminal", "id": "t" }),
         );
         t.note(&fed.native, &fed.registry, &upsert);
-        assert_eq!(told(&mut rx)[0]["method"], json!("session:created"));
+        let methods: Vec<Value> = told(&mut rx).iter().map(|n| n["method"].clone()).collect();
+        assert_eq!(
+            methods[..2],
+            [json!("session:removed"), json!("session:created")]
+        );
+    }
+
+    #[test]
+    fn tells_every_client_a_closed_terminal_is_gone_once() {
+        let fed = fed();
+        let mut rx = fed.notes();
+        let mut t = Told::default();
+        let upsert = json!({ "op": "upsert", "kind": "terminal", "record": { "id": "t", "status": "running" } });
+        let remove = json!({ "op": "remove", "kind": "terminal", "id": "t" });
+        t.note(&fed.native, &fed.registry, &upsert);
+        told(&mut rx);
+        t.note(&fed.native, &fed.registry, &remove);
+        t.note(&fed.native, &fed.registry, &remove);
+        let removed: Vec<Value> = told(&mut rx)
+            .into_iter()
+            .filter(|n| n["method"] == "session:removed")
+            .collect();
+        assert_eq!(
+            removed,
+            [json!({ "method": "session:removed", "params": { "id": "t" } })]
+        );
     }
 
     #[tokio::test]

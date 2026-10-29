@@ -22,6 +22,7 @@ pub const TOPICS: &[&str] = &[
     "session:created",
     "session:updated",
     "session:reordered",
+    "session:removed",
     "terminal:exit",
     "config:changed",
     "layout:opened",
@@ -371,10 +372,10 @@ impl Store {
         self.number_titles();
     }
 
-    /// Numbers each project's live unnamed sessions by creation (then id) from vornd's records alone, so every client agrees.
+    /// Numbers each project's unnamed sessions by creation (then id) from vornd's records alone, so every client agrees.
     pub fn number_titles(&mut self) {
         let mut order: Vec<usize> = (0..self.sessions.len())
-            .filter(|&i| self.sessions[i].own_name().is_none() && !self.sessions[i].ended())
+            .filter(|&i| self.sessions[i].own_name().is_none())
             .collect();
         order.sort_by(|&a, &b| {
             let (a, b) = (&self.sessions[a].info, &self.sessions[b].info);
@@ -421,6 +422,13 @@ impl Store {
                 self.number_titles();
                 Change::Sessions
             }
+            "session:removed" => match params.get("id").and_then(Value::as_str) {
+                Some(id) if self.session(id).is_some() => {
+                    self.remove(id);
+                    Change::Sessions
+                }
+                _ => Change::Nothing,
+            },
             "terminal:exit" => {
                 let Some(id) = params.get("id").and_then(Value::as_str) else {
                     return Change::Nothing;
@@ -429,7 +437,6 @@ impl Store {
                     return Change::Nothing;
                 };
                 s.exited = Some(params.get("exitCode").and_then(Value::as_i64).unwrap_or(0));
-                self.number_titles();
                 Change::Exited(id.to_owned())
             }
             "workflow:runUpdated" => {
@@ -740,19 +747,72 @@ mod tests {
     }
 
     #[test]
-    fn an_ended_session_gives_up_its_number() {
-        let mut s = Store::default();
+    fn a_long_connected_store_numbers_as_a_fresh_one_at_every_step() {
+        let record = |id: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        let titles = |s: &Store| {
+            let mut t: Vec<(String, String)> = s
+                .sessions
+                .iter()
+                .map(|x| (x.info.id.clone(), x.title()))
+                .collect();
+            t.sort();
+            t
+        };
+        let fresh = |rows: Value| {
+            let mut s = Store::default();
+            s.take_sessions(rows);
+            titles(&s)
+        };
+        let ended = |id: &str, at: f64| {
+            let mut r = record(id, at);
+            r["ended"] = json!(true);
+            r
+        };
+        let mut live = Store::default();
         for (id, at) in [("a", 1.0), ("b", 2.0), ("c", 3.0)] {
-            s.apply(
-                "session:created",
-                json!({ "id": id, "agentType": "claude", "projectName": "vorn",
-                        "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 }),
-            );
+            live.apply("session:created", record(id, at));
         }
-        // Another client closed `a`: this one only hears it exit, and numbers as a fresh one would.
-        s.apply("terminal:exit", json!({ "id": "a", "exitCode": 0 }));
-        let titles = |s: &Store| s.sessions.iter().map(Session::title).collect::<Vec<_>>();
-        assert_eq!(titles(&s), ["vorn", "vorn", "vorn 2"]);
+        assert_eq!(
+            titles(&live),
+            fresh(json!([
+                record("a", 1.0),
+                record("b", 2.0),
+                record("c", 3.0)
+            ]))
+        );
+        // `a` ends: vornd keeps listing it, marked ended.
+        live.apply("terminal:exit", json!({ "id": "a", "exitCode": 0 }));
+        assert_eq!(
+            titles(&live),
+            fresh(json!([ended("a", 1.0), record("b", 2.0), record("c", 3.0)]))
+        );
+        // Resumed elsewhere under its id: only an update arrives.
+        live.apply("session:updated", record("a", 1.0));
+        assert_eq!(
+            titles(&live),
+            fresh(json!([
+                record("a", 1.0),
+                record("b", 2.0),
+                record("c", 3.0)
+            ]))
+        );
+        // Closed on another client: the removal reaches this one too.
+        assert_eq!(
+            live.apply("session:removed", json!({ "id": "b" })),
+            Change::Sessions
+        );
+        assert_eq!(
+            titles(&live),
+            fresh(json!([record("a", 1.0), record("c", 3.0)]))
+        );
+        assert_eq!(titles(&live)[1].1, "vorn 2");
+        assert_eq!(
+            live.apply("session:removed", json!({ "id": "b" })),
+            Change::Nothing
+        );
     }
 
     #[test]

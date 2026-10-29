@@ -1904,6 +1904,7 @@ export const IPC = {
   SESSION_CREATED: 'session:created',
   SESSION_UPDATED: 'session:updated',
   SESSION_REORDERED: 'session:reordered',
+  SESSION_REMOVED: 'session:removed',
   TERMINAL_RENAME: 'terminal:rename-session',
   TERMINAL_REORDER: 'terminal:reorder-sessions',
   TERMINAL_SET_GROUP: 'terminal:set-group',
