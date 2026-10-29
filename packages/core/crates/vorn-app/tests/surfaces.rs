@@ -541,8 +541,7 @@ fn cards_minimize_to_the_dock_expand_and_switch_views() {
     let pill = control("dock", Act::ToggleMinimized(a.clone()));
 
     // Minimize leaves the grid for a pill in the top bar.
-    shot.hover(&mut app, term_id(&a));
-    shot.click(&mut app, control("card", Act::ToggleMinimized(a.clone())));
+    shot.card_menu(&mut app, &a, "Minimize");
     assert!(app.st.minimized.contains(&a));
     assert!(shot.ui.rect_of(term_id(&a)).is_none());
     assert!(shot.ui.rect_of(pill).is_some());
