@@ -8,7 +8,8 @@
 //! Keys the terminal cannot send as the window's shortcuts: Alt stands in
 //! for the command key (Alt+1..9 jump to a session, Alt+[ and Alt+] cycle,
 //! Alt+B shows or hides the sidebar, Alt+K opens the palette, Alt+T and
-//! Alt+S switch to Tasks and Sessions, Alt+Shift+W to Workflows), and
+//! Alt+S switch to Tasks and Sessions, Alt+Shift+W to Workflows, Alt+Shift+O
+//! and Alt+Shift+T show a card's folder and shells), and
 //! Ctrl+\ detaches (the sessions keep running in vornd).
 
 use std::collections::VecDeque;
@@ -161,7 +162,7 @@ fn route(input: Input) -> Key {
     ];
     let ours =
         OURS.contains(&code.as_str()) || code.strip_prefix("Digit").is_some_and(|d| d != "0");
-    let shifted = matches!(code.as_str(), "KeyW" | "KeyA" | "KeyD");
+    let shifted = matches!(code.as_str(), "KeyW" | "KeyA" | "KeyD" | "KeyO" | "KeyT");
     let pane = code.starts_with("Arrow") || code == "Equal";
     let chord = match m {
         mods::ALT if ours => MOD(),
@@ -321,6 +322,10 @@ mod tests {
         assert_eq!(
             route(key("KeyW", mods::ALT | mods::SHIFT)),
             Key::App(key("KeyW", MOD() | mods::SHIFT))
+        );
+        assert_eq!(
+            route(key("KeyT", mods::ALT | mods::SHIFT)),
+            Key::App(key("KeyT", MOD() | mods::SHIFT))
         );
         assert_eq!(
             route(key("KeyK", mods::ALT | mods::SHIFT)),

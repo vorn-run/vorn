@@ -307,7 +307,7 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         .clone()
         .filter(|_| info.is_worktree == Some(true));
     // The header's folder, shell and browser buttons, then Rename, each with its key.
-    let keyed = |key: char| format!("{}{key}", super::mod_alt_label());
+    let keyed = |key: char| format!("{}\u{21e7}{key}", super::mod_label());
     let mut items: Vec<Item> = Vec::new();
     for (act, icon, label, key) in super::side::pane_entries(s, session) {
         let mut it = Item::new(icon, label, act);

@@ -775,7 +775,7 @@ pub(super) fn alert(
         .child(panel)
 }
 
-/// The card menu's folder and shells entries: act, icon, label and their Mod+Alt letter.
+/// The card menu's folder and shells entries: act, icon, label and their Mod+Shift letter.
 pub(super) fn pane_entries(
     s: &Screen<'_>,
     session: &Session,

@@ -104,9 +104,9 @@ pub enum Shortcut {
     PaneResize(crate::flex::Side),
     /// Mod+Alt+=: every flexible pane back to an equal share.
     PaneEqualize,
-    /// Mod+Alt+O: the current card's folder shown or hidden.
+    /// Mod+Shift+O: the current card's folder shown or hidden.
     Folder,
-    /// Mod+Alt+T: the current card's shells opened or closed.
+    /// Mod+Shift+T: the current card's shells opened or closed.
     Shells,
 }
 
@@ -123,16 +123,13 @@ pub fn shortcut(code: &str, m: u16) -> Option<Shortcut> {
             "KeyD" => Some(Shortcut::Permission(false)),
             "ArrowUp" => Some(Shortcut::Prompt(true)),
             "ArrowDown" => Some(Shortcut::Prompt(false)),
+            "KeyO" => Some(Shortcut::Folder),
+            "KeyT" => Some(Shortcut::Shells),
             _ => None,
         };
     }
-    if only(MOD() | mods::ALT) {
-        match code {
-            "Equal" => return Some(Shortcut::PaneEqualize),
-            "KeyO" => return Some(Shortcut::Folder),
-            "KeyT" => return Some(Shortcut::Shells),
-            _ => {}
-        }
+    if only(MOD() | mods::ALT) && code == "Equal" {
+        return Some(Shortcut::PaneEqualize);
     }
     for (with, make) in [
         (
@@ -3945,8 +3942,16 @@ mod tests {
         assert_eq!(shortcut("KeyJ", MOD()), Some(Shortcut::ViewOptions));
         assert_eq!(shortcut("KeyB", MOD()), Some(Shortcut::Sidebar));
         assert_eq!(shortcut("F2", 0), Some(Shortcut::Rename));
-        assert_eq!(shortcut("KeyO", MOD() | mods::ALT), Some(Shortcut::Folder));
-        assert_eq!(shortcut("KeyT", MOD() | mods::ALT), Some(Shortcut::Shells));
+        assert_eq!(
+            shortcut("KeyO", MOD() | mods::SHIFT),
+            Some(Shortcut::Folder)
+        );
+        assert_eq!(
+            shortcut("KeyT", MOD() | mods::SHIFT),
+            Some(Shortcut::Shells)
+        );
+        // Off a Mac, Ctrl+Alt is AltGr typing a letter, not a shortcut.
+        assert_eq!(shortcut("KeyO", mods::CTRL | mods::ALT), None);
         assert_eq!(
             shortcut("Digit3", mods::ALT),
             Some(Shortcut::Filter(Filter::Waiting))

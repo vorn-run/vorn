@@ -92,7 +92,24 @@ impl App {
 
     /// Before a frame: the panes Files lists, its codes kept in step with
     /// the edits they hold, and what is left of the dead sessions' panes.
+    /// Tells the store which shells the panels hold, so their titles take no number.
+    fn hold_panel_shells(&mut self) {
+        let panels = &self.st.side.saved.panels;
+        let mut shells = panels.values().flat_map(|p| &p.terminals);
+        let held = &self.store.held;
+        let same = panels.values().map(|p| p.terminals.len()).sum::<usize>() == held.len()
+            && shells.all(|t| held.contains(t));
+        if !same {
+            let held = panels
+                .values()
+                .flat_map(|p| p.terminals.iter().cloned())
+                .collect();
+            self.store.hold(held);
+        }
+    }
+
     pub(super) fn panes_tick(&mut self, ui: &mut Ui) {
+        self.hold_panel_shells();
         let live: HashSet<&str> = self
             .store
             .sessions
@@ -336,7 +353,7 @@ impl App {
         }
     }
 
-    /// Mod+Alt+O or T: the current card's folder or shells, when its More menu offers them.
+    /// Mod+Shift+O or T: the current card's folder or shells, when its More menu offers them.
     pub(super) fn side_key(&mut self, ui: &mut Ui, folder: bool) {
         let Some(s) = self.current().and_then(|id| self.store.session(&id)) else {
             return;

@@ -358,15 +358,6 @@ pub(crate) fn alt_label() -> &'static str {
     }
 }
 
-/// The modifier with Alt, in the platform's order: ⌥⌘ on a Mac, Ctrl+Alt+ elsewhere.
-pub(crate) fn mod_alt_label() -> &'static str {
-    if crate::ui::mods::mac() {
-        "\u{2325}\u{2318}"
-    } else {
-        "Ctrl+Alt+"
-    }
-}
-
 /// The modifier the shortcuts use: ⌘ on a Mac, Ctrl elsewhere.
 pub(crate) fn mod_label() -> &'static str {
     if crate::ui::mods::mac() {

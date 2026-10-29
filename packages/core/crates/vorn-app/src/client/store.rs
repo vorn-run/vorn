@@ -146,6 +146,8 @@ pub struct Store {
     /// Whether vornd has said which sessions run: asked after connecting, since
     /// it waits for the session holder while vornd starts.
     pub sessions_known: bool,
+    /// The shells a card's panel holds: off the grid, so left out of [`Store::number_titles`].
+    pub held: HashSet<String>,
     /// The agents a session can start, from their adapters.
     pub agents: crate::agents::Agents,
     /// Sessions taken off the screen, whose updates still on their way are
@@ -374,7 +376,10 @@ impl Store {
     /// Numbers each project's unnamed sessions by creation, so no two cards share a title.
     pub fn number_titles(&mut self) {
         let mut order: Vec<usize> = (0..self.sessions.len())
-            .filter(|&i| self.sessions[i].own_name().is_none())
+            .filter(|&i| {
+                let s = &self.sessions[i];
+                s.own_name().is_none() && !self.held.contains(&s.info.id)
+            })
             .collect();
         order.sort_by(|&a, &b| {
             let (a, b) = (&self.sessions[a].info, &self.sessions[b].info);
@@ -388,6 +393,14 @@ impl Store {
             if prev.info.project_name == i.info.project_name {
                 self.sessions[pair[1]].ordinal = prev.ordinal + 1;
             }
+        }
+    }
+
+    /// Takes `held` as the panels' shells, numbering the titles again when it changed.
+    pub fn hold(&mut self, held: HashSet<String>) {
+        if held != self.held {
+            self.held = held;
+            self.number_titles();
         }
     }
 
@@ -708,6 +721,24 @@ mod tests {
         assert_eq!(titles(&s), ["vorn", "docs", "journey", "vorn 2"]);
         s.remove("b");
         assert_eq!(titles(&s), ["docs", "journey", "vorn"]);
+    }
+
+    #[test]
+    fn a_shell_a_panel_holds_takes_no_number() {
+        let mut s = Store::default();
+        let make = |id: &str, at: f64| {
+            json!({ "id": id, "agentType": "claude", "projectName": "vorn",
+                    "projectPath": "/p", "status": "running", "createdAt": at, "pid": 1.0 })
+        };
+        s.apply("session:created", make("a", 1.0));
+        s.apply("session:created", make("panel", 2.0));
+        s.apply("session:created", make("b", 3.0));
+        s.hold(HashSet::from(["panel".to_owned()]));
+        let titles = |s: &Store| s.sessions.iter().map(Session::title).collect::<Vec<_>>();
+        assert_eq!(titles(&s), ["vorn", "vorn", "vorn 2"]);
+        // Closing the panel puts its shell back in the count.
+        s.hold(HashSet::new());
+        assert_eq!(titles(&s), ["vorn", "vorn 2", "vorn 3"]);
     }
 
     #[test]
