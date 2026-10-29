@@ -481,8 +481,8 @@ pub struct State {
     pub grids: std::collections::BTreeMap<String, crate::flex::Grid>,
     /// The pane a new session splits in the flexible grid: the last selected one.
     pub flex_anchor: Option<String>,
-    /// A split asked for: the card the next new one goes beside, and which way.
-    pub flex_split: Option<(String, crate::flex::Dir)>,
+    /// Each split's new session: the card it goes beside, and which way.
+    pub flex_split: std::collections::HashMap<String, (String, crate::flex::Dir)>,
     /// The flexible divider being dragged, until it is let go.
     pub flex_drag: Option<crate::flex::Path>,
     /// A layout just set the tree: the workspace's other cards go beside it, not into it.

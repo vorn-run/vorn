@@ -112,13 +112,12 @@ impl App {
             self.set_columns(ui, -1);
         }
         let dir = if down { Dir::Col } else { Dir::Row };
-        self.st.flex_split = Some((id, dir));
         let cwd = if cwd.is_empty() {
             Value::Null
         } else {
             json!(cwd)
         };
-        self.call(Call::Created, "shell:create", cwd);
+        self.call(Call::Split { at: id, dir }, "shell:create", cwd);
     }
 
     /// An extension's toolbar item: its popover under it, or its call or window.
