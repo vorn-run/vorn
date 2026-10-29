@@ -311,7 +311,7 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
     let mut items: Vec<Item> = Vec::new();
     for (act, icon, label, key) in super::side::pane_entries(s, session) {
         let mut it = Item::new(icon, label, act);
-        it.shortcut = Some(keyed(key));
+        it.shortcut = key.map(keyed);
         items.push(it);
     }
     if let Some((act, label)) = super::panes::browser_entry(s, session) {

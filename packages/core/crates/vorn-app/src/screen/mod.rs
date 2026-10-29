@@ -358,6 +358,9 @@ pub(crate) fn alt_label() -> &'static str {
     }
 }
 
+/// Whether Mod+Shift+T reaches the app: a browser keeps it to reopen a tab.
+pub(crate) const SHELLS_KEY: bool = !cfg!(target_arch = "wasm32");
+
 /// The modifier the shortcuts use: ⌘ on a Mac, Ctrl elsewhere.
 pub(crate) fn mod_label() -> &'static str {
     if crate::ui::mods::mac() {

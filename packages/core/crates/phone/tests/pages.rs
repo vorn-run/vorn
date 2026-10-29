@@ -491,3 +491,48 @@ fn screens_build_within_budget_at_ten_thousand_tasks() {
         println!("{route}: {:?} per tree, {nodes} nodes", at.elapsed() / n);
     }
 }
+
+#[test]
+fn the_phone_numbers_duplicate_titles_as_the_desktop_does() {
+    let record = |id: &str, agent: &str, name: Option<&str>, at: f64| {
+        let mut r = json!({ "id": id, "agentType": agent, "projectName": "vorn",
+            "projectPath": "/src/vorn", "status": "running", "createdAt": at, "pid": 1 });
+        if let Some(name) = name {
+            r["displayName"] = json!(name);
+        }
+        r
+    };
+    let records = [
+        record("a", "acme", None, 1.0),
+        record("panel", "shell", Some("Shell 1"), 2.0),
+        record("b", "acme", None, 3.0),
+        record("c", "acme", None, 4.0),
+    ];
+    // The phone hears each session created; the desktop lists them at connect in vornd's grid order.
+    let mut phone = Model::new(Arc::new(|| {}));
+    for r in &records {
+        phone.store.apply("session:created", r.clone());
+    }
+    let mut desktop = vorn_app::client::Store::default();
+    desktop.take_sessions(json!([records[3], records[1], records[0], records[2]]));
+    let titles = |s: &vorn_app::client::Store| {
+        let mut t: Vec<(String, String)> = s
+            .sessions
+            .iter()
+            .map(|x| (x.info.id.clone(), x.title()))
+            .collect();
+        t.sort();
+        t
+    };
+    assert_eq!(titles(&phone.store), titles(&desktop));
+    assert_eq!(
+        titles(&desktop),
+        [
+            ("a", "vorn"),
+            ("b", "vorn 2"),
+            ("c", "vorn 3"),
+            ("panel", "Shell 1")
+        ]
+        .map(|(i, t)| (i.to_owned(), t.to_owned()))
+    );
+}

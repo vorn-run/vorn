@@ -775,11 +775,11 @@ pub(super) fn alert(
         .child(panel)
 }
 
-/// The card menu's folder and shells entries: act, icon, label and their Mod+Shift letter.
+/// The card menu's folder and shells entries: act, icon, label and their Mod+Shift letter, if any.
 pub(super) fn pane_entries(
     s: &Screen<'_>,
     session: &Session,
-) -> Vec<(Act, &'static str, &'static str, char)> {
+) -> Vec<(Act, &'static str, &'static str, Option<char>)> {
     let sid = session.info.id.clone();
     let mut out = Vec::new();
     if files_key(s, &sid).is_some() {
@@ -788,7 +788,7 @@ pub(super) fn pane_entries(
             pane(SideAct::ToggleFiles(sid.clone())),
             "folder-open",
             if open { "Hide folder" } else { "Show folder" },
-            'O',
+            Some('O'),
         ));
     }
     let has = s.st.side.saved.panels.contains_key(&sid);
@@ -801,7 +801,7 @@ pub(super) fn pane_entries(
             } else {
                 "New shell here"
             },
-            'T',
+            super::SHELLS_KEY.then_some('T'),
         ));
     }
     out
