@@ -20,8 +20,8 @@ pub const MINIMIZE: &str = "minimize";
 pub const EXPAND: &str = "expand";
 pub const CLOSE: &str = "close";
 
-/// How many buttons a card shows before the rest go into More.
-pub const DEFAULT_SHOWN: usize = 5;
+/// How many of the arranged buttons a card's header holds before More: the device, minimize, expand and close.
+pub const DEFAULT_SHOWN: usize = 4;
 
 /// One button as Customize lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,12 +42,13 @@ fn own(id: &str, icon: &str, title: &str) -> Entry {
     }
 }
 
-/// Every button a card can have, in the default order: the splits, the
-/// folder, expand and close (the five a card starts with), then minimize,
-/// the other panes, and what extensions add to the card's menu.
+/// Every button a card can have, in the default order: the device, minimize,
+/// expand and close (the header a card always had), then the splits, the
+/// folder, the other panes, and what extensions add to the card's menu.
 pub fn catalog(st: &crate::state::State) -> Vec<Entry> {
     let panes = super::customize::panes(st);
     let files = pane_id(crate::app::FILES, "files");
+    let device = pane_id(crate::panes::DEVICE, crate::panes::DEVICE_PANE);
     let pane = |id: &str| panes.iter().find(|p| p.id == id);
     let as_entry = |p: &super::customize::Pane| Entry {
         id: p.id.clone(),
@@ -55,10 +56,14 @@ pub fn catalog(st: &crate::state::State) -> Vec<Entry> {
         title: p.title.clone(),
         from: p.from.clone(),
     };
-    let mut out = vec![
+    let mut out: Vec<Entry> = pane(&device).map(as_entry).into_iter().collect();
+    out.extend([
+        own(MINIMIZE, "minus", "Minimize"),
+        own(EXPAND, "maximize-2", "Expand"),
+        own(CLOSE, "x", "Close"),
         own(SPLIT_RIGHT, "columns-2", "Split right"),
         own(SPLIT_DOWN, "rows-2", "Split down"),
-    ];
+    ]);
     // The folder keeps the outline icon it always had, whatever its pane declares.
     out.push(pane(&files).map_or_else(
         || own(&files, "folder-open", "Folder"),
@@ -67,10 +72,7 @@ pub fn catalog(st: &crate::state::State) -> Vec<Entry> {
             ..as_entry(p)
         },
     ));
-    out.push(own(EXPAND, "maximize-2", "Expand"));
-    out.push(own(CLOSE, "x", "Close"));
-    out.push(own(MINIMIZE, "minus", "Minimize"));
-    for p in panes.iter().filter(|p| p.id != files) {
+    for p in panes.iter().filter(|p| p.id != files && p.id != device) {
         out.push(as_entry(p));
     }
     for p in st.points.at(kind::MENUS) {
@@ -96,11 +98,14 @@ pub struct Button {
     pub label: String,
     pub shortcut: Option<String>,
     pub danger: bool,
+    /// On the header, being among the first arranged; in More otherwise.
+    pub header: bool,
 }
 
 /// The buttons `session`'s card has, in the arranged order, those hidden
 /// and those that do not apply to it (minimize and expand off the grid, a
-/// pane it cannot show) left out.
+/// pane it cannot show) left out. Which go on the header counts the
+/// arranged ones, so a button that does not apply leaves its place empty.
 pub fn buttons(s: &Screen<'_>, session: &Session, focused: bool) -> Vec<Button> {
     let st = s.st;
     let sid = session.info.id.clone();
@@ -118,10 +123,11 @@ pub fn buttons(s: &Screen<'_>, session: &Session, focused: bool) -> Vec<Button> 
         .collect();
     let args = serde_json::json!({ "sessionId": sid }).to_string();
     let mut out = Vec::new();
-    for id in st.arrange.card.shown(&ids) {
+    for (at, id) in st.arrange.card.shown(&ids).into_iter().enumerate() {
         let Some(e) = catalog.iter().find(|e| e.id == id) else {
             continue;
         };
+        let header = at < st.arrange.card_shown;
         let simple = |act: Act, label: &str, shortcut: Option<String>| Button {
             id: id.to_owned(),
             act,
@@ -129,6 +135,7 @@ pub fn buttons(s: &Screen<'_>, session: &Session, focused: bool) -> Vec<Button> 
             label: label.to_owned(),
             shortcut,
             danger: false,
+            header,
         };
         let b = match id {
             SPLIT_RIGHT | SPLIT_DOWN => {
@@ -211,9 +218,4 @@ pub fn buttons(s: &Screen<'_>, session: &Session, focused: bool) -> Vec<Button> 
         out.push(b);
     }
     out
-}
-
-/// How many buttons the card's header shows.
-pub fn shown(s: &Screen<'_>) -> usize {
-    s.st.arrange.card_shown
 }

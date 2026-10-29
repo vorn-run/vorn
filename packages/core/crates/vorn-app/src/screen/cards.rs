@@ -153,7 +153,6 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
     };
     let place = variant.tip_place();
     let all = super::card_buttons::buttons(s, session, focused);
-    let n = super::card_buttons::shown(s);
     // The device button keeps its own, which holds the simulator picker.
     let mut device = panes::card_buttons(s, session, variant);
     let mut row = div().row().items_center().gap(2.0).shrink0();
@@ -171,7 +170,7 @@ fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
             Tone::Danger,
         )
     };
-    for b in all.iter().take(n) {
+    for b in all.iter().filter(|b| b.header) {
         if let Some(at) = device.iter().position(|(id, _)| *id == b.id) {
             row = row.child(device.remove(at).1);
             continue;
