@@ -59,7 +59,14 @@ pub fn catalog(st: &crate::state::State) -> Vec<Entry> {
         own(SPLIT_RIGHT, "columns-2", "Split right"),
         own(SPLIT_DOWN, "rows-2", "Split down"),
     ];
-    out.push(pane(&files).map_or_else(|| own(&files, "folder-open", "Folder"), as_entry));
+    // The folder keeps the outline icon it always had, whatever its pane declares.
+    out.push(pane(&files).map_or_else(
+        || own(&files, "folder-open", "Folder"),
+        |p| Entry {
+            icon: Mark::kit("folder-open"),
+            ..as_entry(p)
+        },
+    ));
     out.push(own(EXPAND, "maximize-2", "Expand"));
     out.push(own(CLOSE, "x", "Close"));
     out.push(own(MINIMIZE, "minus", "Minimize"));
@@ -156,9 +163,12 @@ pub fn buttons(s: &Screen<'_>, session: &Session, focused: bool) -> Vec<Button> 
             },
             _ => {
                 if let Some(at) = panes.iter().position(|p| p.0 == id) {
-                    let (_, act, _, label, key) = panes.remove(at);
+                    let (_, act, icon, label, key) = panes.remove(at);
                     let key = key.map(|k| format!("{}\u{21e7}{k}", mod_label()));
-                    simple(act, label, key)
+                    Button {
+                        icon: Mark::kit(icon),
+                        ..simple(act, label, key)
+                    }
                 } else if id == pane_id(crate::panes::BROWSER, crate::panes::BROWSER_PANE) {
                     let Some((act, label)) = browser.clone() else {
                         continue;
