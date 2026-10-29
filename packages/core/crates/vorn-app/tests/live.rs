@@ -243,12 +243,11 @@ fn the_clipboard_pastes_into_a_terminal_and_copies_what_is_selected() {
     shot.until(&mut app, "the shell back from sleep", shows("after-9"));
 }
 
-/// A program's copy (OSC 52) lands on the clipboard where this machine's
-/// choice allows it, and waits on a dialog where the choice is to ask.
+/// A program's copy (OSC 52) always lands on the clipboard, and says so when
+/// its card is not the one being typed into.
 #[test]
 #[cfg(unix)]
-fn a_program_copies_to_the_clipboard_as_its_place_allows() {
-    use vorn_app::state::Dialog;
+fn a_program_always_copies_to_the_clipboard() {
     let Some(v) = TestVornd::start() else {
         return;
     };
@@ -266,20 +265,23 @@ fn a_program_copies_to_the_clipboard_as_its_place_allows() {
     // "hi" in base64; the typed line itself is never the copy.
     shot.type_line(&mut app, "printf '\\033]52;c;aGk=\\007'");
     assert_eq!(copied(&mut shot, &mut app, "the program's copy"), "hi");
+    assert!(
+        app.st.toasts.is_empty(),
+        "a copy from the typed-into card is quiet"
+    );
 
-    // The choice as Settings › General writes it.
-    app.store.config["defaults"]["clipboardFromPrograms"] = json!("ask");
+    // From a card not typed into, here in a window in the background: "hi3".
     shot.ui.clipboard().set("");
-    // "hi3".
-    shot.type_line(&mut app, "printf '\\033]52;c;aGkz\\007'");
-    shot.until(&mut app, "the copy asked about", |app, _| {
-        (app.st.dialog == Some(Dialog::ProgramCopy)).then_some(())
-    });
-    shot.save(&mut app, "program-copy");
-    assert_eq!(shot.ui.clipboard().get().unwrap_or_default(), "");
-    shot.send(&mut app, key("Enter", 0, Some("\r")));
-    assert_eq!(app.st.dialog, None);
-    assert_eq!(copied(&mut shot, &mut app, "the allowed copy"), "hi3");
+    shot.type_line(&mut app, "sleep 1; printf '\\033]52;c;aGkz\\007'");
+    shot.ui.set_window_focused(false);
+    assert_eq!(copied(&mut shot, &mut app, "the background copy"), "hi3");
+    assert!(
+        app.st
+            .toasts
+            .iter()
+            .any(|t| t.text.contains("copied 3 characters")),
+        "the background copy says so"
+    );
 }
 
 /// What the copy put on the clipboard, once it has; the caller empties it

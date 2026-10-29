@@ -298,8 +298,6 @@ pub enum Dialog {
     Ask,
     /// "Paste N lines?" before a paste the program could run line by line.
     Paste,
-    /// A program asks to put text on the clipboard (`State::program_copy`).
-    ProgramCopy,
     /// CommandPalette.
     Palette,
     /// Install…'s address or folder, and the sheet read before any extension installs or links.
@@ -312,14 +310,6 @@ pub enum Dialog {
     TurnOn(String),
     /// Settings › Remote Access's Add a device sheet.
     AddDevice,
-}
-
-/// Text a program asked to put on the clipboard, and who asked.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProgramCopy {
-    /// The card, and the remote host it runs on, as the dialog names them.
-    pub who: String,
-    pub text: String,
 }
 
 /// A toast in the bottom right.
@@ -524,8 +514,6 @@ pub struct State {
     pub confirm_close: Option<String>,
     /// A paste waiting on its confirm dialog: the session and the text.
     pub paste: Option<(String, String)>,
-    /// A program's copy waiting on its dialog.
-    pub program_copy: Option<ProgramCopy>,
     /// The terminal selection and the session it is in.
     pub sel: Option<(String, crate::select::Sel)>,
     /// The project whose delete asks first.
