@@ -13,6 +13,15 @@ use vorn_app::screen::term_id;
 use vorn_app::ui::{mods, Input, WheelPhase};
 use vorn_app::App;
 
+/// Waits for a new shell's prompt, so typing does not race its first draw.
+fn first_prompt(shot: &mut Shot, app: &mut App, id: &str) {
+    shot.until(app, "the shell's first prompt", |app, _| {
+        app.pane(id)
+            .filter(|p| !p.text().trim().is_empty())
+            .map(|_| ())
+    });
+}
+
 #[test]
 fn a_shell_opens_from_the_keyboard_and_takes_typing() {
     let Some(v) = TestVornd::start() else {
@@ -33,9 +42,7 @@ fn a_shell_opens_from_the_keyboard_and_takes_typing() {
     assert!(!app.composing(), "a card replaces the composer");
 
     // The frame attaches the card's terminal at the size of its box.
-    shot.until(&mut app, "the shell's first screen", |app, _| {
-        app.pane(&id).map(|_| ())
-    });
+    first_prompt(&mut shot, &mut app, &id);
     // The typed line, then the shell's answer on a line of its own.
     shot.type_line(&mut app, "echo vorn-42");
     let screen = shot.until(&mut app, "the shell's answer", |app, _| {
@@ -60,9 +67,7 @@ fn tab_and_its_variants_reach_a_focused_terminal() {
         app.pump();
         app.st.selected.clone()
     });
-    shot.until(&mut app, "the shell's first screen", |app, _| {
-        app.pane(&id).map(|_| ())
-    });
+    first_prompt(&mut shot, &mut app, &id);
     shot.type_line(&mut app, "stty -echo; cat -vt; stty echo");
     // cat has the terminal once the shell no longer echoes.
     std::thread::sleep(std::time::Duration::from_millis(500));
@@ -393,9 +398,7 @@ fn a_terminal_scrolls_its_history_by_the_pixel_and_typing_returns_live() {
         app.pump();
         app.st.selected.clone()
     });
-    shot.until(&mut app, "the shell's first screen", |app, _| {
-        app.pane(&id).map(|_| ())
-    });
+    first_prompt(&mut shot, &mut app, &id);
     let typed = Instant::now();
     shot.type_line(&mut app, "seq 1 5000; sleep 15; seq 7001 7040");
     shot.until(&mut app, "5000 lines, some in history", |app, _| {
@@ -631,9 +634,7 @@ fn a_terminal_shows_a_scrollbar_that_drags_pages_and_fades() {
         app.pump();
         app.st.selected.clone()
     });
-    shot.until(&mut app, "the shell's first screen", |app, _| {
-        app.pane(&id).map(|_| ())
-    });
+    first_prompt(&mut shot, &mut app, &id);
     shot.type_line(&mut app, "seq 1 3000");
     shot.until(&mut app, "3000 lines, most in history", |app, _| {
         app.pane(&id)
