@@ -154,11 +154,15 @@ impl Prefs {
         }
     }
 
-    /// The arrangements saved in `file`, else the defaults.
+    /// The arrangements saved in `file`, else the defaults; a top bar page kept under its old `views` key is read as a page.
     pub fn load(file: &Path) -> Prefs {
-        crate::keep::read(file)
+        let mut prefs: Prefs = crate::keep::read(file)
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let page = |k: &String| k.replacen("/views/", "/pages/", 1);
+        prefs.tabs.order = prefs.tabs.order.iter().map(page).collect();
+        prefs.tabs.hidden = prefs.tabs.hidden.iter().map(page).collect();
+        prefs
     }
 
     /// Writes them down; a failure costs only their survival past this launch.
@@ -267,7 +271,7 @@ mod tests {
         assert!(!Prefs::default().toolbar.is_shown(crate::toolbar::SPLIT));
         let mut p = Prefs::default();
         p.toolbar.move_to(&["view", "new"], "new", 0);
-        p.tabs.set_shown("vorn.tasks/views/tasks", false);
+        p.tabs.set_shown("vorn.tasks/pages/tasks", false);
         p.card.move_to(
             &["terminals", "vorn.browser/panes/browser"],
             "vorn.browser/panes/browser",
@@ -275,6 +279,15 @@ mod tests {
         );
         p.save(&f);
         assert_eq!(Prefs::load(&f), p);
+        let mut old = p.clone();
+        old.tabs.set_shown("vorn.tasks/pages/tasks", true);
+        old.tabs.set_shown("vorn.tasks/views/tasks", false);
+        old.save(&f);
+        assert_eq!(
+            Prefs::load(&f),
+            p,
+            "a page kept under its old key is still hidden"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }

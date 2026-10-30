@@ -139,7 +139,6 @@ pub(crate) mod tip {
     pub const LIGATURES: &str = "Joins symbols like != and -> into one shape";
     pub const GRID: &str = "Shows sessions side by side";
     pub const TABS: &str = "Shows one session at a time, with tabs to switch";
-    pub const LIST: &str = "Lists sessions beside the open one";
     pub const CARD_HEIGHT: &str = "Applies to cards in the Grid layout";
     #[cfg(target_os = "macos")]
     pub const LOGIN: &str = "Opens Vorn when you sign in to your Mac";
@@ -757,8 +756,7 @@ fn session_rows(s: &Screen<'_>) -> Vec<El> {
         .gap(8.0)
         .role(Role::RadioGroup, "Layout")
         .child(layout_tile(s, "grid", "Grid", layout))
-        .child(layout_tile(s, "tabs", "Tabs", layout))
-        .child(layout_tile(s, "list", "List", layout));
+        .child(layout_tile(s, "tabs", "Tabs", layout));
     let h = s.st.settings.row_height.round();
     let height = div()
         .row()
@@ -783,8 +781,7 @@ fn session_rows(s: &Screen<'_>) -> Vec<El> {
     ]
 }
 
-/// A layout drawn small: four cards, one card under tabs, or a list
-/// beside the chosen session.
+/// A layout drawn small: four cards, or one card under tabs.
 fn layout_tile(s: &Screen<'_>, key: &str, label: &str, chosen: &str) -> El {
     let block = |w: f32, h: f32, a: f32| div().size(w, h).rounded(2.0).bg(white(a));
     let pair = || {
@@ -814,23 +811,11 @@ fn layout_tile(s: &Screen<'_>, key: &str, label: &str, chosen: &str) -> El {
                     .child(block(24.0, 8.0, 0.1)),
             )
             .child(block(98.0, 46.0, 0.12)),
-        _ => pic
-            .row()
-            .child(
-                div()
-                    .col()
-                    .gap(3.0)
-                    .child(block(28.0, 8.0, 0.24))
-                    .child(block(28.0, 8.0, 0.1))
-                    .child(block(28.0, 8.0, 0.1))
-                    .child(block(28.0, 8.0, 0.1)),
-            )
-            .child(block(66.0, 58.0, 0.12)),
+        _ => pic.col().child(pair()).child(pair()),
     };
     let says = match key {
-        "grid" => tip::GRID,
         "tabs" => tip::TABS,
-        _ => tip::LIST,
+        _ => tip::GRID,
     };
     let act = seg_act("layoutMode", format!("\"{key}\""));
     tile(s, "layout", act, pic, label, chosen == key, false, says)

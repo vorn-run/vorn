@@ -987,23 +987,12 @@ fn point_groups(s: &Screen<'_>, p: &crate::points::Point) -> El {
     let mut order: Vec<usize> = (0..heads.len()).collect();
     order.sort_by_key(|&i| rank(&heads[i]));
     for i in order {
-        col = col.child(
-            div()
-                .row()
-                .items_center()
-                .gap(8.0)
-                .px(8.0)
-                .py(6.0)
-                .child(
-                    div().row().grow().min_w0().child(
-                        text(&heads[i], 13.0, c(look::GRAY_300))
-                            .line_height(19.5)
-                            .truncate()
-                            .role(Role::Heading, heads[i].as_str()),
-                    ),
-                )
-                .child(row_count(by[i].len(), 12.0)),
-        );
+        let key = crate::state::point_group_key(&p.key(), &heads[i]);
+        let folded = s.st.groups_folded.contains(&key);
+        col = col.child(point_heading(s, &key, &heads[i], by[i].len(), !folded));
+        if folded {
+            continue;
+        }
         let mut kids = div().col().ml(8.0);
         for x in &by[i] {
             kids = kids.child(session_row(s, x));
@@ -1011,6 +1000,63 @@ fn point_groups(s: &Screen<'_>, p: &crate::points::Point) -> El {
         col = col.child(kids);
     }
     col
+}
+
+/// A heading of an extension's grouping: a click selects it, which the grid and a card view follow; its chevron folds it.
+fn point_heading(s: &Screen<'_>, key: &str, head: &str, count: usize, open: bool) -> El {
+    let select = s
+        .acts
+        .on("sidebar-heading", Act::SideGroup(Some(key.to_owned())));
+    let fold = s
+        .acts
+        .on("sidebar-heading", Act::ToggleGroup(key.to_owned()));
+    let active =
+        s.st.side_selection.as_ref() == Some(&vorn_tree::view::Selection::Group(key.to_owned()));
+    let hot = s.ui.hovered(select) || s.ui.hovered(fold);
+    let fg = if active || hot {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_300)
+    };
+    let glyph = if open {
+        "chevron-down"
+    } else {
+        "chevron-right"
+    };
+    let chevron = div()
+        .id(fold)
+        .on(Action::Click)
+        .size(14.0, 14.0)
+        .center()
+        .shrink0()
+        .role(Role::Button, format!("Fold {head}"))
+        .expanded(open)
+        .child(ico(glyph, 12.0, 2.5, c(look::GRAY_500)));
+    div()
+        .id(select)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(8.0)
+        .px(8.0)
+        .py(6.0)
+        .rounded(6.0)
+        .bg(if active {
+            white(0.08)
+        } else {
+            white(0.0).mix(white(0.04), if hot { 1.0 } else { 0.0 })
+        })
+        .role(Role::Button, head)
+        .selected(active)
+        .child(chevron)
+        .child(
+            div()
+                .row()
+                .grow()
+                .min_w0()
+                .child(text(head, 13.0, fg).line_height(19.5).truncate().silent()),
+        )
+        .child(row_count(count, 12.0))
 }
 
 /// Its icon (a disclosure on hover), name and count, a

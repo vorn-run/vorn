@@ -152,7 +152,7 @@ selection, boards, and the parts a pane draws (below). A program answers the sam
 draws it on every client: the desktop, the web client, a terminal's cells
 (`surface.cells`) and the phone.
 
-Any contribution that draws says `tree = true`: a main view (`views`), a
+Any contribution that draws says `tree = true`: a top bar page (`pages`), a
 sidebar section, a card's badges and footer, a sidebar row's marks
 (`decorations`), a pane, the composer's strip, a shell's commands (`shell`),
 a card of its own (`cards`), a settings page, a window and a dialog. Each is asked for
@@ -305,18 +305,18 @@ a page at a time, windows them, drags them between columns and opens them.
 
 `examples/extensions/turns` draws a tree in every place, and
 `examples/extensions/agent-footer` a card footer. In vorn-run/extensions,
-Tasks (`tasks/`) and Workflows (`workflows/`) draw their main views this
+Tasks (`tasks/`) and Workflows (`workflows/`) draw their pages this
 way, Files (`files/`) its pane and cards, Shell blocks (`blocks/`) a
 shell's commands, the Browser (`browser/`) a session's tabs over its page,
 and the Device (`device/`) a session's simulator.
 
-## Top bar buttons
+## Top bar pages
 
-`[[contributes.views]]` adds a button to the top bar, after Sessions, that
-opens the extension's own main view, drawn from its tree:
+`[[contributes.pages]]` adds a button to the top bar, after Sessions, that
+opens the extension's own page, drawn from its tree:
 
 ```toml
-[[contributes.views]]
+[[contributes.pages]]
 id = "board"
 title = "Board"
 icon = "layout-grid"      # a Lucide icon name
@@ -337,6 +337,38 @@ through one of the extension's `bool` preferences (below): the button shows
 while any of them is on. Hidden, the view still opens from its key and from
 the command palette, which lists every view as "Open <title> View". Tasks
 and Workflows each offer "Show in the top bar", on by default, this way.
+
+## Card views
+
+`[[contributes.views]]` adds a way to arrange the session cards beside Grid
+and Tabs. The layout switcher in View options lists it under its chevron, and
+the palette as "Show Sessions as <title>". A declared view needs no program:
+
+```toml
+[[contributes.views]]
+id = "kanban"
+title = "Kanban"
+icon = "columns-3"
+columns = "status"   # status, project, worktree, groups, or <extension>/<grouping id>
+card = "mini"        # full, mini or line
+
+[contributes.views.by_status]   # started, printing, waiting, finished, idle
+finished = "line"
+```
+
+A full card is the grid's card. A mini card draws its terminal smaller,
+clipped to its newest rows, and never changes the session's size. A line card
+shows the status, the title and the last line the session printed. Dropping a
+card on another column moves its session only where the columns are your own
+groups; by status, project, worktree or an extension's grouping they follow
+the sessions and dragging moves nothing. An agent's request to use a tool
+shows over its card whatever its size, with Allow and Deny. A terminal's
+cells cannot draw mini cards, so there the sessions show as Grid with a line
+saying why. When the view's extension goes, the sessions show as Grid again.
+
+`tree = true` declares a view drawn from the extension's own tree instead,
+with `tile` a size only such a view draws; this build reads and checks it,
+and the switcher lists declared views only.
 
 ## Preferences
 
@@ -498,6 +530,21 @@ current, isGitRepo}`, under `git.read`.
 message}`: a step waits for a sign-in) and `workflow.ended` (`{runId,
 workflowId, workflow, outcome, steps}`, once per run, `outcome` one of
   `completed`, `failed`, `rejected`).
+
+### Sessions as cards: `session.activity` and the card fields
+
+`sessions.list` and `sessions.get` answer each session's `activity`
+(`started`, `printing`, `waiting`, `finished` or `idle`) and `printedAt`, when
+it last printed in epoch ms; with `lastLine: true`, also `lastLine`, the last
+line on its screen with anything on it, escape sequences taken out, at most
+200 characters. The event `session.activity` (`{sessionId, activity}`) says
+when a session starts, prints again after two quiet seconds, waits for a
+person or finishes; output alone never changes its status. A service hears it
+only with `sessions.events` in `declares.uses`.
+
+`sessions.input` is the permission to type into sessions. No other
+permission implies it, and the install sheet asks for it on a line of its
+own.
 
 ### `notifications.send`: notices through the OS
 

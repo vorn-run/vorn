@@ -135,7 +135,7 @@ fn tasks_view(v: &TestVornd) -> (App, Shot) {
 /// Waits for the board's tree, which Tasks answers once its component has started.
 fn board_drawn(shot: &mut Shot, app: &mut App) {
     shot.until(app, "the board's tree", |app, _| {
-        match app.st.points.trees.get("vorn.tasks/views/board") {
+        match app.st.points.trees.get("vorn.tasks/pages/board") {
             Some(Ok(_)) => Some(()),
             Some(Err(e)) => panic!("the board's tree cannot be drawn: {e:?}"),
             None => None,
@@ -830,7 +830,7 @@ fn a_session_working_on_a_task_shows_it_on_its_card_and_off_tasks_are_kept() {
     support::wait_for("the board gone", || {
         let mut ui = Ui::cells(&ui_config(1.0));
         app.frame(&mut ui, (1200.0, 800.0));
-        (app.st.points.loaded && app.st.points.find("vorn.tasks", "views", "board").is_none())
+        (app.st.points.loaded && app.st.points.find("vorn.tasks", "pages", "board").is_none())
             .then_some(())
     });
     assert_eq!(app.st.view, MainView::Sessions);

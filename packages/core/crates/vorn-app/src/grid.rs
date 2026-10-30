@@ -254,12 +254,31 @@ impl Grid {
     /// pixels, 0 when unknown) with up to `history` lines of scrollback,
     /// unless it is already.
     pub fn attach(&self, session: &str, cols: u16, rows: u16, cell: (u32, u32), history: u16) {
+        self.attach_sized(session, (cols.max(2), rows.max(1)), cell, history);
+    }
+
+    /// Attaches `session` reporting no viewport, so vornd never sizes it to this pane: a card drawn smaller or clipped.
+    /// A pane already attached with a viewport is attached again without one, so typing into it takes no stale size.
+    pub fn attach_unsized(&self, session: &str, cell: (u32, u32)) {
+        let sized = self.lock().pane(session).is_some_and(|p| p.size != (0, 0));
+        if sized {
+            self.detach(session);
+        }
+        self.attach_sized(session, (0, 0), cell, 0);
+    }
+
+    fn attach_sized(
+        &self,
+        session: &str,
+        (cols, rows): (u16, u16),
+        cell: (u32, u32),
+        history: u16,
+    ) {
         {
             let mut st = self.lock();
             if st.pane(session).is_some() {
                 return;
             }
-            let (cols, rows) = (cols.max(2), rows.max(1));
             st.client.attach(Attach {
                 session: session.to_owned(),
                 mode: AttachMode::Grid,
@@ -675,9 +694,11 @@ impl Grid {
                     match pane {
                         Some(p) => {
                             p.sid = Some(a.sid);
-                            // The card may have changed size while the attach was on its way.
+                            // The card may have changed size while the attach was on its way; an unsized one takes none.
                             p.sent = (p.size, p.cell);
-                            Self::send_size(&mut st.client, a.sid, p.size, p.cell);
+                            if p.size != (0, 0) {
+                                Self::send_size(&mut st.client, a.sid, p.size, p.cell);
+                            }
                         }
                         // Detached before vornd answered.
                         None => {

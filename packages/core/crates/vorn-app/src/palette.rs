@@ -276,7 +276,7 @@ fn extensions(st: &State) -> Vec<Entry> {
 pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
     let mut out = actions(store, m);
     // Every view, so one whose button its setting hides is still reached.
-    for p in st.points.views() {
+    for p in st.points.pages() {
         let about = p.description.as_deref().unwrap_or_default().to_lowercase();
         let words: Vec<&str> = about.split_whitespace().collect();
         let mut e = Entry::new(
@@ -289,6 +289,22 @@ pub fn commands(store: &Store, st: &State, m: &str, alt: &str) -> Vec<Entry> {
         .keys(&words);
         if let Some(k) = p.key.as_deref().filter(|k| !crate::app::built_in_key(k)) {
             e = e.shortcut(k.replace("Mod+", m).replace('+', ""));
+        }
+        out.push(e);
+    }
+    for p in st.points.card_views() {
+        let key = p.key();
+        let mut e = Entry::new(
+            Cat::Actions,
+            format!("Show Sessions as {}", p.title),
+            p.icon
+                .clone()
+                .map_or(Glyph::Icon("columns-3"), Glyph::Named),
+            crate::act::Act::Layout(crate::state::LayoutMode::View(key.clone())),
+        )
+        .keys(&["layout", "view", "cards", &p.extension_name]);
+        if st.layout.view() == Some(key.as_str()) {
+            e = e.sub("Showing");
         }
         out.push(e);
     }
@@ -487,8 +503,7 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
     }
     let next_layout = match LayoutMode::from_config(&store.config) {
         LayoutMode::Grid => LayoutMode::Tabs,
-        LayoutMode::Tabs => LayoutMode::List,
-        LayoutMode::List => LayoutMode::Grid,
+        LayoutMode::Tabs | LayoutMode::View(_) => LayoutMode::Grid,
     };
     vec![
         Entry::new(
@@ -568,11 +583,11 @@ fn actions(store: &Store, m: &str) -> Vec<Entry> {
         stop,
         Entry::new(
             Cat::Actions,
-            "Toggle Layout (Grid/Tabs/List)",
+            "Toggle Layout (Grid/Tabs)",
             Glyph::Icon("layout-dashboard"),
             Act::Layout(next_layout),
         )
-        .keys(&["grid", "tabs", "list", "layout", "switch", "view"]),
+        .keys(&["grid", "tabs", "layout", "switch", "view"]),
         Entry::new(
             Cat::Actions,
             "Show Welcome Guide",

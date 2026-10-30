@@ -210,6 +210,9 @@ pub trait Around: Send + Sync + 'static {
     }
 }
 
+/// How many of a screen's last rows are read for its last line.
+const LAST_LINE_ROWS: usize = 12;
+
 /// One extension's MCP tool, as listed and as routed.
 struct McpListed {
     name: String,
@@ -433,6 +436,12 @@ impl Extensions {
 
     /// Every contribution a client draws or lists, of the installed packages
     /// and the built-ins that are on.
+    /// The last line terminal `id` printed, read from its screen on demand.
+    pub(crate) async fn last_line(&self, id: &str) -> Option<String> {
+        let lines = self.around.read_output(id, LAST_LINE_ROWS).await.ok()?;
+        vorn_tree::view::last_line(lines.iter().map(String::as_str))
+    }
+
     fn contributions(&self) -> Vec<Value> {
         let store = self.router.store();
         let mut packs: Vec<_> = (store.ids().iter())
@@ -1054,6 +1063,18 @@ impl Extensions {
         let started = guard(&self.given).starter_of(&caller.extension, session);
         let paned = self.paned(&caller.extension, session);
         vorn_extensions::gate::admit_terminal(caller, method, started, paned)
+    }
+
+    /// Whether the caller may have session `session`'s last line, as `terminal.read` would read it.
+    pub(crate) fn admits_last_line(
+        &self,
+        manifest: &vorn_extensions::manifest::Manifest,
+        caller: &vorn_extensions::gate::Caller,
+        session: &str,
+    ) -> bool {
+        let started = guard(&self.given).starter_of(&caller.extension, session);
+        let paned = self.paned(&caller.extension, session);
+        vorn_extensions::gate::admit_last_line(manifest, caller, started, paned)
     }
 
     /// The manifest of built-in or installed extension `id`.

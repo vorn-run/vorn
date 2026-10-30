@@ -307,8 +307,8 @@ pub fn views_listed_in(app: &mut App, ui: &mut Ui, size: (f32, f32)) {
     wait_for("the built-ins' views", || {
         app.frame(ui, size);
         let p = &app.st.points;
-        (p.find("vorn.tasks", "views", "board").is_some()
-            && p.find("vorn.workflows", "views", "workflows").is_some())
+        (p.find("vorn.tasks", "pages", "board").is_some()
+            && p.find("vorn.workflows", "pages", "workflows").is_some())
         .then_some(())
     });
 }

@@ -646,7 +646,7 @@ impl App {
                 | kind::BADGES
                 | kind::CARD_FOOTERS
                 | kind::DECORATIONS
-                | kind::VIEWS => true,
+                | kind::PAGES => true,
                 kind::COMPOSER => composing,
                 _ => false,
             })

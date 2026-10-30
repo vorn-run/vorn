@@ -284,12 +284,7 @@ impl Router {
             let Some(pack) = self.program(&id) else {
                 continue;
             };
-            let names = pack
-                .manifest
-                .service
-                .as_ref()
-                .map(|s| s.events.clone())
-                .unwrap_or_default();
+            let names = events::heard(&pack.manifest);
             if !names.is_empty() {
                 wanted.push((id, names));
             }

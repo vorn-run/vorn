@@ -69,7 +69,7 @@ fn workflows_view(v: &TestVornd) -> (App, Shot) {
     assert_eq!(app.st.view, MainView::Workflows);
     // The view is Workflows' tree around the canvas, once its component answers.
     shot.until(&mut app, "the editor's tree", |app, _| {
-        match app.st.points.trees.get("vorn.workflows/views/workflows") {
+        match app.st.points.trees.get("vorn.workflows/pages/workflows") {
             Some(Ok(_)) => Some(()),
             Some(Err(e)) => panic!("the editor's tree cannot be drawn: {e:?}"),
             None => None,

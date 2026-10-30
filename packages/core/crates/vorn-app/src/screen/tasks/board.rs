@@ -35,7 +35,7 @@ pub fn column_scroll_id(status: &str) -> Id {
 
 /// The board's point, while Tasks is on.
 pub(super) fn point<'a>(s: &Screen<'a>) -> Option<&'a Point> {
-    s.st.points.find(TASKS, kind::VIEWS, "board")
+    s.st.points.find(TASKS, kind::PAGES, "board")
 }
 
 /// The board in `tree`: the first board that reads the tasks.

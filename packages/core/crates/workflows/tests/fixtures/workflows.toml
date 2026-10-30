@@ -18,7 +18,7 @@ component = "workflows.wasm"
 start = "refresh"
 events = ["workflow.changed", "workflow.gates"]
 
-[[contributes.views]]
+[[contributes.pages]]
 id = "workflows"
 title = "Workflows"
 description = "Workflows, their runs, and the editor where each step is a card on a canvas."

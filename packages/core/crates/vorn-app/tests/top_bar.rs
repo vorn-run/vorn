@@ -116,7 +116,7 @@ api = "vorn:extension@1.0"
 [service]
 command = ["node", "main.js"]
 
-[[contributes.views]]
+[[contributes.pages]]
 id = "board"
 title = "Board"
 icon = "layout-grid"
@@ -138,14 +138,14 @@ tree = true
     let board = app
         .st
         .points
-        .find("acme.board", kind::VIEWS, "board")
+        .find("acme.board", kind::PAGES, "board")
         .expect("its view")
         .clone();
     assert!(!board.builtin);
 
     // The install sheet lists the button with its key.
     let groups = vorn_app::plugins::place_groups(Some(&json!({
-        "views": [{ "id": "board", "title": "Board", "key": "Mod+Shift+B" }]
+        "pages": [{ "id": "board", "title": "Board", "key": "Mod+Shift+B" }]
     })));
     assert_eq!(
         groups,
@@ -154,7 +154,7 @@ tree = true
 
     shot.send(&mut app, key("KeyB", MOD() | mods::SHIFT, None));
     assert_eq!(app.st.view, MainView::Extension);
-    assert_eq!(app.st.ext_view.as_deref(), Some("acme.board/views/board"));
+    assert_eq!(app.st.ext_view.as_deref(), Some("acme.board/pages/board"));
     shot.frame(&mut app);
 
     app.rpc()

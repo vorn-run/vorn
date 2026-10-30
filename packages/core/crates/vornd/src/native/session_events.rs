@@ -22,9 +22,10 @@ use tokio::sync::broadcast::error::RecvError;
 use tracing::{debug, warn};
 use vorn_engine::Effect;
 use vorn_extensions::events::{
-    GIT_CHANGED, SESSION_CREATED, SESSION_EXITED, SESSION_MARK, SESSION_PROGRAM, SESSION_STATUS,
-    WORKTREE_IDLE,
+    GIT_CHANGED, SESSION_ACTIVITY, SESSION_CREATED, SESSION_EXITED, SESSION_MARK, SESSION_PROGRAM,
+    SESSION_STATUS, WORKTREE_IDLE,
 };
+use vorn_tree::view::CardStatus;
 
 use super::Native;
 use crate::engine::{Engine, Event};
@@ -63,6 +64,11 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
                     reports.heard(&n, &registry, &fx, &p, std::time::Instant::now());
                 }
                 Ok(Event::Effect(fx, effect)) => effected(&n, &registry, &fx, effect),
+                Ok(Event::Activity(id)) => {
+                    if at_work(&registry, &id) {
+                        printed(&n, &id, u64::try_from(crate::registry::now_ms()).unwrap_or(0));
+                    }
+                }
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => return,
             },
@@ -298,6 +304,35 @@ fn place_in(record: &Value) -> (Value, Value) {
     (project, worktree)
 }
 
+/// `session.activity`: what session `id` just did, for subscribers that declare `sessions.events`.
+fn activity(native: &Native, id: &str, what: CardStatus) {
+    if !native.activity_news(id, what) {
+        return;
+    }
+    native.events().emit(
+        SESSION_ACTIVITY,
+        || json!({ "sessionId": id, "activity": what.key() }),
+    );
+}
+
+/// Whether session `id` is still at work: output that arrives after it ended is not a burst.
+fn at_work(registry: &SessionRegistry, id: &str) -> bool {
+    registry
+        .read(|r| {
+            r.terminal(id).is_some_and(|(_, ended)| !ended)
+                || r.headless_record(id)
+                    .is_some_and(|h| h.status != crate::registry::HeadlessStatus::Exited)
+        })
+        .unwrap_or(false)
+}
+
+/// Session `id` printed at `now` (epoch ms): `session.activity` once per burst.
+fn printed(native: &Native, id: &str, now: u64) {
+    if native.printed(id, now) {
+        activity(native, id, CardStatus::Printing);
+    }
+}
+
 /// `session.created` for a record clients were just told of.
 fn created_event(native: &Native, kind: &str, record: &Value) {
     native.events().emit(SESSION_CREATED, || {
@@ -316,6 +351,9 @@ fn created_event(native: &Native, kind: &str, record: &Value) {
         }
         data
     });
+    if let Some(id) = record.get("id").and_then(Value::as_str) {
+        activity(native, id, CardStatus::Started);
+    }
 }
 
 impl Told {
@@ -325,6 +363,8 @@ impl Told {
         let Some((project, worktree)) = self.places.remove(id) else {
             return;
         };
+        activity(native, id, CardStatus::Finished);
+        native.printed_at(id, true);
         native.events().emit(SESSION_EXITED, || {
             json!({
                 "sessionId": id, "kind": "terminal", "exitCode": code,
@@ -338,14 +378,17 @@ impl Told {
         let Some(status) = record.get("status").and_then(Value::as_str) else {
             return;
         };
-        if self.statuses.get(id).map(String::as_str) == Some(status) {
+        let from = self.statuses.insert(id.to_owned(), status.to_owned());
+        if from.as_deref() == Some(status) {
             return;
         }
-        self.statuses.insert(id.to_owned(), status.to_owned());
         native.events().emit(
             SESSION_STATUS,
             || json!({ "sessionId": id, "status": status }),
         );
+        if let Some(what) = vorn_tree::view::moved(from.as_deref(), status) {
+            activity(native, id, what);
+        }
     }
 }
 
@@ -417,6 +460,8 @@ impl Told {
                     && self.exited.insert(id.to_owned())
                 {
                     let code = record.get("exitCode").cloned().unwrap_or(Value::Null);
+                    activity(native, id, CardStatus::Finished);
+                    native.printed_at(id, true);
                     native.events().emit(SESSION_EXITED, || {
                         let (project, worktree) = place_in(record);
                         json!({
@@ -634,6 +679,59 @@ mod tests {
         assert_eq!(seen[5].1["phase"], "prompt");
     }
 
+    #[tokio::test]
+    async fn activity_is_told_once_per_burst_and_output_never_moves_a_status() {
+        let fed = fed();
+        let mut events = fed
+            .native
+            .events()
+            .subscribe("test", &[SESSION_ACTIVITY, SESSION_STATUS]);
+        let mut t = Told::default();
+        let upsert = |status: &str| json!({ "op": "upsert", "kind": "terminal", "record": { "id": "t", "status": status, "projectPath": "/p" } });
+        t.note(&fed.native, &fed.registry, &upsert("idle"));
+        printed(&fed.native, "t", 10_000);
+        printed(&fed.native, "t", 11_000);
+        printed(&fed.native, "t", 12_500);
+        printed(&fed.native, "t", 12_500 + vorn_tree::view::QUIET_MS);
+        t.note(&fed.native, &fed.registry, &upsert("running"));
+        t.note(&fed.native, &fed.registry, &upsert("waiting"));
+        t.note(&fed.native, &fed.registry, &upsert("running"));
+        t.note(&fed.native, &fed.registry, &upsert("idle"));
+        assert_eq!(fed.native.printed_at("t", false), Some(14_500));
+        t.note(
+            &fed.native,
+            &fed.registry,
+            &json!({ "op": "remove", "kind": "terminal", "id": "t" }),
+        );
+        let mut seen = Vec::new();
+        while let Ok(e) = events.try_recv() {
+            seen.push(match e.name.as_str() {
+                SESSION_ACTIVITY => format!("activity:{}", e.data["activity"].as_str().unwrap()),
+                _ => format!("status:{}", e.data["status"].as_str().unwrap()),
+            });
+        }
+        assert_eq!(
+            seen,
+            [
+                "activity:started",
+                "status:idle",
+                "activity:printing",
+                "activity:printing",
+                "status:running",
+                "status:waiting",
+                "activity:waiting",
+                "status:running",
+                "status:idle",
+                "activity:finished",
+            ]
+        );
+        assert_eq!(
+            fed.native.printed_at("t", false),
+            None,
+            "its bursts go with it"
+        );
+    }
+
     #[test]
     fn a_programs_own_report_is_an_event() {
         use vorn_engine::{BlockedKind, ProgramRecord, ProgramState, Programs};
@@ -658,6 +756,19 @@ mod tests {
             e.data,
             json!({ "sessionId": "a", "state": "blocked", "message": "May I?", "waitingFor": "permission" })
         );
+    }
+
+    #[test]
+    fn output_after_a_terminal_ended_starts_no_burst() {
+        let fed = fed();
+        assert!(at_work(&fed.registry, "a"));
+        let exit = Effect::Exit {
+            code: Some(0),
+            signal: None,
+        };
+        effected(&fed.native, &fed.registry, &fx("a", 5), exit);
+        assert!(!at_work(&fed.registry, "a"), "a late print is not news");
+        assert!(!at_work(&fed.registry, "nobody"));
     }
 
     #[test]

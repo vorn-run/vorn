@@ -264,6 +264,7 @@ pub fn call(native: &Native, method: &str, params: &Value) -> Answer {
             None => bad_params(method),
         },
         "sessions:clear" => clear(native),
+        "sessions:cards" => cards(native, params),
         "terminal:seen" => match params.get("id").and_then(Value::as_str) {
             Some(id) => seen(native, id),
             None => bad_params(method),
@@ -354,6 +355,40 @@ fn restored(native: &Native) -> Answer {
         return not_ready();
     }
     match native.registry.get().and_then(|r| r.restored()) {
+        Some(list) => Answer::Result(Value::Array(list)),
+        None => not_ready(),
+    }
+}
+
+/// `sessions:cards {ids?}`: when each live terminal (of `ids`, or all) last printed, and its card's activity.
+fn cards(native: &Native, params: &Value) -> Answer {
+    let ids: Option<Vec<&str>> = params
+        .get("ids")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect());
+    let Some(registry) = native.registry.get() else {
+        return not_ready();
+    };
+    let now = u64::try_from(crate::registry::now_ms()).unwrap_or(0);
+    let cards = registry.read(|r| {
+        r.live_terminals()
+            .filter(|t| ids.as_ref().is_none_or(|ids| ids.contains(&t.id.as_str())))
+            .map(|t| {
+                let printed = native.printed_at(&t.id, false);
+                let status = serde_json::to_value(t.status).unwrap_or(Value::Null);
+                let activity = vorn_tree::view::CardStatus::of(
+                    &t.agent_type,
+                    status.as_str().unwrap_or_default(),
+                    false,
+                    u64::try_from(t.created_at).unwrap_or(0),
+                    printed,
+                    now,
+                );
+                json!({ "id": t.id, "printedAt": printed, "activity": activity.key() })
+            })
+            .collect::<Vec<_>>()
+    });
+    match cards {
         Some(list) => Answer::Result(Value::Array(list)),
         None => not_ready(),
     }

@@ -64,6 +64,7 @@ pub mod kind {
     pub const WINDOWS: &str = "windows";
     pub const MENUS: &str = "menus";
     pub const DIALOGS: &str = "dialogs";
+    pub const PAGES: &str = "pages";
     pub const VIEWS: &str = "views";
     pub const SHELL: &str = "shell";
     pub const CARDS: &str = "cards";
@@ -115,8 +116,10 @@ pub struct Point {
     pub after: Option<String>,
     /// Shipped with Vorn, so it comes before what installed extensions add.
     pub builtin: bool,
-    /// A view's top bar button shows: its extension's setting can hide it.
+    /// A page's top bar button shows: its extension's setting can hide it.
     pub button: bool,
+    /// A declared card view's columns and card sizes.
+    pub view: Option<crate::card_view::Spec>,
 }
 
 impl Point {
@@ -131,7 +134,6 @@ impl Point {
         Some(Point {
             extension_name: text("extensionName").unwrap_or_else(|| extension.clone()),
             extension,
-            kind,
             id: s(v, "id")?.to_owned(),
             title: text("title").unwrap_or_default(),
             description: text("description"),
@@ -148,6 +150,10 @@ impl Point {
             after: text("after"),
             builtin: v.get("builtin").and_then(Value::as_bool) == Some(true),
             button: v.get("button").and_then(Value::as_bool) != Some(false),
+            view: (kind == kind::VIEWS)
+                .then(|| crate::card_view::Spec::from_value(v))
+                .flatten(),
+            kind,
         })
     }
 
@@ -368,23 +374,39 @@ impl Points {
         self.all.iter().filter(move |p| p.kind == kind)
     }
 
-    /// Every extension view: built-ins first, each group in the order vornd
+    /// Every extension page: built-ins first, each group in the order vornd
     /// lists them.
-    pub fn views(&self) -> Vec<&Point> {
-        let mut views: Vec<&Point> = self.at(kind::VIEWS).collect();
+    pub fn pages(&self) -> Vec<&Point> {
+        let mut pages: Vec<&Point> = self.at(kind::PAGES).collect();
+        pages.sort_by_key(|p| !p.builtin);
+        pages
+    }
+
+    /// The card views extensions declare, built-ins first; a view drawn from its own tree is not listed yet.
+    pub fn card_views(&self) -> Vec<&Point> {
+        let mut views: Vec<&Point> = self.at(kind::VIEWS).filter(|p| p.view.is_some()).collect();
         views.sort_by_key(|p| !p.builtin);
         views
     }
 
-    /// The top bar's extension buttons after Sessions: the views whose
-    /// button their extension's setting shows.
-    pub fn top_bar(&self) -> Vec<&Point> {
-        let mut views = self.views();
-        views.retain(|p| p.button);
-        views
+    /// The card view `key` names, while its extension is on.
+    pub fn card_view(&self, key: &str) -> Option<(&Point, &crate::card_view::Spec)> {
+        let p = self
+            .all
+            .iter()
+            .find(|p| p.kind == kind::VIEWS && p.key() == key)?;
+        Some((p, p.view.as_ref()?))
     }
 
-    /// The tabs after Sessions as `arranged`: the top bar's views in the
+    /// The top bar's extension buttons after Sessions: the pages whose
+    /// button their extension's setting shows.
+    pub fn top_bar(&self) -> Vec<&Point> {
+        let mut pages = self.pages();
+        pages.retain(|p| p.button);
+        pages
+    }
+
+    /// The tabs after Sessions as `arranged`: the top bar's pages in the
     /// person's order, less the ones they hid.
     pub fn tabs(&self, arranged: &crate::arrange::Arrangement) -> Vec<&Point> {
         let views = self.top_bar();

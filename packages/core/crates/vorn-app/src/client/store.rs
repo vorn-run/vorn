@@ -38,6 +38,8 @@ pub const TOPICS: &[&str] = &[
     "terminal:bell",
     "terminal:notify",
     "terminal:command",
+    "permission:requested",
+    "permission:closed",
 ];
 
 /// One terminal session and what is known about how it ended.

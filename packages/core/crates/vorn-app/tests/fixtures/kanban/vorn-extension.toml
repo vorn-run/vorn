@@ -1,0 +1,38 @@
+# A card view from a manifest alone: no program, nothing to build.
+id = "test.kanban"
+name = "Kanban"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+publisher = "Vorn tests"
+description = "Shows the sessions in columns by what they are doing, or by your groups."
+
+[[contributes.views]]
+id = "kanban"
+title = "Kanban"
+description = "Columns by status: working sessions small, the rest one line each"
+icon = "columns-3"
+columns = "status"
+card = "mini"
+
+[contributes.views.by_status]
+finished = "line"
+idle = "line"
+
+[[contributes.views]]
+id = "groups"
+title = "Group board"
+description = "A column per group; drag a card to move its session"
+icon = "layout-grid"
+columns = "groups"
+card = "line"
+
+[[contributes.views]]
+id = "asks"
+title = "Asks"
+description = "Working sessions small; those waiting on you one line each"
+icon = "list-checks"
+columns = "status"
+card = "mini"
+
+[contributes.views.by_status]
+waiting = "line"

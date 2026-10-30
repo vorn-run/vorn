@@ -630,10 +630,10 @@ impl App {
                 };
                 if key == "layoutMode" {
                     let mode = crate::state::LayoutMode::from_key(value.as_str().unwrap_or(""));
-                    self.st.layout = mode;
                     if mode != crate::state::LayoutMode::Grid {
                         self.st.focused = None;
                     }
+                    self.st.layout = mode;
                 }
                 self.write_defaults(|d| d[key.as_str()] = value);
             }

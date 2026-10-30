@@ -28,6 +28,7 @@ pub mod sidebar;
 mod signin;
 pub mod tasks;
 mod video;
+pub mod views;
 pub mod workflows;
 
 use std::collections::HashMap;
@@ -50,7 +51,7 @@ pub use palette::{PALETTE_INPUT, PALETTE_LIST};
 pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};
 
 /// The views the top bar's pills switch between: Sessions, then what
-/// extensions add under `[[contributes.views]]`.
+/// extensions add under `[[contributes.pages]]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum MainView {
     #[default]
@@ -87,7 +88,7 @@ impl MainView {
 /// The view point `view` shows, with a button or not; `None` for Sessions,
 /// or one switched off.
 pub fn view_point<'a>(points: &'a Points, view: MainView, ext: Option<&str>) -> Option<&'a Point> {
-    points.views().into_iter().find(|p| {
+    points.pages().into_iter().find(|p| {
         MainView::of(p) == view && (view != MainView::Extension || ext == Some(p.key().as_str()))
     })
 }
@@ -259,7 +260,7 @@ impl Screen<'_> {
         let st = self.st;
         let body = match st.view {
             MainView::Sessions if st.composer_inline(self.store) => composer::empty_state(self),
-            MainView::Sessions if st.layout == LayoutMode::List => cards::list(self),
+            MainView::Sessions if st.layout.view().is_some() => views::view(self),
             MainView::Sessions => cards::grid(self),
             MainView::Tasks => tasks::view(self),
             MainView::Workflows => workflows::view(self),

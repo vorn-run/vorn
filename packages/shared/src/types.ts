@@ -1492,7 +1492,8 @@ export interface AppConfig {
     reopenSessions?: boolean
     // Open Vorn at sign-in. Off until asked; a no-op on Linux.
     startAtLogin?: boolean
-    layoutMode?: 'grid' | 'tabs' | 'list'
+    /** Grid, Tabs, or a card view an extension adds, as `view:<extension>/views/<id>`. */
+    layoutMode?: 'grid' | 'tabs' | `view:${string}`
     /** Each workspace's grid: its columns, or the Flexible split tree. Kept per viewer. */
     gridLayout?: Record<string, { view?: 'grid' | 'flexible'; columns?: number; tree?: unknown }>
     minimizedPlacement?: MinimizedPlacement
