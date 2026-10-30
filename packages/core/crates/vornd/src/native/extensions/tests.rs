@@ -707,6 +707,8 @@ async fn the_pack_watcher_leaves_a_link_vornd_handled_itself_running() {
             .await
             .unwrap(),
     );
+    // Every session settles again for the link, once, and the service runs on.
+    assert!(w.ext.check_packs().await);
     assert!(!w.ext.check_packs().await);
     assert_eq!(lifecycle.running(), std::slice::from_ref(&key));
 

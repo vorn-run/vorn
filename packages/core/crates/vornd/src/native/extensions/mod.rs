@@ -261,8 +261,10 @@ pub struct Extensions {
     next_sync: AtomicU64,
     /// A package was linked or installed: the manifest watcher lists the linked ones again.
     relist: AtomicBool,
-    /// A package was removed: its sessions are settled now, not on the next pack check.
-    removed: Arc<Notify>,
+    /// A link, install or removal changed a pack: the pack watcher settles every session again.
+    resettle: AtomicBool,
+    /// A package was linked, installed or removed: its sessions are settled now, not on the next pack check.
+    settle_now: Arc<Notify>,
     /// Each pack's version as last handled; a link, install or removal holds it, so the pack watcher acts only on changes made elsewhere.
     packs: tokio::sync::Mutex<Fingerprint>,
     me: Weak<Extensions>,
@@ -358,7 +360,8 @@ impl Extensions {
             syncs: Mutex::default(),
             next_sync: AtomicU64::new(0),
             relist: AtomicBool::new(false),
-            removed: Arc::default(),
+            resettle: AtomicBool::new(false),
+            settle_now: Arc::default(),
             packs: tokio::sync::Mutex::default(),
             me: me.clone(),
         })
@@ -544,7 +547,7 @@ impl Extensions {
                     text(params, "confirm").to_owned(),
                 );
                 let id = self.installs.staged_manifest(&token).map(|m| m.id);
-                let mut packs = self.packs.lock().await;
+                let packs = self.packs.lock().await;
                 let finished = self.finish_removal(id.clone()).await;
                 let installed = match finished {
                     Ok(()) => {
@@ -557,7 +560,7 @@ impl Extensions {
                     self.package_changed(&pack.id).await;
                 }
                 self.handled(
-                    &mut packs,
+                    packs,
                     id.as_deref()
                         .into_iter()
                         .chain(installed.iter().map(|p| p.id.as_str())),
@@ -577,7 +580,7 @@ impl Extensions {
                     .await
                     .ok()
                     .flatten();
-                let mut packs = self.packs.lock().await;
+                let packs = self.packs.lock().await;
                 let linked = match self.finish_removal(id.clone()).await {
                     Ok(()) => {
                         let installs = Arc::clone(&self.installs);
@@ -589,7 +592,7 @@ impl Extensions {
                     self.package_changed(&pack.id).await;
                 }
                 self.handled(
-                    &mut packs,
+                    packs,
                     id.as_deref()
                         .into_iter()
                         .chain(linked.iter().map(|p| p.id.as_str())),
@@ -598,9 +601,9 @@ impl Extensions {
             }
             "extension:remove" => {
                 let id = text(params, "id");
-                let mut packs = self.packs.lock().await;
+                let packs = self.packs.lock().await;
                 let removed = self.remove(id).await;
-                self.handled(&mut packs, [id]);
+                self.handled(packs, [id]);
                 removed
             }
             "extension:call" => {
@@ -887,7 +890,7 @@ impl Extensions {
         };
         self.sync_adapters();
         self.contributions_changed(id);
-        self.removed.notify_one();
+        self.settle_now.notify_one();
         if let Err(err) = &finished {
             warn!("[extensions] {err}");
         }
@@ -923,9 +926,12 @@ impl Extensions {
     }
 
     /// Handles each pack changed since it was last handled, here or by a
-    /// link, install or removal; whether any had.
+    /// link, install or removal; whether any changed either way, so every session settles again.
+    /// Skipped while a link, install or removal is under way, which wakes the watcher when done.
     async fn check_packs(&self) -> bool {
-        let mut packs = self.packs.lock().await;
+        let Ok(mut packs) = self.packs.try_lock() else {
+            return false;
+        };
         let now = fingerprint(self.hosts.store().root());
         let moved = changed(&packs, &now);
         *packs = now;
@@ -938,11 +944,16 @@ impl Extensions {
         if !moved.is_empty() {
             self.sync_adapters();
         }
-        !moved.is_empty()
+        let handled = self.resettle.swap(false, Ordering::Relaxed);
+        !moved.is_empty() || handled
     }
 
-    /// Records the packs `ids` as they are now, as handled here.
-    fn handled<'a>(&self, packs: &mut Fingerprint, ids: impl IntoIterator<Item = &'a str>) {
+    /// Records the packs `ids` as they are now, as handled here, and wakes the pack watcher to settle every session.
+    fn handled<'a>(
+        &self,
+        mut packs: tokio::sync::MutexGuard<'_, Fingerprint>,
+        ids: impl IntoIterator<Item = &'a str>,
+    ) {
         let root = self.hosts.store().root();
         for id in ids {
             match stamp(root, id) {
@@ -950,6 +961,9 @@ impl Extensions {
                 None => packs.remove(id),
             };
         }
+        self.resettle.store(true, Ordering::Relaxed);
+        drop(packs);
+        self.settle_now.notify_one();
     }
 
     /// Whether `method` is `<id>:<action>` for an installed program extension.
@@ -1485,13 +1499,13 @@ async fn watch(me: Weak<Extensions>, mut notes: Option<broadcast::Receiver<Value
         return;
     };
     *extensions.packs.lock().await = fingerprint(extensions.hosts.store().root());
-    let removed = Arc::clone(&extensions.removed);
+    let settle_now = Arc::clone(&extensions.settle_now);
     drop(extensions);
     let mut tick = tokio::time::interval(PACK_CHECK);
     loop {
         tokio::select! {
             () = next_note(&mut notes) => {}
-            () = removed.notified() => {}
+            () = settle_now.notified() => {}
             _ = tick.tick() => {}
         }
         let Some(extensions) = me.upgrade() else {
