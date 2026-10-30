@@ -416,7 +416,7 @@ struct RawContributes {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dialogs: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    views: Vec<RawPoint>,
+    pages: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shell: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -427,6 +427,8 @@ struct RawContributes {
     toolbar: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     groupings: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    views: Vec<RawView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<RawNode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -567,7 +569,7 @@ impl RawContributes {
             (P::Windows, &self.windows),
             (P::Menus, &self.menus),
             (P::Dialogs, &self.dialogs),
-            (P::Views, &self.views),
+            (P::Pages, &self.pages),
             (P::Shell, &self.shell),
             (P::Cards, &self.cards),
             (P::Attention, &self.attention),
@@ -590,7 +592,7 @@ impl RawContributes {
             P::Windows => &mut self.windows,
             P::Menus => &mut self.menus,
             P::Dialogs => &mut self.dialogs,
-            P::Views => &mut self.views,
+            P::Pages => &mut self.pages,
             P::Shell => &mut self.shell,
             P::Cards => &mut self.cards,
             P::Attention => &mut self.attention,
@@ -635,6 +637,29 @@ struct RawPoint {
     after: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     button: Option<RawActivation>,
+}
+
+/// `[[contributes.views]]`: a way to arrange the session cards.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RawView {
+    id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    when: Option<RawActivation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tree: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    columns: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    card: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    by_status: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -873,6 +898,17 @@ impl Raw {
                         &format!("service.events[{i}]"),
                         format!("`{event}` is not an event name like session.exited"),
                     ));
+                }
+                if let Some(needs) = crate::events::permission_for(event) {
+                    if !self.declares.uses.iter().any(|u| u == needs.name()) {
+                        return Err(at(
+                            &format!("service.events[{i}]"),
+                            format!(
+                                "`{event}` is heard only with {} in declares.uses",
+                                needs.name()
+                            ),
+                        ));
+                    }
                 }
                 if crate::events::unknown_core_event(event) {
                     return Err(at(
@@ -1653,6 +1689,39 @@ impl RawContributes {
                 out.insert(place.key().into(), Value::Array(list));
             }
         }
+        let mut views = Vec::new();
+        for (i, v) in self.views.iter().enumerate() {
+            let field = format!("contributes.views[{i}]");
+            let mut m = contribution_json(
+                &v.id,
+                v.title.as_ref(),
+                v.description.as_ref(),
+                v.when.as_ref(),
+                at,
+                &field,
+            )?;
+            opt(&mut m, "icon", v.icon.as_ref());
+            opt(&mut m, "columns", v.columns.as_ref());
+            opt(&mut m, "card", v.card.as_ref());
+            if v.tree {
+                m.insert("tree".into(), json!(true));
+            }
+            if !v.by_status.is_empty() {
+                m.insert("byStatus".into(), json!(v.by_status));
+            }
+            let value = Value::Object(m);
+            if let Some(problem) = super::view_problem(&value) {
+                return Err(at(&format!("{field}{}", problem.0), problem.1));
+            }
+            if ids.contains(&&v.id) {
+                return Err(at(
+                    &format!("{field}.id"),
+                    format!("`{}` names another contribution too", v.id),
+                ));
+            }
+            ids.push(&v.id);
+            views.push(value);
+        }
         let mut flows: [(&str, Vec<Value>); 3] = [
             ("nodes", Vec::new()),
             ("triggers", Vec::new()),
@@ -1725,6 +1794,7 @@ impl RawContributes {
             ("layouts", layouts),
             ("preferences", preferences),
             ("notifications", notifications),
+            ("views", views),
         ]
         .into_iter()
         .chain(flows)
@@ -2144,6 +2214,36 @@ impl From<&Manifest> for Raw {
                 }
             }
             let title = |b: &super::Contribution| (b.title != b.id).then(|| b.title.clone());
+            raw.views = c
+                .views()
+                .iter()
+                .map(|v| {
+                    let mut out = RawView {
+                        id: v.base.id.clone(),
+                        title: title(&v.base),
+                        description: v.base.description.clone(),
+                        when: v.base.when.as_ref().map(when),
+                        icon: v.icon.clone(),
+                        tree: false,
+                        columns: None,
+                        card: None,
+                        by_status: BTreeMap::new(),
+                    };
+                    match &v.draws {
+                        super::ViewDraws::Tree => out.tree = true,
+                        super::ViewDraws::Columns(c) => {
+                            out.columns = Some(c.by.key());
+                            out.card = Some(c.card.key().to_owned());
+                            out.by_status = c
+                                .by_status
+                                .iter()
+                                .map(|(k, v)| (k.key().to_owned(), v.key().to_owned()))
+                                .collect();
+                        }
+                    }
+                    out
+                })
+                .collect();
             raw.nodes = c
                 .nodes()
                 .iter()
@@ -2715,7 +2815,7 @@ tree = true
         assert!(err("tree = true", "tree = true\nview = \"page\"").contains("view"));
         assert!(err("contributes.settings", "contributes.launchers")
             .starts_with("vorn-extension.toml:9: contributes.launchers[0].tree: draws in a place that shows one"));
-        assert!(parse(&text.replace("contributes.settings", "contributes.views")).is_ok());
+        assert!(parse(&text.replace("contributes.settings", "contributes.pages")).is_ok());
         assert!(err("tree = true", "").contains("give it tree = true"));
     }
 
@@ -2772,6 +2872,81 @@ rows = "status"
     }
 
     #[test]
+    fn a_card_view_is_declared_columns_or_its_own_tree() {
+        use super::super::{ColumnsBy, ViewDraws};
+        use vorn_tree::view::{CardSize, CardStatus};
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[[contributes.views]]
+id = "kanban"
+title = "Kanban"
+icon = "columns-3"
+columns = "status"
+card = "mini"
+
+[contributes.views.by_status]
+finished = "line"
+"#;
+        let m = parse(text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        let ViewDraws::Columns(cols) = &c.views()[0].draws else {
+            panic!("a declared view");
+        };
+        assert_eq!(cols.by, ColumnsBy::Status);
+        assert_eq!(cols.card, CardSize::Mini);
+        assert_eq!(cols.by_status[&CardStatus::Finished], CardSize::Line);
+        assert_eq!(
+            serde_json::to_value(c).unwrap()["views"][0],
+            serde_json::json!({ "id": "kanban", "title": "Kanban", "icon": "columns-3",
+                "columns": "status", "card": "mini", "byStatus": { "finished": "line" } })
+        );
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let tree = text.replace("columns = \"status\"\ncard = \"mini\"\n\n[contributes.views.by_status]\nfinished = \"line\"\n", "tree = true\n");
+        let m = parse(&tree).unwrap();
+        assert_eq!(
+            m.contributes.as_ref().unwrap().views()[0].draws,
+            ViewDraws::Tree
+        );
+        assert!(m.contributes.as_ref().unwrap().templated());
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let grouping = parse(&text.replace("\"status\"", "\"acme.chat/channels\"")).unwrap();
+        let ViewDraws::Columns(cols) = &grouping.contributes.as_ref().unwrap().views()[0].draws
+        else {
+            panic!("a declared view");
+        };
+        assert_eq!(
+            cols.by,
+            ColumnsBy::Grouping {
+                extension: "acme.chat".into(),
+                id: "channels".into()
+            }
+        );
+
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert!(err("card = \"mini\"", "card = \"tile\"")
+            .contains("contributes.views[0].card: is tile, which only a view's own tree draws"));
+        assert!(err("finished = \"line\"", "finished = \"tile\"").contains("by_status: is tile"));
+        assert!(err("finished = ", "done = ").contains("`done` is not a status"));
+        assert!(err("\"status\"", "\"colour\"")
+            .contains("columns: is status, project, worktree, groups or a grouping"));
+        assert!(err("\"status\"", "\"acme/Bad id\"").contains("columns: is status"));
+        assert!(err("columns = \"status\"\n", "").contains("names its columns"));
+        assert!(err("card = \"mini\"", "card = \"mini\"\ntree = true")
+            .contains("belongs to a declared view"));
+        assert!(err("card = \"mini\"", "card = \"mini\"\nkey = \"Mod+K\"").contains("key"));
+        let twice = format!("{text}\n[[contributes.sidebar]]\nid = \"kanban\"\ntree = true\n");
+        assert!(parse(&twice)
+            .unwrap_err()
+            .to_string()
+            .contains("names another contribution too"));
+    }
+
+    #[test]
     fn a_settings_page_names_the_app_page_it_follows() {
         let text = r#"id = "x"
 name = "X"
@@ -2796,7 +2971,7 @@ after = "agents"
 
         let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
         assert!(err("\"agents\"", "\"ssh\"").contains("after: is one of appearance"));
-        assert!(err("contributes.settings", "contributes.views")
+        assert!(err("contributes.settings", "contributes.pages")
             .contains("after: belongs to a settings page"));
     }
 

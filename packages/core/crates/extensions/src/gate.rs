@@ -423,10 +423,15 @@ pub const CORE_METHODS: &[(&str, Permission)] = &[
 ];
 
 /// Whether the bridge holds a program to `permission`: some method or call
-/// needs it. `process.run` is held at the workflows a program seeds and runs.
+/// needs it. `process.run` is held at the workflows a program seeds and runs, `sessions.events` at the event bus.
 pub fn enforced(permission: Permission) -> bool {
-    matches!(permission, Permission::Storage | Permission::ProcessRun)
-        || CORE_METHODS.iter().any(|(_, p)| *p == permission)
+    matches!(
+        permission,
+        Permission::Storage
+            | Permission::ProcessRun
+            | Permission::SessionsEvents
+            | Permission::SessionsInput
+    ) || CORE_METHODS.iter().any(|(_, p)| *p == permission)
 }
 
 /// Headers a program may not set: credentials come from vornd alone.
@@ -836,6 +841,7 @@ header = "Authorization: Bearer {token}"
         assert!(enforced(Permission::GitWrite));
         assert!(enforced(Permission::ProcessRun));
         assert!(!enforced(Permission::NetworkTcp));
+        assert!(enforced(Permission::SessionsEvents) && enforced(Permission::SessionsInput));
     }
 
     #[test]

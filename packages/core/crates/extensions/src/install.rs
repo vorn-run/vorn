@@ -656,6 +656,10 @@ impl Installs {
                     format!(
                         "{used} (runs commands: workflow steps it seeds, workflows not its own)"
                     )
+                } else if p == Permission::SessionsEvents {
+                    format!("{used} (hears session.activity)")
+                } else if p == Permission::SessionsInput {
+                    format!("{used} (types into sessions, shown as from {})", m.name)
                 } else if !enforced(p) {
                     format!("{used} (declared; Vorn cannot hold it to this)")
                 } else {
@@ -700,6 +704,11 @@ impl Installs {
                         .map(|p| format!("{}: {}", place.label(), p.base.title)),
                 );
             }
+            adds.extend(
+                c.views()
+                    .iter()
+                    .map(|v| format!("Card view: {}", v.base.title)),
+            );
         }
         if let Some(service) = &m.service {
             adds.extend(service.events.iter().map(|e| format!("Listens to: {e}")));

@@ -487,6 +487,9 @@ pub struct Contributions {
     /// switch the host draws on its Settings page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notifications: Option<Vec<NoticeKind>>,
+    /// Ways to arrange the session cards, offered beside Grid and Tabs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub views: Option<Vec<CardView>>,
     /// What it draws from templates, by where it shows.
     #[serde(flatten)]
     pub points: BTreeMap<Place, Vec<Point>>,
@@ -529,6 +532,10 @@ impl Contributions {
         self.notifications.as_deref().unwrap_or_default()
     }
 
+    pub fn views(&self) -> &[CardView] {
+        self.views.as_deref().unwrap_or_default()
+    }
+
     pub fn points(&self, place: Place) -> &[Point] {
         self.points.get(&place).map_or(&[], Vec::as_slice)
     }
@@ -540,7 +547,9 @@ impl Contributions {
 
     /// Whether it uses anything only the extension API can fill: a tree, or rows a menu or attention lists.
     pub fn templated(&self) -> bool {
-        !self.points.is_empty() || self.panes().iter().any(|p| p.draws == PaneDraws::Tree)
+        !self.points.is_empty()
+            || self.panes().iter().any(|p| p.draws == PaneDraws::Tree)
+            || self.views().iter().any(|v| v.draws == ViewDraws::Tree)
     }
 
     /// Every contribution's own rule, of every kind.
@@ -553,6 +562,7 @@ impl Contributions {
         let nodes = self.nodes().iter().map(|n| &n.base);
         let triggers = self.triggers().iter().map(|t| &t.base);
         let flows = self.workflows().iter().map(|w| &w.base);
+        let views = self.views().iter().map(|v| &v.base);
         panes
             .chain(footers)
             .chain(links)
@@ -561,6 +571,7 @@ impl Contributions {
             .chain(nodes)
             .chain(triggers)
             .chain(flows)
+            .chain(views)
             .map(|c| c.when.as_ref())
     }
 }
@@ -593,8 +604,8 @@ pub enum Place {
     Menus,
     /// A dialog a call opens by answering `{"open": "<id>"}`.
     Dialogs,
-    /// A main view beside the sessions, shown as one of the window's views.
-    Views,
+    /// A page of its own beside the sessions, opened from the top bar.
+    Pages,
     /// A shell's commands over its live rows: one tree per shell, asked for
     /// with the shell's session id as its scope.
     Shell,
@@ -628,7 +639,7 @@ impl Place {
         Place::Windows,
         Place::Menus,
         Place::Dialogs,
-        Place::Views,
+        Place::Pages,
         Place::Shell,
         Place::Cards,
         Place::Attention,
@@ -651,7 +662,7 @@ impl Place {
             Place::Windows => "windows",
             Place::Menus => "menus",
             Place::Dialogs => "dialogs",
-            Place::Views => "views",
+            Place::Pages => "pages",
             Place::Shell => "shell",
             Place::Cards => "cards",
             Place::Attention => "attention",
@@ -675,7 +686,7 @@ impl Place {
             Place::Windows => "Window",
             Place::Menus => "Menu item",
             Place::Dialogs => "Dialog",
-            Place::Views => "Top bar button",
+            Place::Pages => "Top bar button",
             Place::Shell => "Shell commands",
             Place::Cards => "Card",
             Place::Attention => "Waiting for you",
@@ -755,8 +766,8 @@ pub struct Point {
     /// one of [`SETTINGS_PAGES`]; without it the page stays under Extensions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<String>,
-    /// For a top bar view: the on-off preferences its button shows under,
-    /// any of them; without the button the view still opens from its key
+    /// For a top bar page: the on-off preferences its button shows under,
+    /// any of them; without the button the page still opens from its key
     /// and the command palette.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub button: Option<Activation>,
@@ -772,6 +783,104 @@ pub const SETTINGS_PAGES: [&str; 7] = [
     "mcp",
     "network",
 ];
+
+/// A way to arrange the session cards (`[[contributes.views]]`), offered beside Grid and Tabs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CardView {
+    #[serde(flatten)]
+    pub base: Contribution,
+    /// A kit icon by name, as `columns-3`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(flatten)]
+    pub draws: ViewDraws,
+}
+
+/// A view is declared, columns of cards Vorn draws, or drawn from its extension's tree.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum ViewDraws {
+    Columns(Columns),
+    #[serde(serialize_with = "tree_view")]
+    Tree,
+}
+
+fn tree_view<S: serde::Serializer>(s: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeMap;
+    let mut m = s.serialize_map(Some(1))?;
+    m.serialize_entry("tree", &true)?;
+    m.end()
+}
+
+/// A declared view: a column per heading of `by`, each card at `card` unless its status says otherwise.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Columns {
+    #[serde(rename = "columns")]
+    pub by: ColumnsBy,
+    pub card: vorn_tree::view::CardSize,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_status: BTreeMap<vorn_tree::view::CardStatus, vorn_tree::view::CardSize>,
+}
+
+/// What a declared view's columns are.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ColumnsBy {
+    Status,
+    Project,
+    Worktree,
+    /// The person's own session groups.
+    Groups,
+    /// A grouping an extension contributes: its extension's id and the grouping's.
+    Grouping {
+        extension: String,
+        id: String,
+    },
+}
+
+impl ColumnsBy {
+    /// As a manifest writes it: `status`, `project`, `worktree`, `groups` or `<extension>/<grouping>`.
+    pub fn key(&self) -> String {
+        match self {
+            ColumnsBy::Status => "status".into(),
+            ColumnsBy::Project => "project".into(),
+            ColumnsBy::Worktree => "worktree".into(),
+            ColumnsBy::Groups => "groups".into(),
+            ColumnsBy::Grouping { extension, id } => format!("{extension}/{id}"),
+        }
+    }
+
+    pub fn parse(key: &str) -> Option<ColumnsBy> {
+        Some(match key {
+            "status" => ColumnsBy::Status,
+            "project" => ColumnsBy::Project,
+            "worktree" => ColumnsBy::Worktree,
+            "groups" => ColumnsBy::Groups,
+            _ => {
+                let (extension, id) = key.split_once('/')?;
+                let ext_ok = !extension.is_empty()
+                    && extension.len() <= 128
+                    && extension.starts_with(|c: char| c.is_ascii_alphanumeric())
+                    && extension
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'));
+                if !ext_ok || !is_contribution_id(id) {
+                    return None;
+                }
+                ColumnsBy::Grouping {
+                    extension: extension.to_owned(),
+                    id: id.to_owned(),
+                }
+            }
+        })
+    }
+}
+
+impl Serialize for ColumnsBy {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.key())
+    }
+}
 
 /// The id, title and where-it-shows every contribution carries.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -947,6 +1056,12 @@ pub enum Permission {
     SessionsRead,
     #[serde(rename = "sessions.launch")]
     SessionsLaunch,
+    /// Hears what sessions do: started, printing, waiting, finished.
+    #[serde(rename = "sessions.events")]
+    SessionsEvents,
+    /// Types into sessions; never implied by any other permission.
+    #[serde(rename = "sessions.input")]
+    SessionsInput,
     #[serde(rename = "git.write")]
     GitWrite,
     #[serde(rename = "files.read")]
@@ -991,7 +1106,7 @@ pub enum Permission {
 }
 
 impl Permission {
-    pub const ALL: [Permission; 28] = [
+    pub const ALL: [Permission; 30] = [
         Permission::GitRead,
         Permission::TerminalRead,
         Permission::TerminalSelection,
@@ -1001,6 +1116,8 @@ impl Permission {
         Permission::AgentPermissions,
         Permission::SessionsRead,
         Permission::SessionsLaunch,
+        Permission::SessionsEvents,
+        Permission::SessionsInput,
         Permission::GitWrite,
         Permission::FilesRead,
         Permission::FilesWrite,
@@ -1033,6 +1150,8 @@ impl Permission {
             Permission::AgentPermissions => "agent.permissions",
             Permission::SessionsRead => "sessions.read",
             Permission::SessionsLaunch => "sessions.launch",
+            Permission::SessionsEvents => "sessions.events",
+            Permission::SessionsInput => "sessions.input",
             Permission::GitWrite => "git.write",
             Permission::FilesRead => "files.read",
             Permission::FilesWrite => "files.write",
@@ -1802,6 +1921,16 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
             points.insert(place, kept);
         }
     }
+    let mut views: Vec<CardView> = Vec::new();
+    for (base, raw) in declared("views") {
+        let Ok(view) = read_view(base, raw) else {
+            continue;
+        };
+        if !ids.contains(&view.base.id) {
+            ids.push(view.base.id.clone());
+            views.push(view);
+        }
+    }
     // A command or menu item opens a window the extension declares, or nothing.
     let windows: Vec<String> = points
         .get(&Place::Windows)
@@ -1824,6 +1953,7 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         && flows.is_empty()
         && preferences.is_empty()
         && notifications.is_empty()
+        && views.is_empty()
     {
         return None;
     }
@@ -1837,6 +1967,7 @@ pub fn contributes(value: Option<&Value>) -> Option<Contributions> {
         workflows: (!flows.is_empty()).then_some(flows),
         preferences: (!preferences.is_empty()).then_some(preferences),
         notifications: (!notifications.is_empty()).then_some(notifications),
+        views: (!views.is_empty()).then_some(views),
         points,
     })
 }
@@ -2100,8 +2231,8 @@ fn read_point(
         return Err(("deny", "belongs to attention".into()));
     }
     let button = activation(raw.get("button"));
-    if raw.contains_key("button") && place != Place::Views {
-        return Err(("button", "belongs to a top bar view".into()));
+    if raw.contains_key("button") && place != Place::Pages {
+        return Err(("button", "belongs to a top bar page".into()));
     }
     if button.as_ref().is_some_and(|b| {
         b.setting.is_empty()
@@ -2136,6 +2267,119 @@ fn read_point(
         window,
         size,
         raise,
+    })
+}
+
+/// Why a card view written as `value` would be dropped: the field's suffix (`.key`) and what is wrong.
+pub fn view_problem(value: &Value) -> Option<(String, String)> {
+    let raw = value.as_object()?;
+    let Some(base) = contribution(raw) else {
+        return Some((
+            ".id".into(),
+            "needs an id of letters, digits, - and _, starting with a letter".into(),
+        ));
+    };
+    read_view(base, raw).err().map(|(field, message)| {
+        let suffix = if field.is_empty() {
+            String::new()
+        } else {
+            format!(".{field}")
+        };
+        (suffix, message)
+    })
+}
+
+fn read_view(
+    base: Contribution,
+    raw: &Map<String, Value>,
+) -> Result<CardView, (&'static str, String)> {
+    use vorn_tree::view::{CardSize, CardStatus};
+    let icon = raw
+        .get("icon")
+        .and_then(Value::as_str)
+        .map(|s| js::trim(s).to_owned())
+        .filter(|s| !s.is_empty());
+    if icon.as_deref().is_some_and(|i| !icon_name(i)) {
+        return Err(("icon", "is not an icon name such as columns-3".into()));
+    }
+    let tree = match raw.get("tree") {
+        None | Some(Value::Bool(false)) => false,
+        Some(Value::Bool(true)) => true,
+        Some(_) => return Err(("tree", "is true or false".into())),
+    };
+    let declared = ["columns", "card", "byStatus"]
+        .into_iter()
+        .find(|k| raw.contains_key(*k));
+    if tree {
+        if let Some(k) = declared {
+            let field = if k == "byStatus" { "by_status" } else { k };
+            return Err((
+                field,
+                "belongs to a declared view; a view with tree = true places its cards in its own tree"
+                    .into(),
+            ));
+        }
+        return Ok(CardView {
+            base,
+            icon,
+            draws: ViewDraws::Tree,
+        });
+    }
+    let size = |field: &'static str, v: &Value| {
+        match v.as_str().and_then(CardSize::parse) {
+        Some(CardSize::Tile) => Err((
+            field,
+            "is tile, which only a view's own tree draws (tree = true); a declared view's cards are full, mini or line"
+                .into(),
+        )),
+        Some(s) => Ok(s),
+        None => Err((field, "is full, mini or line".into())),
+    }
+    };
+    let by = match raw.get("columns") {
+        None => {
+            return Err((
+                "",
+                "names its columns (columns = \"status\") or draws its own tree (tree = true)"
+                    .into(),
+            ))
+        }
+        Some(v) => v.as_str().and_then(ColumnsBy::parse).ok_or((
+            "columns",
+            "is status, project, worktree, groups or a grouping as <extension>/<grouping id>"
+                .into(),
+        ))?,
+    };
+    let card = match raw.get("card") {
+        None => CardSize::Full,
+        Some(v) => size("card", v)?,
+    };
+    let mut by_status = BTreeMap::new();
+    match raw.get("byStatus") {
+        None => {}
+        Some(Value::Object(m)) => {
+            for (k, v) in m {
+                let Some(status) = CardStatus::parse(k) else {
+                    return Err((
+                        "by_status",
+                        format!(
+                            "`{k}` is not a status: started, printing, waiting, finished or idle"
+                        ),
+                    ));
+                };
+                by_status.insert(status, size("by_status", v)?);
+            }
+        }
+        Some(_) => return Err(("by_status", "is a table of status = size".into())),
+    }
+    Ok(CardView {
+        base,
+        icon,
+        draws: ViewDraws::Columns(Columns {
+            by,
+            card,
+            by_status,
+        }),
     })
 }
 

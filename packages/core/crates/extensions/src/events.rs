@@ -21,6 +21,8 @@ use crate::api::types::Event;
 pub const SESSION_CREATED: &str = "session.created";
 /// A session's status changed: `{sessionId, status}`; only the latest per session in a batch.
 pub const SESSION_STATUS: &str = "session.status";
+/// What a session did, once per change: `{sessionId, activity}`, `activity` started, printing (once per burst after quiet), waiting or finished.
+pub const SESSION_ACTIVITY: &str = "session.activity";
 /// A session's program ended: `{sessionId, kind, projectPath, exitCode}`.
 pub const SESSION_EXITED: &str = "session.exited";
 /// A shell's OSC 133 mark: `{sessionId, phase, at, cwd?, command?, exitCode?, durationMs?}`; `at` in epoch ms, `cwd` the folder the shell last reported.
@@ -62,6 +64,7 @@ pub const CORE_EVENTS: &[&str] = &[
     SESSION_EXITED,
     SESSION_MARK,
     SESSION_PROGRAM,
+    SESSION_ACTIVITY,
     AGENT_HOOK,
     AGENT_CONVERSATION,
     AGENT_PERMISSION,
@@ -75,6 +78,32 @@ pub const CORE_EVENTS: &[&str] = &[
     WORKFLOW_ENDED,
     WORKFLOW_SIGN_IN,
 ];
+
+/// The events only a subscriber declaring the permission beside them hears.
+pub const EVENT_PERMISSIONS: &[(&str, crate::manifest::Permission)] = &[(
+    SESSION_ACTIVITY,
+    crate::manifest::Permission::SessionsEvents,
+)];
+
+/// The permission event `name` needs, when it needs one.
+pub fn permission_for(name: &str) -> Option<crate::manifest::Permission> {
+    EVENT_PERMISSIONS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, p)| *p)
+}
+
+/// The events `manifest`'s service subscribes to that it may hear: one needing a permission it does not declare is left out.
+pub fn heard(manifest: &crate::manifest::Manifest) -> Vec<String> {
+    let declared = manifest.permissions.as_deref().unwrap_or_default();
+    manifest
+        .service
+        .iter()
+        .flat_map(|s| &s.events)
+        .filter(|e| permission_for(e).is_none_or(|p| declared.contains(&p)))
+        .cloned()
+        .collect()
+}
 
 /// The namespaces the core's events live in; another extension's events live in its own.
 pub const CORE_NAMESPACES: &[&str] = &[
@@ -432,6 +461,30 @@ mod tests {
                 "git.changed:{\"worktreePath\":\"/w\"}",
             ]
         );
+    }
+
+    #[test]
+    fn only_a_subscriber_declaring_sessions_events_hears_activity() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[declares]
+uses = ["sessions.events"]
+
+[service]
+command = ["node", "x.js"]
+events = ["session.activity", "session.exited"]
+"#;
+        let mut m = crate::manifest::file::parse(text).unwrap();
+        assert_eq!(heard(&m), [SESSION_ACTIVITY, SESSION_EXITED]);
+        m.permissions = Some(Vec::new());
+        assert_eq!(heard(&m), [SESSION_EXITED]);
+        let err = crate::manifest::file::parse(&text.replace("\"sessions.events\"", ""))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("heard only with sessions.events"), "{err}");
     }
 
     #[test]

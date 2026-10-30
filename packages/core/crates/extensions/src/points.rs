@@ -7,9 +7,12 @@ use serde_json::{json, Map, Value};
 use crate::activation::settings_hold;
 use crate::manifest::{Manifest, PaneDraws, Place};
 
+/// The kind card views are listed under.
+pub const VIEWS: &str = "views";
+
 /// Every contribution of `manifest` a client draws or lists, as
 /// `{extension, kind, id, title, ..., tree?}`; a pane only when it is a tree,
-/// and its `[theme]` as kind `themes` with the section as written, so every
+/// its card views as kind `views`, and its `[theme]` as kind `themes` with the section as written, so every
 /// client reads it with `vorn_theme` as vornd checked it. One whose
 /// `when.setting` names only preferences that are off in `settings` is left out;
 /// a view whose `button.setting` does is listed with `button: false`.
@@ -40,6 +43,16 @@ pub fn listed(manifest: &Manifest, settings: &Map<String, Value>) -> Vec<Value> 
             let v = json!({ "id": pane.base.id, "title": pane.base.title, "tree": true });
             out.push(entry(Place::Panes, v));
         }
+    }
+    for view in c
+        .views()
+        .iter()
+        .filter(|v| settings_hold(v.base.when.as_ref(), settings))
+    {
+        let mut v = serde_json::to_value(view).unwrap_or_else(|_| json!({}));
+        v["extension"] = json!(manifest.id);
+        v["kind"] = json!(VIEWS);
+        out.push(v);
     }
     for place in Place::POINTS {
         for point in c
@@ -73,7 +86,7 @@ api = "vorn:extension@1.0"
 [service]
 command = ["node", "index.js"]
 
-[[contributes.views]]
+[[contributes.pages]]
 id = "board"
 title = "Board"
 tree = true
@@ -82,6 +95,12 @@ tree = true
 id = "refresh"
 title = "Refresh"
 call = "refresh"
+
+[[contributes.views]]
+id = "kanban"
+title = "Kanban"
+columns = "status"
+card = "line"
 
 [[contributes.panes]]
 id = "pane"
@@ -99,13 +118,16 @@ tree = true
             kinds,
             [
                 ("panes", "pane"),
+                ("views", "kanban"),
                 ("commands", "refresh"),
-                ("views", "board")
+                ("pages", "board")
             ]
         );
         assert!(listed.iter().all(|p| p["extension"] == "checks"));
-        assert_eq!(listed[2]["tree"], true);
-        assert!(listed[1].get("tree").is_none());
+        assert_eq!(listed[3]["tree"], true);
+        assert!(listed[2].get("tree").is_none());
+        assert_eq!(listed[1]["columns"], "status");
+        assert_eq!(listed[1]["card"], "line");
     }
 
     #[test]
@@ -154,7 +176,7 @@ default = true
     }
 
     #[test]
-    fn a_views_button_follows_its_preference_and_the_view_stays() {
+    fn a_pages_button_follows_its_preference_and_the_page_stays() {
         let m = parse(
             r#"id = "board"
 name = "Board"
@@ -164,7 +186,7 @@ api = "vorn:extension@1.0"
 [service]
 command = ["node", "index.js"]
 
-[[contributes.views]]
+[[contributes.pages]]
 id = "board"
 title = "Board"
 tree = true
@@ -184,12 +206,12 @@ default = true
         };
         assert_eq!(with(true)[0]["button"], true);
         let off = with(false);
-        assert_eq!(off.len(), 1, "the view stays");
+        assert_eq!(off.len(), 1, "the page stays");
         assert_eq!(off[0]["button"], false);
     }
 
     #[test]
-    fn a_button_belongs_to_a_view_and_names_a_preference() {
+    fn a_button_belongs_to_a_page_and_names_a_preference() {
         let manifest = |point: &str, gate: &str| {
             format!(
                 r#"id = "board"
@@ -214,9 +236,9 @@ default = true
 "#
             )
         };
-        assert!(parse(&manifest("views", r#"{ setting = ["top_bar"] }"#)).is_ok());
+        assert!(parse(&manifest("pages", r#"{ setting = ["top_bar"] }"#)).is_ok());
         assert!(parse(&manifest("sidebar", r#"{ setting = ["top_bar"] }"#)).is_err());
-        assert!(parse(&manifest("views", r#"{ setting = ["nope"] }"#)).is_err());
-        assert!(parse(&manifest("views", r#"{ platform = ["macos"] }"#)).is_err());
+        assert!(parse(&manifest("pages", r#"{ setting = ["nope"] }"#)).is_err());
+        assert!(parse(&manifest("pages", r#"{ platform = ["macos"] }"#)).is_err());
     }
 }

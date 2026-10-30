@@ -6,6 +6,7 @@ pub mod parts;
 pub mod sdk;
 #[cfg(test)]
 mod tests;
+pub mod view;
 
 pub use parts::{
     Choice, Code, CodeState, Command, Filter, Line, LineKind, Log, Outline, Picker, Tab, Tabs,

@@ -10,6 +10,8 @@ description = "Extensions for Vorn: the one manifest and package store, the exte
 
 
 [dependencies]
+# The card types a view arranges.
+vorn-tree = { path = "../tree" }
 vorn-spawn = { path = "../spawn", features = ["tokio"] }
 data-encoding = "2"
 getrandom = "0.4"
@@ -67,8 +69,6 @@ windows-sys = { version = "0.61", features = [
 vorn-extensions = { path = ".", features = ["wasm-compile"] }
 # Builds the test component for wasm32-wasip2.
 vorn-guest-build = { path = "../guest-build" }
-# Reads the trees a component draws.
-vorn-tree = { path = "../tree" }
 criterion = { version = "0.8", default-features = false }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros", "test-util"] }
