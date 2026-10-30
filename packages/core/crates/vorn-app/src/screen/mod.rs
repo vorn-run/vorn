@@ -5,10 +5,12 @@
 
 mod cards;
 pub use cards::{flex_divider_id, grid_id};
+pub mod card_buttons;
 mod chrome;
 pub mod code;
 pub use chrome::{DOCK, VIEWS};
 mod composer;
+pub mod customize;
 mod dialogs;
 pub mod gates;
 pub mod git;
@@ -210,7 +212,7 @@ impl Screen<'_> {
         if let Some(menu) = &self.st.menu {
             let w = menus::width(&menu.kind);
             let panel = match &menu.kind {
-                crate::state::MenuKind::Recent => chrome::recent_panel(self),
+                crate::state::MenuKind::Popover(ref key) => points::popover(self, key),
                 crate::state::MenuKind::Headless => chrome::headless_panel(self),
                 crate::state::MenuKind::WfIcon => workflows::icon_picker(self),
                 crate::state::MenuKind::GroupIcon(g) => sidebar::group_icon_picker(self, g),

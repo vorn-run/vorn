@@ -1639,7 +1639,7 @@ migrations = "migrations"
         assert_eq!(
             sheet.methods,
             [
-                "sessions.read (sessions.list, sessions.get, agents.list)",
+                "sessions.read (sessions.list, sessions.get, sessions.recent, agents.list)",
                 "process.run (runs commands: workflow steps it seeds, workflows not its own)",
                 "storage (its own tables, storage.*)"
             ]

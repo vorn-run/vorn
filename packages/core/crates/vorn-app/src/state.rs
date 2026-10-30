@@ -113,45 +113,6 @@ impl LayoutMode {
     }
 }
 
-/// How the sessions view's sidebar arranges its sessions: worktrees and
-/// their sessions by default.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub enum SidebarMode {
-    #[serde(rename = "worktrees")]
-    Worktrees,
-    #[default]
-    #[serde(rename = "worktrees-sessions")]
-    WorktreesSessions,
-    #[serde(rename = "sessions")]
-    Projects,
-    #[serde(rename = "groups-sessions")]
-    Groups,
-    #[serde(rename = "sessions-flat")]
-    Flat,
-}
-
-impl SidebarMode {
-    pub const ALL: [SidebarMode; 5] = [
-        SidebarMode::Worktrees,
-        SidebarMode::WorktreesSessions,
-        SidebarMode::Projects,
-        SidebarMode::Groups,
-        SidebarMode::Flat,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            SidebarMode::Worktrees => "Projects > Worktrees",
-            SidebarMode::WorktreesSessions => "Projects > Worktrees > Sessions",
-            SidebarMode::Projects => "Projects > Sessions",
-            SidebarMode::Groups => "Groups > Sessions",
-            SidebarMode::Flat => "Sessions (Flat)",
-        }
-    }
-}
-
 /// The workspace being created (`id` none) or edited, and its icon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceForm {
@@ -173,8 +134,18 @@ pub enum MenuKind {
     Terminal(String),
     /// The toolbar's grid options: filter, sort, layout, columns.
     ViewOptions,
-    Recent,
     Headless,
+    /// The ⌄ beside the toolbar's +: the agents, a shell, and other ways to start.
+    NewMenu,
+    /// A right click on the toolbar.
+    ToolbarMenu,
+    /// A right click on a sidebar tab.
+    TabMenu,
+    /// A card button an extension's menu adds, opened from the header: its
+    /// session and the menu point's key.
+    CardPoint(String, String),
+    /// A toolbar item's popover: its tree, by the scoped key it draws for.
+    Popover(String),
     /// A project row's context menu in the sidebar.
     Project(String),
     /// The sidebar's Filter & sort.
@@ -310,6 +281,8 @@ pub enum Dialog {
     TurnOn(String),
     /// Settings › Remote Access's Add a device sheet.
     AddDevice,
+    /// Customize Toolbar: the toolbar's items, the sidebar's tabs and a card's panes.
+    Customize,
 }
 
 /// A toast in the bottom right.
@@ -482,8 +455,15 @@ pub struct State {
     pub worktree: Option<String>,
     /// Sidebar worktrees whose sessions are folded, as project + path.
     pub worktrees_folded: HashSet<(String, String)>,
-    /// The sessions sidebar's arrangement, order and filter.
+    /// The sessions sidebar's grouping, order and row fields.
     pub sidebar_view: crate::sidebar_view::SidebarView,
+    /// The toolbar's items, the sidebar's tabs and a card's panes as arranged.
+    pub arrange: crate::arrange::Prefs,
+    /// An item being dragged in the customize sheet: its list, id and how far it moved.
+    /// Its list, id, how far the pointer moved, and the list's scroll offset when it began.
+    pub arranging: Option<(crate::arrange::List, String, f32, f32)>,
+    /// Which list the customize sheet shows.
+    pub customize_list: crate::arrange::List,
     /// The sessions sidebar's section folded shut.
     pub section_folded: bool,
     /// Session groups folded shut.
@@ -501,6 +481,8 @@ pub struct State {
     pub grids: std::collections::BTreeMap<String, crate::flex::Grid>,
     /// The pane a new session splits in the flexible grid: the last selected one.
     pub flex_anchor: Option<String>,
+    /// Each split's new session: the card it goes beside, and which way.
+    pub flex_split: std::collections::HashMap<String, (String, crate::flex::Dir)>,
     /// The flexible divider being dragged, until it is let go.
     pub flex_drag: Option<crate::flex::Path>,
     /// A layout just set the tree: the workspace's other cards go beside it, not into it.

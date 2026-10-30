@@ -35,7 +35,7 @@ fn the_tasks_button_goes_with_its_uninstall() {
     shot.until(&mut app, "the built-ins' buttons", |app, _| {
         (titles(app) == ["Tasks", "Workflows"]).then_some(())
     });
-    shot.send(&mut app, key("KeyT", MOD(), None));
+    support::open_tasks(&mut shot, &mut app);
     assert_eq!(app.st.view, MainView::Tasks);
 
     app.rpc()
@@ -45,8 +45,6 @@ fn the_tasks_button_goes_with_its_uninstall() {
     shot.until(&mut app, "its button gone", |app, _| {
         (titles(app) == ["Workflows"] && app.st.view == MainView::Sessions).then_some(())
     });
-    shot.send(&mut app, key("KeyT", MOD(), None));
-    assert_eq!(app.st.view, MainView::Sessions);
 }
 
 fn set_top_bar(app: &mut App, id: &str, on: bool) {
@@ -84,7 +82,9 @@ fn the_top_bar_setting_hides_a_button_and_its_view_stays_reachable() {
     for label in ["Open Tasks View", "Open Workflows View"] {
         assert!(palette.iter().any(|e| e.label == label), "{label}");
     }
-    shot.send(&mut app, key("KeyT", MOD(), None));
+    shot.send(&mut app, key("KeyK", MOD(), None));
+    shot.type_text(&mut app, "Open Tasks View");
+    shot.send(&mut app, key("Enter", 0, Some("\r")));
     assert_eq!(app.st.view, MainView::Tasks);
     shot.frame(&mut app);
     assert_eq!(app.st.view, MainView::Tasks, "the view stays open");

@@ -424,6 +424,10 @@ struct RawContributes {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     attention: Vec<RawPoint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    toolbar: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    groupings: Vec<RawPoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<RawNode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     triggers: Vec<RawTriggerType>,
@@ -549,7 +553,7 @@ struct RawWorkflow {
 
 impl RawContributes {
     /// The template points, by place.
-    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 15] {
+    fn points(&self) -> [(super::Place, &Vec<RawPoint>); 17] {
         use super::Place as P;
         [
             (P::Sidebar, &self.sidebar),
@@ -567,6 +571,8 @@ impl RawContributes {
             (P::Shell, &self.shell),
             (P::Cards, &self.cards),
             (P::Attention, &self.attention),
+            (P::Toolbar, &self.toolbar),
+            (P::Groupings, &self.groupings),
         ]
     }
 
@@ -588,6 +594,8 @@ impl RawContributes {
             P::Shell => &mut self.shell,
             P::Cards => &mut self.cards,
             P::Attention => &mut self.attention,
+            P::Toolbar => &mut self.toolbar,
+            P::Groupings => &mut self.groupings,
             P::Panes => return None,
         })
     }
@@ -2709,6 +2717,58 @@ tree = true
             .starts_with("vorn-extension.toml:9: contributes.launchers[0].tree: draws in a place that shows one"));
         assert!(parse(&text.replace("contributes.settings", "contributes.views")).is_ok());
         assert!(err("tree = true", "").contains("give it tree = true"));
+    }
+
+    #[test]
+    fn a_toolbar_item_does_one_thing_under_its_icon() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[[contributes.toolbar]]
+id = "recent"
+title = "Recent"
+description = "Recent sessions"
+icon = "clock"
+tree = true
+"#;
+        let m = parse(text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        let item = &c.points(super::super::Place::Toolbar)[0];
+        assert!(item.tree);
+        assert_eq!(item.icon.as_deref(), Some("clock"));
+        assert_eq!(parse(&to_toml(&m)).unwrap(), m);
+
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert!(parse(&text.replace("tree = true", "call = \"open\"")).is_ok());
+        assert!(err("tree = true", "window = \"w\"").contains("names no window"));
+        assert!(err("tree = true", "").contains("does one of call, window and tree"));
+        assert!(err("tree = true", "tree = true\ncall = \"open\"").contains("does one of"));
+        assert!(err("icon = \"clock\"\n", "").contains("icon"));
+        assert!(err("tree = true", "tree = true\nrows = \"r\"").contains("rows"));
+    }
+
+    #[test]
+    fn a_grouping_names_the_rows_that_group_sessions() {
+        let text = r#"id = "x"
+name = "X"
+version = "1.0.0"
+api = "vorn:extension@1.0"
+
+[[contributes.groupings]]
+id = "status"
+title = "Status"
+rows = "status"
+"#;
+        let m = parse(text).unwrap();
+        let c = m.contributes.as_ref().unwrap();
+        let g = &c.points(super::super::Place::Groupings)[0];
+        assert_eq!(g.rows.as_deref(), Some("status"));
+        let err = |from: &str, to: &str| parse(&text.replace(from, to)).unwrap_err().to_string();
+        assert!(err("rows = \"status\"\n", "").contains("names the collection"));
+        assert!(err("rows = \"status\"", "rows = \"status\"\ntree = true").contains("tree"));
+        assert!(err("rows = \"status\"", "rows = \"status\"\ncall = \"go\"").contains("call"));
     }
 
     #[test]

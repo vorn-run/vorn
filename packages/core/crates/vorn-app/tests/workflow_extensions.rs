@@ -140,7 +140,7 @@ fn run_workflow_comes_from_the_editors_menu_rows() {
     app.st.view = MainView::Sessions;
     shot.click(
         &mut app,
-        App::control("toolbar", &Act::Open(MenuKind::Grid)),
+        App::control("toolbar", &Act::Open(MenuKind::NewMenu)),
     );
     let labels = app.menu_labels(&shot.ui);
     let at = labels

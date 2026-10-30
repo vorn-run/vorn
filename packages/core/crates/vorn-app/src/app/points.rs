@@ -436,7 +436,21 @@ impl App {
         if let Some(id) = a.open {
             self.open_dialog(Some(&ext), &id);
         }
+        let popover = matches!(
+            self.st.menu.as_ref().map(|m| &m.kind),
+            Some(crate::state::MenuKind::Popover(k)) if k == key
+        );
+        self.close_popover |= popover && (a.close || a.focus.is_some());
         match a.focus {
+            // A toolbar popover's pick shows that card, maybe one just started.
+            Some(id) if popover => {
+                self.st.view = MainView::Sessions;
+                if self.store.session(&id).is_some() {
+                    self.go_to(id);
+                } else {
+                    self.pending_select = Some(id);
+                }
+            }
             // A tree drawn in the main window (a pane, a card) picks a card there, maybe one not listed yet.
             Some(id) if unscope(key).1.is_some() => self.st.selected = Some(id),
             Some(id) => {
@@ -546,6 +560,16 @@ impl App {
                 self.open_window(&key);
             }
         }
+        if std::mem::take(&mut self.close_popover) {
+            self.close_menu(ui);
+        }
+        if let Some(id) = self.pending_select.take() {
+            if self.store.session(&id).is_some() {
+                self.go_to(id);
+            } else {
+                self.pending_select = Some(id);
+            }
+        }
         self.show_calls();
         self.render_trees(ui.is_cells());
         self.window_tick(ui);
@@ -636,6 +660,9 @@ impl App {
         out.extend(self.device_trees());
         out.extend(self.shell_trees());
         out.extend(pts.dialog.clone());
+        if let Some(crate::state::MenuKind::Popover(k)) = self.st.menu.as_ref().map(|m| &m.kind) {
+            out.push(k.clone());
+        }
         if pts.floating {
             out.extend(pts.windows.iter().cloned());
         }

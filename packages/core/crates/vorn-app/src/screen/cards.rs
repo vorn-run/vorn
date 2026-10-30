@@ -140,34 +140,77 @@ fn confirm(s: &Screen<'_>, trigger: El, message: &str, ok: Act, cancel: Act, lab
     )
 }
 
-/// Minimize on a grid card, expand or collapse, close, then More actions with the rest.
+/// The card's buttons as arranged, as many as it shows, then More with the
+/// rest; close asks first.
 fn actions(s: &Screen<'_>, session: &Session, focused: bool) -> El {
-    use crate::components::card::{card_actions_with, CardActions, CardVariant};
+    use crate::components::card::CardVariant;
+    use crate::ui::widgets::{confirm, tooltip_at, Tone};
     let sid = session.info.id.clone();
-    let (variant, toggle, key) = if focused {
-        (CardVariant::Focused, Act::Collapse, 'W')
+    let variant = if focused {
+        CardVariant::Focused
     } else {
-        (CardVariant::Mini, Act::Expand(sid.clone()), 'O')
+        CardVariant::Mini
     };
-    let confirming = (s.st.confirm_close.as_deref() == Some(sid.as_str())).then(|| {
-        (
-            s.acts.on("confirm", Act::CloseSession(sid.clone())),
-            s.acts.on("confirm", Act::AskClose(String::new())),
+    let place = variant.tip_place();
+    let all = super::card_buttons::buttons(s, session, focused);
+    // The device button keeps its own, which holds the simulator picker.
+    let mut device = panes::card_buttons(s, session, variant);
+    let mut row = div().row().items_center().gap(2.0).shrink0();
+    // Close asked from More, or hidden, asks on More instead.
+    let mut asking = s.st.confirm_close.as_deref() == Some(sid.as_str());
+    let ask = |el: El| {
+        let ok = s.acts.on("confirm", Act::CloseSession(sid.clone()));
+        let cancel = s.acts.on("confirm", Act::AskClose(String::new()));
+        confirm(
+            s.ui,
+            el,
+            "Close this session?",
+            (ok, "Close"),
+            cancel,
+            Tone::Danger,
         )
-    });
-    card_actions_with(
-        s.ui,
-        &CardActions {
-            variant,
-            more: s.acts.on("card", Act::Open(MenuKind::Card(sid.clone()))),
-            minimize: s.acts.on("card", Act::ToggleMinimized(sid.clone())),
-            toggle: s.acts.on("card", toggle),
-            close: s.acts.on("card", Act::AskClose(sid)),
-            toggle_key: &format!("{m}{key}", m = mod_label()),
-            confirming,
-        },
-        panes::card_buttons(s, session, variant),
-    )
+    };
+    for b in all.iter().filter(|b| b.header) {
+        if let Some(at) = device.iter().position(|(id, _)| *id == b.id) {
+            row = row.child(device.remove(at).1);
+            continue;
+        }
+        let id = s.acts.on("card", b.act.clone());
+        let hot = s.ui.hover(id);
+        let fg = if b.danger {
+            c(look::INK).mix(c(look::DANGER), hot)
+        } else {
+            c(look::INK)
+        };
+        let el = div()
+            .id(id)
+            .on(Action::Click)
+            .p(4.0)
+            .rounded(4.0)
+            .bg(white(0.0).mix(white(0.10), hot))
+            .ring(4.0)
+            .role(Role::Button, b.label.as_str())
+            .child(b.icon.draw(14.0, fg));
+        let mut el = tooltip_at(s.ui, el, id, &b.label, b.shortcut.as_deref(), place);
+        if b.id == super::card_buttons::CLOSE && asking {
+            el = ask(el);
+            asking = false;
+        }
+        row = row.child(el);
+    }
+    let more = s.acts.on("card", Act::Open(MenuKind::Card(sid.clone())));
+    let hot = s.ui.hover(more);
+    let b = div()
+        .id(more)
+        .on(Action::Click)
+        .p(4.0)
+        .rounded(4.0)
+        .bg(white(0.0).mix(white(0.10), hot))
+        .ring(4.0)
+        .role(Role::Button, "More actions")
+        .child(ico("ellipsis", 14.0, 2.0, c(look::INK)));
+    let more = tooltip_at(s.ui, b, more, "More actions", None, place);
+    row.child(if asking { ask(more) } else { more })
 }
 
 /// The title, or the inline rename field while renaming.
@@ -247,7 +290,13 @@ fn position_badge(i: usize, dim: f32) -> El {
 
 /// CardHeader, mini variant: actions on hover, the position badge idle.
 fn header(s: &Screen<'_>, session: &Session, i: usize, dim: f32, hot: bool) -> El {
-    let right = if hot || s.st.confirm_close.as_deref() == Some(session.info.id.as_str()) {
+    let sid = session.info.id.as_str();
+    // More stays while its menu is open: the menu closes when its trigger leaves the layout.
+    let menu = s.st.menu.as_ref().is_some_and(|m| match &m.kind {
+        MenuKind::Card(id) | MenuKind::CardPoint(id, _) => id == sid,
+        _ => false,
+    });
+    let right = if hot || menu || s.st.confirm_close.as_deref() == Some(sid) {
         actions(s, session, false)
     } else if i < 9 {
         position_badge(i, dim)

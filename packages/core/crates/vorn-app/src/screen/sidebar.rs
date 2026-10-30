@@ -8,7 +8,8 @@ use crate::act::{Act, Acts};
 use crate::app::GROUP_NAME;
 use crate::client::Session;
 use crate::look;
-use crate::state::{MenuKind, SidebarMode};
+use crate::sidebar_view::{GroupBy, Rank};
+use crate::state::MenuKind;
 use crate::ui::{
     div, field, text, tooltip, tooltip_at, Action, El, Id, Place, Rgba, Role, Sense, TextStyle,
 };
@@ -240,17 +241,17 @@ pub(super) fn nav_item(
         }))
 }
 
-/// SessionItem, its branch under the name where the list asks for it.
-fn session_row(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
-    let row = session_line(s, session, show_branch);
+/// SessionItem, then any marks extensions put under it.
+fn session_row(s: &Screen<'_>, session: &Session) -> El {
+    let row = session_line(s, session);
     match super::points::decorations(s, &session.info.id) {
         Some(d) => div().col().child(row).child(d.pl(30.0).pb(2.0)),
         None => row,
     }
 }
 
-fn session_line(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
-    use crate::components::sidebar::{session_row, Detail, SessionRow, SessionRowIds, StepRow};
+fn session_line(s: &Screen<'_>, session: &Session) -> El {
+    use crate::components::sidebar::{session_row, SessionRow, SessionRowIds};
     use crate::components::Status;
     let sid = session.info.id.as_str();
     let tabs = s.st.layout != crate::state::LayoutMode::Grid;
@@ -274,41 +275,26 @@ fn session_line(s: &Screen<'_>, session: &Session, show_branch: bool) -> El {
             .acts
             .on("sidebar-session", Act::CloseSession(sid.to_owned())),
     };
+    let fields = s.st.sidebar_view.fields;
     let title = session.title();
     let report = session.report();
-    let steps: Vec<StepRow<'_>> = report
-        .iter()
-        .flat_map(|r| &r.steps)
-        .map(|st| StepRow {
-            depth: st.depth,
-            line: &st.line,
-            status: Status::parse(st.status),
-            progress: st.progress,
-        })
-        .collect();
+    let line = fields.line(
+        session.info.branch.as_deref(),
+        report.as_ref().map(|r| r.line.as_str()),
+        report.as_ref().and_then(|r| r.progress),
+    );
     session_row(
         s.ui,
         s.agents,
         ids,
         &SessionRow {
             name: &title,
-            branch: session
-                .info
-                .branch
-                .as_deref()
-                .filter(|b| show_branch && !b.is_empty()),
+            line: &line,
             agent: &session.info.agent_type,
             status: Status::parse(session.status()),
+            agent_icon: fields.agent,
             active,
-            detail: report
-                .as_ref()
-                .filter(|r| !r.line.is_empty())
-                .map(|r| Detail {
-                    line: &r.line,
-                    progress: r.progress,
-                    unseen: r.unseen,
-                }),
-            steps: &steps,
+            unseen: report.is_some_and(|r| r.unseen),
         },
     )
 }
@@ -376,17 +362,16 @@ fn row_count(n: usize, size: f32) -> El {
         .silent()
 }
 
-/// Icon and name, its quick actions on hover, and under it
-/// while expanded its worktrees or sessions as the view mode arranges them.
+/// Icon, name and session count, its quick actions on hover, and under it
+/// while expanded its sessions, or its worktrees when grouped by worktree.
 fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
-    let view = s.st.sidebar_view;
-    let mode = view.view_mode;
-    let sessions: Vec<&Session> = s
-        .store
-        .sessions
-        .iter()
-        .filter(|x| x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none())
-        .collect();
+    let by_worktree = s.st.sidebar_view.group_by == GroupBy::Worktree;
+    let sessions = ordered(
+        s,
+        listed(s)
+            .filter(|x| x.info.project_name == p.name)
+            .collect(),
+    );
     let worktrees =
         s.st.worktrees
             .get(&p.path)
@@ -482,7 +467,7 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         );
     if hot || open_menu {
         row = row.child(quick_actions(s, "sidebar-project", quick));
-    } else if mode == SidebarMode::Worktrees && !sessions.is_empty() {
+    } else if !sessions.is_empty() {
         row = row.child(row_count(sessions.len(), 12.0));
     }
     let row = s
@@ -494,44 +479,63 @@ fn project_row(s: &Screen<'_>, p: &ProjectConfig) -> El {
         return col;
     }
     let mut kids = div().col().ml(8.0);
-    let worktree_modes = matches!(
-        mode,
-        SidebarMode::Worktrees | SidebarMode::WorktreesSessions
-    );
-    if worktree_modes && git {
-        let nested = mode == SidebarMode::WorktreesSessions;
-        let main = worktrees.iter().find(|w| w.main);
-        if let Some(main) = main {
+    if by_worktree && git {
+        if let Some(main) = worktrees.iter().find(|w| w.main) {
             let mine: Vec<&Session> = sessions
                 .iter()
                 .copied()
                 .filter(|x| x.info.worktree_path.as_deref().is_none_or(str::is_empty))
                 .collect();
-            kids = kids.child(worktree_row(s, p, main, &mine, nested));
+            if !(s.st.sidebar_view.only_active && mine.is_empty()) {
+                kids = kids.child(worktree_row(s, p, main, &mine));
+            }
         }
         for (wt, mine) in sorted_worktrees(s, worktrees, &sessions) {
-            kids = kids.child(worktree_row(s, p, wt, &mine, nested));
+            kids = kids.child(worktree_row(s, p, wt, &mine));
         }
-    } else if mode != SidebarMode::Worktrees || !git {
+    } else {
         if sessions.is_empty() {
             kids = kids.child(quiet("No active sessions"));
         }
         for x in sessions {
-            kids = kids.child(session_row(s, x, true));
+            kids = kids.child(session_row(s, x));
         }
     }
     col.child(kids)
 }
 
-/// The linked worktrees with their sessions, through
-/// the worktree filter, by name or by their first session's last output.
+/// The sessions the sidebar lists: those of the workspace not held in a
+/// card's panel, less the ended ones while only active sessions show.
+fn listed<'a, 'b>(s: &'b Screen<'a>) -> impl Iterator<Item = &'a Session> + use<'a, 'b> {
+    let only_active = s.st.sidebar_view.only_active;
+    s.store
+        .scoped_sessions()
+        .filter(move |x| s.st.side.holder(&x.info.id).is_none() && !(only_active && x.ended()))
+}
+
+/// `list` in the chosen order; a sort on output would trade busy rows' places.
+fn ordered<'a>(s: &Screen<'_>, mut list: Vec<&'a Session>) -> Vec<&'a Session> {
+    let order = s.st.sidebar_view.order;
+    list.sort_by_key(|x| order.rank(Some(x.info.created_at), Some(x.changed_at)));
+    list
+}
+
+/// Where a group of `sessions` sorts: by its newest session in the time orders.
+fn group_rank(s: &Screen<'_>, sessions: &[&Session]) -> Rank {
+    let newest = |f: fn(&Session) -> f64| sessions.iter().map(|x| f(x)).reduce(f64::max);
+    s.st.sidebar_view
+        .order
+        .rank(newest(|x| x.info.created_at), newest(|x| x.changed_at))
+}
+
+/// The linked worktrees with their sessions, by name, then in the chosen
+/// order; while only active sessions show, those with none drop out.
 fn sorted_worktrees<'a, 's>(
     s: &Screen<'s>,
     worktrees: &'a [crate::state::Worktree],
     sessions: &[&'s Session],
 ) -> Vec<(&'a crate::state::Worktree, Vec<&'s Session>)> {
-    use crate::sidebar_view::{WorktreeFilter, WorktreeSort};
-    let view = s.st.sidebar_view;
+    let only_active = s.st.sidebar_view.only_active;
     let mut rest: Vec<_> = worktrees
         .iter()
         .filter(|w| !w.main)
@@ -543,31 +547,20 @@ fn sorted_worktrees<'a, 's>(
                 .collect();
             (wt, mine)
         })
-        .filter(|(_, mine)| view.worktree_filter == WorktreeFilter::All || !mine.is_empty())
+        .filter(|(_, mine)| !only_active || !mine.is_empty())
         .collect();
     rest.sort_by_cached_key(|(wt, _)| wt.name.to_lowercase());
-    if view.worktree_sort == WorktreeSort::Recent {
-        // The session `linkedSessionId` names: the first on the worktree's path.
-        let linked = |wt: &crate::state::Worktree| {
-            s.store
-                .sessions
-                .iter()
-                .find(|x| x.info.worktree_path.as_deref() == Some(wt.path.as_str()))
-                .and_then(|x| s.st.last_output.get(&x.info.id).copied())
-        };
-        rest.sort_by_key(|(wt, _)| std::cmp::Reverse(linked(wt)));
-    }
+    rest.sort_by_key(|(_, mine)| group_rank(s, mine));
     rest
 }
 
 /// The main checkout's branch row (`group/main`) or a WorktreeItem, with
-/// their sessions under them in the nested mode.
+/// their sessions under them.
 fn worktree_row(
     s: &Screen<'_>,
     p: &ProjectConfig,
     wt: &crate::state::Worktree,
     sessions: &[&Session],
-    nested: bool,
 ) -> El {
     let path = if wt.main {
         String::new()
@@ -622,11 +615,7 @@ fn worktree_row(
     } else {
         ico("folder-git-2", 14.0, 1.5, c(look::GRAY_500))
     };
-    let lead = if nested {
-        fold_slot(s, "sidebar-worktree", toggle, hot, open, icon)
-    } else {
-        div().size(14.0, 14.0).center().child(icon)
-    };
+    let lead = fold_slot(s, "sidebar-worktree", toggle, hot, open, icon);
     let label = if wt.main {
         div().row().grow().min_w0().child(
             text(&wt.branch, 13.0, fg)
@@ -686,7 +675,7 @@ fn worktree_row(
         .child(label);
     if hot {
         row = row.child(quick_actions(s, "sidebar-worktree", quick));
-    } else if !nested && !sessions.is_empty() {
+    } else if !sessions.is_empty() {
         row = row.child(row_count(sessions.len(), if wt.main { 12.0 } else { 11.0 }));
     }
     if active && !wt.main {
@@ -699,10 +688,10 @@ fn worktree_row(
         );
     }
     let mut col = div().col().child(row);
-    if nested && open {
+    if open {
         let mut kids = div().col().ml(16.0);
         for x in sessions {
-            kids = kids.child(session_row(s, x, false));
+            kids = kids.child(session_row(s, x));
         }
         col = col.child(kids);
     }
@@ -766,25 +755,16 @@ fn quiet(label: &str) -> El {
     )
 }
 
-/// The sessions newest activity first, as the group and flat lists sort.
-fn by_activity<'a>(s: &Screen<'a>) -> Vec<&'a Session> {
-    let mut list: Vec<&Session> = s
-        .store
-        .scoped_sessions()
-        .filter(|x| s.st.side.holder(&x.info.id).is_none())
-        .collect();
-    list.sort_by_key(|x| std::cmp::Reverse(s.st.last_output.get(&x.info.id).copied()));
-    list
-}
-
-/// The sessions view's sidebar in its arrangement.
+/// The sessions view's sidebar, grouped as chosen.
 fn sessions(s: &Screen<'_>) -> El {
-    match s.st.sidebar_view.view_mode {
-        SidebarMode::Worktrees | SidebarMode::WorktreesSessions | SidebarMode::Projects => {
-            projects(s)
-        }
-        SidebarMode::Groups => groups(s),
-        SidebarMode::Flat => flat(s),
+    match &s.st.sidebar_view.group_by {
+        GroupBy::Project | GroupBy::Worktree => projects(s),
+        GroupBy::Groups => groups(s),
+        GroupBy::None => flat(s),
+        GroupBy::Point(key) => match s.st.points.get(key) {
+            Some(p) => point_groups(s, p),
+            None => flat(s),
+        },
     }
 }
 
@@ -799,13 +779,18 @@ fn all_projects(s: &Screen<'_>, badge: Option<usize>) -> El {
     )
 }
 
-/// The projects, each with its sessions.
+/// The projects, each with its sessions or its worktrees.
 fn projects(s: &Screen<'_>) -> El {
     let open = !s.st.section_folded;
     let add = control(s, Act::AddProject, "folder-plus", "Add project", 13.0, 1.5);
+    let title = if s.st.sidebar_view.group_by == GroupBy::Worktree {
+        "Worktrees"
+    } else {
+        "Projects"
+    };
     let mut col = div().col().gap(2.0).child(toggle_section(
         s,
-        "Projects",
+        title,
         open,
         Act::ToggleSection,
         vec![filter_sort(s), add],
@@ -813,7 +798,7 @@ fn projects(s: &Screen<'_>) -> El {
     if !open {
         return col;
     }
-    col = col.child(all_projects(s, Some(s.store.scoped_sessions().count())));
+    col = col.child(all_projects(s, Some(listed(s).count())));
     if s.store.workspace_projects().next().is_none() {
         col = col.child(
             div().px(10.0).py(4.0).child(
@@ -829,39 +814,25 @@ fn projects(s: &Screen<'_>) -> El {
     col
 }
 
-/// The workspace's projects through the filter, in the
-/// chosen order; recent activity is a project's latest output.
+/// The workspace's projects in the chosen order, those with no session
+/// left out while only active sessions show.
 fn sorted_projects<'a>(s: &Screen<'a>) -> Vec<&'a ProjectConfig> {
-    use crate::sidebar_view::{ProjectSort, WorktreeFilter};
-    let view = s.st.sidebar_view;
-    fn mine<'b>(
-        s: &'b Screen<'_>,
-        p: &'b ProjectConfig,
-    ) -> impl Iterator<Item = &'b crate::client::Session> {
-        s.store.sessions.iter().filter(move |x| {
-            x.info.project_name == p.name && s.st.side.holder(&x.info.id).is_none()
-        })
-    }
-    let mut out: Vec<&ProjectConfig> = s
+    let only_active = s.st.sidebar_view.only_active;
+    let mut out: Vec<(&ProjectConfig, Rank)> = s
         .store
         .workspace_projects()
-        .filter(|p| view.worktree_filter == WorktreeFilter::All || mine(s, p).next().is_some())
+        .filter_map(|p| {
+            let mine: Vec<&Session> = listed(s)
+                .filter(|x| x.info.project_name == p.name)
+                .collect();
+            (!only_active || !mine.is_empty()).then(|| (p, group_rank(s, &mine)))
+        })
         .collect();
-    match view.project_sort {
-        ProjectSort::Manual => {}
-        ProjectSort::Name => out.sort_by_cached_key(|p| p.name.to_lowercase()),
-        ProjectSort::Recent => out.sort_by_key(|p| {
-            std::cmp::Reverse(
-                mine(s, p)
-                    .filter_map(|x| s.st.last_output.get(&x.info.id).copied())
-                    .max(),
-            )
-        }),
-    }
-    out
+    out.sort_by_key(|(_, rank)| *rank);
+    out.into_iter().map(|(p, _)| p).collect()
 }
 
-/// Every session, newest activity first.
+/// Every session in one list.
 fn flat(s: &Screen<'_>) -> El {
     let open = !s.st.section_folded;
     let mut col = div().col().gap(2.0).child(toggle_section(
@@ -874,21 +845,23 @@ fn flat(s: &Screen<'_>) -> El {
     if !open {
         return col;
     }
-    col = col.child(all_projects(s, Some(s.store.scoped_sessions().count())));
+    col = col.child(all_projects(s, Some(listed(s).count())));
     let mut list = div().col().gap(2.0).mt(4.0);
-    let sessions: Vec<&Session> = by_activity(s)
-        .into_iter()
-        .filter(|x| {
-            s.st.project
-                .as_deref()
-                .is_none_or(|p| x.info.project_name == p)
-        })
-        .collect();
+    let sessions = ordered(
+        s,
+        listed(s)
+            .filter(|x| {
+                s.st.project
+                    .as_deref()
+                    .is_none_or(|p| x.info.project_name == p)
+            })
+            .collect(),
+    );
     if sessions.is_empty() {
         list = list.child(quiet("No active sessions"));
     }
     for x in sessions {
-        list = list.child(session_row(s, x, true));
+        list = list.child(session_row(s, x));
     }
     col.child(list)
 }
@@ -913,19 +886,29 @@ fn groups(s: &Screen<'_>) -> El {
         Act::Group(None),
         |_| ico("layers", 14.0, 1.5, c(look::GRAY_400)),
         "All Sessions",
-        Some(s.store.scoped_sessions().count()),
+        Some(listed(s).count()),
         s.st.project.is_none() && s.st.group.is_none(),
     ));
-    let sessions = by_activity(s);
+    let sessions = ordered(s, listed(s).collect());
     let in_group =
         |x: &Session, g: &SessionGroupConfig| x.info.group_id.as_deref() == Some(g.id.as_str());
     let mut any = false;
-    for g in &s.store.groups {
-        let members: Vec<&Session> = sessions
-            .iter()
-            .copied()
-            .filter(|x| in_group(x, g))
-            .collect();
+    let mut shown: Vec<(&SessionGroupConfig, Vec<&Session>)> = s
+        .store
+        .groups
+        .iter()
+        .map(|g| {
+            let members: Vec<&Session> = sessions
+                .iter()
+                .copied()
+                .filter(|x| in_group(x, g))
+                .collect();
+            (g, members)
+        })
+        .filter(|(_, m)| !s.st.sidebar_view.only_active || !m.is_empty())
+        .collect();
+    shown.sort_by_key(|(_, m)| group_rank(s, m));
+    for (g, members) in shown {
         any |= !members.is_empty();
         let expanded = !s.st.groups_folded.contains(&g.id);
         let mut item = div().col().child(group_row(s, g, &members, expanded));
@@ -935,7 +918,7 @@ fn groups(s: &Screen<'_>) -> El {
                 kids = kids.child(quiet("Drop a session here"));
             }
             for x in members {
-                kids = kids.child(session_row(s, x, true));
+                kids = kids.child(session_row(s, x));
             }
             item = item.child(kids);
         }
@@ -951,9 +934,83 @@ fn groups(s: &Screen<'_>) -> El {
         list = list.child(quiet("No active sessions"));
     }
     for x in loose {
-        list = list.child(session_row(s, x, true));
+        list = list.child(session_row(s, x));
     }
     col.child(list)
+}
+
+/// The sessions under the groups an extension's rows put them in (a row's
+/// `id` is a session's, its `group` the heading), in the order the groups
+/// first appear; sessions it names no group for come last, under Other.
+fn point_groups(s: &Screen<'_>, p: &crate::points::Point) -> El {
+    let open = !s.st.section_folded;
+    let mut col = div().col().gap(2.0).child(toggle_section(
+        s,
+        &p.title,
+        open,
+        Act::ToggleSection,
+        vec![filter_sort(s)],
+    ));
+    if !open {
+        return col;
+    }
+    let rows = s.st.points.listed_rows(p, s.store.workspace());
+    let sessions = ordered(s, listed(s).collect());
+    let mut heads: Vec<String> = Vec::new();
+    let mut by: Vec<Vec<&Session>> = Vec::new();
+    for x in sessions {
+        let head = rows
+            .iter()
+            .find(|r| r.id == x.info.id)
+            .map(|r| r.text("group"))
+            .filter(|g| !g.is_empty())
+            .unwrap_or_else(|| "Other".to_owned());
+        let at = match heads.iter().position(|h| *h == head) {
+            Some(i) => i,
+            None => {
+                heads.push(head);
+                by.push(Vec::new());
+                heads.len() - 1
+            }
+        };
+        by[at].push(x);
+    }
+    if heads.is_empty() {
+        return col.child(quiet("No active sessions"));
+    }
+    // Other last, the rest as the rows first name them.
+    let rank = |h: &str| {
+        rows.iter()
+            .position(|r| r.text("group") == h)
+            .unwrap_or(usize::MAX)
+    };
+    let mut order: Vec<usize> = (0..heads.len()).collect();
+    order.sort_by_key(|&i| rank(&heads[i]));
+    for i in order {
+        col = col.child(
+            div()
+                .row()
+                .items_center()
+                .gap(8.0)
+                .px(8.0)
+                .py(6.0)
+                .child(
+                    div().row().grow().min_w0().child(
+                        text(&heads[i], 13.0, c(look::GRAY_300))
+                            .line_height(19.5)
+                            .truncate()
+                            .role(Role::Heading, heads[i].as_str()),
+                    ),
+                )
+                .child(row_count(by[i].len(), 12.0)),
+        );
+        let mut kids = div().col().ml(8.0);
+        for x in &by[i] {
+            kids = kids.child(session_row(s, x));
+        }
+        col = col.child(kids);
+    }
+    col
 }
 
 /// Its icon (a disclosure on hover), name and count, a
@@ -1760,7 +1817,8 @@ pub(super) fn view_tabs(s: &Screen<'_>, place: &str, labels: bool) -> Vec<El> {
             }
             b = b.child(t);
         }
-        tabs.push(tooltip(s.ui, b, id, label, keys.as_deref()));
+        let b = tooltip(s.ui, b, id, label, keys.as_deref());
+        tabs.push(s.acts.context(b, id, Act::Open(MenuKind::TabMenu)));
     }
     tabs
 }

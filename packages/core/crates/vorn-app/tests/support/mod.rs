@@ -313,6 +313,17 @@ pub fn views_listed_in(app: &mut App, ui: &mut Ui, size: (f32, f32)) {
     });
 }
 
+/// Opens the Tasks view from its sidebar tab, as a person clicks it.
+#[allow(dead_code)]
+pub fn open_tasks(shot: &mut Shot, app: &mut App) {
+    let tab = App::control(
+        "sidebar-mode",
+        &vorn_app::act::Act::View(vorn_app::screen::MainView::Tasks),
+    );
+    shot.until(app, "the Tasks tab", |_, ui| ui.rect_of(tab));
+    shot.click(app, tab);
+}
+
 /// Polls `f` until it answers, or fails the test with `what`.
 #[track_caller]
 pub fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
@@ -608,10 +619,12 @@ impl Shot {
     #[track_caller]
     /// Chooses `label` from `session`'s card More menu, opening it first.
     pub fn card_menu(&mut self, app: &mut App, session: &str, label: &str) {
+        let kept = app.st.arrange.card_shown;
         let i = self.card_menu_entry(app, session, |labels| {
             labels.iter().position(|l| l == label)
         });
         self.click(app, vorn_app::ui::item_id(vorn_app::screen::menus::MENU, i));
+        app.st.arrange.card_shown = kept;
     }
 
     /// Opens `session`'s card More menu and waits until `pick` finds what it wants in its labels.
@@ -621,6 +634,8 @@ impl Shot {
         session: &str,
         mut pick: impl FnMut(&[String]) -> Option<T>,
     ) -> T {
+        // Every card button in More, so a test reaches each by its label.
+        app.st.arrange.card_shown = 0;
         let more = App::control(
             "card",
             &vorn_app::act::Act::Open(vorn_app::state::MenuKind::Card(session.to_owned())),

@@ -185,6 +185,7 @@ impl Store {
                 "materials",
                 "terminalFontFamily",
                 "agentTools",
+                "newSessionStarts",
             ],
         );
         Ok(out)

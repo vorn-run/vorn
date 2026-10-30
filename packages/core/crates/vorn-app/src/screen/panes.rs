@@ -1733,8 +1733,27 @@ pub(super) fn browser_entry(s: &Screen<'_>, session: &Session) -> Option<(Act, &
     })
 }
 
+/// The card menu's device entry, as act and label, while the session has one.
+pub(super) fn device_entry(s: &Screen<'_>, session: &Session) -> Option<(Act, &'static str)> {
+    let sid = session.info.id.as_str();
+    let bench = &s.st.bench;
+    let has = bench.devices.contains(sid);
+    let mobile = bench.mobile.get(&session.info.project_path).copied();
+    let showing = has || bench.device_cards.contains(sid);
+    device_key(&s.st.points, sid)
+        .filter(|_| should_show_button(mobile, showing, session.is_shell()))
+        .map(|_| {
+            let label = if has { "Hide device" } else { "Open device" };
+            (Act::Pane(PaneAct::DeviceButton(sid.to_owned())), label)
+        })
+}
+
 /// The card's phone, before its window controls, while the session has one.
-pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVariant) -> Vec<El> {
+pub(super) fn card_buttons(
+    s: &Screen<'_>,
+    session: &Session,
+    variant: CardVariant,
+) -> Vec<(String, El)> {
     let button = |act: Act, icon: &str, label: &str, tip: &str| {
         let b = CardButton {
             id: s.acts.on("card", act),
@@ -1795,7 +1814,10 @@ pub(super) fn card_buttons(s: &Screen<'_>, session: &Session, variant: CardVaria
                 4.0,
             );
         }
-        out.push(b);
+        out.push((
+            super::customize::pane_id(crate::panes::DEVICE, crate::panes::DEVICE_PANE),
+            b,
+        ));
     }
     out
 }

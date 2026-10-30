@@ -52,6 +52,8 @@ pub struct Session {
     pub ordinal: usize,
     /// Shown from the last run's list, not vornd's: an offer to resume, which takes no number.
     pub offer: bool,
+    /// When it last started, waited, finished or ended, in ms: output never moves it.
+    pub changed_at: f64,
 }
 
 impl Session {
@@ -349,10 +351,14 @@ impl Store {
                 if info.branch.is_none() {
                     info.branch = s.info.branch.take();
                 }
+                if info.status != s.info.status {
+                    s.changed_at = crate::state::now_ms();
+                }
                 s.info = info;
                 s.offer = false;
             }
             None => self.sessions.push(Session {
+                changed_at: info.created_at,
                 info,
                 exited: None,
                 cause: None,
@@ -369,6 +375,7 @@ impl Store {
             return;
         }
         self.sessions.push(Session {
+            changed_at: info.created_at,
             info,
             exited: None,
             cause: Some(cause),
@@ -455,6 +462,7 @@ impl Store {
                     return Change::Nothing;
                 };
                 s.exited = Some(params.get("exitCode").and_then(Value::as_i64).unwrap_or(0));
+                s.changed_at = crate::state::now_ms();
                 Change::Exited(id.to_owned())
             }
             "workflow:runUpdated" => {
@@ -702,6 +710,32 @@ mod tests {
 
     fn ids(s: &Store) -> Vec<&str> {
         s.sessions.iter().map(|s| s.info.id.as_str()).collect()
+    }
+
+    #[test]
+    fn only_a_state_change_moves_a_session_in_the_last_change_order() {
+        let mut s = store(&["a", "b"]);
+        assert_eq!(
+            s.sessions[0].changed_at, 1.0,
+            "a new session changed when it started"
+        );
+        let mut busy = session("a", "running");
+        busy["programStatus"] =
+            json!({ "records": [{ "id": "", "state": "working", "progress": 10 }] });
+        s.apply("session:updated", busy);
+        assert_eq!(
+            s.sessions[0].changed_at, 1.0,
+            "output and reports are not a change"
+        );
+        s.apply("session:updated", session("b", "waiting"));
+        assert!(s.sessions[1].changed_at > 1.0, "waiting is");
+        let waited = s.sessions[1].changed_at;
+        s.apply("terminal:exit", json!({ "id": "a", "exitCode": 0 }));
+        assert!(s.sessions[0].changed_at >= waited, "ending is");
+        let order = crate::sidebar_view::Order::LastChange;
+        let mut by: Vec<&Session> = s.sessions.iter().collect();
+        by.sort_by_key(|x| order.rank(Some(x.info.created_at), Some(x.changed_at)));
+        assert_eq!(by[0].info.id, "a");
     }
 
     #[test]

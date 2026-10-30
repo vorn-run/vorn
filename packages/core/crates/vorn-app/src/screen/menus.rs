@@ -6,7 +6,7 @@
 use super::{c, ico, white, Screen};
 use crate::act::Act;
 use crate::look::{self, Color};
-use crate::state::{Filter, LayoutMode, MenuKind, SidebarMode, Sort};
+use crate::state::{Filter, LayoutMode, MenuKind, Sort};
 use crate::ui::menu::Inset;
 use crate::ui::{div, text, Action, El, Id, Role, Ui};
 
@@ -35,7 +35,12 @@ pub fn width(kind: &MenuKind) -> f32 {
         MenuKind::LaunchModel => 288.0,
         MenuKind::LaunchProject | MenuKind::LaunchWorktree => 240.0,
         MenuKind::LaunchBranch => 220.0,
-        MenuKind::Recent | MenuKind::Headless => 280.0,
+        MenuKind::Headless => 280.0,
+        MenuKind::NewMenu => 240.0,
+        MenuKind::CardPoint(..) => 220.0,
+        MenuKind::ToolbarMenu => 200.0,
+        MenuKind::TabMenu => 200.0,
+        MenuKind::Popover(_) => 380.0,
         MenuKind::TaskOptions | MenuKind::TaskStatus(_) | MenuKind::TaskAgent(_) => 200.0,
         MenuKind::TaskProject(_) => 180.0,
         MenuKind::SetShell => 288.0,
@@ -114,7 +119,18 @@ fn kind_items(s: &Screen<'_>, kind: &MenuKind) -> Vec<Item> {
         MenuKind::LaunchAgent => launch_agents(s),
         MenuKind::LaunchWorktree => launch_worktrees(s),
         MenuKind::LaunchBranch => launch_branches(s),
-        MenuKind::Recent | MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell => Vec::new(),
+        MenuKind::Headless | MenuKind::WfIcon | MenuKind::SetShell | MenuKind::Popover(_) => {
+            Vec::new()
+        }
+        MenuKind::NewMenu => new_menu(s),
+        MenuKind::CardPoint(sid, key) => card_point(s, sid, key),
+        MenuKind::ToolbarMenu => vec![Item::new(
+            "sliders-horizontal",
+            "Customize Toolbar\u{2026}",
+            Act::Customize(crate::arrange::List::Toolbar),
+        )
+        .tip("Reorders and hides the toolbar's items, the sidebar's tabs and a card's panes")],
+        MenuKind::TabMenu => tab_menu(s),
         MenuKind::Branch(_)
         | MenuKind::OpenIn(_)
         | MenuKind::LaunchModel
@@ -270,6 +286,129 @@ fn worktree_sessions(s: &Screen<'_>, path: &str) -> usize {
         .count()
 }
 
+/// The ⌄ beside the toolbar's +: each agent and a shell, started at once
+/// where the focused card is; then a project's, a new worktree, the
+/// composer, and what extensions add to start things.
+fn new_menu(s: &Screen<'_>) -> Vec<Item> {
+    const SUB_W: f32 = 240.0;
+    let starts = s
+        .store
+        .config
+        .pointer(&format!("/defaults/{}", crate::app::NEW_SESSION_STARTS))
+        .and_then(serde_json::Value::as_str);
+    let default = if starts == Some("shell") {
+        "shell"
+    } else {
+        s.store.default_agent()
+    };
+    let quick = super::chrome::quick_key();
+    let mut items = Vec::new();
+    for a in installed(s) {
+        let mut it = Item::new("bot", a.label.as_str(), Act::StartWith(a.key.clone()))
+            .mark(super::agent_icon(s, &a.key, 14.0))
+            .tip(format!("Starts {} where the focused card is", a.label));
+        if a.key == default {
+            it.shortcut = Some(quick.clone());
+        }
+        items.push(it);
+    }
+    let mut shell = Item::new("terminal", "Shell", Act::StartWith("shell".to_owned()))
+        .tint(look::GRAY_400)
+        .tip("Starts a shell where the focused card is");
+    shell.shortcut = Some(if default == "shell" {
+        quick
+    } else {
+        "\u{2303}`".to_owned()
+    });
+    items.push(shell);
+    if s.store.workspace_projects().next().is_some() {
+        let mut project = Item::new("folder", "In project\u{2026}", Act::Nothing)
+            .tint(look::GRAY_400)
+            .submenu(scoped(s, false))
+            .sep();
+        project.sub_w = Some(SUB_W);
+        items.push(project);
+    }
+    let here =
+        s.st.selected
+            .as_deref()
+            .and_then(|id| s.store.session(id))
+            .map(|x| x.info.project_name.clone())
+            .or_else(|| s.st.project.clone())
+            .filter(|p| s.store.projects.iter().any(|x| &x.name == p));
+    if let Some(project) = here {
+        items.push(
+            Item::new(
+                "folder-git-2",
+                "New worktree\u{2026}",
+                Act::NewSessionIn {
+                    project,
+                    worktree: Some(String::new()),
+                    agent: None,
+                },
+            )
+            .tint(look::GRAY_400)
+            .tip("Starts the default agent in a new worktree of this project"),
+        );
+    }
+    let mut prompt = Item::new("plus", "New session with a prompt\u{2026}", Act::NewSession)
+        .tip("Opens the composer to write the first prompt");
+    prompt.shortcut = Some(format!("{}N", super::mod_label()));
+    items.push(prompt);
+    let mut extra: Vec<Item> = row_menus(s, "grid", None);
+    for p in s.st.points.at(crate::points::kind::LAUNCHERS) {
+        let act = Act::Point(crate::points::PointAct::Choose {
+            key: p.key(),
+            args: "{}".to_owned(),
+        });
+        let mut it = Item::new("puzzle", p.title.as_str(), act).detail(p.extension_name.as_str());
+        it.icon = None;
+        let icon = p.icon.as_deref().unwrap_or("puzzle");
+        extra.push(it.mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500))));
+    }
+    for (i, mut it) in extra.into_iter().enumerate() {
+        it.sub_w = Some(SUB_W);
+        items.push(if i == 0 { it.sep() } else { it });
+    }
+    items
+}
+
+/// A right click on a sidebar tab: each tab with a check, shown or hidden,
+/// and the customize sheet.
+fn tab_menu(s: &Screen<'_>) -> Vec<Item> {
+    use crate::arrange::List;
+    let mut items = vec![Item::header("Sidebar tabs")];
+    let ids = super::customize::tab_ids(&s.st.points);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    for id in s.st.arrange.tabs.all(&refs) {
+        let Some(p) = s.st.points.get(id) else {
+            continue;
+        };
+        let shown = s.st.arrange.tabs.is_shown(id);
+        let act = Act::ArrangeShow {
+            list: List::Tabs,
+            id: id.to_owned(),
+            shown: !shown,
+        };
+        let tip = if shown {
+            format!("Hides the {} tab", p.title)
+        } else {
+            format!("Shows the {} tab", p.title)
+        };
+        items.push(Item::option(p.title.as_str(), shown, act).tip(tip));
+    }
+    items.push(
+        Item::new(
+            "sliders-horizontal",
+            "Customize\u{2026}",
+            Act::Customize(List::Tabs),
+        )
+        .tip("Reorders and hides the toolbar's items, the sidebar's tabs and a card's panes")
+        .sep(),
+    );
+    items
+}
+
 /// `GridContextMenu`; its submenus are 240 wide.
 fn grid(s: &Screen<'_>) -> Vec<Item> {
     const SUB_W: f32 = 240.0;
@@ -306,54 +445,26 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
         .worktree_path
         .clone()
         .filter(|_| info.is_worktree == Some(true));
-    // The header's folder, shell and browser buttons, then Rename, each with its key.
-    let keyed = |key: char| format!("{}\u{21e7}{key}", super::mod_label());
+    let focused = s.st.focused.as_deref() == Some(id);
+    // First the card's buttons its header has no room for, in their order.
     let mut items: Vec<Item> = Vec::new();
-    for (act, icon, label, key) in super::side::pane_entries(s, session) {
-        let mut it = Item::new(icon, label, act);
-        it.shortcut = key.map(keyed);
-        items.push(it);
-    }
-    if let Some((act, label)) = super::panes::browser_entry(s, session) {
-        items.push(Item::new("globe", label, act));
+    let all = super::card_buttons::buttons(s, session, focused);
+    let close_hidden = !all.iter().any(|b| b.id == super::card_buttons::CLOSE);
+    for b in all.into_iter().filter(|b| !b.header) {
+        if let Act::Open(MenuKind::CardPoint(_, key)) = &b.act {
+            items.extend(row_menu(s, key, Some(id)));
+            continue;
+        }
+        let mut it = Item::new("puzzle", b.label.as_str(), b.act);
+        it.icon = None;
+        it.shortcut = b.shortcut;
+        it.danger = b.danger;
+        items.push(it.mark(b.icon.draw(14.0, c(look::GRAY_500))));
     }
     let mut rename = Item::new("pencil", "Rename\u{2026}", Act::Rename(id.to_owned()));
     rename.shortcut = Some("F2".to_owned());
+    rename.separator = !items.is_empty();
     items.push(rename);
-    // Then, and not behind a submenu: what this card can show.
-    let shown = items.len();
-    items.extend(
-        (s.st.ext.items(id).into_iter())
-            .chain(s.st.ext.builtin_items(id, &s.st.points))
-            .map(|p| {
-                let label = if p.open {
-                    format!("Close {}", p.title)
-                } else {
-                    p.title.clone()
-                };
-                let act = Act::Ext(crate::extensions::ExtAct::Toggle {
-                    session: id.to_owned(),
-                    extension: p.extension_id,
-                    pane: p.pane_id,
-                });
-                let mut it = Item::new("puzzle", label, act).detail(p.extension_name);
-                it.icon = None;
-                it.mark(super::panes::extension_icon(
-                    p.icon.as_ref(),
-                    14.0,
-                    c(look::GRAY_500),
-                ))
-            }),
-    );
-    if let Some(first) = items.get_mut(shown) {
-        first.separator = true;
-    }
-    let args = serde_json::json!({ "sessionId": id }).to_string();
-    for (act, icon, label, _) in super::points::menu_items(s, "card", &args) {
-        let mut it = Item::new("puzzle", label, act);
-        it.icon = None;
-        items.push(it.mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500))));
-    }
     items.extend([
         Item::new(
             "bot",
@@ -395,8 +506,37 @@ fn card(s: &Screen<'_>, id: &str) -> Vec<Item> {
                 .submenu(agents),
         );
     }
-    items.extend(row_menus(s, "card", Some(id)));
+    if close_hidden {
+        let mut close = Item::new("x", "Close session", Act::AskClose(id.to_owned())).sep();
+        close.danger = true;
+        items.push(close);
+    }
+    items.push(
+        Item::new(
+            "sliders-horizontal",
+            "Customize card buttons\u{2026}",
+            Act::Customize(crate::arrange::List::Card),
+        )
+        .tip("Orders the card's buttons and sets how many show on it")
+        .sep(),
+    );
     items
+}
+
+/// A card button an extension's menu adds with rows: its entries, opened from the header.
+fn card_point(s: &Screen<'_>, sid: &str, key: &str) -> Vec<Item> {
+    row_menu(s, key, Some(sid))
+        .map(|it| it.sub)
+        .unwrap_or_default()
+}
+
+/// The submenu menu point `key` adds, one entry per row it lists.
+fn row_menu(s: &Screen<'_>, key: &str, source: Option<&str>) -> Option<Item> {
+    let p = s.st.points.get(key)?;
+    let menu = p.menu.clone()?;
+    row_menus(s, &menu, source)
+        .into_iter()
+        .find(|it| it.label == p.title)
 }
 
 fn terminal(s: &Screen<'_>, id: &str) -> Vec<Item> {
@@ -533,47 +673,39 @@ fn project(s: &Screen<'_>, name: &str) -> Vec<Item> {
     ]
 }
 
-/// Show, then Filter and Sort projects while
-/// the mode lists projects, and Sort worktrees while it lists worktrees.
+/// Group by (the app's groupings, then those extensions add), Order, the
+/// fields each row shows, and whether only active sessions show.
 fn sidebar_options(s: &Screen<'_>) -> Vec<Item> {
-    use crate::sidebar_view::{ProjectSort, WorktreeFilter, WorktreeSort};
-    let v = s.st.sidebar_view;
-    let mut items = vec![Item::header("Show")];
-    for m in SidebarMode::ALL {
-        items.push(Item::option(
-            m.label(),
-            v.view_mode == m,
-            Act::SidebarMode(m),
-        ));
+    use crate::sidebar_view::{Field, GroupBy, Order};
+    let v = &s.st.sidebar_view;
+    let mut items = vec![Item::header("Group by")];
+    for g in GroupBy::BUILT_IN {
+        let on = v.group_by == g;
+        items.push(Item::option(g.label(), on, Act::GroupBy(g.clone())).tip(g.tip()));
     }
-    if v.by_project() {
-        items.push(Item::header("Filter").sep());
-        for f in WorktreeFilter::ALL {
-            items.push(Item::option(
-                f.label(),
-                v.worktree_filter == f,
-                Act::WorktreeFilter(f),
-            ));
-        }
-        items.push(Item::header("Sort projects").sep());
-        for o in ProjectSort::ALL {
-            items.push(Item::option(
-                o.label(),
-                v.project_sort == o,
-                Act::ProjectSort(o),
-            ));
-        }
+    for p in s.st.points.at(crate::points::kind::GROUPINGS) {
+        let g = GroupBy::Point(p.key());
+        let on = v.group_by == g;
+        let tip = p.description.clone().unwrap_or_else(|| g.tip().to_owned());
+        items.push(
+            Item::option(p.title.as_str(), on, Act::GroupBy(g))
+                .detail(p.extension_name.as_str())
+                .tip(&tip),
+        );
     }
-    if v.by_worktree() {
-        items.push(Item::header("Sort worktrees").sep());
-        for o in WorktreeSort::ALL {
-            items.push(Item::option(
-                o.label(),
-                v.worktree_sort == o,
-                Act::WorktreeSort(o),
-            ));
-        }
+    items.push(Item::header("Order").sep());
+    for o in Order::ALL {
+        items.push(Item::option(o.label(), v.order == o, Act::SidebarOrder(o)).tip(o.tip()));
     }
+    items.push(Item::header("Show on each row").sep());
+    for f in Field::ALL {
+        items.push(Item::option(f.label(), f.on(&v.fields), Act::SidebarField(f)).tip(f.tip()));
+    }
+    items.push(
+        Item::option("Only active sessions", v.only_active, Act::OnlyActive)
+            .tip("Hides ended sessions, and projects, worktrees and groups with none")
+            .sep(),
+    );
     items
 }
 
