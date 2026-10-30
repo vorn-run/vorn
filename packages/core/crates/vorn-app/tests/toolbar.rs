@@ -153,12 +153,16 @@ fn plus_starts_at_once_and_a_card_splits_right_then_down() {
     if app.st.settings.open {
         shot.click(&mut app, control("sidebar-footer", Act::Settings));
     }
-    let before = app.store.sessions.len();
+    let before: Vec<String> = app
+        .store
+        .sessions
+        .iter()
+        .map(|s| s.info.id.clone())
+        .collect();
     shot.click(&mut app, control("toolbar", Act::QuickStart));
+    // The card selects on the call's answer, which may come after the session's event.
     let b = shot.until(&mut app, "the session + started", |app, _| {
-        (app.store.sessions.len() > before)
-            .then(|| app.st.selected.clone())
-            .flatten()
+        app.st.selected.clone().filter(|s| !before.contains(s))
     });
     assert_eq!(app.st.dialog, None, "no composer, no menu");
     assert!(app.st.menu.is_none());
