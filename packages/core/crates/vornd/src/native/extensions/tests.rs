@@ -708,7 +708,7 @@ async fn the_pack_watcher_leaves_a_link_vornd_handled_itself_running() {
             .unwrap(),
     );
     assert!(!w.ext.check_packs().await);
-    assert_eq!(lifecycle.running(), [key.clone()]);
+    assert_eq!(lifecycle.running(), std::slice::from_ref(&key));
 
     // A change made outside vornd is still seen, and stops it.
     let current = w.packs.path().join("test.hello").join("current.json");
