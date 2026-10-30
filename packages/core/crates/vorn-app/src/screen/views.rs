@@ -83,8 +83,7 @@ pub(super) fn view(s: &Screen<'_>) -> El {
     let attention = s.st.points.attention(s.store.workspace());
     let status = |x: &Session| {
         let id = x.info.id.as_str();
-        let asking = s.st.asks.iter().any(|a| a.session == id)
-            || attention.iter().any(|(_, r)| r.str("session") == Some(id));
+        let asking = card_view::asked(&s.st.asks, &attention, id);
         card_view::status_of(x, s.st.cards.printed_at(id), now, asking)
     };
     let cols = card_view::columns(&spec.columns, &shown, s.store, status, &rows);

@@ -25,3 +25,14 @@ description = "A column per group; drag a card to move its session"
 icon = "layout-grid"
 columns = "groups"
 card = "line"
+
+[[contributes.views]]
+id = "asks"
+title = "Asks"
+description = "Working sessions small; those waiting on you one line each"
+icon = "list-checks"
+columns = "status"
+card = "mini"
+
+[contributes.views.by_status]
+waiting = "line"

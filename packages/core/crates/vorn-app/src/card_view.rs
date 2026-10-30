@@ -349,6 +349,12 @@ pub fn status_of(s: &Session, printed_at: Option<u64>, now: u64, asking: bool) -
     )
 }
 
+/// Whether a request waits on session `id`: an agent's, or an attention row naming it as its `session`.
+pub fn asked(asks: &[Ask], attention: &[(&crate::points::Point, &Row)], id: &str) -> bool {
+    asks.iter().any(|a| a.session == id)
+        || attention.iter().any(|(_, r)| r.str("session") == Some(id))
+}
+
 /// An agent's request to use a tool, open until answered (`permission:requested`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ask {

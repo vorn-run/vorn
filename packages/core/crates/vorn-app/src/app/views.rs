@@ -84,7 +84,8 @@ impl App {
             (&self.grid, selected, self.st.points.card_view(&key))
         {
             let now_ms = crate::state::now_ms().max(0.0) as u64;
-            let asking = self.st.asks.iter().any(|a| a.session == s.info.id);
+            let attention = self.st.points.attention(self.store.workspace());
+            let asking = card_view::asked(&self.st.asks, &attention, &s.info.id);
             let status =
                 card_view::status_of(s, self.st.cards.printed_at(&s.info.id), now_ms, asking);
             if !s.ended() && spec.size(status) == CardSize::Line {
@@ -117,12 +118,13 @@ impl App {
             return Vec::new();
         };
         let now = crate::state::now_ms().max(0.0) as u64;
+        let attention = self.st.points.attention(self.store.workspace());
         self.st
             .visible(&self.store)
             .into_iter()
             .map(|i| &self.store.sessions[i])
             .filter(|s| {
-                let asking = self.st.asks.iter().any(|a| a.session == s.info.id);
+                let asking = card_view::asked(&self.st.asks, &attention, &s.info.id);
                 let status =
                     card_view::status_of(s, self.st.cards.printed_at(&s.info.id), now, asking);
                 spec.size(status) == CardSize::Line

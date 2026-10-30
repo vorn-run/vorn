@@ -19,6 +19,7 @@ use vorn_app::App;
 
 const KANBAN: &str = "test.kanban/views/kanban";
 const GROUPS: &str = "test.kanban/views/groups";
+const ASKS: &str = "test.kanban/views/asks";
 
 /// Links the fixture's card views, as a person links a folder, and waits for the app to list them.
 fn link_kanban(app: &mut App, shot: &mut Shot) {
@@ -30,7 +31,7 @@ fn link_kanban(app: &mut App, shot: &mut Shot) {
     assert_eq!(linked["id"], "test.kanban", "{linked}");
     app.st.points.stale = true;
     shot.until(app, "the card views", |app, _| {
-        (app.st.points.card_views().len() == 2).then_some(())
+        (app.st.points.card_views().len() == 3).then_some(())
     });
 }
 
@@ -411,4 +412,76 @@ fn a_full_column_still_shows_every_card_a_request_waits_on() {
         );
     }
     shot.save(&mut app, "views-asking-overflow");
+}
+
+#[test]
+fn an_attention_row_naming_a_session_makes_its_card_wait_everywhere_the_view_decides() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let dir = add_project(&mut app, &v, "demo", json!({}));
+    let mut shot = Shot::new();
+    let id = shell(&mut app, &dir);
+    link_kanban(&mut app, &mut shot);
+    app.st.layout = LayoutMode::View(ASKS.into());
+    // An extension's attention row about the session, and nothing from an agent; put back if a reload of the points drops it.
+    let point = vorn_app::points::Point::from_value(&json!({
+        "extension": "acme.gates", "kind": "attention", "id": "gates", "title": "Gates",
+        "rows": "asks", "call": "approve"
+    }))
+    .expect("an attention point");
+    let row = vorn_app::points::Row::from_value(
+        &json!({ "id": "g1", "session": id, "title": "Ship it?" }),
+    )
+    .expect("a row");
+    let seed = |app: &mut App| {
+        if app
+            .st
+            .points
+            .find("acme.gates", "attention", "gates")
+            .is_none()
+        {
+            app.st.points.all.push(point.clone());
+        }
+        app.st
+            .points
+            .rows
+            .entry("acme.gates".into())
+            .or_default()
+            .insert("asks".into(), vec![row.clone()]);
+    };
+    app.st.selected = Some(id.clone());
+    shot.until(
+        &mut app,
+        "its last line read as a one-line card's",
+        |app, _| {
+            app.pump();
+            seed(app);
+            app.st.cards.lines.get(&id)?.text.as_ref().map(|_| ())
+        },
+    );
+    seed(&mut app);
+    shot.frame(&mut app);
+    let attached = app.grid().expect("grid").attached();
+    assert!(
+        attached.contains(&id),
+        "the selected one-line card takes the keys: {attached:?}"
+    );
+    let approve = App::control(
+        "view-ask",
+        &Act::Point(vorn_app::points::PointAct::Answer {
+            key: "acme.gates/attention/gates".into(),
+            row: "g1".into(),
+            allow: true,
+        }),
+    );
+    assert!(
+        shot.ui.rect_of(approve).is_some(),
+        "the row's request is drawn over the card"
+    );
+    assert!(
+        shot.ui.rect_of(card_id(&id)).is_none(),
+        "drawn as the request, not a mini card"
+    );
 }
