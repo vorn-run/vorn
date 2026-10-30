@@ -10,7 +10,7 @@ description = "Git for Vorn's server, off its event loop: gix for what it answer
 
 [dependencies]
 vorn-spawn = { path = "../spawn" }
-gix = { version = "0.89", default-features = false, features = ["sha1"] }
+gix = { version = "0.90", default-features = false, features = ["sha1"] }
 # Worktree ids and generated names come from a random UUID.
 uuid = { version = "1", features = ["v4"] }
 # Git on a remote host runs over ssh.
