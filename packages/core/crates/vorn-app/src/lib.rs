@@ -18,6 +18,7 @@ pub mod appearance;
 pub mod arrange;
 pub mod artifact;
 pub mod canvas;
+pub mod card_view;
 pub mod cli_link;
 pub mod client;
 pub mod code;

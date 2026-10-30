@@ -54,6 +54,7 @@ mod tasks;
 mod term;
 mod toolbar;
 mod video;
+mod views;
 mod web;
 mod workflows;
 
@@ -335,6 +336,7 @@ enum Call {
     /// What a built-in took over from a file the desktop kept: the file goes once it has.
     Imported(std::path::PathBuf),
     TermImage(term::TermImage),
+    Card(views::CardCall),
 }
 
 /// The launcher model picker's id field.
@@ -673,6 +675,7 @@ impl App {
         app.call(Call::Restored, "sessions:restored", Value::Null);
         app.call(Call::Headless, "headless:list", Value::Null);
         app.call(Call::Installed, "agent:locate", Value::Null);
+        app.ask_asks();
         app
     }
 
@@ -961,6 +964,10 @@ impl App {
                         self.shell_notified(&method, &params);
                         continue;
                     }
+                    if method.starts_with("permission:") {
+                        crate::card_view::fold_asks(&mut self.st.asks, &method, &params);
+                        continue;
+                    }
                     if method == "headless:exit" || method == "headless:data" {
                         self.headless_notified(&method, &params);
                         continue;
@@ -1155,6 +1162,7 @@ impl App {
                 Err(e) => self.st.toast(e.to_string(), true),
             },
             Call::Resumed { id, auto } => self.resumed(&id, auto, answer),
+            Call::Card(c) => self.card_answered(c, answer),
             Call::Task(c) => self.task_answered(c, answer),
             Call::Workflow(c) => self.wf_answered(c, answer),
             Call::Set(c) => self.set_answered(c, answer),
@@ -2241,12 +2249,15 @@ impl App {
             Act::Columns(n) => self.set_columns(ui, n),
             Act::EqualizePanes => self.flex_equalize(),
             Act::Layout(mode) => {
-                self.st.layout = mode;
                 let mut config = self.store.config.clone();
                 if !config.get("defaults").is_some_and(Value::is_object) {
                     config["defaults"] = json!({});
                 }
                 config["defaults"]["layoutMode"] = json!(mode.key());
+                if mode.view().is_some() {
+                    self.st.focused = None;
+                }
+                self.st.layout = mode;
                 self.save_config(config, Call::Quiet);
             }
             Act::NewSession => {
@@ -2527,6 +2538,7 @@ impl App {
             Act::Project(p) => {
                 self.st.project = p;
                 self.st.group = None;
+                self.st.side_selection = None;
                 self.st.worktree = None;
                 if self.st.view == MainView::Workflows {
                     self.st.view = MainView::Sessions;
@@ -2607,6 +2619,8 @@ impl App {
             Act::Group(g) => {
                 // A group row toggles its filter; All Sessions clears both.
                 self.st.group = g.filter(|g| self.st.group.as_ref() != Some(g));
+                self.st.side_selection =
+                    self.st.group.clone().map(vorn_tree::view::Selection::Group);
                 self.st.project = None;
                 self.st.worktree = None;
                 self.st.focused = None;
@@ -2673,6 +2687,20 @@ impl App {
             Act::AskDeleteGroup(id) => self.st.confirm_delete = Some(id),
             Act::DeleteGroup(id) => self.delete_group(&id),
             Act::MoveToGroup { session, group } => self.move_to_group(session, group, Call::Quiet),
+            Act::Permission { request, allow } => self.answer_permission(request, allow),
+            Act::ToggleCardViews => self.st.card_views_open = !self.st.card_views_open,
+            Act::SideGroup(key) => {
+                self.st.side_selection = key
+                    .filter(|k| {
+                        self.st.side_selection.as_ref()
+                            != Some(&vorn_tree::view::Selection::Group(k.clone()))
+                    })
+                    .map(vorn_tree::view::Selection::Group);
+                self.st.group = None;
+                self.st.project = None;
+                self.st.worktree = None;
+                self.st.focused = None;
+            }
             Act::AskDeleteProject(name) => self.st.confirm_delete = Some(name),
             Act::DeleteProject(name) => {
                 let mut config = self.store.config.clone();
@@ -2852,6 +2880,7 @@ impl App {
             || self.net_event(ui, &event)
             || self.term_event(ui, &event)
             || self.arrange_event(ui, &event)
+            || self.view_event(ui, &event)
         {
             return;
         }
@@ -2866,6 +2895,7 @@ impl App {
                             | Act::Sort(_)
                             | Act::Columns(_)
                             | Act::Layout(_)
+                            | Act::ToggleCardViews
                     ) || self.st.menu.as_ref().is_some_and(|m| {
                         matches!(m.kind, MenuKind::Headless)
                             && matches!(
@@ -3110,6 +3140,7 @@ impl App {
                 | Act::Sort(_)
                 | Act::Columns(_)
                 | Act::Layout(_)
+                | Act::ToggleCardViews
                 | Act::AskDeleteProject(_)
                 | Act::AskDeleteGroup(_)
                 | Act::GroupBy(_)
@@ -3222,7 +3253,7 @@ impl App {
         let view = self
             .st
             .points
-            .views()
+            .pages()
             .into_iter()
             .find(|p| {
                 p.key
@@ -3295,7 +3326,7 @@ impl App {
     /// Whether an extension's view or command is bound to this key.
     fn point_key(&self, code: &str, m: u16) -> bool {
         let points = &self.st.points;
-        (points.views().into_iter())
+        (points.pages().into_iter())
             .chain(points.at(crate::points::kind::COMMANDS))
             .any(|p| (p.key.as_deref()).is_some_and(|k| crate::points::key_hit(k, code, m, MOD())))
     }
@@ -3589,6 +3620,7 @@ impl App {
             }
         }
         self.seen_tick(ui);
+        self.views_tick(ui);
         self.git_tick();
         self.panes_tick(ui);
         self.tasks_tick(ui);
@@ -3840,7 +3872,17 @@ impl App {
         let cell = ui.text.cell();
         let current = self.typing_target();
         self.term_boxes.clear();
+        // Only a card view lets go of the terminals it did not draw, so only it keeps count.
+        let viewing = self.st.layout.view().is_some();
+        let mut painted: Vec<String> = Vec::new();
         for (id, r) in &laid.customs {
+            if let Some(i) = crate::screen::views::mini_index(*id) {
+                if let Some(sid) = self.store.sessions.get(i).map(|s| s.info.id.clone()) {
+                    self.paint_mini(ui, &sid, *r, current.as_deref() == Some(sid.as_str()));
+                    painted.push(sid);
+                }
+                continue;
+            }
             if let Some(tid) =
                 crate::extensions::term_index(*id).and_then(|i| self.st.ext.slots.get(i))
             {
@@ -3856,6 +3898,9 @@ impl App {
                 continue;
             };
             let sid = session.info.id.as_str();
+            if viewing {
+                painted.push(sid.to_owned());
+            }
             let split =
                 crate::log::split(&self.st.points, session, self.st.shells.get(sid)).is_some();
             let (inner, cols, rows) = if split {
@@ -3927,6 +3972,34 @@ impl App {
         }
         self.paint_web(ui, laid);
         self.paint_video(ui, laid);
+        self.views_painted(&painted);
+    }
+
+    /// A mini card's terminal: attached without a viewport, so its session keeps its size, and clipped to its newest rows.
+    fn paint_mini(&self, ui: &mut Ui, sid: &str, r: crate::ui::Rect, typing: bool) {
+        if let Some(g) = &self.grid {
+            if self.store.session(sid).is_some_and(|s| !s.ended()) {
+                g.attach_unsized(sid, cell_px(ui));
+            }
+        }
+        let Some(v) = self.views.get(sid) else {
+            return;
+        };
+        let (inner, _, _) =
+            paint::inset(r, paint::inset_of(ui), (ui.text.cell().w, ui.text.cell().h));
+        let used = (f32::from(v.last_row()) + 1.0) * ui.text.cell().h;
+        let dy = (inner.h - used).min(0.0).round();
+        let caret = if typing && self.st.dialog.is_none() && ui.focus().is_none() {
+            paint::Caret::Live
+        } else {
+            paint::Caret::Hidden
+        };
+        if ui.is_cells() {
+            return;
+        }
+        ui.scene.push_clip(inner);
+        paint::pane(ui, v, inner, caret, "", &[], dy);
+        ui.scene.pop_clip();
     }
 
     /// An extension's program terminal, attached and sized to its box.

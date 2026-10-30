@@ -875,23 +875,33 @@ pub fn permission(name: &str) -> Option<(&'static str, &'static str)> {
         "agent.usage" => ("Reads", "the agent's context and provider allowance"),
         "agent.permissions" => ("Answers", "the agents' requests to use a tool"),
         "terminal.send" => ("Sends", "text into the session's terminal"),
+        "sessions.events" => (
+            "Follows",
+            "what your sessions do: started, printing, waiting, finished",
+        ),
+        "sessions.input" => (
+            "Types",
+            "into your sessions, shown as typed by this extension",
+        ),
         "card.rename" => ("Renames", "the session card"),
         _ => return None,
     })
 }
 
-const PERMISSIONS: [&str; 6] = [
+const PERMISSIONS: [&str; 8] = [
     "git.read",
     "terminal.read",
     "terminal.selection",
     "agent.usage",
+    "sessions.events",
     "terminal.send",
+    "sessions.input",
     "card.rename",
 ];
 
 /// What an extension asks for, under its verb.
 pub fn permission_rows(asked: &[String]) -> Vec<(&'static str, Vec<&'static str>)> {
-    ["Reads", "Sends", "Renames"]
+    ["Reads", "Follows", "Sends", "Types", "Renames"]
         .into_iter()
         .map(|bucket| {
             let items = PERMISSIONS
@@ -938,8 +948,9 @@ pub fn describe_contributions(contributes: Option<&Value>) -> String {
 
 /// Where each place an extension adds to is grouped on its page, with the
 /// noun an untitled or titled entry reads with (none for a sidebar section or a command).
-const PLACES: [(&str, &str, &str); 15] = [
-    ("Top bar", "views", "button"),
+const PLACES: [(&str, &str, &str); 16] = [
+    ("Top bar", "pages", "button"),
+    ("Sessions", "views", "card view"),
     ("Sidebar", "sidebar", ""),
     ("Cards", "badges", "badge"),
     ("Cards", "cardFooters", "footer"),
@@ -2852,7 +2863,22 @@ mod tests {
                 ("Sends", vec!["text into the session's terminal"])
             ]
         );
-        assert_eq!(not_asked(&asked).len(), 4);
+        assert_eq!(not_asked(&asked).len(), 6);
+        let views = vec!["sessions.input".to_owned(), "sessions.events".to_owned()];
+        assert_eq!(
+            permission_rows(&views),
+            [
+                (
+                    "Follows",
+                    vec!["what your sessions do: started, printing, waiting, finished"]
+                ),
+                (
+                    "Types",
+                    vec!["into your sessions, shown as typed by this extension"]
+                )
+            ],
+            "typing into sessions is never read as reading them"
+        );
     }
 
     #[test]

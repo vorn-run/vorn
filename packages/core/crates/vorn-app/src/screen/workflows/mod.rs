@@ -334,7 +334,7 @@ pub fn view(s: &Screen<'_>) -> El {
 
     let point = s.st.points.find(
         crate::workflows::ID,
-        crate::points::kind::VIEWS,
+        crate::points::kind::PAGES,
         "workflows",
     );
     let Some(p) = point else {

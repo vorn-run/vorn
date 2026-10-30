@@ -587,27 +587,29 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
     let seg = |mode: LayoutMode, label: &str, icon: &str| {
         let on = s.st.layout == mode;
         let id = s.acts.on("layout", Act::Layout(mode));
-        let hot = s.ui.hover(id);
-        let fg = if on {
-            c(look::WHITE)
-        } else {
-            c(look::GRAY_500).mix(c(look::GRAY_300), hot)
-        };
-        div()
-            .id(id)
-            .on(Action::Click)
-            .row()
-            .items_center()
-            .gap(6.0)
-            .px(10.0)
-            .py(4.0)
-            .rounded(6.0)
-            .bg(if on { white(0.10) } else { white(0.04) })
-            .role(Role::Button, label)
-            .selected(on)
-            .child(ico(icon, 12.0, 2.0, fg))
-            .child(text(label, 11.0, fg).line_height(14.0).silent())
+        segment(s, id, on, label, icon)
     };
+    let views = s.st.points.card_views();
+    let active =
+        s.st.layout
+            .view()
+            .and_then(|k| views.iter().find(|p| p.key() == k));
+    let open = s.st.card_views_open;
+    let chevron = (!views.is_empty()).then(|| {
+        let id = s.acts.on("layout", Act::ToggleCardViews);
+        let fold = if open { "chevron-up" } else { "chevron-down" };
+        let (label, icon) = match active {
+            Some(p) => (p.title.as_str(), p.icon.as_deref().unwrap_or("columns-3")),
+            None => ("", fold),
+        };
+        let el = segment(s, id, active.is_some(), label, icon).expanded(open);
+        let el = if active.is_some() {
+            el.child(ico(fold, 12.0, 2.0, c(look::GRAY_500)))
+        } else {
+            el
+        };
+        crate::ui::tooltip(s.ui, el, id, "Card views from extensions", None)
+    });
     items.push(Item {
         row: Some(
             div()
@@ -617,10 +619,13 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
                 .py(4.0)
                 .child(seg(LayoutMode::Grid, "Grid", "grid-4"))
                 .child(seg(LayoutMode::Tabs, "Tabs", "tab-window"))
-                .child(seg(LayoutMode::List, "List", "list")),
+                .child_if(chevron),
         ),
         ..Item::default()
     });
+    if open && !views.is_empty() {
+        items.extend(card_views(s));
+    }
     if s.st.layout == LayoutMode::Grid {
         items.push(Item::header("Columns").sep());
         for (n, label) in [
@@ -642,6 +647,53 @@ fn view_options(s: &Screen<'_>) -> Vec<Item> {
     // The browser is where the web client already runs.
     if !cfg!(target_arch = "wasm32") {
         items.push(Item::new("globe", "Open in Browser", Act::OpenWebClient).sep());
+    }
+    items
+}
+
+/// One segment of the layout switcher.
+fn segment(s: &Screen<'_>, id: Id, on: bool, label: &str, icon: &str) -> El {
+    let hot = s.ui.hover(id);
+    let fg = if on {
+        c(look::WHITE)
+    } else {
+        c(look::GRAY_500).mix(c(look::GRAY_300), hot)
+    };
+    div()
+        .id(id)
+        .on(Action::Click)
+        .row()
+        .items_center()
+        .gap(6.0)
+        .px(10.0)
+        .py(4.0)
+        .rounded(6.0)
+        .bg(if on { white(0.10) } else { white(0.04) })
+        .role(Role::Button, label)
+        .selected(on)
+        .child(ico(icon, 12.0, 2.0, fg))
+        .child_if((!label.is_empty()).then(|| text(label, 11.0, fg).line_height(14.0).silent()))
+}
+
+/// The card views extensions add, listed under the layout switcher while its chevron is open.
+fn card_views(s: &Screen<'_>) -> Vec<Item> {
+    let mut items = vec![Item::header("From extensions")];
+    for p in s.st.points.card_views() {
+        let key = p.key();
+        let on = s.st.layout.view() == Some(key.as_str());
+        let mut it = Item::option(p.title.as_str(), on, Act::Layout(LayoutMode::View(key)));
+        it.detail = Some(p.extension_name.clone());
+        let tip = p.description.clone().unwrap_or_else(|| {
+            format!(
+                "Arranges the sessions as {} lays them out",
+                p.extension_name
+            )
+        });
+        let icon = p.icon.as_deref().unwrap_or("columns-3");
+        items.push(
+            it.tip(tip)
+                .mark(vorn_components::lucide(icon, 14.0, 1.5, c(look::GRAY_500))),
+        );
     }
     items
 }

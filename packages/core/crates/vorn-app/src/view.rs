@@ -460,6 +460,15 @@ impl PaneView {
             .unwrap_or("?")
     }
 
+    /// The lowest row anything is drawn on, the cursor's included: what a clipped card keeps in view.
+    pub fn last_row(&self) -> u16 {
+        self.runs
+            .iter()
+            .filter(|r| !self.run_text(r).trim().is_empty())
+            .map(|r| r.row)
+            .fold(self.cursor_y, u16::max)
+    }
+
     /// The screen as text, one line per row, trailing blanks dropped: for
     /// checks and assistive technology, not for drawing.
     pub fn text(&self) -> String {

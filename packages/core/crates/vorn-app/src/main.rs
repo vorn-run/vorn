@@ -148,9 +148,9 @@ impl Args {
         }
     }
 
-    /// `--layout tabs|list` shows the sessions as tabs or as a list.
+    /// `--layout tabs|view:<key>` shows the sessions as tabs or as a card view.
     fn layout(&self, app: &mut App) {
-        if let Some(l @ ("tabs" | "list")) = self.get("layout") {
+        if let Some(l) = self.get("layout") {
             app.st.layout = vorn_app::state::LayoutMode::from_key(l);
         }
     }

@@ -280,15 +280,14 @@ impl App {
         }
         let mode = match view {
             Some("tabs") => Some(LayoutMode::Tabs),
-            Some("list") => Some(LayoutMode::List),
             Some("grid" | "flexible") => Some(LayoutMode::Grid),
             _ => None,
         };
         if ws == self.store.workspace() {
             self.st.flex_beside = set_tree;
             self.load_columns();
-            if let Some(mode) = mode {
-                self.st.layout = mode;
+            if let Some(mode) = &mode {
+                self.st.layout = mode.clone();
             }
         }
         // Saved again so this screen's next save does not put the old view back.

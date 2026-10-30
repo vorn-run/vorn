@@ -431,6 +431,7 @@ fn session_json(t: &crate::registry::TerminalSession, printed: Option<u64>, now:
     let status = serde_json::to_value(t.status).unwrap_or(Value::Null);
     let created = u64::try_from(t.created_at).unwrap_or(0);
     let activity = vorn_tree::view::CardStatus::of(
+        &t.agent_type,
         status.as_str().unwrap_or_default(),
         false,
         created,

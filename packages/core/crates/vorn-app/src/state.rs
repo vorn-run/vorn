@@ -74,14 +74,14 @@ impl Sort {
     }
 }
 
-/// Cards in a grid, one at a time under tabs, or one per row in a list
-/// (`defaults.layoutMode`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+/// Cards in a grid, one at a time under tabs, or as a card view arranges them (`defaults.layoutMode`; a view as `view:<key>`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub enum LayoutMode {
     #[default]
     Grid,
     Tabs,
-    List,
+    /// A card view, by its point's key (`ext/views/id`).
+    View(String),
 }
 
 impl LayoutMode {
@@ -95,20 +95,30 @@ impl LayoutMode {
         }
     }
 
-    /// The mode a stored `layoutMode` names; Grid for any other.
+    /// The mode a stored `layoutMode` names; Grid for any other, `list` among them.
     pub fn from_key(key: &str) -> LayoutMode {
         match key {
             "tabs" => LayoutMode::Tabs,
-            "list" => LayoutMode::List,
-            _ => LayoutMode::Grid,
+            _ => match key.strip_prefix("view:").filter(|k| !k.is_empty()) {
+                Some(view) => LayoutMode::View(view.to_owned()),
+                None => LayoutMode::Grid,
+            },
         }
     }
 
-    pub fn key(self) -> &'static str {
+    pub fn key(&self) -> String {
         match self {
-            LayoutMode::Grid => "grid",
-            LayoutMode::Tabs => "tabs",
-            LayoutMode::List => "list",
+            LayoutMode::Grid => "grid".into(),
+            LayoutMode::Tabs => "tabs".into(),
+            LayoutMode::View(k) => format!("view:{k}"),
+        }
+    }
+
+    /// The card view it names, by its point's key.
+    pub fn view(&self) -> Option<&str> {
+        match self {
+            LayoutMode::View(k) => Some(k),
+            _ => None,
         }
     }
 }
@@ -573,6 +583,16 @@ pub struct State {
     pub signin: Option<crate::signin::Window>,
     /// An agent has asked for permission, so Mod+Shift+A and D answer it.
     pub permission_keys: bool,
+    /// What the sidebar has selected, which a card view follows.
+    pub side_selection: Option<vorn_tree::view::Selection>,
+    /// What a card view shows of each session beside its terminal.
+    pub cards: crate::card_view::Cards,
+    /// The agents' permission requests open now, oldest first.
+    pub asks: Vec<crate::card_view::Ask>,
+    /// The layout switcher lists the card views extensions add.
+    pub card_views_open: bool,
+    /// A card being dragged in a card view: its session and the column it is over.
+    pub view_drag: Option<(String, Option<String>)>,
 }
 
 impl State {
@@ -589,6 +609,7 @@ impl State {
     /// The cards the grid shows, as indexes into `store.sessions`: the
     /// active project's, through the status filter, in the chosen order.
     pub fn visible(&self, store: &Store) -> Vec<usize> {
+        let heading = self.selected_heading(store);
         let mut out: Vec<usize> = store
             .sessions
             .iter()
@@ -609,6 +630,7 @@ impl State {
                         .is_none_or(|w| s.info.worktree_path.as_deref().unwrap_or("") == w)
                     && self.filter.keeps(s)
                     && self.side.holder(&s.info.id).is_none()
+                    && heading.as_ref().is_none_or(|under| under(&s.info.id))
             })
             .map(|(i, _)| i)
             .collect();
@@ -624,6 +646,27 @@ impl State {
             }
         }
         out
+    }
+
+    /// Whether a session is under the grouping heading the sidebar has selected, when one is.
+    fn selected_heading<'a>(&'a self, store: &'a Store) -> Option<impl Fn(&str) -> bool + 'a> {
+        let Some(vorn_tree::view::Selection::Group(key)) = &self.side_selection else {
+            return None;
+        };
+        let (point, heading) = key.split_once('#')?;
+        let p = self.points.get(point)?;
+        let mut named: HashSet<&str> = HashSet::new();
+        let mut under: HashSet<&str> = HashSet::new();
+        for r in self.points.listed_rows(p, store.workspace()) {
+            if let Some(g) = r.str("group").filter(|g| !g.is_empty()) {
+                named.insert(r.id.as_str());
+                if g == heading {
+                    under.insert(r.id.as_str());
+                }
+            }
+        }
+        let other = heading == crate::card_view::OTHER;
+        Some(move |id: &str| under.contains(id) || (other && !named.contains(id)))
     }
 
     /// The cards the grid lays out: [`State::visible`] less the minimized,
@@ -684,6 +727,11 @@ impl State {
     }
 }
 
+/// The key a heading of a grouping point is selected and folded by: `<point key>#<heading>`.
+pub fn point_group_key(point: &str, heading: &str) -> String {
+    format!("{point}#{heading}")
+}
+
 /// Just now, 5m ago, 3h ago, 2d ago.
 pub fn time_ago(then_ms: f64, now_ms: f64) -> String {
     let s = ((now_ms - then_ms) / 1000.0).max(0.0) as u64;
@@ -739,9 +787,19 @@ mod tests {
         let c = json!({ "defaults": { "layoutMode": "tabs" } });
         assert_eq!(LayoutMode::from_config(&c), LayoutMode::Tabs);
         assert_eq!(LayoutMode::from_config(&json!({})), LayoutMode::Grid);
-        for mode in [LayoutMode::Grid, LayoutMode::Tabs, LayoutMode::List] {
-            assert_eq!(LayoutMode::from_key(mode.key()), mode);
+        for mode in [
+            LayoutMode::Grid,
+            LayoutMode::Tabs,
+            LayoutMode::View("acme/views/kanban".into()),
+        ] {
+            assert_eq!(LayoutMode::from_key(&mode.key()), mode);
         }
+        assert_eq!(
+            LayoutMode::from_key("list"),
+            LayoutMode::Grid,
+            "the list layout is gone"
+        );
+        assert_eq!(LayoutMode::from_key("view:"), LayoutMode::Grid);
         assert_eq!(basename("/a/b/demo/"), "demo");
         assert_eq!(basename(r"C:\src\demo"), "demo");
     }

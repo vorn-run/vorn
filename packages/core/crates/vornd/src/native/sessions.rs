@@ -377,6 +377,7 @@ fn cards(native: &Native, params: &Value) -> Answer {
                 let printed = native.printed_at(&t.id, false);
                 let status = serde_json::to_value(t.status).unwrap_or(Value::Null);
                 let activity = vorn_tree::view::CardStatus::of(
+                    &t.agent_type,
                     status.as_str().unwrap_or_default(),
                     false,
                     u64::try_from(t.created_at).unwrap_or(0),

@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 /// Output this long apart is one burst: a card prints again only after this much quiet.
 pub const QUIET_MS: u64 = 2_000;
+/// A card reads as printing this long after its last print: vornd tells prints once a second, so a shorter window would flicker.
+pub const PRINTING_MS: u64 = 5_000;
 /// A session that has not printed yet reads as started for this long.
 pub const STARTED_MS: u64 = 10_000;
 /// The most characters a card's last line keeps.
@@ -98,9 +100,22 @@ impl CardStatus {
         }
     }
 
-    /// A card's status from its agent status, whether it ended, and when it started and last printed (epoch ms).
-    pub fn of(status: &str, exited: bool, created: u64, printed: Option<u64>, now: u64) -> Self {
-        let recent = |at: u64| now.saturating_sub(at) < QUIET_MS;
+    /// A card's status from its agent (`shell` for a shell), its status, whether it ended, and when it started and last printed (epoch ms).
+    pub fn of(
+        agent: &str,
+        status: &str,
+        exited: bool,
+        created: u64,
+        printed: Option<u64>,
+        now: u64,
+    ) -> Self {
+        let recent = |at: u64| now.saturating_sub(at) < PRINTING_MS;
+        // A shell runs while it is open: only its output says it works.
+        let status = if agent == "shell" && status == "running" {
+            "idle"
+        } else {
+            status
+        };
         match status {
             "waiting" => CardStatus::Waiting,
             _ if exited => CardStatus::Finished,
@@ -297,16 +312,29 @@ mod tests {
     fn a_card_reads_its_status_from_its_session() {
         let now = 100_000;
         let of = |status, exited, created, printed| {
-            CardStatus::of(status, exited, created, printed, now)
+            CardStatus::of("acme", status, exited, created, printed, now)
         };
         assert_eq!(of("waiting", false, 0, Some(now)), CardStatus::Waiting);
         assert_eq!(of("idle", true, 0, Some(now)), CardStatus::Finished);
         assert_eq!(of("idle", false, now - 1_000, None), CardStatus::Started);
         assert_eq!(of("idle", false, 0, Some(now - 500)), CardStatus::Printing);
+        assert_eq!(
+            of("idle", false, 0, Some(now - PRINTING_MS + 1)),
+            CardStatus::Printing,
+            "a print a second or two ago still reads as printing"
+        );
         assert_eq!(of("running", false, 0, Some(0)), CardStatus::Printing);
         assert_eq!(of("idle", false, 0, Some(0)), CardStatus::Finished);
         assert_eq!(of("idle", false, 0, None), CardStatus::Idle);
         assert_eq!(of("error", false, 0, None), CardStatus::Finished);
+        let shell = |printed| CardStatus::of("shell", "running", false, 0, printed, now);
+        assert_eq!(shell(Some(now - 100)), CardStatus::Printing);
+        assert_eq!(
+            shell(Some(0)),
+            CardStatus::Finished,
+            "an open shell gone quiet is done"
+        );
+        assert_eq!(shell(None), CardStatus::Idle);
     }
 
     #[test]

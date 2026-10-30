@@ -33,6 +33,15 @@ pub enum Act {
     Filter(Filter),
     Sort(Sort),
     Layout(LayoutMode),
+    /// Lists the card views under the layout switcher, or folds them away.
+    ToggleCardViews,
+    /// Answers an agent's permission request.
+    Permission {
+        request: String,
+        allow: bool,
+    },
+    /// Selects a group heading in the sidebar, or clears the selection, which a card view follows.
+    SideGroup(Option<String>),
     Columns(i32),
     /// Every flexible pane back to an equal share.
     EqualizePanes,

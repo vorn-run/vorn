@@ -169,6 +169,7 @@ impl App {
         self.reload_tasks();
         self.call(Call::Sessions, "terminal:listActive", Value::Null);
         self.call(Call::Restored, "sessions:restored", Value::Null);
+        self.ask_asks();
         self.call(Call::Headless, "headless:list", Value::Null);
         self.call(Call::Installed, "agent:locate", Value::Null);
     }
