@@ -8,7 +8,7 @@ publish = false
 description = "Vorn's thin UI layer: winit windows, wgpu or CPU drawing, cosmic-text and swash text, taffy layout, AccessKit accessibility, and the widgets the app is built from"
 
 [dependencies]
-wgpu = { version = "29", default-features = false, features = ["wgsl", "std"] }
+wgpu = { version = "30", default-features = false, features = ["wgsl", "std"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 accesskit = "0.25"
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
