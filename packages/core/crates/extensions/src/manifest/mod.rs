@@ -2518,6 +2518,26 @@ mod tests {
     }
 
     #[test]
+    fn every_permission_reads_back_by_its_name_and_typing_is_its_own() {
+        for p in Permission::ALL {
+            assert_eq!(Permission::named(p.name()), Some(p));
+        }
+        let asked = permissions(Some(&json!([
+            "sessions.read",
+            "sessions.input",
+            "sessions.events"
+        ])));
+        assert_eq!(
+            asked,
+            Some(vec![
+                Permission::SessionsRead,
+                Permission::SessionsInput,
+                Permission::SessionsEvents
+            ])
+        );
+    }
+
+    #[test]
     fn drops_an_icon_with_one_bad_path() {
         assert_eq!(icon(Some(&json!({ "paths": ["M0 0", "<script>"] }))), None);
         assert_eq!(icon(Some(&json!({ "paths": [] }))), None);
