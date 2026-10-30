@@ -51,7 +51,7 @@ pub use palette::{PALETTE_INPUT, PALETTE_LIST};
 pub(crate) use sidebar::{picker_project_icon, project_icon as sidebar_project_icon};
 
 /// The views the top bar's pills switch between: Sessions, then what
-/// extensions add under `[[contributes.views]]`.
+/// extensions add under `[[contributes.pages]]`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum MainView {
     #[default]

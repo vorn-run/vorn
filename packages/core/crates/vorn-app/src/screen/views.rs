@@ -80,9 +80,14 @@ pub(super) fn view(s: &Screen<'_>) -> El {
     let now = crate::state::now_ms().max(0.0) as u64;
     let shown = s.st.visible(s.store);
     let rows = grouping_rows(s, &spec.columns);
-    let status = |x: &Session| card_view::status_of(x, s.st.cards.printed_at(&x.info.id), now);
-    let cols = card_view::columns(&spec.columns, &shown, s.store, status, &rows);
     let attention = s.st.points.attention(s.store.workspace());
+    let status = |x: &Session| {
+        let id = x.info.id.as_str();
+        let asking = s.st.asks.iter().any(|a| a.session == id)
+            || attention.iter().any(|(_, r)| r.str("session") == Some(id));
+        card_view::status_of(x, s.st.cards.printed_at(id), now, asking)
+    };
+    let cols = card_view::columns(&spec.columns, &shown, s.store, status, &rows);
     let (w, h) = s.grid_size();
     let room = (h - BAR_H - COLUMN_HEAD_H - 2.0 * GAP).max(LINE_H);
     let n = cols.len().max(1) as f32;
@@ -208,18 +213,20 @@ fn column(
                 .silent(),
         );
     let mut list = div().col().gap(GAP).min_w0();
-    let mut used = 0.0;
-    let mut hidden = 0;
-    for &i in &col.sessions {
+    let sized: Vec<(usize, f32, bool)> = col
+        .sessions
+        .iter()
+        .map(|&i| {
+            let session = &s.store.sessions[i];
+            let asking = ask_of(s, attention, &session.info.id).is_some();
+            (i, height(spec.size(status(session)), asking), asking)
+        })
+        .collect();
+    let (shown, hidden) = card_view::fit(&sized, room, GAP);
+    for i in shown {
         let session = &s.store.sessions[i];
         let ask = ask_of(s, attention, &session.info.id);
         let size = spec.size(status(session));
-        let h = height(size, ask.is_some());
-        if hidden > 0 || used + h > room {
-            hidden += 1;
-            continue;
-        }
-        used += h + GAP;
         list = list.child(card(s, i, session, size, ask, inside));
     }
     if hidden > 0 {

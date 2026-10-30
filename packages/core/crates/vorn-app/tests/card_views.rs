@@ -171,6 +171,31 @@ fn the_chevron_lists_card_views_and_kanban_draws_columns_without_resizing_a_sess
         "typing into it sizes nothing"
     );
 
+    // Sized by another client, then typed into from the mini card: the pane the grid sized is let go, so typing takes no size.
+    app.rpc()
+        .call(
+            "terminal:resize",
+            json!({ "id": busy, "cols": 90, "rows": 20 }),
+        )
+        .expect("resized");
+    shot.until(&mut app, "the other client's size", |app, _| {
+        app.pump();
+        (recorded(app, &busy) == Some((90, 20))).then_some(())
+    });
+    std::thread::sleep(std::time::Duration::from_millis(3200));
+    shot.click(&mut app, card_id(&busy));
+    shot.type_text(&mut app, "x");
+    for _ in 0..30 {
+        shot.frame(&mut app);
+        app.pump();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    assert_eq!(
+        recorded(&app, &busy),
+        Some((90, 20)),
+        "typing into a mini card resizes nothing"
+    );
+
     // A request to use a tool shows over the mini card and over the line card.
     for (n, sid) in [&busy, &quiet].into_iter().enumerate() {
         app.st.asks.push(Ask {
@@ -342,4 +367,48 @@ fn a_terminal_shows_grid_with_a_note_and_a_grouping_heading_selects_and_folds() 
     );
     shot.click(&mut app, select);
     assert_eq!(app.st.side_selection, None, "a second click clears it");
+}
+
+#[test]
+fn a_full_column_still_shows_every_card_a_request_waits_on() {
+    let Some(v) = TestVornd::start() else {
+        return;
+    };
+    let mut app = connect(&v);
+    let dir = add_project(&mut app, &v, "demo", json!({}));
+    let mut shot = Shot::at((1100.0, 420.0), 1.0);
+    let ids: Vec<String> = (0..5).map(|_| shell(&mut app, &dir)).collect();
+    link_kanban(&mut app, &mut shot);
+    app.st.layout = LayoutMode::View(KANBAN.into());
+    for (n, sid) in ids.iter().enumerate() {
+        app.st.asks.push(Ask {
+            request: format!("r{n}"),
+            session: sid.clone(),
+            tool: "Bash".into(),
+            description: None,
+        });
+    }
+    shot.frame(&mut app);
+    let waiting = shot
+        .ui
+        .rect_of(column_id("waiting"))
+        .expect("the Waiting column");
+    for (n, sid) in ids.iter().enumerate() {
+        let allow = App::control(
+            "view-ask",
+            &Act::Permission {
+                request: format!("r{n}"),
+                allow: true,
+            },
+        );
+        let r = shot
+            .ui
+            .rect_of(allow)
+            .unwrap_or_else(|| panic!("request r{n} is drawn"));
+        assert!(
+            r.x >= waiting.x && r.x < waiting.x + waiting.w,
+            "{sid} waits in Waiting"
+        );
+    }
+    shot.save(&mut app, "views-asking-overflow");
 }

@@ -18,7 +18,7 @@ component = "tasks.wasm"
 start = "badges"
 events = ["agent.conversation"]
 
-[[contributes.views]]
+[[contributes.pages]]
 id = "board"
 title = "Tasks"
 description = "The board of each project's tasks: a queue of todos for you and your agents."

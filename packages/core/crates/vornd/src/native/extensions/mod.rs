@@ -997,6 +997,18 @@ impl Extensions {
         vorn_extensions::gate::admit_terminal(caller, method, started, paned)
     }
 
+    /// Whether the caller may have session `session`'s last line, as `terminal.read` would read it.
+    pub(crate) fn admits_last_line(
+        &self,
+        manifest: &vorn_extensions::manifest::Manifest,
+        caller: &vorn_extensions::gate::Caller,
+        session: &str,
+    ) -> bool {
+        let started = guard(&self.given).starter_of(&caller.extension, session);
+        let paned = self.paned(&caller.extension, session);
+        vorn_extensions::gate::admit_last_line(manifest, caller, started, paned)
+    }
+
     /// The manifest of built-in or installed extension `id`.
     pub(crate) fn manifest_of(
         &self,

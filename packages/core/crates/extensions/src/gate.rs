@@ -259,6 +259,12 @@ pub fn admit_terminal(
     ))
 }
 
+/// Whether `sessions.list` and `sessions.get` answer a session's `lastLine`: only what `terminal.read` would read of it.
+pub fn admit_last_line(manifest: &Manifest, caller: &Caller, started: bool, paned: bool) -> bool {
+    declares(manifest, Permission::TerminalRead)
+        && admit_terminal(caller, "terminal.read", started, paned).is_ok()
+}
+
 /// The page ops `web.call` passes to the client: reading, finding and acting
 /// on what the page shows. None runs a script of the extension's own.
 pub const WEB_OPS: &[&str] = &[
@@ -622,6 +628,24 @@ header = "Authorization: Bearer {token}"
 
     fn caller() -> Caller {
         Caller::of(&manifest())
+    }
+
+    #[test]
+    fn a_last_line_is_read_only_as_terminal_read_would_read_it() {
+        let reads = crate::manifest::file::parse(
+            "id = \"r\"\nname = \"R\"\nversion = \"1.0.0\"\napi = \"vorn:extension@1.0\"\n[service]\ncommand = [\"r\"]\n[declares]\nuses = [\"sessions.read\", \"terminal.read\"]\n",
+        )
+        .unwrap();
+        let by = Caller::of(&reads);
+        assert!(
+            !admit_last_line(&manifest(), &caller(), true, false),
+            "sessions.read alone reads no screen"
+        );
+        assert!(admit_last_line(&reads, &by, true, false));
+        assert!(
+            !admit_last_line(&reads, &by, false, false),
+            "nor a session it did not start"
+        );
     }
 
     #[tokio::test]

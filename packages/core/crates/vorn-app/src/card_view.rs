@@ -317,8 +317,28 @@ impl Cards {
     }
 }
 
-/// A card's status, as vornd's rules read it from what the app knows of its session.
-pub fn status_of(s: &Session, printed_at: Option<u64>, now: u64) -> CardStatus {
+/// What a column shows of `cards` (each its place, height and whether a request waits on it) in `room` with `gap` between: requests first and always, then the rest while they fit; and how many it leaves out.
+pub fn fit(cards: &[(usize, f32, bool)], room: f32, gap: f32) -> (Vec<usize>, usize) {
+    let asking = cards.iter().filter(|c| c.2);
+    let mut used: f32 = asking.clone().map(|c| c.1 + gap).sum();
+    let mut shown: Vec<usize> = asking.map(|c| c.0).collect();
+    let mut hidden = 0;
+    for &(i, h, _) in cards.iter().filter(|c| !c.2) {
+        if hidden > 0 || used + h > room {
+            hidden += 1;
+        } else {
+            used += h + gap;
+            shown.push(i);
+        }
+    }
+    (shown, hidden)
+}
+
+/// A card's status, as vornd's rules read it from what the app knows of its session; one a request waits on is waiting.
+pub fn status_of(s: &Session, printed_at: Option<u64>, now: u64, asking: bool) -> CardStatus {
+    if asking {
+        return CardStatus::Waiting;
+    }
     CardStatus::of(
         s.info.agent_type.as_str(),
         s.status(),
@@ -442,7 +462,7 @@ mod tests {
             json!([{ "id": "g1", "name": "Review", "order": 0.0, "workspaceId": "personal" }]),
         );
         let shown = [0, 1, 2];
-        let by_status = |s: &Session| status_of(s, None, 1_000_000);
+        let by_status = |s: &Session| status_of(s, None, 1_000_000, false);
         let titles = |cols: Vec<Column>| -> Vec<(String, Vec<usize>)> {
             cols.into_iter().map(|c| (c.title, c.sessions)).collect()
         };
@@ -493,6 +513,40 @@ mod tests {
         );
         assert!(ColumnsBy::Groups.moves());
         assert!(!ColumnsBy::Status.moves() && !by.moves());
+    }
+
+    #[test]
+    fn a_full_column_never_hides_a_card_a_request_waits_on() {
+        let cards = [
+            (0, 100.0, false),
+            (1, 100.0, true),
+            (2, 100.0, false),
+            (3, 100.0, true),
+            (4, 100.0, true),
+        ];
+        assert_eq!(
+            fit(&cards, 250.0, 10.0),
+            (vec![1, 3, 4], 2),
+            "requests show even past the room"
+        );
+        assert_eq!(fit(&cards, 450.0, 10.0), (vec![1, 3, 4, 0], 1));
+        assert_eq!(fit(&cards[..1], 50.0, 10.0), (vec![], 1));
+    }
+
+    #[test]
+    fn a_session_a_request_waits_on_is_waiting() {
+        let st = store(
+            json!([session("a", "vorn", "running", json!({}))]),
+            json!([]),
+        );
+        assert_eq!(
+            status_of(&st.sessions[0], None, 1_000_000, true),
+            CardStatus::Waiting
+        );
+        assert_eq!(
+            status_of(&st.sessions[0], None, 1_000_000, false),
+            CardStatus::Printing
+        );
     }
 
     #[test]

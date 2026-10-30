@@ -65,7 +65,9 @@ pub async fn follow(native: Weak<Native>, engine: Arc<Engine>) {
                 }
                 Ok(Event::Effect(fx, effect)) => effected(&n, &registry, &fx, effect),
                 Ok(Event::Activity(id)) => {
-                    printed(&n, &id, u64::try_from(crate::registry::now_ms()).unwrap_or(0));
+                    if at_work(&registry, &id) {
+                        printed(&n, &id, u64::try_from(crate::registry::now_ms()).unwrap_or(0));
+                    }
                 }
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => return,
@@ -311,6 +313,17 @@ fn activity(native: &Native, id: &str, what: CardStatus) {
         SESSION_ACTIVITY,
         || json!({ "sessionId": id, "activity": what.key() }),
     );
+}
+
+/// Whether session `id` is still at work: output that arrives after it ended is not a burst.
+fn at_work(registry: &SessionRegistry, id: &str) -> bool {
+    registry
+        .read(|r| {
+            r.terminal(id).is_some_and(|(_, ended)| !ended)
+                || r.headless_record(id)
+                    .is_some_and(|h| h.status != crate::registry::HeadlessStatus::Exited)
+        })
+        .unwrap_or(false)
 }
 
 /// Session `id` printed at `now` (epoch ms): `session.activity` once per burst.
@@ -743,6 +756,19 @@ mod tests {
             e.data,
             json!({ "sessionId": "a", "state": "blocked", "message": "May I?", "waitingFor": "permission" })
         );
+    }
+
+    #[test]
+    fn output_after_a_terminal_ended_starts_no_burst() {
+        let fed = fed();
+        assert!(at_work(&fed.registry, "a"));
+        let exit = Effect::Exit {
+            code: Some(0),
+            signal: None,
+        };
+        effected(&fed.native, &fed.registry, &fx("a", 5), exit);
+        assert!(!at_work(&fed.registry, "a"), "a late print is not news");
+        assert!(!at_work(&fed.registry, "nobody"));
     }
 
     #[test]

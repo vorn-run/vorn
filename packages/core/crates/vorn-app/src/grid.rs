@@ -258,7 +258,12 @@ impl Grid {
     }
 
     /// Attaches `session` reporting no viewport, so vornd never sizes it to this pane: a card drawn smaller or clipped.
+    /// A pane already attached with a viewport is attached again without one, so typing into it takes no stale size.
     pub fn attach_unsized(&self, session: &str, cell: (u32, u32)) {
+        let sized = self.lock().pane(session).is_some_and(|p| p.size != (0, 0));
+        if sized {
+            self.detach(session);
+        }
         self.attach_sized(session, (0, 0), cell, 0);
     }
 

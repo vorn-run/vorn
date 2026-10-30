@@ -452,6 +452,7 @@ fn session_json(t: &crate::registry::TerminalSession, printed: Option<u64>, now:
 /// The live terminals `pick` keeps, as [`session_json`] answers them, each with its `lastLine` when `last_line` asks.
 async fn sessions_json(
     native: &Arc<Native>,
+    caller: &Caller,
     pick: impl Fn(&crate::registry::TerminalSession) -> bool,
     last_line: bool,
 ) -> Vec<Value> {
@@ -468,13 +469,18 @@ async fn sessions_json(
             })
         })
         .unwrap_or_default();
-    if last_line {
-        if let Ok(host) = host_of(native) {
-            for s in &mut out {
-                let id = s["id"].as_str().unwrap_or_default().to_owned();
-                if let Some(line) = host.last_line(&id).await {
-                    s["lastLine"] = json!(line);
-                }
+    let host = host_of(native).ok().filter(|_| last_line);
+    let manifest = host
+        .as_ref()
+        .and_then(|h| h.manifest_of(&caller.extension).ok());
+    if let (Some(host), Some(manifest)) = (host, manifest) {
+        for s in &mut out {
+            let id = s["id"].as_str().unwrap_or_default().to_owned();
+            if !host.admits_last_line(&manifest, caller, &id) {
+                continue;
+            }
+            if let Some(line) = host.last_line(&id).await {
+                s["lastLine"] = json!(line);
             }
         }
     }
@@ -625,12 +631,12 @@ impl World for Wired {
             let last_line = args.get("lastLine").and_then(Value::as_bool) == Some(true);
             match m {
                 "sessions.list" => Ok(Value::Array(
-                    sessions_json(&native, |_| true, last_line).await,
+                    sessions_json(&native, &caller, |_| true, last_line).await,
                 )),
                 "sessions.get" => {
                     let id = text(&args, "sessionId")
                         .ok_or_else(|| needs(m, "the sessionId to read"))?;
-                    sessions_json(&native, |t| t.id == id, last_line)
+                    sessions_json(&native, &caller, |t| t.id == id, last_line)
                         .await
                         .pop()
                         .ok_or_else(|| {

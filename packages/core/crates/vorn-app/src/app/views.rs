@@ -84,7 +84,9 @@ impl App {
             (&self.grid, selected, self.st.points.card_view(&key))
         {
             let now_ms = crate::state::now_ms().max(0.0) as u64;
-            let status = card_view::status_of(s, self.st.cards.printed_at(&s.info.id), now_ms);
+            let asking = self.st.asks.iter().any(|a| a.session == s.info.id);
+            let status =
+                card_view::status_of(s, self.st.cards.printed_at(&s.info.id), now_ms, asking);
             if !s.ended() && spec.size(status) == CardSize::Line {
                 g.attach_unsized(&s.info.id, super::cell_px(ui));
             }
@@ -120,7 +122,9 @@ impl App {
             .into_iter()
             .map(|i| &self.store.sessions[i])
             .filter(|s| {
-                let status = card_view::status_of(s, self.st.cards.printed_at(&s.info.id), now);
+                let asking = self.st.asks.iter().any(|a| a.session == s.info.id);
+                let status =
+                    card_view::status_of(s, self.st.cards.printed_at(&s.info.id), now, asking);
                 spec.size(status) == CardSize::Line
             })
             .map(|s| s.info.id.clone())
