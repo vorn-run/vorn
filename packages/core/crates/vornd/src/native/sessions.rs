@@ -63,6 +63,20 @@ pub const INITIAL_ROWS: u16 = 24;
 /// The terminal type programs are told they run in, off Windows.
 pub(super) const PTY_TERM: &str = "xterm-256color";
 
+/// Tells a program what terminal it runs in, over whatever vornd inherited.
+pub(super) fn set_terminal_env(env: &mut Vec<(String, String)>) {
+    if !cfg!(windows) {
+        set(env, "TERM", PTY_TERM.to_owned());
+    }
+    set(env, "COLORTERM", "truecolor".to_owned());
+    set(env, "TERM_PROGRAM", "vorn".to_owned());
+    set(
+        env,
+        "TERM_PROGRAM_VERSION",
+        env!("CARGO_PKG_VERSION").to_owned(),
+    );
+}
+
 /// How long a create naming a conversation that another start holds waits
 /// for it before it says the conversation is busy, and how
 /// often it looks meanwhile.
@@ -1588,9 +1602,7 @@ fn register(
     // Set at the spawn and never in vornd's own environment, so no other
     // child inherits one session's id.
     set(&mut env, "VORN_SESSION_ID", id.clone());
-    if !cfg!(windows) {
-        set(&mut env, "TERM", PTY_TERM.to_owned());
-    }
+    set_terminal_env(&mut env);
     let answer = record_json(&record);
     let mut created = json!({
         "agentType": record.agent_type,
@@ -1801,6 +1813,23 @@ fn reorder(native: &Native, ids: Vec<String>) -> Answer {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_env_advertises_truecolor_over_inherited_values() {
+        let mut env = vec![
+            ("TERM_PROGRAM".to_owned(), "other".to_owned()),
+            ("COLORTERM".to_owned(), "24bit".to_owned()),
+            ("PATH".to_owned(), "/bin".to_owned()),
+        ];
+        set_terminal_env(&mut env);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("COLORTERM"), Some("truecolor"));
+        assert_eq!(get("TERM_PROGRAM"), Some("vorn"));
+        assert_eq!(get("TERM_PROGRAM_VERSION"), Some(env!("CARGO_PKG_VERSION")));
+        assert_eq!(get("PATH"), Some("/bin"));
+        assert_eq!(get("TERM"), (!cfg!(windows)).then_some(PTY_TERM));
+        assert_eq!(env.iter().filter(|(k, _)| k == "TERM_PROGRAM").count(), 1);
+    }
 
     /// A create read against the test adapters.
     fn read_req(params: &Value) -> Option<CreateRequest> {
