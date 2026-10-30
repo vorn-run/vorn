@@ -101,6 +101,7 @@ pub const METHODS: &[&str] = &[
     "sessions:restored",
     "sessions:resume",
     "sessions:clear",
+    "sessions:cards",
     "shell:listExecutables",
     "shell:listInstalled",
     // Answered from the session records ([`crate::registry`]),
@@ -291,6 +292,10 @@ pub struct Native {
     /// The model each running session was started with, when one was chosen,
     /// which `session.created` tells.
     models: Mutex<HashMap<String, String>>,
+    /// When each session last printed, by burst, which `session.activity` and the card fields read.
+    bursts: Mutex<vorn_tree::view::Bursts>,
+    /// The activity last told of each session, so a repeat is not told again.
+    activities: Mutex<HashMap<String, vorn_tree::view::CardStatus>>,
     shells: shell::Shells,
     /// The session registry, when vornd holds sessions.
     registry: OnceLock<Arc<SessionRegistry>>,
@@ -368,6 +373,8 @@ impl Native {
             catalog: vorn_agents::models::Catalog::default(),
             adapters: OnceLock::new(),
             models: Mutex::default(),
+            bursts: Mutex::default(),
+            activities: Mutex::default(),
             shells: shell::Shells::default(),
             registry: OnceLock::new(),
             hooks: OnceLock::new(),
@@ -427,6 +434,36 @@ impl Native {
         } else {
             models.get(id).cloned()
         }
+    }
+
+    /// Session `id` printed at `now` (epoch ms): whether that starts a burst.
+    pub(crate) fn printed(&self, id: &str, now: u64) -> bool {
+        self.bursts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .printed(id, now)
+    }
+
+    /// Whether `what` is news for session `id`, keeping it as the last told; a burst is always news.
+    pub(crate) fn activity_news(&self, id: &str, what: vorn_tree::view::CardStatus) -> bool {
+        let mut told = self.activities.lock().unwrap_or_else(|e| e.into_inner());
+        let news = what == vorn_tree::view::CardStatus::Printing || told.get(id) != Some(&what);
+        told.insert(id.to_owned(), what);
+        news
+    }
+
+    /// When session `id` last printed, in epoch ms; `forget` drops it and its last activity.
+    pub(crate) fn printed_at(&self, id: &str, forget: bool) -> Option<u64> {
+        let mut bursts = self.bursts.lock().unwrap_or_else(|e| e.into_inner());
+        let at = bursts.at(id);
+        if forget {
+            bursts.forget(id);
+            self.activities
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(id);
+        }
+        at
     }
 
     /// A snapshot of the agents that are on.

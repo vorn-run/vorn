@@ -12,8 +12,9 @@ use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use vorn_extensions::events::{
-    next_batch, Bus, Owner, AGENT_HOOK, GIT_CHANGED, SESSION_CREATED, SESSION_EXITED, SESSION_MARK,
-    SESSION_PROGRAM, SESSION_STATUS, TASK_CREATED, TASK_STATUS_CHANGED,
+    next_batch, Bus, Owner, AGENT_HOOK, GIT_CHANGED, SESSION_ACTIVITY, SESSION_CREATED,
+    SESSION_EXITED, SESSION_MARK, SESSION_PROGRAM, SESSION_STATUS, TASK_CREATED,
+    TASK_STATUS_CHANGED,
 };
 
 use crate::streams::Forwarder;
@@ -32,6 +33,7 @@ pub const STREAMED: &[&str] = &[
     SESSION_EXITED,
     SESSION_MARK,
     SESSION_PROGRAM,
+    SESSION_ACTIVITY,
     AGENT_HOOK,
     GIT_CHANGED,
     TASK_CREATED,

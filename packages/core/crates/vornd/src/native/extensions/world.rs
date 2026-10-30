@@ -421,17 +421,63 @@ fn launch_args(args: &Value, project: Option<String>) -> Result<SessionStart, Ex
 }
 
 /// A running session as `sessions.list` and `sessions.get` describe it.
-fn session_json(t: &crate::registry::TerminalSession) -> Value {
+/// A live terminal as `sessions.list` and `sessions.get` answer it, with its card's `activity` and `printedAt`.
+fn session_json(t: &crate::registry::TerminalSession, printed: Option<u64>, now: u64) -> Value {
     let name = t
         .display_name
         .as_deref()
         .filter(|n| !n.is_empty())
         .unwrap_or(&t.project_name);
-    json!({
-        "id": t.id, "agent": t.agent_type, "status": t.status, "name": name,
+    let status = serde_json::to_value(t.status).unwrap_or(Value::Null);
+    let created = u64::try_from(t.created_at).unwrap_or(0);
+    let activity = vorn_tree::view::CardStatus::of(
+        status.as_str().unwrap_or_default(),
+        false,
+        created,
+        printed,
+        now,
+    );
+    let mut out = json!({
+        "id": t.id, "agent": t.agent_type, "status": status, "name": name,
         "projectName": t.project_name, "projectPath": t.project_path,
-        "worktreePath": t.worktree_path,
-    })
+        "worktreePath": t.worktree_path, "activity": activity.key(),
+    });
+    if let Some(at) = printed {
+        out["printedAt"] = json!(at);
+    }
+    out
+}
+
+/// The live terminals `pick` keeps, as [`session_json`] answers them, each with its `lastLine` when `last_line` asks.
+async fn sessions_json(
+    native: &Arc<Native>,
+    pick: impl Fn(&crate::registry::TerminalSession) -> bool,
+    last_line: bool,
+) -> Vec<Value> {
+    let now = u64::try_from(crate::registry::now_ms()).unwrap_or(0);
+    let mut out = native
+        .registry
+        .get()
+        .and_then(|r| {
+            r.read(|r| {
+                r.live_terminals()
+                    .filter(|t| pick(t))
+                    .map(|t| session_json(t, native.printed_at(&t.id, false), now))
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default();
+    if last_line {
+        if let Ok(host) = host_of(native) {
+            for s in &mut out {
+                let id = s["id"].as_str().unwrap_or_default().to_owned();
+                if let Some(line) = host.last_line(&id).await {
+                    s["lastLine"] = json!(line);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// `worktrees.list`: every worktree of `project`, or of every project, as the inventory scans it.
@@ -575,27 +621,17 @@ impl World for Wired {
                     let _ = tokio::task::spawn_blocking(settle).await;
                 }
             }
+            let last_line = args.get("lastLine").and_then(Value::as_bool) == Some(true);
             match m {
-                "sessions.list" => {
-                    let sessions = native
-                        .registry
-                        .get()
-                        .and_then(|r| {
-                            r.read(|r| r.live_terminals().map(session_json).collect::<Vec<_>>())
-                        })
-                        .unwrap_or_default();
-                    Ok(Value::Array(sessions))
-                }
+                "sessions.list" => Ok(Value::Array(
+                    sessions_json(&native, |_| true, last_line).await,
+                )),
                 "sessions.get" => {
                     let id = text(&args, "sessionId")
                         .ok_or_else(|| needs(m, "the sessionId to read"))?;
-                    native
-                        .registry
-                        .get()
-                        .and_then(|r| {
-                            r.read(|r| r.live_terminals().find(|t| t.id == id).map(session_json))
-                        })
-                        .flatten()
+                    sessions_json(&native, |t| t.id == id, last_line)
+                        .await
+                        .pop()
                         .ok_or_else(|| {
                             ExtError::new("not-found", format!("Session not found: {id}"))
                         })
@@ -1195,6 +1231,25 @@ mod tests {
 
     const KEY: &str =
         "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    #[test]
+    fn a_session_carries_its_cards_activity_and_when_it_printed() {
+        let t: crate::registry::TerminalSession = serde_json::from_value(json!({
+            "id": "t", "agentType": "acme", "projectName": "p", "projectPath": "/p",
+            "status": "idle", "createdAt": 0, "pid": 1
+        }))
+        .unwrap();
+        let quiet = session_json(&t, None, 60_000);
+        assert_eq!(quiet["activity"], "idle");
+        assert!(quiet.get("printedAt").is_none());
+        let printing = session_json(&t, Some(59_500), 60_000);
+        assert_eq!(printing["activity"], "printing");
+        assert_eq!(printing["printedAt"], 59_500);
+        assert_eq!(
+            session_json(&t, Some(1_000), 60_000)["activity"],
+            "finished"
+        );
+    }
 
     #[test]
     fn a_key_is_imported_only_from_ssh_or_where_a_person_chose() {
