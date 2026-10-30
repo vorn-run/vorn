@@ -680,6 +680,48 @@ async fn a_changed_pack_stops_its_service_so_it_starts_again_with_the_new_hosts(
 }
 
 #[tokio::test]
+async fn the_pack_watcher_leaves_a_link_vornd_handled_itself_running() {
+    let w = world();
+    w.ext.check_packs().await;
+    let folder = tempfile::tempdir().unwrap();
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../extensions/tests/fixtures/hello-bash");
+    for file in ["vorn-extension.toml", "greet.sh"] {
+        fs::copy(fixture.join(file), folder.path().join(file)).unwrap();
+    }
+    result(
+        w.call("extension:link", json!({ "path": folder.path() }))
+            .await,
+    );
+    // Started right after the link, under a way out that a second stop would take back.
+    let proxy = vorn_extensions::netproxy::NetProxy::start().await.unwrap();
+    let grant = proxy
+        .grant("test.hello", vec!["api.example.com".into()])
+        .unwrap();
+    guard(&w.ext.router.confiner().grants).insert("test.hello".to_owned(), grant);
+    let lifecycle = w.ext.router.lifecycle();
+    let key = vorn_extensions::lifecycle::ServiceKey::new("test.hello", "");
+    drop(
+        lifecycle
+            .get_or_start(&key, || async { Ok::<_, String>(Idle) })
+            .await
+            .unwrap(),
+    );
+    // Every session settles again for the link, once, and the service runs on.
+    assert!(w.ext.check_packs().await);
+    assert!(!w.ext.check_packs().await);
+    assert_eq!(lifecycle.running(), std::slice::from_ref(&key));
+
+    // A change made outside vornd is still seen, and stops it.
+    let current = w.packs.path().join("test.hello").join("current.json");
+    let mut written = fs::read(&current).unwrap();
+    written.push(b'\n');
+    fs::write(&current, written).unwrap();
+    assert!(w.ext.check_packs().await);
+    assert!(lifecycle.running().is_empty());
+}
+
+#[tokio::test]
 async fn the_bridge_answers_only_the_extension_its_token_was_minted_for() {
     let w = world();
     w.add(w.session("s1"));
