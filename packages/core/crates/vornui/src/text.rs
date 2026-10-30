@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Family, FontSystem, LayoutGlyph, Metrics, Shaping, Style, SwashCache,
-    SwashContent, Weight, Wrap,
+    Attrs, Buffer, CacheKey, CacheKeyFlags, Family, FontSystem, LayoutGlyph, Metrics, Shaping,
+    Style, SwashCache, SwashContent, Weight, Wrap,
 };
 
 use crate::atlas::Atlases;
@@ -168,6 +168,8 @@ struct CellPiece {
     raster: Raster,
     dx: f32,
     dy: f32,
+    /// Cell geometry, not a glyph: drawn without text gamma so shades keep their coverage.
+    sprite: bool,
 }
 
 /// Terminal cell style bits that pick a face.
@@ -204,11 +206,19 @@ pub struct TextSystem {
     rasters: HashMap<CacheKey, Option<Raster>>,
     term_size: f32,
     cell: Cell,
+    /// The terminal face's advance before rounding to [`Cell::w`].
+    advance: f32,
+    /// Light box drawing lines' thickness: the face's underline, in whole pixels.
+    stroke: u32,
     /// Laid out in terminal cells: the terminal cell is one unit square.
     pub(crate) cells: bool,
     ascii: Vec<Option<Option<CellPiece>>>,
-    clusters: HashMap<(Box<str>, u8), Rc<[CellPiece]>>,
+    /// Keyed by text, then style, so a lookup borrows the cell's text.
+    clusters: HashMap<Box<str>, [Option<Pieces>; 4]>,
 }
+
+/// A terminal cluster's pieces, shared between frames.
+type Pieces = Rc<[CellPiece]>;
 
 /// Font files a host brings instead of the system's (a browser exposes none).
 static BUNDLED: std::sync::OnceLock<Vec<std::sync::Arc<dyn AsRef<[u8]> + Send + Sync>>> =
@@ -263,11 +273,13 @@ impl TextSystem {
                 h: 0.0,
                 baseline: 0.0,
             },
+            advance: 0.0,
+            stroke: 1,
             cells: false,
             ascii: vec![None; 128 * 4],
             clusters: HashMap::new(),
         };
-        t.cell = t.measure_cell();
+        t.measure_cell();
         t
     }
 
@@ -290,25 +302,31 @@ impl TextSystem {
         a
     }
 
-    /// The terminal cell: the advance of `M` and a 1.2 line, in whole
-    /// physical pixels so every cell starts on a pixel.
-    fn measure_cell(&mut self) -> Cell {
+    /// Measures the terminal cell from `M`'s advance and a 1.2 line, in whole pixels.
+    fn measure_cell(&mut self) {
         let size = self.term_size * self.scale;
         let line = (size * 1.2).ceil();
         let attrs = Self::attrs_in(self.term_family, 400, false);
         let mut b = Buffer::new(&mut self.fonts, Metrics::new(size, line));
         b.set_text("M", &attrs, Shaping::Advanced, None);
         b.shape_until_scroll(&mut self.fonts, false);
-        let (w, baseline) = b
+        let (w, baseline, font) = b
             .layout_runs()
             .next()
-            .and_then(|r| r.glyphs.first().map(|g| (g.w, r.line_y)))
-            .unwrap_or((size * 0.6, size));
-        Cell {
+            .and_then(|r| r.glyphs.first().map(|g| (g.w, r.line_y, Some(g.font_id))))
+            .unwrap_or((size * 0.6, size, None));
+        let underline = font
+            .and_then(|id| self.fonts.get_font(id, Weight(400)))
+            .map(|f| f.as_swash().metrics(&[]).scale(size).stroke_size)
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .unwrap_or(size / 16.0);
+        self.advance = w;
+        self.stroke = underline.ceil().max(1.0) as u32;
+        self.cell = Cell {
             w: w.round().max(1.0),
             h: line,
             baseline: baseline.round(),
-        }
+        };
     }
 
     /// Moves to another display density; rasters at the old one are
@@ -318,7 +336,7 @@ impl TextSystem {
         self.shaped.clear();
         self.ascii.fill(None);
         self.clusters.clear();
-        self.cell = self.measure_cell();
+        self.measure_cell();
     }
 
     /// Forgets every raster, after the atlases they pointed into were reset.
@@ -565,7 +583,7 @@ impl TextSystem {
         self.term_size = size;
         self.ascii.fill(None);
         self.clusters.clear();
-        self.cell = self.measure_cell();
+        self.measure_cell();
     }
 
     /// The terminal's font family.
@@ -592,7 +610,7 @@ impl TextSystem {
         self.term_family = family;
         self.ascii.fill(None);
         self.clusters.clear();
-        self.cell = self.measure_cell();
+        self.measure_cell();
     }
 
     /// Whether a face of `family` is installed.
@@ -679,6 +697,27 @@ impl TextSystem {
     /// that is text by default (U+23FA) and came back from a colour emoji
     /// face, in the first text symbol face that draws it in one colour.
     fn shape_cell(&mut self, atlases: &mut Atlases, text: &str, style: u8) -> Vec<CellPiece> {
+        let mut chars = text.chars();
+        if let (Some(ch), None) = (chars.next(), chars.next()) {
+            let (w, h) = (self.cell.w as u32, self.cell.h as u32);
+            if let Some(mask) = crate::sprite::mask(ch, w, h, self.stroke) {
+                let Some(uv) = atlases.insert_mask(w, h, &mask) else {
+                    return Vec::new();
+                };
+                let raster = Raster {
+                    uv,
+                    left: 0.0,
+                    top: 0.0,
+                    colored: false,
+                };
+                return vec![CellPiece {
+                    raster,
+                    dx: 0.0,
+                    dy: 0.0,
+                    sprite: true,
+                }];
+            }
+        }
         let weight = if style & BOLD != 0 { 700 } else { 400 };
         let attrs = Self::attrs_in(self.term_family, weight, style & ITALIC != 0);
         let pieces = self.shape_cell_in(atlases, text, &attrs);
@@ -710,23 +749,33 @@ impl TextSystem {
         attrs: &Attrs<'_>,
     ) -> Vec<CellPiece> {
         let size = self.term_size * self.scale;
+        // Unhinted, as the system draws text on macOS; hinting reshapes stems and heights there.
+        let flags = if cfg!(target_os = "macos") {
+            CacheKeyFlags::DISABLE_HINTING
+        } else {
+            CacheKeyFlags::empty()
+        };
+        let attrs = attrs.clone().cache_key_flags(attrs.cache_key_flags | flags);
         let mut b = Buffer::new(&mut self.fonts, Metrics::new(size, self.cell.h));
-        b.set_text(text, attrs, Shaping::Advanced, None);
+        b.set_text(text, &attrs, Shaping::Advanced, None);
         b.shape_until_scroll(&mut self.fonts, false);
         let glyphs: Vec<LayoutGlyph> = b
             .layout_runs()
             .flat_map(|run| run.glyphs.iter().cloned())
             .collect();
         let baseline = self.cell.baseline;
+        // Centred in the rounded cell, keeping the fraction for subpixel placement.
+        let centre = (self.cell.w - self.advance) / 2.0;
         glyphs
             .iter()
             .filter_map(|g| {
-                let p = g.physical((0.0, baseline), 1.0);
+                let p = g.physical((centre, baseline), 1.0);
                 let ra = self.raster(atlases, p.cache_key)?;
                 Some(CellPiece {
                     raster: ra,
                     dx: p.x as f32 + ra.left,
                     dy: p.y as f32 - ra.top,
+                    sprite: false,
                 })
             })
             .collect()
@@ -762,13 +811,13 @@ impl TextSystem {
             }
             return;
         }
-        let key = (Box::<str>::from(text), style & 3);
-        let pieces = match self.clusters.get(&key) {
-            Some(p) => p.clone(),
+        let slot = usize::from(style & 3);
+        let pieces = match self.clusters.get(text).and_then(|s| s[slot].clone()) {
+            Some(p) => p,
             None => {
                 let p: Rc<[CellPiece]> = self.shape_cell(atlases, text, style).into();
                 if !atlases.full {
-                    self.clusters.insert(key, p.clone());
+                    self.clusters.entry(text.into()).or_default()[slot] = Some(p.clone());
                 }
                 p
             }
@@ -962,6 +1011,7 @@ fn fixed_advances(db: &cosmic_text::fontdb::Database, id: cosmic_text::fontdb::I
 
 fn put(scene: &mut Scene, p: &CellPiece, x: f32, y: f32, color: Rgba, gamma: TextGamma) {
     let ra = &p.raster;
+    let gamma = if p.sprite { TextGamma::OFF } else { gamma };
     scene.glyph(
         Rect::new(x + p.dx, y + p.dy, ra.uv[2], ra.uv[3]),
         ra.uv,
