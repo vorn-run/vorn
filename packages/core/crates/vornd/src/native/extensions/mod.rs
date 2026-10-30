@@ -1284,7 +1284,7 @@ impl Extensions {
         argv: &[String],
         session: &Live,
     ) -> Result<String, String> {
-        use super::sessions::{set, INITIAL_COLS, INITIAL_ROWS, PTY_TERM};
+        use super::sessions::{set, set_terminal_env, INITIAL_COLS, INITIAL_ROWS};
         let id = uuid::Uuid::new_v4().to_string();
         let mut env = self.around.base_env();
         if let Some(token) = self.hosts.token_for(key) {
@@ -1293,9 +1293,7 @@ impl Extensions {
         let host = format!("{}/extensions/{ext}/bridge", self.bridge_origin);
         set(&mut env, "VORN_EXTENSION_HOST", host);
         set(&mut env, "VORN_SESSION_ID", id.clone());
-        if !cfg!(windows) {
-            set(&mut env, "TERM", PTY_TERM.to_owned());
-        }
+        set_terminal_env(&mut env);
         let spec = SpawnSpec {
             argv: argv.to_vec(),
             cwd: session.worktree().to_owned(),

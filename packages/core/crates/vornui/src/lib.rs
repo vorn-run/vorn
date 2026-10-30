@@ -34,6 +34,7 @@ pub mod pace;
 pub mod palette;
 mod render;
 pub mod scene;
+mod sprite;
 pub mod text;
 pub mod theme;
 #[cfg(not(target_arch = "wasm32"))]
