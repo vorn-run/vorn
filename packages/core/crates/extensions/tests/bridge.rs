@@ -573,6 +573,26 @@ async fn remove_leaves_no_files_rows_or_processes() {
     assert!(entries(b.router.store().root()).is_empty());
 }
 
+/// Between stopping an extension and removing its files, no event or call
+/// starts it again; once it is back, it starts as before.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_forgotten_extension_stays_stopped_until_it_returns() {
+    if !node() {
+        return;
+    }
+    let b = bench(&["a"], Policy::default(), Duration::from_secs(20));
+    b.call("a", "echo", json!({})).await.unwrap();
+    b.router.forget("a").await;
+    assert_eq!(b.router.emit("test.ping", json!({ "n": 1 })), 0);
+    assert!(b.call("a", "echo", json!({})).await.is_err());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(b.lifecycle.running().is_empty());
+    b.router.returned("a");
+    b.router.reindex();
+    b.call("a", "echo", json!({})).await.unwrap();
+    assert_eq!(b.router.emit("test.ping", json!({ "n": 2 })), 1);
+}
+
 /// A recorded run: the program fetches through a connection whose token vornd
 /// adds, and neither what it was sent nor its environment ever holds the token.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

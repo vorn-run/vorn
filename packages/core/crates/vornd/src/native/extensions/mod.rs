@@ -1264,6 +1264,7 @@ impl Extensions {
 
     /// After a pack changed, no process keeps running its old files.
     async fn pack_changed(&self, extension_id: &str) {
+        self.router.returned(extension_id);
         self.router.reindex();
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
