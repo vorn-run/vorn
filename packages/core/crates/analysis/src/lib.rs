@@ -37,6 +37,8 @@ const RECENT_COMPLETED: usize = 4;
 /// How far back the status looks, in characters of stripped output, for an
 /// error or the last non-blank line.
 const WAITING_WINDOW_CHARS: usize = 2000;
+/// The line in progress past which its oldest half goes: cursor-drawn output with no newline would grow it, and every checkpoint, for ever.
+const MAX_LINE_CHARS: usize = 8192;
 
 /// Returned by [`Analyzer::append`].
 pub const STATUS_NONE: u32 = 0;
@@ -344,6 +346,7 @@ impl Analyzer {
             self.line.push_str(run);
             self.line_chars += n;
             self.col = self.line_chars;
+            self.keep_tail();
             return;
         }
         let mut cells: Vec<char> = self.line.chars().collect();
@@ -357,6 +360,23 @@ impl Analyzer {
         }
         self.line_chars = cells.len();
         self.line = cells.into_iter().collect();
+        self.keep_tail();
+    }
+
+    /// Drops the oldest half of a line past [`MAX_LINE_CHARS`]; the kept tail outlasts the status window.
+    fn keep_tail(&mut self) {
+        if self.line_chars <= MAX_LINE_CHARS {
+            return;
+        }
+        let drop = self.line_chars - MAX_LINE_CHARS / 2;
+        let at = self
+            .line
+            .char_indices()
+            .nth(drop)
+            .map_or(self.line.len(), |(i, _)| i);
+        self.line.drain(..at);
+        self.line_chars -= drop;
+        self.col = self.col.saturating_sub(drop);
     }
 
     fn carriage_return(&mut self) {
@@ -704,5 +724,53 @@ mod tests {
         // Beyond the 2000-character window it is gone.
         let blank = format!("{}\n", " ".repeat(100)).repeat(25);
         assert_eq!(a.append_str(&blank, true), STATUS_RUNNING);
+    }
+
+    /// An animated screen drawn with cursor moves and no newline, for as long as it runs.
+    #[test]
+    fn a_screen_redrawn_without_newlines_keeps_its_state_bounded() {
+        let mut a = Analyzer::new();
+        let frame = "\x1b[?2026h\x1b[2;18H+\x1b[3;18H,/_.\\\x1b[4;17H|_||.\x1b[49m\x1b[?2026l";
+        for _ in 0..200_000 {
+            a.feed(frame);
+        }
+        assert!(a.line_chars <= MAX_LINE_CHARS, "{}", a.line_chars);
+        assert_eq!(a.line.chars().count(), a.line_chars);
+        assert!(a.save().len() < 4 * MAX_LINE_CHARS, "{}", a.save().len());
+    }
+
+    /// The status reads only the last 2000 characters, so dropping a long line's start changes nothing.
+    #[test]
+    fn a_long_line_reads_the_same_status_after_its_start_goes() {
+        let long = "y".repeat(3 * MAX_LINE_CHARS);
+        let mut a = Analyzer::new();
+        assert_eq!(
+            a.append_str(&format!("{long}Continue? (y/n)"), true),
+            STATUS_WAITING
+        );
+        assert_eq!(a.append_str(" FATAL boom", true), STATUS_ERROR);
+        // In chunks, one character past the cap at a time.
+        let mut b = Analyzer::new();
+        for c in long.as_bytes().chunks(MAX_LINE_CHARS / 2 + 1) {
+            b.feed(std::str::from_utf8(c).unwrap());
+        }
+        assert_eq!(b.append_str("$ ", true), STATUS_WAITING);
+        assert!(b.line_chars <= MAX_LINE_CHARS);
+    }
+
+    /// An overwrite after `\r` on a line that lost its start lands where the cursor is.
+    #[test]
+    fn an_overwrite_after_the_start_goes_lands_in_place() {
+        let mut a = Analyzer::new();
+        let wide = "€".repeat(MAX_LINE_CHARS + 10);
+        a.feed(&wide);
+        let kept = a.line_chars;
+        assert!(kept <= MAX_LINE_CHARS);
+        assert_eq!(a.col, kept);
+        a.feed("\rab");
+        assert_eq!(a.col, 2);
+        assert!(a.line.starts_with("ab€"));
+        a.feed("\x1b[K\n");
+        assert_eq!(lines(&a), ["ab"]);
     }
 }
