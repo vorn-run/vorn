@@ -25,6 +25,18 @@ fn engine(history: std::path::PathBuf) -> Arc<Engine> {
     })
 }
 
+/// Ends the test's program, its pid written by the script, when the test ends or panics.
+struct Reap(std::path::PathBuf);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        let pid = std::fs::read_to_string(&self.0).ok();
+        if let Some(pid) = pid.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            let _ = std::process::Command::new("kill").arg(pid).status();
+        }
+    }
+}
+
 /// Total bytes in sessiond's spool directory.
 fn spooled(dir: &std::path::Path) -> u64 {
     std::fs::read_dir(dir)
@@ -68,9 +80,14 @@ async fn a_backlog_of_redraws_recovers_and_stays_connected() {
     let task = tokio::spawn(async move {
         let _ = holder::connect(&endpoint, &holder).await;
     });
+    let pid = home.path().join("pid");
+    let done = home.path().join("done");
+    let _reap = Reap(pid.clone());
     let script = format!(
-        "sleep 1; f=$(printf '\\033[2;18H+ ;\\033[3;18H,/ _.\\\\\\033[4;17H|_||.\\033[5;17H|/|^~,\\033[49m'); \
-         yes \"$f\" | tr -d '\\n' | head -c {BACKLOG}; exec sleep 600"
+        "echo $$ > '{}'; sleep 1; f=$(printf '\\033[2;18H+ ;\\033[3;18H,/ _.\\\\\\033[4;17H|_||.\\033[5;17H|/|^~,\\033[49m'); \
+         yes \"$f\" | tr -d '\\n' | head -c {BACKLOG}; touch '{}'; exec sleep 600",
+        pid.display(),
+        done.display()
     );
     let t = Instant::now();
     let id = loop {
@@ -96,19 +113,18 @@ async fn a_backlog_of_redraws_recovers_and_stays_connected() {
     task.abort();
     let _ = task.await;
 
-    // Until the program has drawn everything into sessiond.
+    // Until the program has drawn everything and sessiond's spool has stopped growing.
     let spool = home.path().join("spool");
     let t = Instant::now();
-    let mut last = (0, Instant::now());
+    let mut last = u64::MAX;
     loop {
         let now = spooled(&spool);
-        if now != last.0 {
-            last = (now, Instant::now());
-        } else if now > 0 && last.1.elapsed() > Duration::from_secs(2) {
+        if done.exists() && now == last {
             break;
         }
+        last = now;
         assert!(t.elapsed() < PATIENCE, "the program never finished drawing");
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
     // The next vornd replays it all and stays.

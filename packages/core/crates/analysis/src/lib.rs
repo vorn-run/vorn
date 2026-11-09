@@ -39,6 +39,10 @@ const RECENT_COMPLETED: usize = 4;
 const WAITING_WINDOW_CHARS: usize = 2000;
 /// The line in progress past which its oldest half goes: cursor-drawn output with no newline would grow it, and every checkpoint, for ever.
 const MAX_LINE_CHARS: usize = 8192;
+/// Bytes the completed-line ring keeps at most, so long lines with newlines cannot fill checkpoints either.
+const MAX_OUTPUT_BYTES: usize = 256 << 10;
+/// Starts a line whose beginning went to [`MAX_LINE_CHARS`].
+const CUT_MARK: char = '…';
 
 /// Returned by [`Analyzer::append`].
 pub const STATUS_NONE: u32 = 0;
@@ -95,9 +99,13 @@ pub struct Analyzer {
     line: String,
     line_chars: usize,
     col: usize,
+    /// Columns dropped from the line's start: `line` covers columns `hidden..hidden + line_chars`.
+    hidden: usize,
     /// A `\r` not yet resolved: CRLF ends the line, anything else overwrites.
     pending_cr: bool,
     lines: VecDeque<Line>,
+    /// Bytes of text in `lines`, for [`MAX_OUTPUT_BYTES`].
+    lines_bytes: usize,
 }
 
 impl Default for Analyzer {
@@ -116,8 +124,10 @@ impl Analyzer {
             line: String::with_capacity(256),
             line_chars: 0,
             col: 0,
+            hidden: 0,
             pending_cr: false,
             lines: VecDeque::with_capacity(64),
+            lines_bytes: 0,
         }
     }
 
@@ -136,7 +146,11 @@ impl Analyzer {
 
     /// The line in progress, stripped, as kept between chunks.
     pub fn partial(&self) -> String {
-        self.line.clone()
+        if self.hidden > 0 {
+            format!("{CUT_MARK}{}", self.line)
+        } else {
+            self.line.clone()
+        }
     }
 
     /// Release the line ring now; the analyzer starts empty if fed again.
@@ -342,19 +356,22 @@ impl Analyzer {
         self.resolve_cr();
         // Characters, counted as the bytes that start one: no decoding.
         let n = run.bytes().filter(|&b| (b as i8) >= -0x40).count();
-        if self.col == self.line_chars {
+        if self.col == self.hidden + self.line_chars {
             self.line.push_str(run);
             self.line_chars += n;
-            self.col = self.line_chars;
+            self.col += n;
             self.keep_tail();
             return;
         }
         let mut cells: Vec<char> = self.line.chars().collect();
         for ch in run.chars() {
-            if self.col < cells.len() {
-                cells[self.col] = ch;
-            } else {
-                cells.push(ch);
+            // Columns before `hidden` were dropped; what lands there is dropped too.
+            if let Some(i) = self.col.checked_sub(self.hidden) {
+                if i < cells.len() {
+                    cells[i] = ch;
+                } else {
+                    cells.push(ch);
+                }
             }
             self.col += 1;
         }
@@ -368,15 +385,10 @@ impl Analyzer {
         if self.line_chars <= MAX_LINE_CHARS {
             return;
         }
-        let drop = self.line_chars - MAX_LINE_CHARS / 2;
-        let at = self
-            .line
-            .char_indices()
-            .nth(drop)
-            .map_or(self.line.len(), |(i, _)| i);
+        let at = self.line.len() - tail(&self.line, MAX_LINE_CHARS / 2).len();
         self.line.drain(..at);
-        self.line_chars -= drop;
-        self.col = self.col.saturating_sub(drop);
+        self.hidden += self.line_chars - MAX_LINE_CHARS / 2;
+        self.line_chars = MAX_LINE_CHARS / 2;
     }
 
     fn carriage_return(&mut self) {
@@ -389,33 +401,52 @@ impl Analyzer {
         let next = if self.lines.len() == MAX_OUTPUT_LINES {
             // Reuse the evicted line's allocation for the next one.
             let mut old = self.lines.pop_front().map(|l| l.text).unwrap_or_default();
+            self.lines_bytes -= old.len();
             old.clear();
             old
         } else {
             String::with_capacity(self.line.len().max(64))
         };
-        let text = std::mem::replace(&mut self.line, next);
+        let mut text = std::mem::replace(&mut self.line, next);
+        if self.hidden > 0 {
+            text.insert(0, CUT_MARK);
+        }
         self.line_chars = 0;
         self.col = 0;
+        self.hidden = 0;
+        self.lines_bytes += text.len();
         self.lines.push_back(Line { text, error: None });
+        self.trim_lines();
+    }
+
+    /// Evicts the oldest completed lines past [`MAX_OUTPUT_BYTES`], keeping the newest.
+    fn trim_lines(&mut self) {
+        while self.lines_bytes > MAX_OUTPUT_BYTES && self.lines.len() > 1 {
+            if let Some(l) = self.lines.pop_front() {
+                self.lines_bytes -= l.text.len();
+            }
+        }
     }
 
     fn erase_in_line(&mut self, mode: u32) {
         self.resolve_cr();
         match mode {
-            0 if self.col < self.line_chars => {
+            0 if self.col < self.hidden + self.line_chars => {
+                let keep = self.col.saturating_sub(self.hidden);
                 let at = self
                     .line
                     .char_indices()
-                    .nth(self.col)
+                    .nth(keep)
                     .map_or(self.line.len(), |(i, _)| i);
                 self.line.truncate(at);
-                self.line_chars = self.col;
+                self.line_chars = keep;
             }
             2 => {
                 self.line.clear();
                 self.line.extend(std::iter::repeat_n(' ', self.col));
                 self.line_chars = self.col;
+                self.hidden = 0;
+                self.keep_tail();
             }
             _ => {}
         }
@@ -758,19 +789,65 @@ mod tests {
         assert!(b.line_chars <= MAX_LINE_CHARS);
     }
 
-    /// An overwrite after `\r` on a line that lost its start lands where the cursor is.
+    /// An overwrite after `\r` on a line that lost its start lands in the dropped part, as on screen.
     #[test]
-    fn an_overwrite_after_the_start_goes_lands_in_place() {
+    fn an_overwrite_where_the_start_went_leaves_the_kept_tail() {
         let mut a = Analyzer::new();
-        let wide = "€".repeat(MAX_LINE_CHARS + 10);
-        a.feed(&wide);
-        let kept = a.line_chars;
-        assert!(kept <= MAX_LINE_CHARS);
-        assert_eq!(a.col, kept);
+        a.feed(&"€".repeat(MAX_LINE_CHARS + 10));
+        let kept = a.line.clone();
+        assert!(a.line_chars <= MAX_LINE_CHARS);
         a.feed("\rab");
         assert_eq!(a.col, 2);
-        assert!(a.line.starts_with("ab€"));
-        a.feed("\x1b[K\n");
-        assert_eq!(lines(&a), ["ab"]);
+        assert_eq!(a.line, kept);
+        assert!(a.partial().starts_with('…'));
+        a.feed("\n");
+        assert_eq!(lines(&a), [format!("…{kept}")]);
+    }
+
+    /// Writes past the kept start still land on their own columns.
+    #[test]
+    fn an_overwrite_inside_the_kept_tail_lands_in_place() {
+        let mut a = Analyzer::new();
+        a.feed(&"x".repeat(MAX_LINE_CHARS + 1));
+        let start = a.hidden;
+        a.feed(&format!("\r{}ab", "-".repeat(start)));
+        assert_eq!(a.col, start + 2);
+        assert!(a.line.starts_with("abx"));
+        assert_eq!(a.line_chars, MAX_LINE_CHARS / 2);
+    }
+
+    /// Long lines with newlines keep the ring, and so each checkpoint, under its byte cap.
+    #[test]
+    fn long_completed_lines_keep_the_ring_bounded() {
+        let mut a = Analyzer::new();
+        let line = format!("{}\n", "z".repeat(MAX_LINE_CHARS));
+        for _ in 0..200 {
+            a.feed(&line);
+        }
+        assert!(a.lines_bytes <= MAX_OUTPUT_BYTES, "{}", a.lines_bytes);
+        assert_eq!(
+            a.lines_bytes,
+            a.lines.iter().map(|l| l.text.len()).sum::<usize>()
+        );
+        assert!(a.save().len() < MAX_OUTPUT_BYTES + 4 * MAX_LINE_CHARS);
+        assert_eq!(a.output(Some(1)), ["z".repeat(MAX_LINE_CHARS)]);
+    }
+
+    /// A trimmed line carries on the same after a save and restore.
+    #[test]
+    fn a_trimmed_line_survives_a_checkpoint() {
+        let mut a = Analyzer::new();
+        a.feed(&"q".repeat(MAX_LINE_CHARS + 5));
+        let mut b = Analyzer::restore(&a.save()).unwrap();
+        assert_eq!(
+            (b.hidden, b.col, b.line_chars),
+            (a.hidden, a.col, a.line_chars)
+        );
+        b.feed("\rw\n");
+        assert!(lines(&b)[0].starts_with('…'));
+        // A checkpoint from before the cap is refused, so the engine replays into a bounded analyzer.
+        let mut old = a.save();
+        old[0] = 1;
+        assert!(Analyzer::restore(&old).is_none());
     }
 }

@@ -9,9 +9,9 @@
 
 use std::collections::VecDeque;
 
-use crate::{Analyzer, Line, State};
+use crate::{Analyzer, Line, State, MAX_LINE_CHARS, MAX_OUTPUT_BYTES};
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 impl Analyzer {
     /// Everything the analyzer would need to carry on, as bytes.
@@ -25,6 +25,7 @@ impl Analyzer {
         put_str(&mut out, &self.line);
         out.extend_from_slice(&(self.line_chars as u64).to_le_bytes());
         out.extend_from_slice(&(self.col as u64).to_le_bytes());
+        out.extend_from_slice(&(self.hidden as u64).to_le_bytes());
         out.push(u8::from(self.pending_cr));
         out.extend_from_slice(&(self.lines.len() as u32).to_le_bytes());
         for l in &self.lines {
@@ -52,6 +53,7 @@ impl Analyzer {
         let line = r.string()?;
         let line_chars = usize::try_from(r.u64()?).ok()?;
         let col = usize::try_from(r.u64()?).ok()?;
+        let hidden = usize::try_from(r.u64()?).ok()?;
         let pending_cr = r.bool()?;
         let n = r.u32()? as usize;
         // Each line takes at least five bytes, which bounds a forged count.
@@ -69,7 +71,13 @@ impl Analyzer {
             };
             lines.push_back(Line { text, error });
         }
-        if !r.0.is_empty() || line_chars != line.chars().count() || col > line_chars {
+        let lines_bytes = lines.iter().map(|l| l.text.len()).sum();
+        if !r.0.is_empty()
+            || line_chars != line.chars().count()
+            || line_chars > MAX_LINE_CHARS
+            || lines_bytes > MAX_OUTPUT_BYTES
+            || col > hidden.checked_add(line_chars)?
+        {
             return None;
         }
         Some(Analyzer {
@@ -80,8 +88,10 @@ impl Analyzer {
             line,
             line_chars,
             col,
+            hidden,
             pending_cr,
             lines,
+            lines_bytes,
         })
     }
 }
