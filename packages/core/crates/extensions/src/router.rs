@@ -9,7 +9,7 @@
 //! component's imports are answered by the same [`answer`] on its own thread.
 //! The extensions Vorn ships as components ([`Bundled`]) run the same way.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
@@ -202,6 +202,8 @@ pub struct Router {
     bus: Arc<Bus>,
     /// Each subscribed extension's queue, read by its own delivery task.
     queues: Mutex<HashMap<String, Queue>>,
+    /// Extensions being removed: none of their services starts again until they come back.
+    leaving: Mutex<HashSet<String>>,
     blobs: Option<BlobStore>,
     preferences: Mutex<Preferences>,
     me: Weak<Router>,
@@ -257,6 +259,7 @@ impl Router {
             packs: Mutex::default(),
             bus,
             queues: Mutex::default(),
+            leaving: Mutex::default(),
             blobs,
             me: me.clone(),
         })
@@ -386,10 +389,19 @@ impl Router {
 
     /// Package `id`, if it is a program in the extension API.
     pub fn program(&self, id: &str) -> Option<Arc<InstalledPack>> {
+        if self.is_leaving(id) {
+            return None;
+        }
         self.pack(id).ok().filter(|p| p.manifest.speaks_api())
     }
 
     fn program_pack(&self, id: &str) -> Result<Arc<InstalledPack>, ExtError> {
+        if self.is_leaving(id) {
+            return Err(ExtError::new(
+                "not-installed",
+                format!("\"{id}\" is being removed"),
+            ));
+        }
         let pack = self
             .pack(id)
             .map_err(|e| ExtError::new("not-installed", e))?;
@@ -681,13 +693,31 @@ impl Router {
         })
     }
 
-    /// Stops extension `id` and drops what it published.
-    pub async fn forget(&self, id: &str) {
+    /// Stops extension `id` for good: from now on no event or call starts it
+    /// or runs any of its programs, until [`Router::returned`].
+    pub async fn leave(&self, id: &str) {
+        guard(&self.leaving).insert(id.to_owned());
         self.lifecycle.stop_extension(id).await;
+        self.reindex();
+    }
+
+    fn is_leaving(&self, id: &str) -> bool {
+        guard(&self.leaving).contains(id)
+    }
+
+    /// Stops extension `id` and drops what it published; nothing starts it
+    /// again, by an event or a call, until [`Router::returned`].
+    pub async fn forget(&self, id: &str) {
+        self.leave(id).await;
         self.settings.confiner.revoke(id);
         guard(&self.rows).retain(|(ext, _), _| ext != id);
         guard(&self.packs).remove(id);
         self.reindex();
+    }
+
+    /// Lets extension `id` start again after a [`Router::leave`]: it was installed or linked anew.
+    pub fn returned(&self, id: &str) {
+        guard(&self.leaving).remove(id);
     }
 
     fn launch(&self, pack: &InstalledPack, argv: &[String]) -> Result<Launch, String> {
@@ -738,6 +768,9 @@ impl Router {
     }
 
     async fn start_service(&self, pack: &InstalledPack) -> Result<Program, String> {
+        if self.is_leaving(&pack.id) {
+            return Err(format!("{} is being removed", pack.name()));
+        }
         let service = pack
             .manifest
             .service

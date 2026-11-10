@@ -868,10 +868,12 @@ impl Extensions {
         {
             return Err(format!("No extension \"{id}\" is installed"));
         }
+        self.router.call_hook(id, Hook::Stop).await;
+        // Nothing of it starts again from here, so what it holds is closed for good.
+        self.router.leave(id).await;
         let closed = guard(&self.grants).close_where(|g| g.extension_id == id);
         guard(&self.given).forget(id);
         self.kill_terminals(&closed);
-        self.router.call_hook(id, Hook::Stop).await;
         self.hosts.stop_extension(id).await;
         self.router.forget(id).await;
         self.router.forget_preferences(id);
@@ -1264,6 +1266,7 @@ impl Extensions {
 
     /// After a pack changed, no process keeps running its old files.
     async fn pack_changed(&self, extension_id: &str) {
+        self.router.returned(extension_id);
         self.router.reindex();
         let closed = guard(&self.grants).close_where(|g| g.extension_id == extension_id);
         self.kill_terminals(&closed);
