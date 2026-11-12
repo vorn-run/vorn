@@ -40,28 +40,28 @@
     "*.{json,css,md,html}": "prettier --write"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "shiki": "^4.5.0",
-    "ws": "^8.22.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "shiki": "^4.6.0",
+    "ws": "^8.22.2",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/ws": "^8.18.2",
-    "@vitest/coverage-v8": "5.0.5",
-    "@vitest/eslint-plugin": "^1.6.27",
-    "eslint": "^10.13.0",
+    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/eslint-plugin": "^1.6.28",
+    "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
     "libsql": "^0.5.29",
     "lint-staged": "^17.6.0",
-    "playwright-core": "1.64.1",
+    "playwright-core": "1.65.0",
     "prettier": "^3.9.10",
     "simple-git-hooks": "^2.14.0",
     "ts-json-schema-generator": "^2.9.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.2",
-    "vite": "^8.2.2",
-    "vitest": "5.0.5"
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.6",
+    "vitest": "5.1.0"
   },
   "resolutions": {
     "serialize-javascript": "^7.0.5",
