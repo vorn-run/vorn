@@ -16,7 +16,7 @@ vorn-remote = { path = "../remote" }
 # Local time for the dates an agent records without an offset, as `new Date` reads them.
 jiff = "0.2"
 # The agents keep their sessions in SQLite files of their own, read here read-only.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 # An adapter's [agent] section is TOML read into typed specs; its model listing lines are patterns. All already in the tree.
 serde = { version = "1", features = ["derive"] }

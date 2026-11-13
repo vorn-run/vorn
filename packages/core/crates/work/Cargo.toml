@@ -20,5 +20,5 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 # To take the receipts table away under a store, as a broken database would.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 tempfile = "3"

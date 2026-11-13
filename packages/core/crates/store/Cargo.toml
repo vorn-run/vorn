@@ -9,7 +9,7 @@ description = "Vorn's store on rusqlite: the database file, its schema and the c
 
 [dependencies]
 # `hooks` for the authorizer that holds an extension to its own tables.
-rusqlite = { version = "0.40", features = ["bundled", "hooks"] }
+rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 vorn-protocol = { path = "../protocol" }

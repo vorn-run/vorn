@@ -87,7 +87,7 @@ toml = { version = "1.1", default-features = false, features = ["parse", "serde"
 # The built-ins' tests compile their components in process.
 vorn-extensions = { path = "../extensions", features = ["wasm-compile"] }
 # Reads vorn.db directly to see an extension's tables come and go; already in the tree.
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # What the /mcp test posts with.
 hyper = { version = "1", features = ["client"] }
 hyper-util = { version = "0.1", features = ["client-legacy"] }
