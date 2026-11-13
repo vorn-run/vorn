@@ -18,4 +18,4 @@ regex = { version = "1", default-features = false, features = ["std", "perf", "u
 # Addresses resolved as the WHATWG URL parser resolves them, as `new URL` does.
 url = "2"
 # Item ids and seen keys hashed as the connector hashes them.
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }

@@ -49,7 +49,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The address bar parses as the renderer's WHATWG `URL` does.
 url = "2"
-sha2 = "0.10"
+sha2 = "0.11"
 semver = "1"
 # std's clock on a desktop; the page's `performance.now()` in a browser.
 web-time = "1"

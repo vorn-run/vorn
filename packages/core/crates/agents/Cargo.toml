@@ -31,7 +31,7 @@ libc = "0.2"
 
 [dev-dependencies]
 # Pins the shims' contents by digest.
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 tempfile = "3"
 # Status fixtures: rule files read against recorded screens.
 vorn-recovery = { path = "../recovery" }
